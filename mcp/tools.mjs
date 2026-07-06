@@ -244,6 +244,42 @@ export function registerTools(server) {
     return ok(text, { ...j, url });
   }));
 
+  // ---------- skills (Higgsfield get_workflow_instructions parity: workflows ship as SKILL.md bundles) ----------
+  server.registerTool('list_skills', {
+    description: 'List the bundled Hermoso SKILLS — multi-step workflow instructions (SKILL.md) that orchestrate the other tools (research an ad space, plan+render a finished ad, product photoshoot, raw generation) — plus the in-app strategy skills and creative recipes. Call get_skill to load a bundle. Read-only, free.',
+    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+  }, wrap(async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const dir = new URL('../skills/', import.meta.url);
+    let bundles = [];
+    try {
+      const names = await readdir(dir);
+      bundles = (await Promise.all(names.map(async (n) => {
+        try {
+          const md = await readFile(new URL(`../skills/${n}/SKILL.md`, import.meta.url), 'utf8');
+          const desc = (/description:\s*>?-?\s*\n?([\s\S]*?)\n[a-z_-]+:/.exec(md)?.[1] || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+          return { name: n, description: desc };
+        } catch { return null; }
+      }))).filter(Boolean);
+    } catch {}
+    const d = await apiGet('/api/skills').catch(() => ({ skills: [] }));
+    const inApp = (d.skills || []).map(s => `${s.id} (${s.kind || s.group})`).join(', ');
+    const text = `Skill bundles (call get_skill with the name):\n${bundles.map(b => `- ${b.name}: ${b.description}`).join('\n') || '(none bundled)'}\n\nIn-app strategy skills + creative recipes (pass as plan_ad's recipe / create's skill): ${inApp}`;
+    return ok(text, { bundles, inApp: d.skills || [] });
+  }));
+
+  server.registerTool('get_skill', {
+    description: 'Load a bundled skill’s full SKILL.md workflow instructions by name (from list_skills). Follow the loaded instructions to run that workflow with the other tools. Read-only, free.',
+    inputSchema: { name: z.string().describe('bundle name from list_skills, e.g. hermoso-generate') },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, wrap(async ({ name }) => {
+    const safe = String(name).replace(/[^a-z0-9-]/gi, '');
+    const { readFile } = await import('node:fs/promises');
+    const md = await readFile(new URL(`../skills/${safe}/SKILL.md`, import.meta.url), 'utf8').catch(() => null);
+    if (!md) return { content: [{ type: 'text', text: `No skill bundle named "${safe}" — call list_skills for the catalog.` }], isError: true };
+    return ok(md.slice(0, 24000), { name: safe });
+  }));
+
   server.registerTool('list_jobs', {
     description: 'List the most recent render jobs + how many are currently running, so you can report on or resume in-flight work.',
     inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
