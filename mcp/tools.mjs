@@ -9,6 +9,18 @@ import { apiGet, apiPost, apiPut, apiSSE, submitJob, getJob, jobResult, pollJob,
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
 const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data ?? undefined });
+// Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
+// Skipped silently for huge files / fetch errors — the URL in the text always works.
+async function imageBlock(url) {
+  try {
+    const r = await fetch(url); if (!r.ok) return null;
+    const ct = (r.headers.get('content-type') || 'image/jpeg').split(';')[0];
+    if (!/^image\//.test(ct)) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 1_400_000) return null;
+    return { type: 'image', data: buf.toString('base64'), mimeType: ct };
+  } catch { return null; }
+}
 const wrap = (fn) => async (args, extra) => {
   try { return await fn(args, extra); }
   catch (e) { return { content: [{ type: 'text', text: `Error: ${e?.message || e}` }], isError: true }; }
@@ -78,7 +90,8 @@ export function registerTools(server) {
   }, wrap(async ({ prompt, refImages, aspectRatio, model, imageSize }) => {
     const refs = refImages?.length ? (await Promise.all(refImages.map(toRef))).filter(Boolean) : undefined;
     const d = await apiPost('/api/generate/image', { prompt, refImages: refs, aspectRatio, model, imageSize });
-    return ok(`Image ready: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}`, { ...d, image: abs(d.image) });
+    const img = await imageBlock(abs(d.image)); // show the actual creative inline in Claude, not just a URL
+    return { content: [{ type: 'text', text: `Image ready: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
 
   // ---------- video / avatar / stitch (job-based, polled to completion) ----------
