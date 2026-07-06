@@ -11,7 +11,7 @@ const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.
 const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data ?? undefined });
 // Video-return variant: attaches the clip's first frame as an inline image block (Claude can't play mp4 in chat,
 // but a poster makes the result VISIBLE, mirroring generate_image). Falls back to plain ok() when frames fail.
-const stillMsg = (r) => `Still rendering (renders take 1–3 min) — job ${r.jobId}. Call get_job with this id in ~60s to fetch the finished video.`;
+const stillMsg = (r) => `Still rendering — job ${r.jobId}. This is NORMAL: video renders take 1–3 minutes and each get_job call waits up to ~45s, so it can take several calls. Keep calling get_job with this id until status is done or error — do NOT ask the user whether to keep waiting, and do NOT re-fire the render on another model (that double-charges). Only surface a problem after ~6 minutes of polling.`;
 const okVideo = async (text, r) => {
   if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? undefined }; };
 // Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
@@ -24,7 +24,7 @@ async function videoPosterBlock(videoUrl) {
     const f = (d.frames || [])[0]; if (!f || !/^data:image\//.test(f)) return null;
     const [head, b64] = f.split(',');
     return { type: 'image', data: b64, mimeType: head.slice(5).split(';')[0] };
-  } catch { return null; }
+  } catch (e) { console.error('[mcp] video poster failed:', String(e?.message || e).slice(0, 160)); return null; } // silent-null keeps the link usable; log so a missing poster is diagnosable (Dave hit this on Claude.ai)
 }
 async function imageBlock(url) {
   try {
@@ -198,7 +198,7 @@ export function registerTools(server) {
   }));
 
   server.registerTool('get_job', {
-    description: 'Poll a render job by id. Returns status (queued|running|done|error), progress, and on done the served media URL. Use to resume a render left in flight.',
+    description: 'Poll a render job by id. Returns status (queued|running|done|error), progress, and on done the served media URL. Renders take 1–3 minutes: keep calling this until done/error without asking the user — several calls is normal, not a stall.',
     inputSchema: { id: z.string().describe('the job id, e.g. job_xxx') },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async ({ id }) => {
