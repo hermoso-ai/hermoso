@@ -36,7 +36,12 @@ async function imageBlock(url) {
 }
 const wrap = (fn) => async (args, extra) => {
   try { return await fn(args, extra); }
-  catch (e) { return { content: [{ type: 'text', text: `Error: ${e?.message || e}` }], isError: true }; }
+  catch (e) {
+    let msg = `Error: ${e?.message || e}`;
+    // credit outages need an actionable path the agent can relay — the web app has a top-up gate; here the URL is it
+    if (/not enough credits/i.test(msg)) msg += `\nTop up or upgrade at https://app.hermoso.ai (Settings → Billing), then retry — nothing was charged. hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
+    return { content: [{ type: 'text', text: msg }], isError: true };
+  }
 };
 
 // run a job to completion, surfacing the served media URL
