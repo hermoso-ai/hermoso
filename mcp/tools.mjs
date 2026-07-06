@@ -145,8 +145,24 @@ export function registerTools(server) {
   }));
 
   // ---------- video / avatar / stitch (job-based, polled to completion) ----------
+  server.registerTool('render_ad', {
+    description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), brand end card, licensed music bed, real product references. Pass plan_ad’s full structured output as `creative`. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
+    inputSchema: {
+      creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
+      model: z.string().optional().describe('video model id from hermoso_capabilities (default: the plan’s pick)'),
+      durationSeconds: z.number().optional(),
+      aspectRatio: z.string().optional(),
+      resolution: z.string().optional().describe("'720p' (default) or '1080p'"),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const { input, notes } = await apiPost('/api/render/assemble', a);
+    const r = await renderJob('video', input, 'MCP ad render');
+    return okVideo(`Ad video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]\n${notes || ''}`, r);
+  }));
+
   server.registerTool('generate_video', {
-    description: 'Render a VIDEO ad and return its served mp4 URL. Renders take 1–3 min — this tool blocks until done. refImage anchors the opening frame; ttsScript adds a voiceover. model = a video catalog id from hermoso_capabilities. Spends credits (Starter plan is video-blocked server-side).',
+    description: 'Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. model = a video catalog id from hermoso_capabilities. Spends credits (Starter plan is video-blocked server-side).',
     inputSchema: {
       prompt: z.string().describe('the video prompt / shot description'),
       refImage: z.string().optional().describe('local path or URL to anchor the first frame'),
