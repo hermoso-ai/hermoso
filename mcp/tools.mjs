@@ -4,14 +4,16 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
-import { apiGet, apiPost, apiPut, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, API_BASE, PROFILE } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, API_BASE, PROFILE, mcpCtx } from './client.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
 const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data ?? undefined });
 // Video-return variant: attaches the clip's first frame as an inline image block (Claude can't play mp4 in chat,
 // but a poster makes the result VISIBLE, mirroring generate_image). Falls back to plain ok() when frames fail.
-const okVideo = async (text, r) => { const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? undefined }; };
+const stillMsg = (r) => `Still rendering (renders take 1–3 min) — job ${r.jobId}. Call get_job with this id in ~60s to fetch the finished video.`;
+const okVideo = async (text, r) => {
+  if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? undefined }; };
 // Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
 // Skipped silently for huge files / fetch errors — the URL in the text always works.
 // Claude can't play video inline — attach the FIRST FRAME as an image block next to the link so the spot is
@@ -44,12 +46,20 @@ const wrap = (fn) => async (args, extra) => {
   }
 };
 
-// run a job to completion, surfacing the served media URL
+// run a job to completion, surfacing the served media URL. Under the HOSTED connector (Claude.ai/ChatGPT) the
+// client kills long tool calls before a 1-3 min render finishes — so cap the in-call wait there and return a
+// RESUMABLE handle instead of dying (the agent polls get_job, which now attaches the poster on done).
 async function renderJob(type, input, label) {
   const job = await submitJob(type, input, { label });
-  const { result } = await pollJob(job.id, { timeoutMs: JOB_TIMEOUT });
-  const url = abs(result?.video || result?.image || result?.url);
-  return { jobId: job.id, url, model: result?.model || null, raw: result };
+  const remote = !!mcpCtx.getStore(); // AsyncLocalStorage ctx only exists on the remote transport
+  try {
+    const { result } = await pollJob(job.id, { timeoutMs: remote ? 45_000 : JOB_TIMEOUT });
+    const url = abs(result?.video || result?.image || result?.url);
+    return { jobId: job.id, url, model: result?.model || null, raw: result };
+  } catch (e) {
+    if (remote && e?.jobId) return { jobId: job.id, url: null, stillRendering: true, raw: null }; // not an error — resume via get_job
+    throw e;
+  }
 }
 
 export function registerTools(server) {
@@ -173,7 +183,10 @@ export function registerTools(server) {
     const j = await getJob(id);
     const res = jobResult(j);
     const url = abs(res?.video || res?.image || res?.url);
-    return ok(`Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${url ? ` → ${url}` : ''}${j.error ? ` — ${j.error}` : ''}`, { ...j, url });
+    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${url ? ` → ${url}` : ''}${j.error ? ` — ${j.error}` : ''}`;
+    if (j.status === 'done' && res?.video) return okVideo(text, { ...j, url }); // resumed video → same inline poster as a direct return
+    if (j.status === 'done' && res?.image) { const img = await imageBlock(url); return { content: [{ type: 'text', text }, ...(img ? [img] : [])], structuredContent: { ...j, url } }; }
+    return ok(text, { ...j, url });
   }));
 
   server.registerTool('list_jobs', {
