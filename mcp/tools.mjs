@@ -116,7 +116,7 @@ export function registerTools(server) {
       product: z.string().describe('what to advertise + any angle/offer the user specified'),
       format: z.enum(['auto', 'image', 'video']).optional().describe("'image', 'video', or 'auto' when unspecified"),
       recipe: z.string().optional().describe('a recipe id from hermoso_capabilities to force an archetype'),
-      reference: z.string().optional().describe('a reference ad URL to remix the angle from'),
+      reference: z.string().optional().describe('a reference ad URL to remix the angle from — Facebook Ad Library, LinkedIn Ad Library or Google Ads Transparency links (the real ad’s copy/advertiser are fetched and fed into the concept)'),
       language: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
