@@ -70,8 +70,10 @@ export function registerTools(server) {
   }, wrap(async () => {
     const d = await apiGet('/api/generate/status');
     const img = (d.options?.image?.models || []).map(m => `${m.id} (${m.label}, ${m.credits}cr${m.best ? ', best' : ''})`).join('; ');
-    const vid = (d.options?.video?.models || []).map(m => `${m.id} (${m.label})`).join('; ');
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar} canPublish:${d.canPublish}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…`;
+    // durations + per-duration credits MATTER: without them agents assume the generic "AI video caps at 8-10s"
+    // prior and wrongly steer users to stitching (a real Claude.ai session did exactly that on a 15s ad)
+    const vid = (d.options?.video?.models || []).map(m => `${m.id} (${m.label}: one continuous clip of ${(m.durations || []).map(x => `${x}s=${m.credits?.[x] ?? '?'}cr`).join(' ')}${m.audio ? ', native audio' : ', silent'}${m.best ? ', best' : ''})`).join('; ');
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\nIMPORTANT: durations above are SINGLE-PASS — e.g. seedance-2 renders a full multi-beat 15s ad in ONE generation (do NOT assume a generic 8–10s cap, and do NOT stitch for ≤15s spots; stitching is only for longer). durationSeconds must be one of the model's listed values.\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar} canPublish:${d.canPublish}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…`;
     return ok(text, d);
   }));
 
@@ -122,7 +124,7 @@ export function registerTools(server) {
     const brandObj = brand ? (typeof brand === 'string' ? { name: brand } : brand) : null; // null → the server hydrates the workspace's saved brand/memory/taste
     const d = await apiPost('/api/create', { brand: brandObj, product, format, recipe: recipe || '', reference: reference ? { url: reference } : null, language: language || '' });
     const c = d.creative || d;
-    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: generate_${c.format === 'video' ? 'video' : 'image'} with the ${c.format === 'video' ? 'storyboard' : 'image_concept.prompt'}.`;
+    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a ≤15s storyboard renders as ONE single-pass clip — don’t stitch)' : 'generate_image with the image_concept.prompt'}.`;
     return ok(text, c);
   }));
 
@@ -162,7 +164,7 @@ export function registerTools(server) {
   }));
 
   server.registerTool('generate_video', {
-    description: 'Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. model = a video catalog id from hermoso_capabilities. Spends credits (Starter plan is video-blocked server-side).',
+    description: 'Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. ONE generation = one continuous clip up to the model’s longest listed duration (seedance-2 goes to 15s single-pass with a full multi-beat arc — never assume a generic 8–10s cap); durationSeconds must be one of the model’s durations from hermoso_capabilities. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. Spends credits (Starter plan is video-blocked server-side).',
     inputSchema: {
       prompt: z.string().describe('the video prompt / shot description'),
       refImage: z.string().optional().describe('local path or URL to anchor the first frame'),
@@ -197,7 +199,7 @@ export function registerTools(server) {
   }));
 
   server.registerTool('stitch_video', {
-    description: 'Render a multi-scene STITCHED video (≥2 scenes) — the long-form / multi-beat path. Blocks until done. Spends credits.',
+    description: 'Render a multi-scene STITCHED video (≥2 scenes) — ONLY for spots LONGER than one model clip (>15s). A ≤15s multi-beat ad renders better and cheaper as ONE single-pass generate_video/render_ad on seedance-2 (it handles the full hook→demo→payoff arc in one take) — never stitch those. Blocks until done. Spends credits.',
     inputSchema: {
       scenes: z.array(z.object({}).passthrough()).min(2).describe('array of scene objects (visual + optional voiceover/seconds)'),
       aspectRatio: z.string().optional(),
