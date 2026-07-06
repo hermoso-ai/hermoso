@@ -1,0 +1,14 @@
+{
+  "name": "hermoso",
+  "version": "0.1.0",
+  "description": "Drive Hermoso — the AI ad studio — from any AI agent: MCP server, CLI, and Claude skills for researching winning ads and generating finished image & video ads.",
+  "type": "module",
+  "bin": { "hermoso": "bin/hermoso.mjs" },
+  "scripts": { "mcp": "node mcp/hermoso-mcp.mjs" },
+  "dependencies": { "@modelcontextprotocol/sdk": "^1.12.0" },
+  "keywords": ["mcp", "model-context-protocol", "ai-ads", "ad-generator", "ugc", "claude", "cli", "video-ads"],
+  "homepage": "https://hermoso.ai",
+  "repository": { "type": "git", "url": "https://github.com/hermoso-ai/hermoso.git" },
+  "license": "MIT",
+  "author": "Hermoso <hello@hermoso.ai>"
+}
