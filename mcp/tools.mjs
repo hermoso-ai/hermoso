@@ -9,8 +9,21 @@ import { apiGet, apiPost, apiPut, apiSSE, submitJob, getJob, jobResult, pollJob,
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
 const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data ?? undefined });
+// Video-return variant: attaches the clip's first frame as an inline image block (Claude can't play mp4 in chat,
+// but a poster makes the result VISIBLE, mirroring generate_image). Falls back to plain ok() when frames fail.
+const okVideo = async (text, r) => { const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? undefined }; };
 // Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
 // Skipped silently for huge files / fetch errors — the URL in the text always works.
+// Claude can't play video inline — attach the FIRST FRAME as an image block next to the link so the spot is
+// visible in chat (0 credits; ffmpeg still via /api/video/frames).
+async function videoPosterBlock(videoUrl) {
+  try {
+    const d = await apiGet('/api/video/frames', { url: videoUrl, n: 1 });
+    const f = (d.frames || [])[0]; if (!f || !/^data:image\//.test(f)) return null;
+    const [head, b64] = f.split(',');
+    return { type: 'image', data: b64, mimeType: head.slice(5).split(';')[0] };
+  } catch { return null; }
+}
 async function imageBlock(url) {
   try {
     const r = await fetch(url); if (!r.ok) return null;
@@ -112,7 +125,7 @@ export function registerTools(server) {
   }, wrap(async (a) => {
     const refImage = a.refImage ? await toRef(a.refImage) : undefined;
     const r = await renderJob('video', { ...a, refImage }, 'MCP video');
-    return ok(`Video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]`, r);
+    return okVideo(`Video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]`, r);
   }));
 
   server.registerTool('generate_avatar', {
@@ -127,7 +140,7 @@ export function registerTools(server) {
   }, wrap(async (a) => {
     const image = await toRef(a.image);
     const r = await renderJob('avatar', { ...a, image }, 'MCP avatar');
-    return ok(`Avatar clip ready: ${r.url}  [job ${r.jobId}]`, r);
+    return okVideo(`Avatar clip ready: ${r.url}  [job ${r.jobId}]`, r);
   }));
 
   server.registerTool('stitch_video', {
@@ -144,7 +157,7 @@ export function registerTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await renderJob('stitch', a, 'MCP stitch');
-    return ok(`Stitched video ready: ${r.url}  [job ${r.jobId}]`, r);
+    return okVideo(`Stitched video ready: ${r.url}  [job ${r.jobId}]`, r);
   }));
 
   server.registerTool('get_job', {
@@ -297,7 +310,7 @@ export function registerTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ video, aspectRatio }) => {
     const r = await renderJob('reframe', { video, aspectRatio }, `Reframe → ${aspectRatio}`);
-    return ok(`Reframed video (${aspectRatio}): ${r.url}`, r);
+    return okVideo(`Reframed video (${aspectRatio}): ${r.url}`, r);
   }));
 
   server.registerTool('upscale_video', {
@@ -306,7 +319,7 @@ export function registerTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ video }) => {
     const r = await renderJob('upscale', { video, factor: 2 }, 'Upscale 2x');
-    return ok(`Upscaled video: ${r.url}`, r);
+    return okVideo(`Upscaled video: ${r.url}`, r);
   }));
 
   server.registerTool('dub_video', {
@@ -319,7 +332,7 @@ export function registerTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ video, language, script }) => {
     const r = await renderJob('dub', { video, language, script: script || '' }, `Dub → ${language}`);
-    return ok(`Localized video (${language}): ${r.url}`, r);
+    return okVideo(`Localized video (${language}): ${r.url}`, r);
   }));
 
   server.registerTool('recast_motion', {
@@ -333,7 +346,7 @@ export function registerTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ image, video, prompt = '', orientation = 'video' }) => {
     const r = await renderJob('motion', { image, video, prompt, orientation }, 'Motion recast');
-    return ok(`Recast video: ${r.url}`, r);
+    return okVideo(`Recast video: ${r.url}`, r);
   }));
 
   server.registerTool('plan_variations', {
