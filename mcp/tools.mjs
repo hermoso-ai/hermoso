@@ -211,6 +211,21 @@ export function registerTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
+    // HARD GUARD (Dave watched an agent stitch a 15s ad into 4 separate renders): a spot that fits ONE Seedance
+    // clip renders single-pass through the Studio assembly instead — no seams, exact multi-beat arc, ~1/4 the cost.
+    // The agent's scene list becomes the storyboard; its voiceover lines ride the same exactness rails.
+    const total = +a.durationSeconds || (a.scenes || []).reduce((s, x) => s + (+x.seconds || 4), 0);
+    if (total <= 15) {
+      try {
+        const { input } = await apiPost('/api/render/assemble', {
+          creative: { recipe: '', copy: [], video_storyboard: { scenes: a.scenes, cta: '', music: '' } },
+          durationSeconds: total, aspectRatio: a.aspectRatio, resolution: a.resolution,
+        });
+        if (a.voiceover && !input.ttsScript) { input.ttsScript = String(a.voiceover); if (a.voice) input.ttsVoice = String(a.voice); }
+        const r = await renderJob('video', input, 'MCP ad render (single-pass)');
+        return okVideo(`Rendered as ONE single-pass ${input.durationSeconds}s clip instead of stitching (this length fits a single generation — cleaner cuts, exact script, far fewer credits): ${r.url}  [job ${r.jobId}]`, r);
+      } catch (e) { console.error('[mcp] single-pass collapse failed, falling back to stitch:', String(e?.message || e).slice(0, 140)); }
+    }
     const r = await renderJob('stitch', a, 'MCP stitch');
     return okVideo(`Stitched video ready: ${r.url}  [job ${r.jobId}]`, r);
   }));
