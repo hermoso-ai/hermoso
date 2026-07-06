@@ -5,7 +5,12 @@ Codex, or your own scripts. Research the ads already winning in a market, plan a
 image & video ads (your real product composited in, copy + CTA included) — all over
 [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-## Quickstart (2 minutes)
+## Instant: the hosted Claude.ai connector
+
+Paste **`https://app.hermoso.ai/mcp`** into Claude → Settings → Connectors → *Add custom connector*, approve with
+your Hermoso account, done — all 22 tools with your saved brand context, billed to your plan.
+
+## Quickstart for Claude Code / Cursor / scripts (2 minutes)
 
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai) — free tier included; plans & credits are the
    same ones the web Studio uses.

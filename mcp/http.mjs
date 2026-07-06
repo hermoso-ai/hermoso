@@ -16,6 +16,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools } from './tools.mjs';
+import { mcpCtx } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
@@ -50,7 +51,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     const sid = req.headers['mcp-session-id'];
     let entry = sid && sessions.get(sid);
     if (!entry) {
-      const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' });
+      const server = new McpServer({ name: 'hermoso', version: '1.0.0' });
       registerTools(server); // the SAME tools as stdio — but here every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => 'sess_' + Math.random().toString(36).slice(2),
@@ -60,9 +61,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       entry = { transport, server, user };
       await server.connect(transport);
     }
-    // NOTE: the user's identity must flow into the tools' /api calls (so spend bills the right account). The clean
-    // way is an AsyncLocalStorage carrying {token|userId} that mcp/client.mjs reads — wire that in the cloud step.
-    await entry.transport.handleRequest(req, res, req.body);
+    await mcpCtx.run({ token }, () => entry.transport.handleRequest(req, res, req.body)); // the caller's bearer rides into every /api call the tools make — spend bills THEIR account
   });
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);

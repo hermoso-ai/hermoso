@@ -5,14 +5,21 @@
 // the server treats them as non-authoritative (identity comes from the verified token / local dev user).
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-export const API_BASE = (process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai').replace(/\/+$/, '');
+// Remote-connector identity: mcp/http.mjs wraps each request in mcpCtx.run({ token }) so every /api call a tool
+// makes carries THAT caller's bearer (bills their account). stdio keeps using the env token — ctx is simply unset.
+export const mcpCtx = new AsyncLocalStorage();
+
+export const API_BASE = (process.env.HERMOSO_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
 const TOKEN = process.env.HERMOSO_TOKEN || '';
 export const PROFILE = process.env.HERMOSO_PROFILE || 'default';
 
 function headers(extra = {}) {
-  const h = { 'Content-Type': 'application/json', 'x-hermoso-user': PROFILE, ...extra };
-  if (TOKEN) h.Authorization = `Bearer ${TOKEN}`;
+  const ctx = mcpCtx.getStore();
+  const h = { 'Content-Type': 'application/json', 'x-hermoso-user': ctx?.profile || PROFILE, ...extra };
+  const tok = ctx?.token || TOKEN;
+  if (tok) h.Authorization = `Bearer ${tok}`;
   return h;
 }
 
@@ -21,8 +28,7 @@ async function unwrap(res) {
   let body = null;
   try { body = await res.json(); } catch {}
   if (!res.ok) {
-    let msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
-    if (res.status === 401 && !TOKEN) msg += ' — set HERMOSO_TOKEN: create a key at app.hermoso.ai → Settings → Agents & API (or run `hermoso auth login --token <key>`)';
+    const msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
     throw Object.assign(new Error(msg), { status: res.status });
   }
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
