@@ -4,7 +4,7 @@
 // in skills/ wrap these commands. Same /api as the MCP server.
 //
 //   npm i -g  (from this repo)  OR  node bin/hermoso.mjs <cmd>
-//   hermoso auth login --url http://localhost:3000      # local: no token needed (records the base URL)
+//   hermoso auth login --token <key>                   # key from app.hermoso.ai → Settings → Agents & API
 //   hermoso capabilities                                 # learn valid model ids + costs (run first)
 //   hermoso create --brand Flourish --product "protein pancakes" --format image
 //   hermoso generate image --prompt "…" --ref ./bag.png --wait
@@ -46,18 +46,19 @@ async function main() {
   // ---- auth: no network call today; records base URL + optional token (the OAuth seam) ----
   if (group === 'auth') {
     if (sub === 'logout') { await saveConfig({}); return console.log('✓ Logged out (cleared ~/.hermoso/config.json)'); }
-    const next = { apiBase: flags.url || cfg.apiBase || 'http://localhost:3000', token: flags.token || cfg.token || '', profile: flags.profile || cfg.profile || 'default' };
+    const next = { apiBase: flags.url || cfg.apiBase || 'https://app.hermoso.ai', token: flags.token || cfg.token || '', profile: flags.profile || cfg.profile || 'default' };
     await saveConfig(next);
-    console.log(`✓ Saved. API: ${next.apiBase}${next.token ? ' · token stored' : ' · local dev (no auth required)'}`);
+    console.log(`✓ Saved. API: ${next.apiBase}${next.token ? ' · token stored' : ''}`);
+    if (!next.token) console.log('  Next: create an agent key at app.hermoso.ai → Settings → Agents & API, then run:  hermoso auth login --token <key>');
     return;
   }
   if (group === 'version' || flags.version) {
-    console.log(`hermoso-cli 1.0.0 · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'http://localhost:3000'} · ${cfg.token ? 'authed' : 'local (no auth)'}`);
+    console.log(`hermoso-cli 1.0.0 · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai'} · ${cfg.token ? 'authed' : 'no token — run: hermoso auth login --token <key>'}`);
     return;
   }
 
   // resolve API base + token from config (env overrides), then load the shared client
-  process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'http://localhost:3000';
+  process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
   if (cfg.profile && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
   const api = await import('../mcp/client.mjs');

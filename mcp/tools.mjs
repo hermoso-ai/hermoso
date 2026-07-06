@@ -4,7 +4,7 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
-import { apiGet, apiPost, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, API_BASE } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, API_BASE, PROFILE } from './client.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
@@ -47,7 +47,7 @@ export function registerTools(server) {
   server.registerTool('plan_ad', {
     description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. Spends LLM tokens, 0 ScrapeCreators credits.',
     inputSchema: {
-      brand: z.union([z.string(), z.object({}).passthrough()]).describe('brand name, or a brand profile object {name,domain,category,palette,products,…} (use draft_brand to build one)'),
+      brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name, or a brand profile object {name,domain,category,palette,products,…}. OMIT to use the workspace’s SAVED brand + memory automatically (see get_brand); use draft_brand to onboard a new one'),
       product: z.string().describe('what to advertise + any angle/offer the user specified'),
       format: z.enum(['auto', 'image', 'video']).optional().describe("'image', 'video', or 'auto' when unspecified"),
       recipe: z.string().optional().describe('a recipe id from hermoso_capabilities to force an archetype'),
@@ -56,7 +56,7 @@ export function registerTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language }) => {
-    const brandObj = typeof brand === 'string' ? { name: brand } : brand;
+    const brandObj = brand ? (typeof brand === 'string' ? { name: brand } : brand) : null; // null → the server hydrates the workspace's saved brand/memory/taste
     const d = await apiPost('/api/create', { brand: brandObj, product, format, recipe: recipe || '', reference: reference ? { url: reference } : null, language: language || '' });
     const c = d.creative || d;
     const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: generate_${c.format === 'video' ? 'video' : 'image'} with the ${c.format === 'video' ? 'storyboard' : 'image_concept.prompt'}.`;
@@ -197,6 +197,18 @@ export function registerTools(server) {
   }));
 
   // ---------- brand onboarding ----------
+  server.registerTool('get_brand', {
+    description: 'What Hermoso ALREADY KNOWS for this account/workspace — the same saved brand profile (products, logos, palette, positioning) + learned memory the web Studio uses. Call this FIRST: if hasBrand is true you can omit brand everywhere; if false, onboard with draft_brand. 0 credits.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, wrap(async () => {
+    const d = await apiGet('/api/brand/current');
+    const text = d?.hasBrand
+      ? `Saved brand: ${d.brand.name || d.brand.domain}${d.brand.category ? ' · ' + d.brand.category : ''} · ${d.memoryCount} learned memory notes. plan_ad / plan_variations / create use it automatically when you omit brand.`
+      : 'No saved brand for this workspace yet — onboard one with draft_brand (it saves automatically), or the user can onboard in the web Studio.';
+    return ok(text, d);
+  }));
+
   server.registerTool('draft_brand', {
     description: 'Onboard a brand profile — from a website domain, a free-text description, or a social handle — into a {name, products, logo, …} object you can pass to plan_ad / generate. 0 ScrapeCreators credits.',
     inputSchema: {
@@ -204,12 +216,24 @@ export function registerTools(server) {
       description: z.string().optional().describe('a free-text brand description (no website)'),
       socialHandle: z.string().optional(),
       platform: z.string().optional().describe('platform for socialHandle (instagram/tiktok/…)'),
+      save: z.boolean().optional().describe('save as the workspace’s brand (like Studio onboarding) so plan_ad/create use it automatically. Default: saves only when NO brand is saved yet; pass true to overwrite, false to never save'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  }, wrap(async (a) => {
+  }, wrap(async ({ save, ...a }) => {
     const d = await apiPost('/api/brand/draft', a);
     const p = d.profile || d;
-    return ok(`Drafted brand: ${p.name || '—'}${p.category ? ' · ' + p.category : ''}. Pass this object to plan_ad.`, p);
+    let saved = false;
+    if (save !== false) {
+      try {
+        const cur = save === true ? null : await apiGet('/api/brand/current').catch(() => null);
+        if (save === true || !cur?.hasBrand) {
+          const bk = PROFILE !== 'default' ? `heist.brand.v1.${PROFILE}` : 'heist.brand.v1'; // mirror the webapp's per-profile key namespacing
+          await apiPut(`/api/store/${encodeURIComponent(bk)}`, { value: JSON.stringify(p) });
+          saved = true;
+        }
+      } catch {} // saving is best-effort — the drafted profile is still returned either way
+    }
+    return ok(`Drafted brand: ${p.name || '—'}${p.category ? ' · ' + p.category : ''}.${saved ? ' Saved as the workspace brand — plan_ad/create now use it automatically.' : ' Pass this object to plan_ad.'}`, p);
   }));
 
   // ---------- assets ----------
@@ -301,14 +325,14 @@ export function registerTools(server) {
   server.registerTool('plan_variations', {
     description: "Fan a brief into N DISTINCT ad angles (different hooks/mechanics/audiences), each with its own headline + visual brief — then render each with generate_image and rank with score_ad. LLM planning only; renders nothing itself.",
     inputSchema: {
-      brand: z.union([z.string(), z.object({}).passthrough()]).describe('brand name or profile object'),
+      brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object; OMIT to use the workspace’s saved brand'),
       product: z.string().describe('what to advertise'),
       count: z.number().int().min(2).max(8).optional().describe('how many distinct variants (default 6)'),
       language: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ brand, product, count = 6, language }) => {
-    const brandObj = typeof brand === 'string' ? { name: brand } : brand;
+    const brandObj = brand ? (typeof brand === 'string' ? { name: brand } : brand) : null;
     const d = await apiPost('/api/batch/plan', { brand: brandObj, product, count, language: language || '' });
     const vars = d?.variants || d?.angles || [];
     const text = vars.map((v, i) => `${i + 1}. ${v.name || v.angle || 'Variant'} — ${v.hook || v.headline || ''}`).join('\n') || 'No variants returned.';

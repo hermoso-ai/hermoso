@@ -5,13 +5,25 @@ Codex, or your own scripts. Research the ads already winning in a market, plan a
 image & video ads (your real product composited in, copy + CTA included) — all over
 [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-> **Hosted access is rolling out.** These surfaces authenticate with `HERMOSO_TOKEN` (a Bearer token) against
-> `HERMOSO_API_BASE`. Hosted tokens for app.hermoso.ai are shipping shortly — watch this repo. Everything below
-> also works today against a development server.
+## Quickstart (2 minutes)
+
+1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai) — free tier included; plans & credits are the
+   same ones the web Studio uses.
+2. **Create an agent key**: app.hermoso.ai → **Settings → Agents & API** → Create API key (`hmk_…`).
+3. **Connect** (Claude Code shown; any MCP client works):
+
+```bash
+git clone https://github.com/hermoso-ai/hermoso.git && cd hermoso && npm install
+claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- node "$(pwd)/mcp/hermoso-mcp.mjs"
+```
+
+Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
+learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
+`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits — same prices as the Studio.
 
 ## 1. MCP server (stdio) — Claude Code / Cursor / Codex
 
-`mcp/hermoso-mcp.mjs` is a stdio MCP server exposing 14 tools.
+`mcp/hermoso-mcp.mjs` is a stdio MCP server exposing 22 tools.
 
 ```bash
 npm install
@@ -27,7 +39,7 @@ Cursor / Codex — add to `mcp.json` (Codex uses the TOML equivalent):
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-**Tools (21):** `hermoso_capabilities`, `hermoso_credits`, `plan_ad`, `plan_variations`, `generate_image`,
+**Tools (22):** `hermoso_capabilities`, `hermoso_credits`, `get_brand`, `plan_ad`, `plan_variations`, `generate_image`,
 `generate_video`, `generate_avatar`, `stitch_video`, `reframe_video`, `upscale_video`, `dub_video`,
 `recast_motion`, `analyze_video`, `score_ad`, `get_job`, `list_jobs`, `find_competitors`,
 `pull_competitor_ads`, `research_ads`, `draft_brand`, `fetch_asset`. Call `hermoso_capabilities` first — it

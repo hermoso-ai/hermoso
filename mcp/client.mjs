@@ -6,9 +6,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export const API_BASE = (process.env.HERMOSO_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
+export const API_BASE = (process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai').replace(/\/+$/, '');
 const TOKEN = process.env.HERMOSO_TOKEN || '';
-const PROFILE = process.env.HERMOSO_PROFILE || 'default';
+export const PROFILE = process.env.HERMOSO_PROFILE || 'default';
 
 function headers(extra = {}) {
   const h = { 'Content-Type': 'application/json', 'x-hermoso-user': PROFILE, ...extra };
@@ -21,7 +21,8 @@ async function unwrap(res) {
   let body = null;
   try { body = await res.json(); } catch {}
   if (!res.ok) {
-    const msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
+    let msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
+    if (res.status === 401 && !TOKEN) msg += ' — set HERMOSO_TOKEN: create a key at app.hermoso.ai → Settings → Agents & API (or run `hermoso auth login --token <key>`)';
     throw Object.assign(new Error(msg), { status: res.status });
   }
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
@@ -35,6 +36,11 @@ export async function apiGet(p, query) {
 
 export async function apiPost(p, body = {}) {
   const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  return unwrap(res);
+}
+
+export async function apiPut(p, body = {}) {
+  const res = await fetch(`${API_BASE}${p}`, { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
