@@ -40,7 +40,8 @@ export function registerTools(server) {
     inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/credits');
-    return ok(`Balance: ${d.balance} credits · session used: ${d.sessionUsed ?? 0}`, d);
+    const bal = d.accountBalance ?? d.balance; // accountBalance = the caller's Hermoso credits (authed); balance = the local-dev usage pill
+    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}`, d);
   }));
 
   // ---------- planning (LLM, 0 SC credits) ----------
