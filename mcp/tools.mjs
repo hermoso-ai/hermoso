@@ -84,6 +84,28 @@ export function registerTools(server) {
     return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}`, d);
   }));
 
+  server.registerTool('list_brands', {
+    description: "List every brand on this account (id + name) and which one this connection currently acts on. Multi-brand accounts: call this, then use_brand to switch. Read-only, free.",
+    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+  }, wrap(async () => {
+    const d = await apiGet('/api/brands');
+    const lines = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})${b.active ? '  ← active' : ''}`).join('\n');
+    return ok(`Brands on this account:\n${lines}\n\nSwitch with use_brand.`, d);
+  }));
+
+  server.registerTool('use_brand', {
+    description: "Pin which brand this connection generates for (multi-brand accounts). Pass the brand id or exact name from list_brands. Persists for this API key until changed.",
+    inputSchema: { brand: z.string().describe('brand id (e.g. default / p_xxx) or its exact name from list_brands') },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, wrap(async ({ brand }) => {
+    const d = await apiGet('/api/brands');
+    const want = String(brand || '').trim().toLowerCase();
+    const hit = (d.brands || []).find(b => b.id.toLowerCase() === want || String(b.name || '').toLowerCase() === want);
+    if (!hit) return { content: [{ type: 'text', text: `No brand matching "${brand}". Available:\n${(d.brands || []).map(b => `• ${b.name} (id: ${b.id})`).join('\n')}` }], isError: true };
+    await apiPost('/api/keys/brand', { profileId: hit.id });
+    return ok(`Now acting on ${hit.name} (${hit.id}) — brand, memory, renders and Library all scope to it.`, { ok: true, brand: hit });
+  }));
+
   // ---------- planning (LLM, 0 SC credits) ----------
   server.registerTool('plan_ad', {
     description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. Spends LLM tokens, 0 ScrapeCreators credits.',
