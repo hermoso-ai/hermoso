@@ -59,11 +59,11 @@ tool manifest.
 ```bash
 npm install -g .                                   # installs `hermoso`
 hermoso capabilities                               # valid model ids + costs (run first)
-hermoso create --brand "Flourish" --product "protein pancakes" --format image
+hermoso create --brand "YourBrand" --product "your best-selling product" --format image
 hermoso generate image --prompt "…" --ref ./product.png --wait
 hermoso generate video --prompt "…" --duration 8 --wait
-hermoso competitors flourish.com
-hermoso research "longest-running protein-pancake ads"
+hermoso competitors yourbrand.com
+hermoso research "Liquid Death’s longest-running ads"
 ```
 
 Add `--json` to any command for machine output.
@@ -77,13 +77,13 @@ Add `--json` to any command for machine output.
 cp -r skills/* ~/.claude/skills/
 ```
 
-Then invoke `/hermoso-ad-from-brand an ad for flourish.com protein pancakes`.
+Then invoke `/hermoso-ad-from-brand an ad for yourbrand.com — our hero product`.
 
 ## Configuration
 
 | Env | Meaning |
 | --- | --- |
-| `HERMOSO_API_BASE` | The Hermoso API origin (default `http://localhost:3000` for development) |
+| `HERMOSO_API_BASE` | The Hermoso API origin (default `https://app.hermoso.ai` — set `http://localhost:3000` if you run the app yourself) |
 | `HERMOSO_TOKEN` | Bearer token — required against the hosted app (rolling out) |
 | `HERMOSO_PROFILE` | Brand-workspace id, for accounts with multiple brand profiles |
 

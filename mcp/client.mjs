@@ -11,7 +11,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // makes carries THAT caller's bearer (bills their account). stdio keeps using the env token — ctx is simply unset.
 export const mcpCtx = new AsyncLocalStorage();
 
-export const API_BASE = (process.env.HERMOSO_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
+export const API_BASE = (process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai').replace(/\/+$/, '');
 const TOKEN = process.env.HERMOSO_TOKEN || '';
 export const PROFILE = process.env.HERMOSO_PROFILE || 'default';
 

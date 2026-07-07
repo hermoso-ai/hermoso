@@ -2,7 +2,7 @@
 // Hermoso MCP server (stdio transport) — lets Claude Code / Cursor / Codex (and any stdio MCP client) drive Hermoso:
 // research competitors, plan ads, and generate images/videos/avatars, all against the running Hermoso server.
 //
-//   Local (today):   node mcp/hermoso-mcp.mjs            # talks to http://localhost:3000 (HERMOSO_API_BASE to override)
+//   Local (today):   node mcp/hermoso-mcp.mjs            # talks to https://app.hermoso.ai (HERMOSO_API_BASE to override, e.g. http://localhost:3000 when self-running)
 //   Auth (today):    none — the local server resolves the dev account. Set HERMOSO_TOKEN once real auth lands.
 //
 // stdout is the JSON-RPC channel — NEVER print to it. All logging goes to stderr (console.error).

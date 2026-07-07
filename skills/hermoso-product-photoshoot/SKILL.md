@@ -15,7 +15,7 @@ Use Hermoso's reference-image compositing so the real product (label, colours, s
 scene around it is generated. Drive the **Hermoso CLI**.
 
 ## Setup
-- `hermoso auth login --url http://localhost:3000`; run `hermoso capabilities` once to see image model ids + recipes.
+- `hermoso auth login --url https://app.hermoso.ai --token <your agent key>` (key from the app’s MCP & CLI page); run `hermoso capabilities` once to see image model ids + recipes.
 
 ## Procedure
 1. Get the **product image** path/URL from the user. This is the `--ref` — it forces product-accurate compositing.

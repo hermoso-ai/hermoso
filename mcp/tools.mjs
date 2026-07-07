@@ -293,7 +293,7 @@ export function registerTools(server) {
   server.registerTool('find_competitors', {
     description: "Discover a brand's competitor / similar / adjacent brands from its domain (Claude grounded by web search). mode=competitors (default, excludes the searched company), inspiration (best relevant ads incl. it), or company. 0 ScrapeCreators credits.",
     inputSchema: {
-      domain: z.string().describe('the brand domain, e.g. flourish.com'),
+      domain: z.string().describe('the brand domain, e.g. yourbrand.com'),
       mode: z.enum(['competitors', 'inspiration', 'company']).optional(),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },

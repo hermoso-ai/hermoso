@@ -5,7 +5,7 @@ description: >-
   copy, then render the image or video. Use when the user says "make an ad for <company/website>", "build a
   launch ad for my brand", or gives a domain/brand and wants a complete ad, not just research. NOT for: just
   pulling competitor ads (use hermoso-research) or rendering from a prompt you already have (use hermoso-generate).
-argument-hint: "[brand or website + what to advertise — e.g. 'an ad for flourish.com protein pancakes']"
+argument-hint: "[brand or website + what to advertise — e.g. 'an ad for yourbrand.com — our best-selling olive oil']"
 allowed-tools: Bash
 ---
 
@@ -14,7 +14,7 @@ allowed-tools: Bash
 Drive the **Hermoso CLI** to go from a brand to a finished ad in three steps. Report the final media URL.
 
 ## Setup
-- `hermoso version` to confirm the CLI; `hermoso auth login --url http://localhost:3000` (local = no token).
+- `hermoso version` to confirm the CLI; `hermoso auth login --url https://app.hermoso.ai --token <your key>` (create one under MCP & CLI).
 
 ## Procedure
 1. **Onboard the brand** (skip if the user already gave full brand details):
