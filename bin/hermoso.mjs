@@ -43,14 +43,23 @@ async function main() {
   const [group, sub] = pos;
   const cfg = await loadConfig();
 
-  // ---- auth: no network call today; records base URL + optional token (the OAuth seam) ----
+  // ---- auth: `login` opens the browser to mint + store an agent key (nothing to paste — matches the app's OAuth
+  //      connectors); `--token <key>` is the manual fallback; a localhost base needs no auth (dev). ----
   if (group === 'auth') {
     if (sub === 'logout') { await saveConfig({}); return console.log('✓ Logged out (cleared ~/.hermoso/config.json)'); }
-    const next = { apiBase: flags.url || cfg.apiBase || 'https://app.hermoso.ai', token: flags.token || cfg.token || '', profile: flags.profile || cfg.profile || 'default' };
-    await saveConfig(next);
-    console.log(`✓ Saved. API: ${next.apiBase}${next.token ? ' · token stored' : ''}`);
-    if (!next.token) console.log('  Next: create an agent key at app.hermoso.ai → Settings → Agents & API, then run:  hermoso auth login --token <key>');
-    return;
+    const apiBase = (flags.url || cfg.apiBase || 'https://app.hermoso.ai').replace(/\/$/, '');
+    const profile = flags.profile || cfg.profile || 'default';
+    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(apiBase);
+    if (flags.token) { await saveConfig({ apiBase, token: String(flags.token), profile }); return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`); }
+    if (isLocal) { await saveConfig({ apiBase, token: '', profile }); return console.log(`✓ Local dev — no auth required. API: ${apiBase}`); }
+    if (sub === 'login') { // browser sign-in: spin a loopback server, open the app's /?cliauth page, receive a minted key
+      const key = await browserLogin(apiBase);
+      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login", or paste a key: hermoso auth login --token <key>  (create one in the app under Agents & API keys).`);
+      await saveConfig({ apiBase, token: key, profile });
+      return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`);
+    }
+    await saveConfig({ apiBase, token: cfg.token || '', profile }); // bare `auth` / `auth --url …`: just record the base
+    return console.log(`✓ Saved. API: ${apiBase}${cfg.token ? ' · token stored' : ''}`);
   }
   if (group === 'version' || flags.version) {
     console.log(`hermoso-cli 1.0.0 · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai'} · ${cfg.token ? 'authed' : 'no token — run: hermoso auth login --token <key>'}`);
@@ -61,6 +70,12 @@ async function main() {
   process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
   if (cfg.profile && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
+
+  // `hermoso mcp` → run the stdio MCP server (Claude Code / Cursor / Codex spawn this, e.g. `npx -y hermoso mcp`).
+  // It OWNS stdout as the JSON-RPC channel, so hand off immediately and print nothing to stdout here. The
+  // config-resolved API base + token (set just above) ride into the server's client via env; all logs go to stderr.
+  if (group === 'mcp') { await import('../mcp/hermoso-mcp.mjs'); return; }
+
   const api = await import('../mcp/client.mjs');
   const out = (label, data) => { if (flags.json) console.log(JSON.stringify(data, null, 2)); else console.log(label); };
   const absUrl = (u) => (u && u.startsWith('/') ? api.API_BASE + u : u);
@@ -140,9 +155,54 @@ async function main() {
   generate image --prompt [--ref] [--model] [--aspect]        generate video|avatar|stitch … [--wait]
   jobs list | jobs get <id> [--wait]                          competitors <domain>
   ads pull (--company|--domain)                               research "<request>"
-  fetch <url> [--out]                                         version
+  fetch <url> [--out]                                         mcp   (run the stdio MCP server)
+  version
 add --json to any command for machine output.`);
     }
   } catch (e) { die(e?.message || String(e)); }
+}
+
+// ---- browser sign-in (loopback OAuth, like gh/firebase): spin a 127.0.0.1 server, open the app's cli-auth page,
+//      which mints an agent key and redirects the browser back to our loopback with ?key=&state=. Nothing is pasted;
+//      the key transits only the user's own machine. Times out after 3 min. Returns the hmk_ key, or null. ----
+async function browserLogin(apiBase) {
+  const http = await import('node:http');
+  const crypto = await import('node:crypto');
+  const state = crypto.randomBytes(16).toString('hex');
+  return await new Promise((resolve) => {
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; try { server.close(); } catch {} resolve(val); };
+    const server = http.createServer((req, res) => {
+      try {
+        const u = new URL(req.url, 'http://127.0.0.1');
+        if (u.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
+        const key = u.searchParams.get('key') || '';
+        const st = u.searchParams.get('state') || '';
+        const ok = st === state && /^hmk_[A-Za-z0-9_-]{20,}$/.test(key);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(cliAuthPage(ok ? 'You’re signed in ✓' : 'Sign-in didn’t complete', ok ? 'Hermoso CLI is connected. You can close this tab and return to your terminal.' : 'Please close this tab and run the command again.'));
+        finish(ok ? key : null);
+      } catch { try { res.writeHead(500); res.end('error'); } catch {} finish(null); }
+    });
+    server.on('error', () => finish(null));
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      const authUrl = `${apiBase}/?cliauth=1&port=${port}&state=${state}`;
+      console.log(`\nOpening your browser to sign in…\nIf it doesn’t open, paste this into your browser:\n  ${authUrl}\n`);
+      openBrowser(authUrl);
+    });
+    setTimeout(() => finish(null), 180000);
+  });
+}
+function openBrowser(url) {
+  import('node:child_process').then(({ spawn }) => {
+    const plat = process.platform;
+    const cmd = plat === 'darwin' ? 'open' : plat === 'win32' ? 'cmd' : 'xdg-open';
+    const args = plat === 'win32' ? ['/c', 'start', '', url] : [url];
+    try { const c = spawn(cmd, args, { stdio: 'ignore', detached: true }); c.on('error', () => {}); c.unref(); } catch {}
+  }).catch(() => {});
+}
+function cliAuthPage(title, body) {
+  return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Hermoso CLI</title><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0e0e10;color:#f4f1ea;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0"><div style="text-align:center;max-width:420px;padding:32px"><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:700;letter-spacing:-.5px;margin-bottom:18px">hermoso<span style="color:#d9714e">.ai</span></div><h1 style="font-size:20px;margin:14px 0 8px;font-weight:600">${title}</h1><p style="color:#a7a29a;line-height:1.55;font-size:15px">${body}</p></div></body>`;
 }
 main();

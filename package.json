@@ -1,14 +1,45 @@
 {
   "name": "hermoso",
-  "version": "0.1.0",
-  "description": "Drive Hermoso — the AI ad studio — from any AI agent: MCP server, CLI, and Claude skills for researching winning ads and generating finished image & video ads.",
+  "version": "0.1.6",
+  "mcpName": "io.github.hermoso-ai/hermoso",
+  "description": "Generate finished VIDEO ADS, image ads and UGC avatar ads for any brand with AI \u2014 and spy on competitor ads across the Meta, Google and LinkedIn ad libraries plus TikTok/Instagram/YouTube organic. MCP server, CLI and Claude skills for Hermoso, the AI ad studio: brand onboarding, 30+ image/video models, finished-ad pipeline (script, voiceover, music, brand end card), ad scoring and competitor teardowns.",
   "type": "module",
-  "bin": { "hermoso": "bin/hermoso.mjs" },
-  "scripts": { "mcp": "node mcp/hermoso-mcp.mjs" },
-  "dependencies": { "@modelcontextprotocol/sdk": "^1.12.0" },
-  "keywords": ["mcp", "model-context-protocol", "ai-ads", "ad-generator", "ugc", "claude", "cli", "video-ads"],
+  "bin": {
+    "hermoso": "bin/hermoso.mjs"
+  },
+  "scripts": {
+    "mcp": "node mcp/hermoso-mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "keywords": [
+    "ad-generator",
+    "ad-library",
+    "ads",
+    "advertising",
+    "ai-ads",
+    "ai-agents",
+    "ai-video",
+    "claude",
+    "cli",
+    "competitor-analysis",
+    "image-generation",
+    "marketing",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "seedance",
+    "ugc",
+    "veo",
+    "video-ads",
+    "video-generation"
+  ],
   "homepage": "https://hermoso.ai",
-  "repository": { "type": "git", "url": "https://github.com/hermoso-ai/hermoso.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hermoso-ai/hermoso.git"
+  },
   "license": "MIT",
   "author": "Hermoso <hello@hermoso.ai>"
 }

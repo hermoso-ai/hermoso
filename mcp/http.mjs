@@ -15,7 +15,7 @@
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { registerTools } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS } from './tools.mjs';
 import { mcpCtx } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
@@ -51,7 +51,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     const sid = req.headers['mcp-session-id'];
     let entry = sid && sessions.get(sid);
     if (!entry) {
-      const server = new McpServer({ name: 'hermoso', version: '1.0.0' });
+      const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
       registerTools(server); // the SAME tools as stdio — but here every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => 'sess_' + Math.random().toString(36).slice(2),

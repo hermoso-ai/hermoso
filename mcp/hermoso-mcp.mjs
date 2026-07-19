@@ -8,11 +8,13 @@
 // stdout is the JSON-RPC channel — NEVER print to it. All logging goes to stderr (console.error).
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { registerTools } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS } from './tools.mjs';
 import { API_BASE } from './client.mjs';
 
+// instructions = the full capability map (ad spy · create · raw model playground · account) — one source of truth
+// in tools.mjs, shared with the hosted connector (http.mjs), so every surface tells agents the same breadth.
 const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' }, {
-  instructions: 'Hermoso generates copyable, on-brand ad creative. Typical flow: hermoso_capabilities (learn valid model ids + costs) → optionally draft_brand → plan_ad (concept + copy) → generate_image / generate_video (returns a served URL). Use find_competitors / pull_competitor_ads / research_ads to gather proven ads to remix first. Always report the final media URL to the user.',
+  instructions: MCP_INSTRUCTIONS,
 });
 
 registerTools(server);
