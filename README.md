@@ -1,5 +1,8 @@
 # Hermoso — MCP, CLI & Skills
 
+[![smithery badge](https://smithery.ai/badge/hermoso/hermoso)](https://smithery.ai/servers/hermoso/hermoso) [![npm version](https://img.shields.io/npm/v/hermoso.svg)](https://www.npmjs.com/package/hermoso) [![MCP registry](https://img.shields.io/badge/MCP_registry-io.github.hermoso--ai%2Fhermoso-cc4f33)](https://registry.modelcontextprotocol.io/v0/servers?search=hermoso)
+
+
 Drive [Hermoso](https://hermoso.ai) — the AI ad studio — from **any AI agent**: Claude Code, Claude.ai, Cursor,
 Codex, or your own scripts. Research the ads already winning in a market, plan a creative, and generate finished
 image & video ads (your real product composited in, copy + CTA included) — all over

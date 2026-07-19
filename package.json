@@ -1,6 +1,6 @@
 {
   "name": "hermoso",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "mcpName": "io.github.hermoso-ai/hermoso",
   "description": "Generate finished VIDEO ADS, image ads and UGC avatar ads for any brand with AI \u2014 and spy on competitor ads across the Meta, Google and LinkedIn ad libraries plus TikTok/Instagram/YouTube organic. MCP server, CLI and Claude skills for Hermoso, the AI ad studio: brand onboarding, 30+ image/video models, finished-ad pipeline (script, voiceover, music, brand end card), ad scoring and competitor teardowns.",
   "type": "module",

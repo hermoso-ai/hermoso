@@ -8,12 +8,12 @@ import { apiGet, apiPost, apiPut, apiSSE, submitJob, getJob, jobResult, pollJob,
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
-const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data ?? undefined });
+const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data ?? {} });
 // Video-return variant: attaches the clip's first frame as an inline image block (Claude can't play mp4 in chat,
 // but a poster makes the result VISIBLE, mirroring generate_image). Falls back to plain ok() when frames fail.
 const stillMsg = (r) => `Still rendering — job ${r.jobId}. This is NORMAL: video renders take 1–3 minutes and each get_job call waits up to ~45s, so it can take several calls. Keep calling get_job with this id until status is done or error — do NOT ask the user whether to keep waiting, and do NOT re-fire the render on another model (that double-charges). Only surface a problem after ~6 minutes of polling.`;
 const okVideo = async (text, r) => {
-  if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? undefined }; };
+  if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
 
 // ── CAPABILITY MAP — the FULL agent surface, four categories. Appended to hermoso_capabilities so an agent that
 // probes once learns everything Hermoso does (not just the models): ad spy, create, raw playground, account. Keep
@@ -23,7 +23,7 @@ const CAPABILITY_MAP = [
   'A) AD SPY / RESEARCH — spy on the ads already winning in any market, then mine them. find_competitors · competitor_teardown · pull_competitor_ads · research_ads (open brief) · ad libraries search_meta_ads / search_google_ads / search_linkedin_ads · organic social search_tiktok / search_instagram / search_youtube / search_reddit / search_threads · scrapecreators_fetch (any allowlisted endpoint) · mine_angles · analyze_video · check_ad_policy · list_skills / get_skill (teardowns + creative playbooks).',
   'B) CREATE — finished, on-brand image & video ads (real product composited in, copy + CTA baked). draft_brand / get_brand / use_brand · plan_ad (concept + copy) → render_ad (the Studio quality pipeline) or generate_image / generate_video / generate_avatar (UGC creators + lip-sync) · make_template_ad (native HTML ad formats) · remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video · plan_variations + score_ad (fan out + rank).',
   'C) RAW MODEL PLAYGROUND — direct access to the full catalog (30+ image / video / voice / writing models, each with the exact per-render credit cost shown above), no ad framing: generate_image / generate_video (useBrand:false) for plain prompt-only renders, generate_voice for raw text-to-speech against any voice engine, and generate_text for the writing models (Claude / Gemini / GPT / Llama / DeepSeek…) — all against ANY catalog id.',
-  'D) ACCOUNT — hermoso_credits (balance) · billing_status (plan + your billing role) · buy_credits (top-up checkout link) · upgrade_plan / set_auto_reload (admin) · list_jobs / get_job (track async renders).',
+  'D) ACCOUNT — hermoso_credits (balance) · billing_status (plan + your billing role) · buy_credits (one-click top-up on the saved card, or a first-purchase checkout link) · upgrade_plan / set_auto_reload (admin) · list_jobs / get_job (track async renders).',
 ].join('\n');
 
 // Server-level `instructions` (initialize response — injected into the model's context by the client). Denser than
@@ -35,8 +35,8 @@ export const MCP_INSTRUCTIONS = [
   '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; scrapecreators_fetch; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
   '• CREATE (finished ads): draft_brand → plan_ad → render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar; make_template_ad (native HTML formats); remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video; plan_variations + score_ad.',
   '• RAW MODEL PLAYGROUND: generate_image / generate_video (useBrand:false) for prompt-only renders, generate_voice for text-to-speech, generate_text for the writing models — against any of 30+ image / video / voice / writing model ids (exact costs in hermoso_capabilities), no ad framing.',
-  '• ACCOUNT: hermoso_credits, billing_status, buy_credits (top-up link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job.',
-  'No anonymous spend — tools/call needs a bearer. Out of credits → buy_credits mints a Stripe link your human pays; agents never spend money directly. Always report the final media URL to the user.',
+  '• ACCOUNT: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job.',
+  'No anonymous spend — tools/call needs a bearer. Out of credits → buy_credits: with a saved card + admin rights it one-click charges after an explicit confirm:true (state the exact price first); the FIRST purchase is a Stripe link your human pays, which saves the card. Always report the final media URL to the user.',
 ].join('\n');
 // Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
 // Skipped silently for huge files / fetch errors — the URL in the text always works.
@@ -65,7 +65,7 @@ const wrap = (fn) => async (args, extra) => {
   catch (e) {
     let msg = `Error: ${e?.message || e}`;
     // credit outages need an actionable path the agent can relay — the web app has a top-up gate; here the URL is it
-    if (/not enough credits/i.test(msg)) msg += `\nRun buy_credits to get a ready-to-pay checkout link (credit packs; your human pays on Stripe's secure page — nothing was charged here). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
+    if (/not enough credits/i.test(msg)) msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes then one-click charges on confirm:true; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
     return { content: [{ type: 'text', text: msg }], isError: true };
   }
 };
@@ -86,12 +86,32 @@ async function renderJob(type, input, label) {
   }
 }
 
+// Shared outputSchema fields for the job-based render tools (the renderJob result that becomes structuredContent).
+// Every field is optional so validation can never fail on a sparse or still-rendering result.
+const JOB_OUT = {
+  jobId: z.string().optional().describe('the render job id — poll get_job with this id to resume or inspect'),
+  url: z.string().nullable().optional().describe('the served URL of the finished media (absent/null while still rendering)'),
+  model: z.string().nullable().optional().describe('the product-facing label of the model that rendered it'),
+  raw: z.any().optional().describe('the raw job result payload (e.g. images[] for carousel template ads)'),
+  stillRendering: z.boolean().optional().describe('true when the render is still in progress — keep polling get_job with jobId'),
+};
+
 export function registerTools(server) {
   // ---------- read-only / discovery ----------
   server.registerTool('hermoso_capabilities', {
     title: 'Hermoso capabilities',
     description: 'Probe what this Hermoso account can do RIGHT NOW: available image/video model ids + their exact credit costs, aspect ratios, video durations, the recipe ids, and the canEdit/canAvatar/canPublish flags. Call this FIRST so you generate with valid model ids and known costs. Read-only, free.',
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: {}, outputSchema: {
+      image: z.any().optional().describe('the default image provider label, or null when image generation is unavailable'),
+      video: z.any().optional().describe('the default video provider label, or null when video generation is unavailable'),
+      canEdit: z.boolean().optional().describe('whether image editing is enabled on this account'),
+      canAvatar: z.boolean().optional().describe('whether talking-avatar generation is enabled'),
+      canPublish: z.boolean().optional().describe('whether ad publishing is enabled'),
+      editCredits: z.number().optional().describe('credit cost of one image edit'),
+      options: z.any().optional().describe('the live model catalog — image/video/voice/llm model lists with per-model credit costs'),
+      recipes: z.array(z.any()).optional().describe('the creative recipe catalog (id + label per recipe)'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/generate/status');
     const img = (d.options?.image?.models || []).map(m => `${m.id} (${m.label}, ${m.credits}cr${m.refs ? `, ≤${m.refs.max} reference images` : ''}${m.hiRes ? ', 2K' : ''}${m.best ? ', best' : ''})`).join('; ');
@@ -108,34 +128,60 @@ export function registerTools(server) {
   server.registerTool('hermoso_credits', {
     title: 'Credit balance',
     description: 'Return the account credit balance, credits used this session, and recent priced calls. Check before kicking off paid generation.',
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: {}, outputSchema: {
+      accountBalance: z.number().nullable().optional().describe('the account’s Hermoso credit balance (authoritative when authed)'),
+      balance: z.number().optional().describe('raw vendor meter balance (operator/local-dev surface)'),
+      sessionStart: z.number().nullable().optional().describe('vendor balance at session start (operator surface)'),
+      sessionUsed: z.number().optional().describe('credits used this session'),
+      recentCalls: z.array(z.any()).optional().describe('recent priced calls with their credit deltas'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/credits');
     const bal = d.accountBalance ?? d.balance; // accountBalance = the caller's Hermoso credits (authed); balance = the local-dev usage pill
     return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}`, d);
   }));
 
-  // AGENT BILLING HANDOFF: out of credits → mint a ready-to-pay Stripe checkout link for a credit PACK and hand the
-  // URL to the human. The human pays on Stripe's hosted page (agents never spend money directly); credits post to
-  // this account automatically once payment completes. Packs only — subscriptions are managed by a person in-app.
+  // AGENT BILLING: out of credits → top up. With a saved card + billing-admin rights this is the SAME one-click
+  // off-session charge the web app's Add-credits button uses (explicit confirm:true required — an agent states the
+  // exact charge before any money moves). First-ever purchase (no card on file) goes through a Stripe checkout link
+  // the human pays once — that card then saves for one-click forever. Packs only — subscriptions are in-app.
   server.registerTool('buy_credits', {
     title: 'Buy credits',
-    description: "Out of credits? Get a ready-to-pay checkout link for a credit PACK. Call with no argument to list the available packs (id · credits · price); call again with `pack` set to a pack id to get a Stripe checkout URL. Hand that URL to your human — THEY pay on Stripe's secure hosted page (agents never spend money directly), and the credits land on this account the moment payment completes. Packs only; subscriptions are managed by a person in Settings → Billing. Nothing is charged until your human pays.",
+    description: "Out of credits? Top up with a credit PACK. Call with no argument to list the available packs (id · credits · price). If the account has a saved card and you have billing-admin rights, calling with `pack` quotes the exact charge and calling again with confirm:true charges the saved card instantly (same one-click top-up as the app — no redirect). If there's no saved card yet, you get a Stripe checkout URL to hand your human for the FIRST purchase; their card saves for one-click after that. Packs only; subscriptions are managed by a person in Settings → Billing.",
     inputSchema: {
       pack: z.string().optional().describe('the pack id to buy (e.g. pack-2k) — omit to list the available packs first'),
+      confirm: z.boolean().optional().describe('set true to actually charge the saved card for `pack` (required for the one-click charge; ignored on the checkout-link path)'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true }, // creates no server-side charge; the human pays on Stripe's page
-  }, wrap(async ({ pack }) => {
+    outputSchema: {
+      packs: z.array(z.any()).optional().describe('available credit packs ({id, credits, priceUsd}) when listing'),
+      quote: z.any().optional().describe('the one-click charge quote ({packId, credits, priceUsd, card}) awaiting confirm:true'),
+      ok: z.boolean().optional().describe('true when a one-click top-up charge succeeded'),
+      credits: z.number().optional().describe('credits added by a completed top-up (or bought by the checkout link)'),
+      url: z.string().optional().describe('Stripe checkout URL for a first purchase (no saved card yet)'),
+      amountUsd: z.number().optional().describe('USD amount of the checkout link'),
+      packId: z.string().optional().describe('the pack id the checkout link buys'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, // confirm:true charges the saved card (one-click top-up); link path charges nothing
+  }, wrap(async ({ pack, confirm }) => {
     const cfg = await apiGet('/api/billing/config');
     const packs = (cfg.packs || []).map(p => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd }));
     if (!pack) {
       const lines = packs.map(p => `• ${p.id} — ${p.credits.toLocaleString()} credits · $${p.priceUsd}`).join('\n') || '(no packs configured)';
-      return ok(`Credit packs you can buy:\n${lines}\n\nCall buy_credits again with pack="<id>" to get a checkout link for your human to pay.`, { packs });
+      return ok(`Credit packs you can buy:\n${lines}\n\nCall buy_credits again with pack="<id>". With a saved card it's a one-click charge (you'll be asked to confirm); otherwise you get a checkout link for your human.`, { packs });
     }
     const match = packs.find(p => p.id === pack);
     if (!match) return ok(`No pack "${pack}". Available: ${packs.map(p => p.id).join(', ') || '(none)'}. Call buy_credits with no argument to see details.`, { packs });
+    let st = null;
+    try { st = await apiGet('/api/billing/status'); } catch {}
+    if (st?.paymentMethodOnFile && st?.isAdmin) {
+      const card = st.card ? `${st.card.brand} ····${st.card.last4}` : 'the saved card';
+      if (!confirm) return ok(`Ready to charge ${card} $${match.priceUsd} for ${match.credits.toLocaleString()} credits (one-click, no redirect — same as the app's Add credits button). Confirm with your human if they haven't already asked for this, then call buy_credits again with pack="${match.id}" and confirm:true.`, { quote: { packId: match.id, credits: match.credits, priceUsd: match.priceUsd, card: st.card || null } });
+      const d = await apiPost('/api/billing/topup', { packId: match.id, idempotencyKey: (globalThis.crypto?.randomUUID?.() || String(Date.now())) });
+      return ok(`Done — charged ${card} $${match.priceUsd}; ${match.credits.toLocaleString()} credits are on the account now. (Receipt lands in Settings → Billing → invoice history.)`, d);
+    }
     const d = await apiPost('/api/billing/checkout-link', { packId: pack });
-    return ok(`Checkout link for ${match.credits.toLocaleString()} credits ($${d.amountUsd ?? match.priceUsd}):\n${d.url}\n\nGive this URL to your human to pay on Stripe's secure page — the credits post to this account automatically once payment completes. Nothing is charged until they pay.`, d);
+    return ok(`Checkout link for ${match.credits.toLocaleString()} credits ($${d.amountUsd ?? match.priceUsd}):\n${d.url}\n\nGive this URL to your human to pay on Stripe's secure page — credits post automatically once payment completes, and their card saves for one-click top-ups (in-app AND via this tool) from then on. Nothing is charged until they pay.`, d);
   }));
 
   // BILLING SURFACE (read → top-up → plan/auto-reload): hermoso_credits (balance) → buy_credits (top-up link) →
@@ -143,7 +189,16 @@ export function registerTools(server) {
   server.registerTool('billing_status', {
     title: 'Billing status',
     description: "Show this account's billing at a glance: current plan (id + label + monthly price), credit balance, whether auto-reload is on, whether a card is on file, and whether YOU (this key) have ADMIN rights to change billing. Read-only, free. Call it before upgrade_plan / set_auto_reload to know what's possible — members have read-only billing.",
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: {}, outputSchema: {
+      plan: z.any().optional().describe('the current plan ({id, label, monthlyUsd})'),
+      balanceCredits: z.number().optional().describe('the current credit balance'),
+      autoReload: z.any().optional().describe('auto-reload config ({enabled, thresholdCredits, reloadCredits, available})'),
+      paymentMethodOnFile: z.boolean().optional().describe('whether a card is saved for one-click charges'),
+      card: z.any().optional().describe('the saved card ({brand, last4}) when present'),
+      role: z.string().optional().describe('this key’s billing role (admin/member)'),
+      isAdmin: z.boolean().optional().describe('whether this key can change billing'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/billing/status');
     const ar = d.autoReload || {};
@@ -160,6 +215,18 @@ export function registerTools(server) {
     inputSchema: {
       plan: z.string().optional().describe('the plan id to move to (e.g. pro) — omit to list the available plans first'),
       period: z.enum(['mo', 'yr']).optional().describe('billing cadence — monthly (default) or yearly (2 months free)'),
+    },
+    outputSchema: {
+      plans: z.array(z.any()).optional().describe('available paid plans ({id, name, priceUsd, credits}) when listing'),
+      mode: z.string().optional().describe("'checkout' (a Stripe URL was minted) or 'in_app' (a person makes the change in the app)"),
+      url: z.string().optional().describe('the ready-to-pay Stripe Checkout URL (checkout mode)'),
+      plan: z.string().optional().describe('the target plan id'),
+      planLabel: z.string().optional().describe('the target plan display name'),
+      monthlyUsd: z.number().optional().describe('the plan’s monthly price in USD'),
+      chargeUsd: z.number().optional().describe('the actual charge amount (yearly billing charges the annual total)'),
+      period: z.string().optional().describe("billing cadence of the link — 'mo' or 'yr'"),
+      action: z.string().optional().describe("the in-app action required ('upgrade' or 'downgrade')"),
+      guidance: z.string().optional().describe('exact instructions when the change must be made in the app'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true }, // creates no server-side charge; the human pays on Stripe / in-app
   }, wrap(async ({ plan, period }) => {
@@ -184,6 +251,17 @@ export function registerTools(server) {
       thresholdCredits: z.number().int().optional().describe('reload when the balance drops below this many credits'),
       reloadCredits: z.number().int().optional().describe('how many credits to add each reload — must match a credit pack size (see buy_credits)'),
     },
+    outputSchema: {
+      applied: z.boolean().optional().describe('whether the auto-reload config was applied'),
+      needsCard: z.boolean().optional().describe('true when there is no saved card yet (add one in the app first)'),
+      enabled: z.boolean().optional().describe('the resulting auto-reload state'),
+      thresholdCredits: z.number().nullable().optional().describe('reload triggers below this balance'),
+      reloadCredits: z.number().nullable().optional().describe('credits added per reload'),
+      reloadPack: z.any().optional().describe('the pack charged on each reload'),
+      capUsd: z.any().optional().describe('monthly auto-reload spend cap in USD, if set'),
+      status: z.string().optional().describe('auto-reload status detail'),
+      guidance: z.string().optional().describe('instructions when the change must be made in the app'),
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async ({ enabled, thresholdCredits, reloadCredits }) => {
     const d = await apiPost('/api/billing/autoreload-config', { enabled, thresholdCredits, reloadCredits });
@@ -195,7 +273,10 @@ export function registerTools(server) {
   server.registerTool('list_brands', {
     title: 'List brands',
     description: "List every brand on this account (id + name) and which one this connection currently acts on. Multi-brand accounts: call this, then use_brand to switch. Read-only, free.",
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: {}, outputSchema: {
+      brands: z.array(z.any()).optional().describe('every brand on the account ({id, name, active})'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/brands');
     const lines = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})${b.active ? '  ← active' : ''}`).join('\n');
@@ -206,6 +287,10 @@ export function registerTools(server) {
     title: 'Switch brand',
     description: "Pin which brand this connection generates for (multi-brand accounts). Pass the brand id or exact name from list_brands. Persists for this API key until changed.",
     inputSchema: { brand: z.string().describe('brand id (e.g. default / p_xxx) or its exact name from list_brands') },
+    outputSchema: {
+      ok: z.boolean().optional().describe('true when the brand switch persisted'),
+      brand: z.any().optional().describe('the now-active brand ({id, name})'),
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async ({ brand }) => {
     const d = await apiGet('/api/brands');
@@ -226,7 +311,20 @@ export function registerTools(server) {
       format: z.enum(['auto', 'image', 'video']).optional().describe("'image', 'video', or 'auto' when unspecified"),
       recipe: z.string().optional().describe('a recipe id from hermoso_capabilities to force an archetype'),
       reference: z.string().optional().describe('a reference ad URL to remix the angle from — Facebook Ad Library, LinkedIn Ad Library or Google Ads Transparency links (the real ad’s copy/advertiser are fetched and fed into the concept)'),
-      language: z.string().optional(),
+      language: z.string().optional().describe('output language for the ad copy (e.g. Spanish) — default English'),
+    },
+    outputSchema: {
+      format: z.string().optional().describe("the resolved creative format — 'image' or 'video'"),
+      concept: z.string().optional().describe('the one-line creative concept'),
+      recipe: z.string().optional().describe('the resolved recipe id'),
+      recipe_label: z.string().optional().describe('the resolved recipe display name'),
+      copy: z.array(z.any()).optional().describe('copy variants ({headline, primary, cta})'),
+      image_concept: z.any().optional().describe('the render-ready image concept (prompt etc.) when format is image'),
+      video_storyboard: z.any().optional().describe('the timed storyboard (scenes, cta, music) when format is video'),
+      render_plan: z.any().optional().describe('the routing plan (structure/duration) render_ad honors'),
+      imodel: z.string().optional().describe('the image model id to render with'),
+      vmodel: z.string().optional().describe('the video model id to render with'),
+      brand: z.any().optional().describe('the brand grounding embedded in the creative (name, logo, palette, productImages)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language }) => {
@@ -251,7 +349,11 @@ export function registerTools(server) {
       useBrand: z.boolean().optional().describe('default true: with no refImages, the server hydrates the SAVED brand’s product/logo references so the output lands on-brand; pass false for a pure prompt-only render'),
       aspectRatio: z.string().optional().describe("e.g. '1:1', '9:16', '16:9'"),
       model: z.string().optional().describe('image model id from hermoso_capabilities'),
-      imageSize: z.string().optional(),
+      imageSize: z.string().optional().describe('pixel-size preset for models that support it (e.g. 1K/2K) — omit for the default'),
+    },
+    outputSchema: {
+      image: z.string().optional().describe('the served absolute URL of the finished image'),
+      model: z.string().optional().describe('the product-facing label of the model that rendered it'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize }) => {
@@ -270,6 +372,12 @@ export function registerTools(server) {
       engine: z.string().optional().describe("voice-engine id: 'seed-audio' (default), 'eleven-v3', 'minimax-speech', or 'kokoro' — listed in hermoso_capabilities"),
       voice: z.string().optional().describe("a voice preset from the chosen engine (e.g. 'Aria'/'George' on eleven-v3, 'stokie_en' on seed-audio) — omit for the engine default"),
     },
+    outputSchema: {
+      audio: z.string().optional().describe('the served absolute URL of the MP3 voice clip'),
+      voice: z.string().optional().describe('the voice preset used'),
+      model: z.string().optional().describe('the voice engine label'),
+      creditsUsed: z.number().optional().describe('credits billed for this clip'),
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ text, engine, voice }) => {
     const d = await apiPost('/api/generate/voice', { text, ...(engine ? { engine } : {}), ...(voice ? { voice } : {}) });
@@ -282,6 +390,11 @@ export function registerTools(server) {
     inputSchema: {
       prompt: z.string().describe('the writing task / question'),
       model: z.string().optional().describe('a writing-model id from hermoso_capabilities (a Claude / Gemini / GPT / Llama / DeepSeek id) — omit for the default'),
+    },
+    outputSchema: {
+      text: z.string().optional().describe('the generated text'),
+      model: z.string().optional().describe('the writing model label'),
+      creditsUsed: z.number().optional().describe('credits billed for this generation'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ prompt, model }) => {
@@ -296,8 +409,8 @@ export function registerTools(server) {
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
       model: z.string().optional().describe('video model id from hermoso_capabilities (default: the plan’s pick). Naming one is a DELIBERATE pick — the server asks before ever swapping it (no silent fallback)'),
-      durationSeconds: z.number().optional(),
-      aspectRatio: z.string().optional(),
+      durationSeconds: z.number().optional().describe('total ad length in seconds — omit to honor the plan’s own duration'),
+      aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
       resolution: z.enum(['480p', '720p', '1080p', '4k']).optional().describe("'720p' default; '480p' = cheap fast draft pass, '1080p'/'4k' = premium final delivery (more credits)"),
       captions: z.boolean().optional().describe('composited caption pills on/off (default: the recipe decides)'),
       endCard: z.boolean().optional().describe('branded end card on/off (default: on, except organic recipes)'),
@@ -305,6 +418,12 @@ export function registerTools(server) {
       lockup: z.boolean().optional().describe('persistent brand-logo lockup overlay on/off'),
       ttsVoice: z.string().optional().describe('voiceover voice name (e.g. Rachel / George) when the plan voices over'),
       dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) WITHOUT submitting a render — free, nothing charged'),
+    },
+    outputSchema: {
+      ...JOB_OUT,
+      dryRun: z.boolean().optional().describe('true when this was a dry run (no job submitted, nothing charged)'),
+      jobType: z.string().optional().describe("the routing decision — 'video' (single pass) or 'stitch' (acts)"),
+      input: z.any().optional().describe('the assembled render input (dry run only — resolved model, duration, scenes)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
@@ -324,15 +443,16 @@ export function registerTools(server) {
     inputSchema: {
       config: z.object({}).passthrough().describe("the template config — MUST include config.template (one of the template ids above) plus that template's fields"),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const r = await renderJob('templatead', { config: a.config }, 'MCP template ad');
     if (Array.isArray(r?.raw?.images) && r.raw.images.length) { // carousel: one PNG per slide → list every URL + inline the first slide
       const urls = r.raw.images.map((u) => abs(u));
       const first = await imageBlock(urls[0]).catch(() => null);
-      return { content: [{ type: 'text', text: `Carousel ready — ${urls.length} slides:\n${urls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}  [job ${r.jobId}]` }, ...(first ? [first] : [])], structuredContent: r ?? undefined };
+      return { content: [{ type: 'text', text: `Carousel ready — ${urls.length} slides:\n${urls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}  [job ${r.jobId}]` }, ...(first ? [first] : [])], structuredContent: r ?? {} };
     }
-    if (r?.raw?.image || /\.png($|\?)/.test(r?.url || '')) { const img = r?.url ? await imageBlock(r.url) : null; return { content: [{ type: 'text', text: `Template ad ready: ${r.url}  [job ${r.jobId}]` }, ...(img ? [img] : [])], structuredContent: r ?? undefined }; }
+    if (r?.raw?.image || /\.png($|\?)/.test(r?.url || '')) { const img = r?.url ? await imageBlock(r.url) : null; return { content: [{ type: 'text', text: `Template ad ready: ${r.url}  [job ${r.jobId}]` }, ...(img ? [img] : [])], structuredContent: r ?? {} }; }
     return okVideo(`Template ad ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]`, r);
   }));
 
@@ -348,6 +468,7 @@ export function registerTools(server) {
       pills: z.boolean().optional().describe('default true — set false for a grain-only pass'),
       grain: z.boolean().optional().describe('default false — anti-AI film-grain finish'),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const r = await renderJob('videofinish', { videoUrl: a.videoUrl, header: a.header, sub: a.sub, points: a.points, accent: a.accent, pills: a.pills !== false, grain: !!a.grain }, 'MCP video finish');
@@ -365,6 +486,7 @@ export function registerTools(server) {
       refImage: z.string().optional().describe('optional product/style anchor image URL'),
       speechWindows: z.array(z.array(z.number())).optional().describe('[[start,end],...] windows with spoken lines — the fix window must not overlap these'),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const r = await renderJob('fixbeat', { videoUrl: a.videoUrl, startSeconds: a.startSeconds, endSeconds: a.endSeconds, prompt: a.prompt, refImage: a.refImage, speechWindows: a.speechWindows }, 'MCP fix beat');
@@ -384,8 +506,9 @@ export function registerTools(server) {
       resolution: z.enum(['480p', '720p', '1080p', '4k']).optional().describe("'720p' default; '480p' = cheap fast draft pass, '1080p'/'4k' = premium final delivery (more credits)"),
       ttsScript: z.string().optional().describe('voiceover script to speak'),
       ttsVoice: z.string().optional().describe('voice name, e.g. Rachel / George'),
-      musicMood: z.string().optional(),
+      musicMood: z.string().optional().describe('licensed music-bed mood (e.g. upbeat / cinematic) — omit for no music bed'),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const refImage = a.refImage ? await toRef(a.refImage) : undefined;
@@ -404,6 +527,7 @@ export function registerTools(server) {
       voice: z.string().optional().describe('voice name (Rachel/Sarah/George/Adam)'),
       resolution: z.string().optional().describe("'720p' (default) or '480p' draft"),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const image = await toRef(a.image);
@@ -416,13 +540,14 @@ export function registerTools(server) {
     description: 'Render a multi-scene STITCHED video (≥2 scenes) — ONLY for spots LONGER than one model clip (>15s). A ≤15s multi-beat ad renders better and cheaper as ONE single-pass generate_video/render_ad on seedance-2 (it handles the full hook→demo→payoff arc in one take) — never stitch those. Blocks until done. Spends credits.',
     inputSchema: {
       scenes: z.array(z.object({}).passthrough()).min(2).describe('array of scene objects (visual + optional voiceover/seconds)'),
-      aspectRatio: z.string().optional(),
-      voiceover: z.string().optional(),
-      voice: z.string().optional(),
-      resolution: z.string().optional(),
-      model: z.string().optional(),
-      durationSeconds: z.number().optional(),
+      aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
+      voiceover: z.string().optional().describe('full voiceover script spoken across the scenes'),
+      voice: z.string().optional().describe('voiceover voice name, e.g. Rachel / George'),
+      resolution: z.string().optional().describe('720p (default), 480p draft, or 1080p final'),
+      model: z.string().optional().describe('video model id from hermoso_capabilities — omit to let the router pick'),
+      durationSeconds: z.number().optional().describe('total spot length in seconds (defaults to the sum of the scenes’ seconds)'),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     // HARD GUARD (Dave watched an agent stitch a 15s ad into 4 separate renders): a spot that fits ONE Seedance
@@ -448,6 +573,15 @@ export function registerTools(server) {
     title: 'Get render job',
     description: 'Poll a render job by id. Returns status (queued|running|done|error), progress, and on done the served media URL. Renders take 1–3 minutes: keep calling this until done/error without asking the user — several calls is normal, not a stall.',
     inputSchema: { id: z.string().describe('the job id, e.g. job_xxx') },
+    outputSchema: {
+      id: z.string().optional().describe('the job id'),
+      status: z.string().optional().describe('queued | running | done | error'),
+      progress: z.number().optional().describe('0–1 progress when reported'),
+      error: z.string().nullable().optional().describe('the failure message when status is error'),
+      url: z.string().nullable().optional().describe('the served media URL once done'),
+      type: z.string().optional().describe('the job type (video / stitch / avatar / …)'),
+      result: z.any().optional().describe('the raw job result payload'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async ({ id }) => {
     const j = await getJob(id);
@@ -463,7 +597,11 @@ export function registerTools(server) {
   server.registerTool('list_skills', {
     title: 'List skills',
     description: 'List the bundled Hermoso SKILLS — multi-step workflow instructions (SKILL.md) that orchestrate the other tools (research an ad space, plan+render a finished ad, product photoshoot, raw generation) — plus the in-app strategy skills and creative recipes. Call get_skill to load a bundle. Read-only, free.',
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: {}, outputSchema: {
+      bundles: z.array(z.any()).optional().describe('bundled skills ({name, description}) loadable via get_skill'),
+      inApp: z.array(z.any()).optional().describe('in-app strategy skills + creative recipes ({id, kind/group})'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const { readdir, readFile } = await import('node:fs/promises');
     const dir = new URL('../skills/', import.meta.url);
@@ -488,6 +626,9 @@ export function registerTools(server) {
     title: 'Get skill',
     description: 'Load a bundled skill’s full SKILL.md workflow instructions by name (from list_skills). Follow the loaded instructions to run that workflow with the other tools. Read-only, free.',
     inputSchema: { name: z.string().describe('bundle name from list_skills, e.g. hermoso-generate') },
+    outputSchema: {
+      name: z.string().optional().describe('the loaded skill bundle name'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async ({ name }) => {
     const safe = String(name).replace(/[^a-z0-9-]/gi, '');
@@ -500,7 +641,11 @@ export function registerTools(server) {
   server.registerTool('list_jobs', {
     title: 'List render jobs',
     description: 'List the most recent render jobs + how many are currently running, so you can report on or resume in-flight work.',
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: {}, outputSchema: {
+      running: z.number().optional().describe('how many jobs are currently running'),
+      jobs: z.array(z.any()).optional().describe('recent jobs ({id, type, status, …}), newest first'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/jobs');
     const lines = (d.jobs || []).slice(0, 12).map(j => `${j.id} ${j.type} ${j.status}`).join('\n');
@@ -513,7 +658,11 @@ export function registerTools(server) {
     description: "Discover a brand's competitor / similar / adjacent brands from its domain (Claude grounded by web search). mode=competitors (default, excludes the searched company), inspiration (best relevant ads incl. it), or company. 0 ScrapeCreators credits.",
     inputSchema: {
       domain: z.string().describe('the brand domain, e.g. yourbrand.com'),
-      mode: z.enum(['competitors', 'inspiration', 'company']).optional(),
+      mode: z.enum(['competitors', 'inspiration', 'company']).optional().describe("'competitors' (default, excludes the searched company), 'inspiration' (best relevant ads incl. it), or 'company'"),
+    },
+    outputSchema: {
+      candidates: z.array(z.any()).optional().describe('discovered brands ({name, domain, kind, reason})'),
+      diagnostics: z.any().optional().describe('discovery diagnostics (LLM tokens, web grounding)'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ domain, mode = 'competitors' }) => {
@@ -530,8 +679,13 @@ export function registerTools(server) {
       domain: z.string().optional().describe('the advertiser domain'),
       platforms: z.array(z.string()).optional().describe("default ['facebook']; add 'google','linkedin'"),
       country: z.string().optional().describe("2-letter, default 'US'"),
-      limit: z.number().optional(),
+      limit: z.number().optional().describe('max ads per platform (default 30)'),
       sort: z.string().optional().describe("'longest_running' (default) etc."),
+    },
+    outputSchema: {
+      facebook: z.any().optional().describe('Meta results ({ads[], matched} or {error}; null when not requested)'),
+      google: z.any().optional().describe('Google results ({ads[], cursor} or {error}; null when not requested)'),
+      linkedin: z.any().optional().describe('LinkedIn results ({ads[], cursor} or {error}; null when not requested)'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => {
@@ -544,7 +698,12 @@ export function registerTools(server) {
     description: 'Natural-language ad research: a Claude tool-use loop over Meta/Google/LinkedIn ad libraries + organic TikTok. Returns a summary + the found ads (with their served URLs). Spends LLM tokens + ScrapeCreators credits.',
     inputSchema: {
       query: z.string().describe('what to research, e.g. "the longest-running protein-pancake ads on Meta"'),
-      brand: z.union([z.string(), z.object({}).passthrough()]).optional(),
+      brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object to tailor the research to; omit to use the workspace’s saved brand'),
+    },
+    outputSchema: {
+      reply: z.string().optional().describe('the research summary'),
+      results: z.array(z.any()).optional().describe('the found ads/videos (normalized card objects with served URLs)'),
+      actions: z.any().optional().describe('follow-up actions the research loop suggested'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ query, brand }) => {
@@ -570,8 +729,12 @@ export function registerTools(server) {
       pageId: z.string().optional().describe('one advertiser’s ads by Facebook page id (most precise)'),
       country: z.string().optional().describe("2-letter code or 'ALL' (default ALL)"),
       status: z.enum(['ACTIVE', 'INACTIVE', 'ALL']).optional().describe("ACTIVE = currently running; default ALL (includes proven past winners)"),
-      mediaType: z.enum(['ALL', 'IMAGE', 'VIDEO', 'MEME', 'IMAGE_AND_MEME', 'NONE']).optional(),
+      mediaType: z.enum(['ALL', 'IMAGE', 'VIDEO', 'MEME', 'IMAGE_AND_MEME', 'NONE']).optional().describe('filter by creative type (default ALL)'),
       limit: z.number().int().optional().describe('max ads returned (1–25, default 8)'),
+    },
+    outputSchema: {
+      found: z.number().optional().describe('total ads found upstream'),
+      ads: z.array(z.any()).optional().describe('the compact ad objects ({page_name, body, cta, link, dates, media})'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => {
@@ -601,6 +764,10 @@ export function registerTools(server) {
       region: z.string().optional().describe('2-letter region, default US'),
       limit: z.number().int().optional().describe('max ads returned (1–25, default 8)'),
     },
+    outputSchema: {
+      found: z.number().optional().describe('total ads found upstream'),
+      ads: z.array(z.any()).optional().describe('the compact ad objects ({advertiser, format, adUrl, image, firstShown, lastShown})'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.domain && !a.advertiserId) throw new Error('Pass domain or advertiserId.');
@@ -616,9 +783,13 @@ export function registerTools(server) {
     inputSchema: {
       company: z.string().optional().describe('advertiser company name'),
       keyword: z.string().optional().describe('keyword across all advertisers'),
-      companyId: z.string().optional(),
+      companyId: z.string().optional().describe('LinkedIn company id (numeric) when the name is ambiguous'),
       countries: z.string().optional().describe("CSV of 2-letter codes like 'US,CA'; omit or 'ALL' = worldwide"),
       limit: z.number().int().optional().describe('max ads returned (1–25, default 8)'),
+    },
+    outputSchema: {
+      found: z.number().optional().describe('total ads found upstream'),
+      ads: z.array(z.any()).optional().describe('the compact ad objects ({advertiser, headline, description, cta, link, media, dates, impressions})'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => {
@@ -638,6 +809,10 @@ export function registerTools(server) {
     inputSchema: {
       query: z.string().describe('keyword or hashtag (no # needed)'),
       limit: z.number().int().optional().describe('max videos returned (1–25, default 8)'),
+    },
+    outputSchema: {
+      found: z.number().optional().describe('total videos found'),
+      videos: z.array(z.any()).optional().describe('the compact video objects ({desc, author, handle, plays, likes, link, cover}), ranked by plays'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
@@ -659,6 +834,10 @@ export function registerTools(server) {
     inputSchema: {
       query: z.string().describe('keyword to search reels for'),
       limit: z.number().int().optional().describe('max reels returned (1–25, default 8)'),
+    },
+    outputSchema: {
+      found: z.number().optional().describe('total reels found'),
+      reels: z.array(z.any()).optional().describe('the compact reel objects ({desc, author, handle, plays, likes, link, cover}), ranked by plays'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
@@ -683,6 +862,10 @@ export function registerTools(server) {
       query: z.string().describe('keyword to search videos for'),
       limit: z.number().int().optional().describe('max videos returned (1–25, default 8)'),
     },
+    outputSchema: {
+      found: z.number().optional().describe('total videos found'),
+      videos: z.array(z.any()).optional().describe('the compact video objects ({desc, author, handle, plays, link, cover}), ranked by views'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/youtube/search', query });
@@ -699,6 +882,10 @@ export function registerTools(server) {
     inputSchema: {
       query: z.string().describe('what to search Reddit for'),
       limit: z.number().int().optional().describe('max posts returned (1–25, default 8)'),
+    },
+    outputSchema: {
+      found: z.number().optional().describe('total posts found'),
+      posts: z.array(z.any()).optional().describe('the compact post objects ({desc, subreddit, upvotes, comments, link})'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
@@ -717,6 +904,10 @@ export function registerTools(server) {
     inputSchema: {
       query: z.string().describe('keyword to search Threads for'),
       limit: z.number().int().optional().describe('max posts returned (1–25, default 8)'),
+    },
+    outputSchema: {
+      found: z.number().optional().describe('total posts found'),
+      posts: z.array(z.any()).optional().describe('the compact post objects ({desc, author, handle, likes, link, cover})'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
@@ -740,6 +931,7 @@ export function registerTools(server) {
       path: z.string().describe("exact SC endpoint path, e.g. '/v1/tiktok/profile' — non-allowlisted paths are rejected"),
       params: z.object({}).passthrough().optional().describe("endpoint query params, e.g. {handle:'nike'}"),
     },
+    outputSchema: {}, // deliberately empty — the raw provider payload (any shape, can be huge) stays in the text
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ path, params }) => {
     const d = await apiGet('/api/sc/run', { __path: path, ...qp(params || {}) });
@@ -752,6 +944,11 @@ export function registerTools(server) {
     title: 'Get saved brand',
     description: 'What Hermoso ALREADY KNOWS for this account/workspace — the same saved brand profile (products, logos, palette, positioning) + learned memory the web Studio uses. Call this FIRST: if hasBrand is true you can omit brand everywhere; if false, onboard with draft_brand. 0 credits.',
     inputSchema: {},
+    outputSchema: {
+      hasBrand: z.boolean().optional().describe('whether a brand is saved for this workspace'),
+      brand: z.any().optional().describe('the saved brand profile (name, domain, category, products, palette, …) or null'),
+      memoryCount: z.number().optional().describe('how many learned memory notes the workspace holds'),
+    },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/brand/current');
@@ -767,9 +964,20 @@ export function registerTools(server) {
     inputSchema: {
       domain: z.string().optional().describe('a website to scrape'),
       description: z.string().optional().describe('a free-text brand description (no website)'),
-      socialHandle: z.string().optional(),
+      socialHandle: z.string().optional().describe('a social handle to draft from (influencers/creators) — pair with platform'),
       platform: z.string().optional().describe('platform for socialHandle (instagram/tiktok/…)'),
       save: z.boolean().optional().describe('save as the workspace’s brand (like Studio onboarding) so plan_ad/create use it automatically. Default: saves only when NO brand is saved yet; pass true to overwrite, false to never save'),
+    },
+    outputSchema: {
+      name: z.string().optional().describe('the drafted brand name — VERIFY it matches the brand the user meant'),
+      domain: z.string().optional().describe('the brand website domain (empty for non-website drafts)'),
+      category: z.string().optional().describe('the detected category'),
+      summary: z.string().optional().describe('a short positioning summary'),
+      sells: z.any().optional().describe('what the brand sells'),
+      logo: z.string().optional().describe('the detected logo URL'),
+      palette: z.array(z.any()).optional().describe('the brand colors'),
+      products: z.any().optional().describe('the detected products'),
+      productImages: z.array(z.any()).optional().describe('product photo URLs'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ save, ...a }) => {
@@ -793,7 +1001,11 @@ export function registerTools(server) {
   server.registerTool('fetch_asset', {
     title: 'Fetch asset',
     description: 'Resolve a generated asset reference (a /generated/… path or any URL) to a clickable absolute URL + a direct download URL.',
-    inputSchema: { url: z.string().describe('the asset url or /generated/ path'), name: z.string().optional() },
+    inputSchema: { url: z.string().describe('the asset url or /generated/ path'), name: z.string().optional().describe('optional filename for the download') },
+    outputSchema: {
+      url: z.string().optional().describe('the clickable absolute asset URL'),
+      downloadUrl: z.string().optional().describe('a direct download URL for the asset'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async ({ url, name }) => {
     const absolute = abs(url);
@@ -806,6 +1018,11 @@ export function registerTools(server) {
     title: 'Analyze video',
     description: "Break a video ad down into its structure: the verbatim transcript (voiceover + on-screen text) with a beat list, plus duration and sampled frame timestamps. Use to study a reference/competitor ad before remixing its structure. Costs ~a transcription call; no ScrapeCreators credits.",
     inputSchema: { url: z.string().describe('the video URL (a served /generated/ path or a public http(s) video)') },
+    outputSchema: {
+      durationSeconds: z.number().optional().describe('the video length in seconds'),
+      frameTimes: z.array(z.number()).optional().describe('timestamps (seconds) of the sampled frames'),
+      transcript: z.string().nullable().optional().describe('verbatim voiceover + on-screen text with a beat list (null when silent/unreachable)'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ url }) => {
     const [fr, tr] = await Promise.all([
@@ -822,8 +1039,15 @@ export function registerTools(server) {
     description: "Virality/performance prediction for a finished ad (image or video URL): overall score, per-dimension breakdown (scroll-stop, hook, clarity, brand/product, CTA, retention, goal fit), strengths, and the single biggest fix. Use BEFORE spending on distribution, or to rank variants.",
     inputSchema: {
       url: z.string().describe('the ad asset URL (a /generated/ path or public URL)'),
-      kind: z.enum(['image', 'video']).optional(),
+      kind: z.enum(['image', 'video']).optional().describe("'image' (default) or 'video'"),
       intent: z.string().optional().describe('what the ad is trying to achieve, for goal-fit scoring'),
+    },
+    outputSchema: {
+      overall: z.number().optional().describe('the overall score out of 100'),
+      tier: z.string().optional().describe('the qualitative tier'),
+      dimensions: z.array(z.any()).optional().describe('per-dimension breakdown ({name, score})'),
+      top_fix: z.string().optional().describe('the single biggest improvement lever'),
+      strengths: z.any().optional().describe('what the ad already does well'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ url, kind = 'image', intent = '' }) => {
@@ -837,6 +1061,7 @@ export function registerTools(server) {
     title: 'Reframe video',
     description: "Reframe a video to a different aspect ratio (e.g. 16:9 master → 9:16 vertical) with smart subject tracking. Paid render; returns the served URL of the reframed video.",
     inputSchema: { video: z.string().describe('the source video URL'), aspectRatio: z.enum(['9:16', '1:1', '16:9', '4:3', '3:4', '21:9', '9:21']).describe('the target aspect ratio') },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ video, aspectRatio }) => {
     const r = await renderJob('reframe', { video, aspectRatio }, `Reframe → ${aspectRatio}`);
@@ -847,6 +1072,7 @@ export function registerTools(server) {
     title: 'Upscale video',
     description: "Upscale a video to higher resolution (2x) for final delivery. Paid render; returns the served URL.",
     inputSchema: { video: z.string().describe('the source video URL') },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ video }) => {
     const r = await renderJob('upscale', { video, factor: 2 }, 'Upscale 2x');
@@ -861,6 +1087,7 @@ export function registerTools(server) {
       language: z.string().describe("target language, e.g. 'Spanish', 'de', 'French (Canada)'"),
       script: z.string().optional().describe('the original spoken script if known — improves translation fidelity'),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ video, language, script }) => {
     const r = await renderJob('dub', { video, language, script: script || '' }, `Dub → ${language}`);
@@ -874,6 +1101,7 @@ export function registerTools(server) {
       video: z.string().describe('the source video URL'),
       voice: z.string().optional().describe("target narrator voice preset name, e.g. 'Aria', 'George', 'Rachel', 'Sarah', 'Brian', 'Charlotte' (defaults to a warm female read)"),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ video, voice }) => {
     const r = await renderJob('voiceswap', { video, ...(voice ? { voice } : {}) }, 'Voice swap');
@@ -889,6 +1117,7 @@ export function registerTools(server) {
       prompt: z.string().optional().describe('optional scene/style guidance'),
       orientation: z.enum(['video', 'image']).optional().describe("which aspect to keep: the video's (default) or the image's"),
     },
+    outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ image, video, prompt = '', orientation = 'video' }) => {
     const r = await renderJob('motion', { image, video, prompt, orientation }, 'Motion recast');
@@ -902,7 +1131,11 @@ export function registerTools(server) {
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object; OMIT to use the workspace’s saved brand'),
       product: z.string().describe('what to advertise'),
       count: z.number().int().min(2).max(8).optional().describe('how many distinct variants (default 6)'),
-      language: z.string().optional(),
+      language: z.string().optional().describe('output language for the variant copy (e.g. Spanish) — default English'),
+    },
+    outputSchema: {
+      variants: z.array(z.any()).optional().describe('the distinct ad angles ({name, hook, headline, visual brief})'),
+      angles: z.array(z.any()).optional().describe('alternate key the planner may return the variants under'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ brand, product, count = 6, language }) => {
@@ -937,6 +1170,10 @@ export function registerTools(server) {
       ads: z.array(z.object({}).passthrough()).optional().describe('ad objects to tear down (from pull_competitor_ads / search_meta_ads). Omit to auto-pull their Meta ads first.'),
       language: z.string().optional().describe('output language (default English)'),
     },
+    outputSchema: {
+      teardown: z.any().optional().describe('the playbook — hook_taxonomy, campaigns, white_space, counter_plays, not_saying'),
+      adCount: z.number().optional().describe('how many ads were analyzed'),
+    },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async ({ competitor, ads, language }) => {
     const name = String(competitor?.name || '').trim();
@@ -967,6 +1204,12 @@ export function registerTools(server) {
       category: z.string().optional().describe('the product category — helps pick the relevant policy pages'),
       imageDescription: z.string().optional().describe('a description of the creative / image when relevant'),
     },
+    outputSchema: {
+      verdict: z.string().optional().describe('pass / fix / block'),
+      summary: z.string().optional().describe('one-line verdict summary'),
+      findings: z.array(z.any()).optional().describe('flagged issues ({severity, issue, policy_quote, fix_suggestion, where_in_ad})'),
+      anchors: z.array(z.any()).optional().describe('the Meta policy pages consulted ({url, …})'),
+    },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ copy, claims, category, imageDescription }) => {
     const d = await apiPost('/api/policy/check', { copy, claims: claims || '', category: category || '', imageDescription: imageDescription || '' });
@@ -982,6 +1225,12 @@ export function registerTools(server) {
     inputSchema: {
       imageUrl: z.string().describe('the URL of the static ad image to remix'),
       brandId: z.string().optional().describe('a brand id/name from list_brands to remix for; omit to use the active brand'),
+    },
+    outputSchema: {
+      image: z.string().optional().describe('the served absolute URL of the remixed ad image'),
+      model: z.string().optional().describe('the model label that rendered it'),
+      slots: z.any().optional().describe('the filled slot map (layout elements swapped to your brand)'),
+      residual: z.any().optional().describe('source-branding sweep result ({clean, note})'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ imageUrl, brandId }) => {
@@ -1001,6 +1250,11 @@ export function registerTools(server) {
     inputSchema: {
       brandId: z.string().optional().describe('a brand id/name from list_brands to mine for; omit to use the active brand'),
     },
+    outputSchema: {
+      angles: z.array(z.any()).optional().describe('the ranked angle bank ({category, angle, score, hook_draft, proof_quotes})'),
+      sourceCount: z.number().optional().describe('how many customer sources were mined'),
+      note: z.string().optional().describe('why no angles were returned, when the bank is empty'),
+    },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ brandId }) => {
     const brand = await activeBrand(brandId);
@@ -1019,6 +1273,10 @@ export function registerTools(server) {
     inputSchema: {
       brandId: z.string().optional().describe('a brand id/name from list_brands whose product library to list; omit to use the active brand'),
     },
+    outputSchema: {
+      summary: z.string().optional().describe('a readable rundown of the saved product photos'),
+      photos: z.array(z.any()).optional().describe('the saved photos ({url, label, …})'),
+    },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async ({ brandId }) => {
     const brand = await activeBrand(brandId);
@@ -1033,6 +1291,12 @@ export function registerTools(server) {
       imageUrl: z.string().describe('the image URL to lock as the product (from a research result, a workspace / list_product_photos url, or any public product photo)'),
       source_note: z.string().optional().describe('a short note on where it came from, e.g. "from their IG post"'),
       brandId: z.string().optional().describe('a brand id/name from list_brands to lock the product for; omit to use the active brand'),
+    },
+    outputSchema: {
+      attached: z.boolean().optional().describe('true when the image passed the product check and was locked'),
+      summary: z.string().optional().describe('the check verdict — on rejection, why nothing was locked'),
+      url: z.string().nullable().optional().describe('the durable served URL of the locked product photo'),
+      source_note: z.string().nullable().optional().describe('where the photo came from'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ imageUrl, source_note, brandId }) => {
