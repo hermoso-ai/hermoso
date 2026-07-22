@@ -50,6 +50,18 @@ export async function apiPut(p, body = {}) {
   return unwrap(res);
 }
 
+// A hosted-connector call (via mcp/http.mjs) has an mcpCtx store; local stdio/CLI does not. Used to REFUSE local-path
+// file reads on the hosted connector (it runs on the SERVER host, not the user's machine — an LFI/exfil vector).
+export const isRemote = () => !!mcpCtx.getStore();
+// Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so
+// the server reads the raw body. Lets an agent post ARBITRARY user files (not just Hermoso renders).
+export async function apiUpload(p, buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {
+  const h = headers({ 'Content-Type': contentType });
+  if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
+  const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: h, body: buf });
+  return unwrap(res);
+}
+
 // /api/explore/chat streams Server-Sent-Events; collect to the terminal `done` payload {reply, results, actions}.
 export async function apiSSE(p, body = {}) {
   const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
