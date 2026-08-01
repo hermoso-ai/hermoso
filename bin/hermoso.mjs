@@ -4,14 +4,14 @@
 // in skills/ wrap these commands. Same /api as the MCP server.
 //
 //   npm i -g  (from this repo)  OR  node bin/hermoso.mjs <cmd>
-//   hermoso auth login --token <key>                   # key from app.hermoso.ai → Settings → Agents & API
+//   hermoso auth login                                 # browser sign-in (loopback, like gh/heroku); --token <key> for CI
 //   hermoso capabilities                                 # learn valid model ids + costs (run first)
 //   hermoso create --brand Flourish --product "protein pancakes" --format image
 //   hermoso generate image --prompt "…" --ref ./bag.png --wait
 //
 // Auth today: none locally (the server resolves the dev account). `hermoso auth login --token <t>` stores a Bearer
 // for when real auth lands — the seam, not a requirement.
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,7 +19,15 @@ const CONFIG_DIR = path.join(os.homedir(), '.hermoso');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 async function loadConfig() { try { return JSON.parse(await readFile(CONFIG_FILE, 'utf8')); } catch { return {}; } }
-async function saveConfig(c) { await mkdir(CONFIG_DIR, { recursive: true }); await writeFile(CONFIG_FILE, JSON.stringify(c, null, 2)); }
+// config.json holds a long-lived hmk_ account bearer (full billing/spend authority) — write it OWNER-ONLY (dir 0700,
+// file 0600) so a co-tenant on a shared machine can't read the key and spend the victim's credits (aws/gh/docker do the
+// same). mode on mkdir/writeFile is pre-umask, so also chmod after in case an existing dir/file kept looser perms.
+async function saveConfig(c) {
+  await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  try { await chmod(CONFIG_DIR, 0o700); } catch {}
+  await writeFile(CONFIG_FILE, JSON.stringify(c, null, 2), { mode: 0o600 });
+  try { await chmod(CONFIG_FILE, 0o600); } catch {}
+}
 
 // ---- minimal arg parser: positionals + --flags (--flag value | --flag=value | boolean --flag) ----
 function parse(argv) {
@@ -70,6 +78,7 @@ async function main() {
   process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
   if (cfg.profile && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
+  if (cfg.owner && !process.env.HERMOSO_OWNER) process.env.HERMOSO_OWNER = cfg.owner; // shared team workspace: the owning account (server re-authorizes it)
 
   // `hermoso mcp` → run the stdio MCP server (Claude Code / Cursor / Codex spawn this, e.g. `npx -y hermoso mcp`).
   // It OWNS stdout as the JSON-RPC channel, so hand off immediately and print nothing to stdout here. The
