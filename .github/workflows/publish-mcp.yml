@@ -1,0 +1,141 @@
+# Publishes this repo's server.json to the official MCP Registry using GitHub Actions OIDC.
+#
+# Shape follows the registry's own guide, read 2026-08-03:
+#   https://modelcontextprotocol.io/registry/github-actions  (OIDC workflow: permissions block,
+#     actions/checkout@v5, the mcp-publisher install one-liner, `login github-oidc`, `publish`)
+#   https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/cli/commands.md
+#     ("mcp-publisher login github-oidc … Requires `id-token: write` permission in workflow")
+#
+# WHY OIDC: it proves ownership of the io.github.hermoso-ai/* namespace structurally, from the fact
+# that this job runs in the hermoso-ai org. No stored PAT, nothing to rotate, nothing that expires.
+#
+# WHY THIS DOES NOT PUBLISH TO npm: the npm package `hermoso` is published from the private source
+# repo (its cli/ directory), NOT from this mirror. This workflow only registers metadata that points
+# at an ALREADY-published npm version — which is why the guard below exists.
+#
+# TRIGGER IS DELIBERATE — tag or manual, never every push. The registry rejects a version that npm
+# does not have ("NPM package 'hermoso' exists, but version X was not found"), so a publish that
+# fired on every commit would spam the registry with 400s.
+
+name: Publish to MCP Registry
+
+on:
+  push:
+    tags: ['v*'] # e.g. v0.1.34
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must already be live on npm). Blank = use server.json as committed.'
+        required: false
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC authentication
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve the version to publish
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Tag push → version $VERSION"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "Manual run → version $VERSION"
+          else
+            VERSION="$(jq -r '.version' server.json)"
+            echo "Manual run → using server.json version $VERSION"
+          fi
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::'$VERSION' is not a semver version"; exit 1 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Pin server.json to that version
+        run: |
+          set -euo pipefail
+          V='${{ steps.ver.outputs.version }}'
+          # Both the server version AND every npm package version must move together, or the
+          # registry validates the metadata against a version of the package nobody published.
+          jq --arg v "$V" '.version = $v | .packages |= map(.version = $v)' server.json > server.tmp
+          mv server.tmp server.json
+          jq '{name, version, packages: [.packages[] | {identifier, version}]}' server.json
+
+      - name: Verify the npm package version is live
+        # THE GUARD. The MCP registry verifies package ownership by reading the published npm
+        # tarball's package.json `mcpName`, so publishing metadata for a version npm does not
+        # have fails with a 400. Fail here, loudly and for free, instead of there.
+        run: |
+          set -euo pipefail
+          V='${{ steps.ver.outputs.version }}'
+          PKG="$(jq -r '.packages[0].identifier' server.json)"
+          echo "Checking https://registry.npmjs.org/$PKG/$V"
+          if ! curl -sfL "https://registry.npmjs.org/$PKG/$V" -o npm-version.json; then
+            echo "::error::npm has no $PKG@$V yet. Publish the npm package first, then re-run this workflow."
+            exit 1
+          fi
+          MCP_NAME="$(jq -r '.mcpName // empty' npm-version.json)"
+          WANT="$(jq -r '.name' server.json)"
+          if [ "$MCP_NAME" != "$WANT" ]; then
+            echo "::error::$PKG@$V declares mcpName='$MCP_NAME' but server.json is '$WANT' — the registry will reject this."
+            exit 1
+          fi
+          echo "npm has $PKG@$V and it declares mcpName=$MCP_NAME"
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish
+
+      - name: Confirm the registry read-back
+        # Report what the registry ACTUALLY stored, never what we asked it to store.
+        # Response shape (verified live 2026-08-03): servers[].server.{name,version} with the
+        # registry's own status as a SIBLING under servers[]._meta."io.modelcontextprotocol.registry/official".
+        run: |
+          set -uo pipefail
+          NAME="$(jq -r '.name' server.json)"
+          V='${{ steps.ver.outputs.version }}'
+          # The registry key is passed as a jq --arg, never interpolated by the shell: it contains
+          # dots, and splicing it after `._meta.` yields `._meta.."io.…"`, a jq compile error.
+          K='io.modelcontextprotocol.registry/official'
+          for i in 1 2 3 4 5 6; do
+            curl -sfL "https://registry.modelcontextprotocol.io/v0.1/servers?search=$NAME" -o reg.json || true
+            if [ -s reg.json ]; then
+              jq -r --arg n "$NAME" --arg k "$K" '
+                [.servers[] | select(.server.name == $n)
+                 | { version: .server.version,
+                     isLatest: ._meta[$k].isLatest,
+                     updatedAt: ._meta[$k].updatedAt }]
+                | sort_by(.updatedAt) | .[-3:] | .[]
+                | "  \(.version)  isLatest=\(.isLatest)  \(.updatedAt)"' reg.json
+              # `// "absent"` would be wrong here: jq's alternative operator treats a legitimate
+              # `false` as empty, so a version that IS present but not latest would read "absent".
+              FOUND="$(jq -r --arg n "$NAME" --arg v "$V" --arg k "$K" \
+                '[.servers[] | select(.server.name == $n and .server.version == $v)
+                  | ._meta[$k].isLatest]
+                 | if length == 0 then "absent" else (.[0] | tostring) end' reg.json)"
+              if [ "$FOUND" = "true" ]; then
+                echo "Registry read-back: $NAME @ $V is live and isLatest."
+                exit 0
+              fi
+              echo "attempt $i: $NAME @ $V reads back as '$FOUND' — retrying in 10s"
+            fi
+            sleep 10
+          done
+          # The publish step already exited non-zero on a real failure, so do not manufacture one
+          # here — say plainly that it could not be CONFIRMED, which is not the same as failed.
+          echo "::warning::Published, but could not confirm $NAME @ $V in the registry within 60s. Check https://registry.modelcontextprotocol.io/v0.1/servers?search=$NAME"

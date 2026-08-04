@@ -34,8 +34,13 @@ export const ENV_PREFIX = 'HERMOSO';
 
 function headers(extra = {}) {
   const ctx = mcpCtx.getStore();
-  const prof = ctx?.profile || PROFILE; // omitted when unpinned so the key's saved brand wins server-side
-  const own = ctx?.owner || OWNER; // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
+  // A HOSTED-CONNECTOR request (mcp/http.mjs) is a DIFFERENT TENANT from the process serving it, so its ctx is the
+  // ONLY scope it may carry: falling through to this process's HERMOSO_PROFILE / HERMOSO_OWNER would scope one
+  // customer's tool call to whatever workspace the SERVER's environment happens to name — a cross-tenant leak that
+  // is invisible because it succeeds. stdio/CLI keeps the env fallback: there the process and the caller are the
+  // same person. Presence of the ctx store IS "remote" (see isRemote below).
+  const prof = ctx ? (ctx.profile || '') : PROFILE; // omitted when unpinned so the key's saved brand wins server-side
+  const own = ctx ? (ctx.owner || '') : OWNER; // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
   const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-hermoso-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...extra };
   const tok = ctx?.token || TOKEN;
   if (tok) h.Authorization = `Bearer ${tok}`;
@@ -69,6 +74,14 @@ export async function apiPost(p, body = {}) {
   return unwrap(res);
 }
 
+// PATCH — a PARTIAL update, and the distinction is load-bearing on the schedule routes: an omitted key means
+// "leave that field exactly as it was", so sending a whole object where a patch was meant would blank the fields
+// the caller never mentioned. Only ever send the keys that are actually changing.
+export async function apiPatch(p, body = {}) {
+  const res = await fetch(`${API_BASE}${p}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+  return unwrap(res);
+}
+
 export async function apiDelete(p) {
   const res = await fetch(`${API_BASE}${p}`, { method: 'DELETE', headers: headers() });
   return unwrap(res);
@@ -82,6 +95,42 @@ export async function apiPut(p, body = {}) {
 // A hosted-connector call (via mcp/http.mjs) has an mcpCtx store; local stdio/CLI does not. Used to REFUSE local-path
 // file reads on the hosted connector (it runs on the SERVER host, not the user's machine — an LFI/exfil vector).
 export const isRemote = () => !!mcpCtx.getStore();
+
+// ── WHICH WORKSPACE'S STORE KEYS THIS CALL WRITES ──────────────────────────────────────────────────────────────
+// The suffix synced store keys carry (`` = the bare/anchor keys, `<clientSlug>` = a sub-brand). It comes from the
+// SERVER (`GET /api/workspace` → resolveWs), never from this process's environment, because on the hosted twin the
+// caller and the process are different tenants: HERMOSO_PROFILE names whatever workspace the SERVER's env happens to
+// mention, which for a hosted connector is nothing at all. That is how `use_brand "Client X"` kept reading and
+// WRITING the anchor brand (live 2026-08-01), and how draft_brand's save overwrote the default brand's profile.
+let _suffixMemo = null; // stdio/CLI only: one process = one caller, so a module-level memo is honest here
+async function fetchStoreSuffix() {
+  const w = await apiGet('/api/workspace'); // throws on failure — see storeSuffix()
+  if (!w || typeof w.storeSuffix !== 'string') throw new Error('Could not resolve this workspace.');
+  return w.storeSuffix;
+}
+export async function storeSuffix() {
+  const ctx = mcpCtx.getStore();
+  if (ctx) {
+    // HOSTED: memoize on the PER-REQUEST ctx object only. A module-level cache here would serve one customer's
+    // workspace suffix to the next caller on the same process — a silent cross-tenant write.
+    if (ctx._storeSuffix === undefined) ctx._storeSuffix = await fetchStoreSuffix();
+    return ctx._storeSuffix;
+  }
+  if (_suffixMemo === null) {
+    // stdio/CLI: the env pin is a REAL local authority (the process and the caller are the same person), so it is
+    // the fallback when an older server has no /api/workspace. A hosted call has no such fallback and must throw:
+    // guessing `bare` on a failed read is how the anchor brand gets overwritten, and a FAILED READ IS NOT EMPTY.
+    try { _suffixMemo = await fetchStoreSuffix(); }
+    catch { _suffixMemo = PROFILE && PROFILE !== 'default' ? PROFILE : ''; }
+  }
+  return _suffixMemo;
+}
+// use_brand / create_brand re-pin the key SERVER-SIDE, so the memo must not outlive the switch.
+export function forgetWorkspaceScope() {
+  _suffixMemo = null;
+  const ctx = mcpCtx.getStore();
+  if (ctx) delete ctx._storeSuffix;
+}
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so
 // the server reads the raw body. Lets an agent post ARBITRARY user files (not just Hermoso renders).
 export async function apiUpload(p, buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {

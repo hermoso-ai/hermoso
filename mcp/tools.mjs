@@ -4,7 +4,7 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
-import { apiGet, apiPost, apiPut, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, apiUpload, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, apiUpload, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
@@ -19,6 +19,31 @@ const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.
 const _mintedQuotes = new Set();
 const stripNulls = (v) => { if (Array.isArray(v)) return v.map(stripNulls); if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) { if (x !== null) o[k] = stripNulls(x); } return o; } return v; };
 const ok = (text, data) => ({ content: [{ type: 'text', text }], structuredContent: data == null ? {} : stripNulls(data) });
+// A TEXT RESPONSE THAT SAYS ONLY "12 row(s)" IS NOT A REPORT. MCP clients differ in whether they surface
+// structuredContent at all — plenty print the text block and nothing else — so a reporting tool whose rows live
+// ONLY in structuredContent answers the caller's question with a row COUNT. Every other reporting tool here prints
+// what it found; `google_ads_report` and `list_youtube_comments` did not (found live 2026-08-01).
+// GAQL answers arrive NESTED (`{campaign:{name}, metrics:{clicks}}`), so flatten one path per leaf rather than
+// JSON-dumping, and CAP the printed set: a 500-row pull must not blow the caller's context. The full set is always
+// still in structuredContent, and the tail says so rather than letting a truncation pass for the whole answer.
+const flatRow = (r, pre = '') => Object.entries(r || {}).flatMap(([k, v]) =>
+  (v && typeof v === 'object' && !Array.isArray(v)) ? flatRow(v, `${pre}${k}.`) : [[`${pre}${k}`, Array.isArray(v) ? v.join('|') : v]]);
+// One line per SAVED CREATOR. Byte-identical to server.js's creatorLine(), deliberately: the in-app agent and the
+// MCP twins must describe the same person the same way, or "who do we have?" reads as two different rosters.
+const creatorLine = (c) => {
+  const bits = [c.source === 'generated' ? 'AI creator' : c.source === 'social' ? 'from a social profile' : c.source === 'upload' ? 'uploaded photo' : c.source];
+  if (c.source !== 'generated') bits.push(c.consented ? 'likeness consented' : 'NO likeness consent on file');
+  if (c.poses) bits.push(`${c.poses} pose plate${c.poses === 1 ? '' : 's'}`);
+  if (c.voiceClone) bits.push('cloned voice');
+  else if (c.voice) bits.push(`voice ${c.voice}`);
+  return `  • ${c.name} — ${bits.join(', ')}${c.id ? `  [${c.id}]` : ''}\n    ${c.image || '(portrait stored in-app as an uploaded photo — cast them by NAME; there is no url to hand a render tool)'}`;
+};
+function rowLines(rows, max = 40) {
+  const all = Array.isArray(rows) ? rows : [];
+  if (!all.length) return '  (no rows)';
+  const shown = all.slice(0, max).map((r, i) => `  ${i + 1}. ${flatRow(r).map(([k, v]) => `${k}=${v}`).join(' · ') || '(empty row)'}`);
+  return shown.join('\n') + (all.length > max ? `\n  … and ${all.length - max} more row(s) — the complete set is in this tool's structured result.` : '');
+}
 // Video-return variant: attaches the clip's first frame as an inline image block (Claude can't play mp4 in chat,
 // but a poster makes the result VISIBLE, mirroring generate_image). Falls back to plain ok() when frames fail.
 // PER-CHANNEL OUTCOMES BELONG IN THE SENTENCE, not only in structuredContent. A multi-channel post is the one job
@@ -37,7 +62,7 @@ const channelOutcomeLine = (res) => {
 };
 const stillMsg = (r) => `Still rendering — job ${r.jobId}. This is NORMAL: video renders take 1–3 minutes and each get_job call waits up to ~45s, so it can take several calls. Keep calling get_job with this id until status is done or error — do NOT ask the user whether to keep waiting, and do NOT re-fire the render on another model (that double-charges). Only surface a problem after ~6 minutes of polling.`;
 const okVideo = async (text, r) => {
-  if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; return { content: [{ type: 'text', text: p ? text + '\n(first frame attached — open the URL for the full video)' : text }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
+  if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; const t = text + qaLine(r); return { content: [{ type: 'text', text: p ? t + '\n(first frame attached — open the URL for the full video)' : t }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
 
 // ── CAPABILITY MAP — the FULL agent surface, four categories. Appended to hermoso_capabilities so an agent that
 // probes once learns everything Hermoso does (not just the models): ad spy, create, raw playground, account. Keep
@@ -45,10 +70,10 @@ const okVideo = async (text, r) => {
 const CAPABILITY_MAP = [
   'What Hermoso can do — the full agent surface (every tool below runs over this MCP):',
   'A) AD SPY / RESEARCH — spy on the ads already winning in any market, then mine them. find_competitors · competitor_teardown · pull_competitor_ads · research_ads (open brief) · ad libraries search_meta_ads / search_google_ads / search_linkedin_ads · organic social search_tiktok / search_instagram / search_youtube / search_reddit / search_threads · scrapecreators_fetch (any allowlisted endpoint) · mine_angles · analyze_video · check_ad_policy · list_skills / get_skill (teardowns + creative playbooks).',
-  'B) CREATE — finished, on-brand image & video ads (real product composited in, copy + CTA baked). draft_brand / get_brand / update_brand (patch single fields without re-onboarding) / use_brand · list_brands / create_brand / delete_brand (one account holds MANY brand workspaces — an agency runs every client through here; each has its own brand, memory, swipefile, Library and connectors, and create_brand → draft_brand onboards a new one end to end) · plan_ad (concept + copy) → render_ad (the Studio quality pipeline) or generate_image / generate_video / generate_avatar (UGC creators + lip-sync) · make_template_ad (native HTML ad formats) · remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video · plan_variations + score_ad (fan out + rank).',
+  'B) CREATE — finished, on-brand image & video ads (real product composited in, copy + CTA baked). draft_brand / get_brand / update_brand (patch single fields without re-onboarding) / use_brand · list_brands / create_brand / delete_brand (one account holds MANY brand workspaces — an agency runs every client through here; each has its own brand, memory, swipefile, Library and connectors, and create_brand → draft_brand onboards a new one end to end) · plan_ad (concept + copy) → render_ad (the Studio quality pipeline) or generate_image / generate_video / generate_avatar (UGC creators + lip-sync) · list_creators / save_creator / delete_creator (the workspace’s REUSABLE CAST — saved creators with their portrait urls, so the SAME person stars in every ad; list them before ever generating a new one) · make_template_ad (native HTML ad formats) · remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video · plan_variations + score_ad (fan out + rank).',
   'C) RAW MODEL PLAYGROUND — direct access to the full catalog (30+ image / video / voice / writing models, each with the exact per-render credit cost shown above), no ad framing: generate_image / generate_video (useBrand:false) for plain prompt-only renders, generate_voice for raw text-to-speech against any voice engine, and generate_text for the writing models (Claude / Gemini / GPT / Llama / DeepSeek…) — all against ANY catalog id.',
   'D) ACCOUNT — hermoso_credits (balance) · billing_status (plan + your billing role) · buy_credits (one-click top-up on the saved card, or a first-purchase checkout link) · upgrade_plan / set_auto_reload (admin) · list_jobs / get_job (track async renders) · get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it, over MCP as well as in the app — plus app appearance and the weekly competitor-watch email) · list_team / invite_member / remove_member / set_role (who else can work in this brand).',
-  'E) PUBLISH & MANAGE YOUR CHANNELS — post, run ads, and organize files on the user’s OWN connected accounts (Settings ▸ Connectors), all driven over this MCP. Bring ANY file in with upload_file (desktop/external media, not just Hermoso renders). MANAGING THE CONNECTIONS THEMSELVES: list_connectors (what is linked, and what could be) · list_connector_accounts then set_connector_accounts (WHICH Facebook Pages / Instagram / Meta ad accounts / Google Ads customers / LinkedIn company Pages / Pinterest / Microsoft Advertising accounts this brand may post to and spend from — one person often administers several, only the chosen ones are usable, and an empty choice shares nothing) · disconnect_connector (revoke and drop a connection; confirm-gated because RECONNECTING NEEDS A BROWSER and no agent can do it). LINKING a new account is the one thing that is not headless — it is an OAuth consent screen, so send the user to Workspace ▸ Connectors in the app. META: list_meta_pages · post_to_meta (Facebook / Instagram / Threads) · list_meta_ads + meta_insights (read existing campaigns/ad sets/ads + spend/CTR/CPC, with breakdowns by age / gender / placement / country) · preview_meta_ad (Meta renders the REAL ad per placement — a link the user can look at, valid 24h) · estimate_meta_reach (how many people a targeting spec reaches, BEFORE a budget is committed) · list_meta_audiences / create_meta_audience (website-pixel retargeting, Page + Instagram engagement audiences, and lookalikes — creating one spends nothing) · create_meta_campaign / create_meta_ad / upload_meta_asset (build) · update_meta_object / delete_meta_object / set_meta_campaign_status (edit, delete, activate — every spend + delete is confirm-gated) · manage_meta_post (edit or delete a published post). SCHEDULING (one content calendar across every channel): schedule_post (queue a post for a future time to one or MORE channels at once — facebook / instagram / threads / tiktok / youtube — with per-channel captions; Hermoso publishes it at that time, nothing has to stay open — it goes LIVE PUBLICLY by default, and only stages as draft/unlisted/private if the user asks) · list_scheduled (what is queued and what already fired, with PER-CHANNEL outcomes) · cancel_scheduled (pull a queued post before it goes out). YOUTUBE (publish, measure AND manage): post_to_youtube (publish a finished video to the brand’s channel — defaults to UNLISTED, i.e. link-only and ad-ready; set public to put it on the channel, or private for eyes-only) · list_youtube_videos (the channel’s OWN uploads with their video ids — call this to resolve “my latest video” yourself instead of asking the user for a link; it is where the videoId every other YouTube tool needs comes from, and it sees unlisted/private uploads a public search cannot) · update_youtube_video (retitle/re-describe/re-tag, and FLIP AN UNLISTED UPLOAD PUBLIC — the step that finishes the default publish flow; confirm before going public) · set_youtube_thumbnail (put a Hermoso thumbnail on an uploaded video — the biggest single lever on click-through, and YouTube otherwise picks a frame at random; needs a phone-verified channel) · youtube_video_insights (per-VIDEO views, watch time, average view PERCENTAGE/retention, likes, comments, shares, subscribers gained — the numbers that say whether a hook held; youtube_channel only gives channel-wide totals) · list_youtube_comments + reply_to_youtube_comment (read viewer questions and objections in their own words, and answer as the channel) · youtube_channel (read title + subscriber/view/video counts for reporting). TIKTOK: post_to_tiktok (post a finished video — or a PHOTO POST, TikTok’s photo/slideshow format of 1 to 35 images where a single image is just a one-slide post —LIVE to the profile, or into TikTok drafts to review in the app) · tiktok_creator_info (the creator’s REAL privacy options — read them and let the user choose before any direct post) · tiktok_account (bio, verified status, follower/following/likes/video counts) · list_tiktok_videos (their own recent posts with views/likes/comments/shares). LINKEDIN: post_to_linkedin (publish a finished post to the connected LinkedIn PROFILE) · list_linkedin_pages (the company Pages this connection administers — call this first and let the USER pick, never guess a Page) · post_to_linkedin_page (publish as a company PAGE rather than a person — this is the one most brands actually want) · manage_linkedin_post (edit the copy of a published post, or delete it) · linkedin_page_analytics (ORGANIC Page performance — followers, follower gains, Page views, and post impressions/clicks/engagement, for the Page total or per post; this is the free organic read, NOT linkedin_ads_report). LINKEDIN ADS (full three-tier management): list_linkedin_ads_campaigns (ad accounts, then a chosen account’s campaign groups, campaigns and — with campaignId — the CREATIVES under them) · linkedin_ads_report (impressions, clicks, cost, conversions, leads) · search_linkedin_ads_targeting (resolve locations / titles / industries / seniorities / company sizes to the URNs LinkedIn demands — never invent one) · create_linkedin_ads_campaign_group → create_linkedin_ads_campaign → create_linkedin_ads_creative (the tree, every tier born DRAFT) · set_linkedin_ads_budget / set_linkedin_ads_status / delete_linkedin_ads_object (budgets, activate/pause at any tier, delete — every spend change confirm-gated). LinkedIn is a THREE-tier platform and the third tier is the one people forget: a campaign with no creative shows nothing, and all three tiers must be ACTIVE before a single impression is served. REDDIT: post_to_reddit (submit a text, link or native image post to ONE subreddit — Reddit bans near-identical posts across communities, so write for one subreddit and never fan out) · reddit_post_stats (score, comments, upvote ratio on a post you made). REDDIT ADS: list_reddit_ads_campaigns / reddit_ads_report (read the account tree + performance) · list_reddit_ads_profiles + list_reddit_ads_posts / create_reddit_ads_post / update_reddit_ads_post (the CREATIVE — a Reddit ad promotes a post) · create_reddit_ads_campaign / update_reddit_ads_campaign · create_reddit_ads_ad_group / update_reddit_ads_ad_group · create_reddit_ads_ad / update_reddit_ads_ad · set_reddit_ads_status (the ONLY switch that arms real spend, confirm-gated) · search_reddit_ads_targeting / reddit_ads_forecast / reddit_ads_bid_suggestion (free planning) · list_reddit_ads_pixels + send_reddit_ads_conversions (conversion tracking — Reddit now requires a pixel on every ad group) · list_reddit_ads_audiences / create_reddit_ads_audience / update_reddit_ads_audience_users / delete_reddit_ads_audience (retargeting lists) · list_reddit_ads_saved_audiences / create_reddit_ads_saved_audience / update_reddit_ads_saved_audience · list_reddit_ads_lead_forms / create_reddit_ads_lead_form · reddit_ads_history (who changed what, when). X / TWITTER: post_to_x (publish a post — text, an image or a video render WITH alt text, a POLL, a reply, or a whole thread, and optionally restrict who may reply) · delete_x_post (remove one) · x_post_metrics (the PUBLIC counts — impressions, likes, reposts, replies, quotes, bookmarks) · x_post_insights (the ADVERTISER numbers for your own posts — link clicks, profile visits, video views and completion quartiles, up to 25 posts at once; this is what says whether a creative worked, and x_post_metrics cannot tell you, but it only sees the LAST 28 HOURS) · x_post_insights_historical (the same advertiser numbers over ANY date range — the one to use for anything older than yesterday) · x_mentions (who is talking to the brand, in their own words — the read half of the reply loop, and a source of real customer language for ad copy). X IS THE ONE CONNECTOR THAT COSTS CREDITS PER CALL — X charges us per API request, so posting, deleting, reading metrics, reading insights and pulling mentions each bill the user, a post CONTAINING A LINK costs 13× one without, and insights and mentions are billed PER POST RETURNED. Say so before posting a thread or pulling a big page of mentions, and prefer one post over five when the content allows. X ADS ARE NOT AVAILABLE: the X Ads API is a separate product on a separate host with OAuth 1.0a signing and its own approval form — Hermoso cannot create or manage X ad campaigns, so say that plainly instead of offering it. PINTEREST: create_pinterest_board (make a board — a NEW Pinterest account has none and a Pin needs one) · list_pinterest_boards (the user must pick a board — never choose one for them) · post_to_pinterest (create an image or video Pin on a chosen board, with a title, description and destination link). GOOGLE ADS (full management): list_google_ads_campaigns (list accounts, then a customer’s campaigns + spend/CTR/CPC/conversions) · google_ads_report (any GAQL breakdown — ad groups, keywords, search terms, geo) · create_google_ads_campaign (paused) · set_google_ads_budget / set_google_ads_status (change budget, enable/pause — every spend change confirm-gated) · upload_google_ads_asset (add an image render or a YouTube video to the ad account’s asset library) · create_google_ads_performance_max_campaign (Google’s cross-surface campaign type — non-retail only; the Merchant Center / Shopping-feed variant is refused by name) · add_google_ads_assets (sitelinks, callouts and structured snippets, CREATED AND ATTACHED — an asset that is not attached shows nothing) · list_google_ads_conversion_actions + create_google_ads_conversion_action (what Google counts as a result — MAXIMIZE_CONVERSIONS, TARGET_CPA, TARGET_ROAS and every Performance Max campaign are undeliverable without one, and Hermoso refuses to build them on an account that has none) · google_ads_keyword_ideas (Keyword Planner — real monthly search volume, competition and top-of-page bids; use it before choosing keywords). MICROSOFT ADVERTISING / BING ADS (full management, mirroring Google): list_microsoft_ads_campaigns (list the shared ad accounts, then a chosen account’s campaigns + budgets) · microsoft_ads_geo_search (resolve country / region / city names to the Microsoft location ids a campaign needs — call it when an ask is ambiguous and let the USER pick) · microsoft_ads_report (impressions, clicks, CTR, average CPC, spend, conversions — generated asynchronously, so it may come back pending and must be called again) · create_microsoft_ads_campaign (campaign → ad group → responsive search ad → keywords, always Paused; with no locations[] it is created serving WORLDWIDE, Microsoft’s own default, and the read-back warns loudly — relay that before anyone activates it) · create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords (fill in an existing account) · set_microsoft_ads_budget / set_microsoft_ads_status (change budget, activate/pause — every spend change confirm-gated; Microsoft statuses are Active/Paused, never Deleted). GOOGLE BUSINESS PROFILE (the local-SEO channel — the listing panel on Google Search and Maps, which for a local business is where the demand actually is, and there is no delete): list_business_locations (the listings the connected Google account manages — call this first and let the USER pick when there is more than one; a Post on the wrong storefront is a public mistake) · post_to_google_business (publish a Post to the listing — text, ONE PHOTO and a call-to-action button; Google’s Posts API takes no video, so pass a still. EVENT and OFFER posts both require a title and a start date, and on an OFFER Google ignores the button link) · list_google_business_posts (what is showing right now, with each Post’s state) · delete_google_business_post (take one down — immediate and public, so confirm first) · google_business_insights (Search + Maps impressions, calls, website clicks, direction requests, messages, bookings — listing-level; Google discontinued per-Post insights in 2023 with no replacement, so never promise per-Post numbers). Google gates this API behind a per-project access request and the default quota is zero, so the connection can be live and calls still refused — the error says so. CHATGPT ADS (ads under ChatGPT answers, via OpenAI’s Advertiser API — full management): list_openai_ads_campaigns (the ad account, then its campaigns, ad groups and ads with each ad’s review state) · openai_ads_report (impressions, clicks, spend, CTR, CPC, CPM at account / campaign / ad group / ad scope — run this first, it validates the key with zero spend risk) · openai_ads_geo_search (location ids: geo is the ONLY audience targeting this platform has) · create_openai_ads_campaign (campaign → ad group → ad in one call, always PAUSED) · create_openai_ads_ad_group / create_openai_ads_ad (fill in an existing campaign) · update_openai_ads_object (rename, re-budget, rewrite context hints or the ad copy) · set_openai_ads_budget / set_openai_ads_status (change budget, activate, pause, archive — every spend change and every archive is confirm-gated, and archiving is irreversible because this API has no delete). TWO RULES THIS CHANNEL DOES NOT SHARE WITH THE OTHERS: it is connected by PASTING an Advertiser API key (no OAuth, no manager account, one key = one ad account), and it has exactly ONE creative format — a text plus image card, title 50 characters, body 100. There is NO VIDEO on ChatGPT Ads, so never offer a video ad here. GOOGLE DRIVE — ONE connection covering Drive, Sheets and Docs (full CRUD over the files Hermoso created there, plus any file the user hands over with the Google file picker in the app): save_to_drive · list_drive_files / get_drive_file · update_drive_file (rename/move/trash) · delete_drive_file · create_drive_folder. GOOGLE SHEETS (part of the Google Drive connection — export data to a spreadsheet the app creates, or read one the user picked; drive.file, no verification): create_sheet · append_to_sheet · read_sheet. GOOGLE DOCS (part of the Google Drive connection — export copy/brief/report as a doc, or read one the user picked; drive.file, no verification): create_doc · append_to_doc. ONEDRIVE (full CRUD over the user’s Microsoft OneDrive): save_to_onedrive · list_onedrive_files / get_onedrive_file · update_onedrive_file (rename/move) · delete_onedrive_file · create_onedrive_folder. Use these standalone — Hermoso is a full posting/ads/file-storage control surface, not only an ad generator.',
+  'E) PUBLISH & MANAGE YOUR CHANNELS — post, run ads, and organize files on the user’s OWN connected accounts (Settings ▸ Connectors), all driven over this MCP. Bring ANY file in with upload_file (desktop/external media, not just Hermoso renders). MANAGING THE CONNECTIONS THEMSELVES: list_connectors (what is linked, and what could be) · list_connector_accounts then set_connector_accounts (WHICH Facebook Pages / Instagram / Meta ad accounts / Google Ads customers / LinkedIn company Pages / Pinterest / Microsoft Advertising accounts this brand may post to and spend from — one person often administers several, only the chosen ones are usable, and an empty choice shares nothing) · disconnect_connector (revoke and drop a connection; confirm-gated because RECONNECTING NEEDS A BROWSER and no agent can do it). LINKING a new account is the one thing that is not headless — it is an OAuth consent screen, so send the user to Workspace ▸ Connectors in the app. META: list_meta_pages · post_to_meta (Facebook / Instagram / Threads) · list_meta_ads + meta_insights (read existing campaigns/ad sets/ads + spend/CTR/CPC, with breakdowns by age / gender / placement / country) · preview_meta_ad (Meta renders the REAL ad per placement — a link the user can look at, valid 24h) · estimate_meta_reach (how many people a targeting spec reaches, BEFORE a budget is committed) · list_meta_audiences / create_meta_audience (website-pixel retargeting, Page + Instagram engagement audiences, and lookalikes — creating one spends nothing) · create_meta_campaign / create_meta_ad / upload_meta_asset (build) · update_meta_object / delete_meta_object / set_meta_campaign_status (edit, delete, activate — every spend + delete is confirm-gated) · manage_meta_post (edit or delete a published post). SCHEDULING (one content calendar across every channel): schedule_post (queue a post for a future time to one or MORE channels at once — Facebook / Instagram / Threads / TikTok / YouTube / LinkedIn / X / Pinterest / Google Business Profile — with per-channel captions; Hermoso publishes it at that time, nothing has to stay open — it goes LIVE PUBLICLY by default, and only stages as draft/unlisted/private if the user asks, and an impossible channel+visibility pair, an over-length caption or media the channel cannot carry is REFUSED while you are still there rather than failing hours later) · list_scheduled (what is queued and what already fired, with PER-CHANNEL outcomes) · reschedule_post (move a queued post to a new time, or change its caption, media, channels or target Page/board — send only what changes) · cancel_scheduled (pull a queued post before it goes out). YOUTUBE (publish, measure AND manage): post_to_youtube (publish a finished video to the brand’s channel — defaults to UNLISTED, i.e. link-only and ad-ready; set public to put it on the channel, or private for eyes-only) · list_youtube_videos (the channel’s OWN uploads with their video ids — call this to resolve “my latest video” yourself instead of asking the user for a link; it is where the videoId every other YouTube tool needs comes from, and it sees unlisted/private uploads a public search cannot) · update_youtube_video (retitle/re-describe/re-tag, and FLIP AN UNLISTED UPLOAD PUBLIC — the step that finishes the default publish flow; confirm before going public) · delete_youtube_video (take one down for good — irreversible, so the unconfirmed call reports the video’s real title, privacy, views and comments first; use update_youtube_video(privacy:"private") when they only want it out of sight) · set_youtube_thumbnail (put a Hermoso thumbnail on an uploaded video — the biggest single lever on click-through, and YouTube otherwise picks a frame at random; needs a phone-verified channel) · youtube_video_insights (per-VIDEO views, watch time, average view PERCENTAGE/retention, likes, comments, shares, subscribers gained — the numbers that say whether a hook held; youtube_channel only gives channel-wide totals) · list_youtube_comments + reply_to_youtube_comment (read viewer questions and objections in their own words, and answer as the channel) · youtube_channel (read title + subscriber/view/video counts for reporting). TIKTOK: post_to_tiktok (post a finished video — or a PHOTO POST, TikTok’s photo/slideshow format of 1 to 35 images where a single image is just a one-slide post —LIVE to the profile, or into TikTok drafts to review in the app) · tiktok_creator_info (the creator’s REAL privacy options — read them and let the user choose before any direct post) · tiktok_account (bio, verified status, follower/following/likes/video counts) · list_tiktok_videos (their own recent posts with views/likes/comments/shares). LINKEDIN: post_to_linkedin (publish a finished post to the connected LinkedIn PROFILE) · list_linkedin_pages (the company Pages this connection administers — call this first and let the USER pick, never guess a Page) · post_to_linkedin_page (publish as a company PAGE rather than a person — this is the one most brands actually want) · manage_linkedin_post (edit the copy of a published post, or delete it) · linkedin_page_analytics (ORGANIC Page performance — followers, follower gains, Page views, and post impressions/clicks/engagement, for the Page total or per post; this is the free organic read, NOT linkedin_ads_report). LINKEDIN ADS (full three-tier management): list_linkedin_ads_campaigns (ad accounts, then a chosen account’s campaign groups, campaigns and — with campaignId — the CREATIVES under them) · linkedin_ads_report (impressions, clicks, cost, conversions, leads) · search_linkedin_ads_targeting (resolve locations / titles / industries / seniorities / company sizes to the URNs LinkedIn demands — never invent one) · create_linkedin_ads_campaign_group → create_linkedin_ads_campaign → create_linkedin_ads_creative (the tree, every tier born DRAFT) · set_linkedin_ads_budget / set_linkedin_ads_status / delete_linkedin_ads_object (budgets, activate/pause at any tier, delete — every spend change confirm-gated). LinkedIn is a THREE-tier platform and the third tier is the one people forget: a campaign with no creative shows nothing, and all three tiers must be ACTIVE before a single impression is served. REDDIT: post_to_reddit (submit a text, link or native image post to ONE subreddit — Reddit bans near-identical posts across communities, so write for one subreddit and never fan out) · reddit_post_stats (score, comments, upvote ratio on a post you made). REDDIT ADS: list_reddit_ads_campaigns / reddit_ads_report (read the account tree + performance) · list_reddit_ads_profiles + list_reddit_ads_posts / create_reddit_ads_post / update_reddit_ads_post (the CREATIVE — a Reddit ad promotes a post) · create_reddit_ads_campaign / update_reddit_ads_campaign · create_reddit_ads_ad_group / update_reddit_ads_ad_group · create_reddit_ads_ad / update_reddit_ads_ad · set_reddit_ads_status (the ONLY switch that arms real spend, confirm-gated) · search_reddit_ads_targeting / reddit_ads_forecast / reddit_ads_bid_suggestion (free planning) · list_reddit_ads_pixels + send_reddit_ads_conversions (conversion tracking — Reddit now requires a pixel on every ad group) · list_reddit_ads_audiences / create_reddit_ads_audience / update_reddit_ads_audience_users / delete_reddit_ads_audience (retargeting lists) · list_reddit_ads_saved_audiences / create_reddit_ads_saved_audience / update_reddit_ads_saved_audience · list_reddit_ads_lead_forms / create_reddit_ads_lead_form · reddit_ads_history (who changed what, when). X / TWITTER: post_to_x (publish a post — text, an image or a video render WITH alt text, a POLL, a reply, or a whole thread, and optionally restrict who may reply) · delete_x_post (remove one) · x_post_metrics (the PUBLIC counts — impressions, likes, reposts, replies, quotes, bookmarks) · x_post_insights (the ADVERTISER numbers for your own posts — link clicks, profile visits, video views and completion quartiles, up to 25 posts at once; this is what says whether a creative worked, and x_post_metrics cannot tell you, but it only sees the LAST 28 HOURS) · x_post_insights_historical (the same advertiser numbers over ANY date range — the one to use for anything older than yesterday) · x_mentions (who is talking to the brand, in their own words — the read half of the reply loop, and a source of real customer language for ad copy). X IS THE ONE CONNECTOR THAT COSTS CREDITS PER CALL — X charges us per API request, so posting, deleting, reading metrics, reading insights and pulling mentions each bill the user, a post CONTAINING A LINK costs 13× one without, and insights and mentions are billed PER POST RETURNED. Say so before posting a thread or pulling a big page of mentions, and prefer one post over five when the content allows. X ADS ARE NOT AVAILABLE: the X Ads API is a separate product on a separate host with OAuth 1.0a signing and its own approval form — Hermoso cannot create or manage X ad campaigns, so say that plainly instead of offering it. PINTEREST: create_pinterest_board (make a board — a NEW Pinterest account has none and a Pin needs one) · list_pinterest_boards (the user must pick a board — never choose one for them) · post_to_pinterest (create an image or video Pin on a chosen board, with a title, description and destination link). GOOGLE ADS (full management): list_google_ads_campaigns (list accounts, then a customer’s campaigns + spend/CTR/CPC/conversions) · google_ads_report (any GAQL breakdown — ad groups, keywords, search terms, geo) · create_google_ads_campaign (paused) · set_google_ads_budget / set_google_ads_status (change budget, enable/pause — every spend change confirm-gated) · upload_google_ads_asset (add an image render or a YouTube video to the ad account’s asset library) · create_google_ads_performance_max_campaign (Google’s cross-surface campaign type — non-retail only; the Merchant Center / Shopping-feed variant is refused by name) · add_google_ads_assets (sitelinks, callouts and structured snippets, CREATED AND ATTACHED — an asset that is not attached shows nothing) · list_google_ads_conversion_actions + create_google_ads_conversion_action (what Google counts as a result — MAXIMIZE_CONVERSIONS, TARGET_CPA, TARGET_ROAS and every Performance Max campaign are undeliverable without one, and Hermoso refuses to build them on an account that has none) · google_ads_keyword_ideas (Keyword Planner — real monthly search volume, competition and top-of-page bids; use it before choosing keywords). MICROSOFT ADVERTISING / BING ADS (full management, mirroring Google): list_microsoft_ads_campaigns (list the shared ad accounts, then a chosen account’s campaigns + budgets) · microsoft_ads_geo_search (resolve country / region / city names to the Microsoft location ids a campaign needs — call it when an ask is ambiguous and let the USER pick) · microsoft_ads_report (impressions, clicks, CTR, average CPC, spend, conversions — generated asynchronously, so it may come back pending and must be called again) · create_microsoft_ads_campaign (campaign → ad group → responsive search ad → keywords, always Paused; with no locations[] it is created serving WORLDWIDE, Microsoft’s own default, and the read-back warns loudly — relay that before anyone activates it) · create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords (fill in an existing account) · set_microsoft_ads_budget / set_microsoft_ads_status (change budget, activate/pause — every spend change confirm-gated; Microsoft statuses are Active/Paused, never Deleted). GOOGLE BUSINESS PROFILE (the local-SEO channel — the listing panel on Google Search and Maps, which for a local business is where the demand actually is, and there is no delete): list_business_locations (the listings the connected Google account manages — call this first and let the USER pick when there is more than one; a Post on the wrong storefront is a public mistake) · post_to_google_business (publish a Post to the listing — text, ONE PHOTO and a call-to-action button; Google’s Posts API takes no video, so pass a still. EVENT and OFFER posts both require a title and a start date, and on an OFFER Google ignores the button link) · list_google_business_posts (what is showing right now, with each Post’s state) · delete_google_business_post (take one down — immediate and public, so confirm first) · google_business_insights (Search + Maps impressions, calls, website clicks, direction requests, messages, bookings — listing-level; Google discontinued per-Post insights in 2023 with no replacement, so never promise per-Post numbers). Google gates this API behind a per-project access request and the default quota is zero, so the connection can be live and calls still refused — the error says so. CHATGPT ADS (ads under ChatGPT answers, via OpenAI’s Advertiser API — full management): list_openai_ads_campaigns (the ad account, then its campaigns, ad groups and ads with each ad’s review state) · openai_ads_report (impressions, clicks, spend, CTR, CPC, CPM at account / campaign / ad group / ad scope — run this first, it validates the key with zero spend risk) · openai_ads_geo_search (location ids: geo is the ONLY audience targeting this platform has) · create_openai_ads_campaign (campaign → ad group → ad in one call, always PAUSED) · create_openai_ads_ad_group / create_openai_ads_ad (fill in an existing campaign) · update_openai_ads_object (rename, re-budget, rewrite context hints or the ad copy) · set_openai_ads_budget / set_openai_ads_status (change budget, activate, pause, archive — every spend change and every archive is confirm-gated, and archiving is irreversible because this API has no delete). TWO RULES THIS CHANNEL DOES NOT SHARE WITH THE OTHERS: it is connected by PASTING an Advertiser API key (no OAuth, no manager account, one key = one ad account), and it has exactly ONE creative format — a text plus image card, title 50 characters, body 100. There is NO VIDEO on ChatGPT Ads, so never offer a video ad here. GOOGLE DRIVE — ONE connection covering Drive, Sheets and Docs (full CRUD over the files Hermoso created there, plus any file the user hands over with the Google file picker in the app): save_to_drive · list_drive_files / get_drive_file · update_drive_file (rename/move/trash) · delete_drive_file · create_drive_folder. GOOGLE SHEETS (part of the Google Drive connection — export data to a spreadsheet the app creates, or read one the user picked; drive.file, no verification): create_sheet · append_to_sheet · read_sheet. GOOGLE DOCS (part of the Google Drive connection — export copy/brief/report as a doc, or read one the user picked; drive.file, no verification): create_doc · append_to_doc. ONEDRIVE (full CRUD over the user’s Microsoft OneDrive): save_to_onedrive · list_onedrive_files / get_onedrive_file · update_onedrive_file (rename/move) · delete_onedrive_file · create_onedrive_folder. Use these standalone — Hermoso is a full posting/ads/file-storage control surface, not only an ad generator.',
 ].join('\n');
 
 // Server-level `instructions` (initialize response — injected into the model's context by the client). Denser than
@@ -58,7 +83,7 @@ const CAPABILITY_MAP = [
 export const MCP_INSTRUCTIONS = [
   'Hermoso is an AI ad studio you drive over MCP — use it for four jobs: (1) AD SPY / research the ads already winning in any market, (2) CREATE finished on-brand image & video ads, (3) run RAW generations against the full model catalog, and (4) PUBLISH & MANAGE the user’s OWN Meta channels (posts + ads) and Google Drive. Call hermoso_capabilities FIRST (free) to learn valid model ids + exact credit costs. Capability map:',
   '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; scrapecreators_fetch; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
-  '• CREATE (finished ads): get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) → plan_ad → render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar; make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video; plan_variations + score_ad.',
+  '• CREATE (finished ads): get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) → plan_ad → render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar; list_creators / save_creator / delete_creator (the reusable saved CAST — re-cast the same face instead of generating a new person every time); make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video; plan_variations + score_ad.',
   '• RAW MODEL PLAYGROUND: generate_image / generate_video (useBrand:false) for prompt-only renders, generate_voice for text-to-speech, generate_text for the writing models — against any of 30+ image / video / voice / writing model ids (exact costs in hermoso_capabilities), no ad framing.',
   '• ACCOUNT & WORKSPACES: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job; list_brands / create_brand / use_brand / delete_brand (one account holds MANY brand workspaces — an agency runs every client through here, each with its own brand, memory, Library and connectors; create_brand → draft_brand onboards a new one, delete_brand is confirm-gated); get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it — plus app appearance and the weekly competitor-watch email); list_team / invite_member / remove_member / set_role.',
   '• PUBLISH & MANAGE YOUR CHANNELS (the user’s connected accounts, over this MCP): Meta — post_to_meta (FB/IG/Threads), upload_file (post ANY external/local file), list_meta_ads + meta_insights (read campaigns/ad sets/ads + performance, broken down by age/gender/placement/country), preview_meta_ad (see the real ad per placement, 24h links), estimate_meta_reach (audience size before you spend), list_meta_audiences / create_meta_audience (retargeting + lookalikes), create_meta_campaign / create_meta_ad / upload_meta_asset (build), update_meta_object / delete_meta_object / set_meta_campaign_status (edit/delete/activate — spend + deletes confirm-gated), manage_meta_post (edit/delete a post); Microsoft Advertising (Bing Ads) — list_microsoft_ads_campaigns, microsoft_ads_report, microsoft_ads_geo_search, create_microsoft_ads_campaign / create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords (all created Paused), set_microsoft_ads_budget / set_microsoft_ads_status (spend confirm-gated); ChatGPT Ads (OpenAI Advertiser API) — list_openai_ads_campaigns, openai_ads_report, openai_ads_geo_search, create_openai_ads_campaign / create_openai_ads_ad_group / create_openai_ads_ad (all created PAUSED), update_openai_ads_object, set_openai_ads_budget / set_openai_ads_status (spend + archive confirm-gated). Connected by pasting an API key; ONE creative format, a text plus image card — no video; Reddit — post_to_reddit (ONE subreddit at a time; never repost the same content across communities), reddit_post_stats; Pinterest — list_pinterest_boards then post_to_pinterest (the user picks the board); Google Business Profile — list_business_locations, post_to_google_business, list_google_business_posts, delete_google_business_post, google_business_insights (the brand’s listing on Google Search and Maps); Google Drive (ONE connection covering Drive, Sheets and Docs) — save_to_drive, list_drive_files, get_drive_file, update_drive_file, delete_drive_file, create_drive_folder, plus create_sheet / append_to_sheet / read_sheet and create_doc / append_to_doc / read_doc (Hermoso-created files, plus any file the user hands over with the Google file picker in the app); Microsoft OneDrive — save_to_onedrive, list_onedrive_files, get_onedrive_file, update_onedrive_file, delete_onedrive_file, create_onedrive_folder (full CRUD over the user’s OneDrive); MANAGING THE CONNECTIONS — list_connectors, list_connector_accounts + set_connector_accounts (which Pages / ad accounts / company Pages this brand may post to and spend from — fails closed, an empty choice shares nothing), disconnect_connector (confirm-gated: reconnecting needs a browser). Full read+write control over the user’s own channels, not just generation. LINKING a NEW account is the one step that is not headless (an OAuth consent screen) — send the user to Workspace ▸ Connectors in the app.',
@@ -106,6 +131,26 @@ const wrap = (fn) => async (args, extra) => {
   }
 };
 
+// ── A TIMED-OUT PUBLISH IS NOT A FAILED PUBLISH (2026-08-02) ────────────────────────────────────────────────────
+// `post_to_meta` with a videoUrl returned "The operation timed out" while the post was LIVE on the Facebook Page.
+// An agent that retries on that double-posts; an agent that trusts it tells the user their post failed. The server
+// side of the fix is publish-idempotency.mjs (a retry is a READ, never a second post); this is the half that speaks
+// to the agent, because the sentence it prints is what decides which of those two mistakes it makes.
+// Deliberately NOT folded into `wrap`: `wrap` covers every tool and this advice is only true for a publish. It
+// fires only on an AMBIGUOUS failure — a timeout, an abort, a socket reset, a gateway error — never on a clean 4xx,
+// because a warning that always fires bans nothing.
+const PUBLISH_AMBIGUOUS_RE = /timed? ?out|timeout|ETIMEDOUT|ECONNRESET|EPIPE|socket hang up|aborted|network error|fetch failed|\b50[24]\b/i;
+const publishWrap = (fn) => {
+  const inner = wrap(fn);
+  return async (args, extra) => {
+    const r = await inner(args, extra);
+    if (!r?.isError) return r;
+    const text = r.content?.[0]?.text || '';
+    if (!PUBLISH_AMBIGUOUS_RE.test(text)) return r;
+    return { ...r, content: [{ type: 'text', text: `${text}\n\nDO NOT ASSUME THIS FAILED, AND DO NOT RETRY BLINDLY. Publishing routinely outlives a transport, so the post may well be LIVE. Hermoso protects you: call this tool AGAIN with the identical arguments${args?.idempotencyKey ? ` and the same idempotencyKey ("${args.idempotencyKey}")` : ''} — an identical publish is recognised and returns the ORIGINAL post instead of posting twice. Tell the user it is being confirmed, not that it failed. For video, prefer async:true (post_to_meta), which returns a job id you poll with get_job and cannot time out at all.` }] };
+  };
+};
+
 // run a job to completion, surfacing the served media URL. Under the HOSTED connector (Claude.ai/ChatGPT) the
 // client kills long tool calls before a 1-3 min render finishes — so cap the in-call wait there and return a
 // RESUMABLE handle instead of dying (the agent polls get_job, which now attaches the poster on done).
@@ -127,6 +172,14 @@ async function renderJob(type, input, label) {
 // bill always follows the model that RAN. An agent that asked for one model and reads a one-line "ready" reply would
 // otherwise never learn it got another, so the note rides the reply text every render tool prints.
 const switchNote = (r) => { const n = r?.raw?.modelNote || r?.modelNote; return n ? `\n⚠ ${n}` : ''; };
+// THE VISION-QA READ-BACK (2026-08-03). The server WATCHES every generatively-rendered clip before it reports it
+// done — free ffmpeg cadence/freeze probes plus ONE vision call over frames sampled at the hook, either side of
+// each cut, and the tail — and puts what it saw on the result as `qaNote` (see vision-qa.mjs). An agent reading a
+// one-line "ready" reply would otherwise never learn that the register flipped at an act seam or that the model
+// painted its own end card, so the note rides the reply of EVERY video tool via okVideo. It REPORTS ONLY: nothing
+// was re-rendered and nothing extra was charged, and a check it could not settle says "could not tell" rather
+// than passing by default.
+const qaLine = (r) => { const n = r?.raw?.qaNote; return n ? `\n${n}` : ''; };
 
 // Shared outputSchema fields for the job-based render tools (the renderJob result that becomes structuredContent).
 // Every field is optional so validation can never fail on a sparse or still-rendering result.
@@ -315,14 +368,20 @@ function registerAppResources(server) {
 // the whole {key:{value}} map, so a per-key READ resolves the value out of it. WRITES go through `PUT /api/store/:key`,
 // which union-merges the sync stores server-side (adapters/sync-merge.js) so a snapshot never clobbers another device's
 // concurrent work. Keys are per-profile namespaced exactly like the webapp's pk() (bare for default, `<base>.<id>` else).
-const pk = (base) => (PROFILE && PROFILE !== 'default' ? `${base}.${PROFILE}` : base); // '' (unpinned) behaves like default
+// THE KEY NAMESPACE IS THE SERVER'S ANSWER, NOT THIS PROCESS'S ENVIRONMENT. `pk` used to read a module-level
+// HEIST_PROFILE constant, which is EMPTY on the hosted connector (it has no environment) — so `use_brand "Client X"`
+// switched the pin server-side and every store read AND WRITE still addressed the anchor brand's bare key. Reads
+// returned another brand's memory/skills/Library; writes corrupted the default brand. storeSuffix() asks
+// /api/workspace, where resolveWs re-authorizes the pin per request, so hosted and stdio now resolve identically.
+const pk = async (base) => { const s = await storeSuffix(); return s ? `${base}.${s}` : base; };
 async function readStore(base) {
+  const key = await pk(base); // deliberately OUTSIDE the try: an unresolvable workspace must fail loudly, not read the wrong one
   let dump; try { dump = await apiGet('/api/store/bootstrap'); } catch { return null; }
-  const raw = dump && dump[pk(base)] && dump[pk(base)].value;
+  const raw = dump && dump[key] && dump[key].value;
   if (typeof raw !== 'string') return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
-async function writeStore(base, value) { await apiPut(`/api/store/${encodeURIComponent(pk(base))}`, { value: JSON.stringify(value) }); }
+async function writeStore(base, value) { await apiPut(`/api/store/${encodeURIComponent(await pk(base))}`, { value: JSON.stringify(value) }); }
 // Record a cross-device DELETE so the union-merge (server PUT + client boot) drops the item instead of resurrecting it
 // (mirrors the webapp's Tomb writer + adapters/sync-merge.js TOMB_SCOPES). Written BEFORE removing the item so the
 // content PUT's merge already sees the delete. scope = the base store key; the tombstone map is itself a synced store.
@@ -510,24 +569,36 @@ export function registerTools(server) {
 
   server.registerTool('billing_status', {
     title: 'Billing status',
-    description: "Show this account's billing at a glance: current plan (id + label + monthly price), credit balance, whether auto-reload is on, whether a card is on file, and whether YOU (this key) have ADMIN rights to change billing. Read-only, free. Call it before upgrade_plan / set_auto_reload to know what's possible — members have read-only billing.",
+    description: "Show this account's billing at a glance: current plan (id + label + monthly price), credit balance, whether auto-reload is on, whether a card is on file, and whether YOU (this key) have ADMIN rights to change billing. Read-only, free. Call it before upgrade_plan / set_auto_reload to know what's possible — members have read-only billing. IN A SHARED TEAM WORKSPACE A MEMBER SEES THE PLAN AND THE BALANCE ONLY: the workspace owner's payment card and auto-reload belong to them and are not reported (billingScope:'member'). Never tell a member there is no card on file — the honest answer is that you cannot see it.",
     inputSchema: {}, outputSchema: {
       plan: z.any().optional().describe('the current plan ({id, label, monthlyUsd})'),
       balanceCredits: z.number().nullable().optional().describe('the current credit balance'),
-      autoReload: z.any().optional().describe('auto-reload config ({enabled, thresholdCredits, reloadCredits, available})'),
-      paymentMethodOnFile: z.boolean().optional().describe('whether a card is saved for one-click charges'),
-      card: z.any().optional().describe('the saved card ({brand, last4}) when present'),
+      autoReload: z.any().optional().describe('auto-reload config ({enabled, thresholdCredits, reloadCredits, available}); {withheld:true} for a member of a shared workspace'),
+      paymentMethodOnFile: z.boolean().nullable().optional().describe('whether a card is saved for one-click charges; NULL means withheld (you are a member of someone else’s workspace), which is NOT the same as false'),
+      card: z.any().optional().describe('the saved card ({brand, last4}) when present AND you are allowed to see it'),
       role: z.string().optional().describe('this key’s billing role (admin/member)'),
       isAdmin: z.boolean().optional().describe('whether this key can change billing'),
+      billingScope: z.string().optional().describe("'full', or 'member' when the payment instrument is deliberately withheld"),
+      billingWithheld: z.array(z.string()).optional().describe('the fields withheld because they belong to the workspace owner'),
+      billingNote: z.string().optional().describe('why those fields are absent'),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/billing/status');
     const ar = d.autoReload || {};
-    const arLine = ar.available === false ? 'set in the app (not via API)' : (ar.enabled ? `on (below ${ar.thresholdCredits} cr → +${ar.reloadCredits} cr)` : 'off');
+    // A MEMBER of a shared workspace gets plan + balance and nothing about the owner's card (Dave, 2026-08-02:
+    // "members dont need to see the owners payment card"). `null` is deliberately distinguished from `false` on
+    // both lines below — rendering "Card on file: no" at somebody whose owner definitely has a card is a
+    // well-formed lie, which is the whole class this sweep exists to remove.
+    const withheld = d.billingScope === 'member';
+    const arLine = ar.withheld ? 'not shown — the workspace owner configures it on their own card'
+      : ar.available === false ? 'set in the app (not via API)'
+      : (ar.enabled ? `on (below ${ar.thresholdCredits} cr → +${ar.reloadCredits} cr)` : 'off');
+    const cardLine = (withheld || d.paymentMethodOnFile == null) ? 'not shown — the payment method belongs to the workspace owner'
+      : d.paymentMethodOnFile ? `yes${d.card ? ` (${d.card.brand} ····${d.card.last4})` : ''}` : 'no';
     const _per = d.plan?.period === 'yr' ? 'yr' : 'mo';
     const _price = _per === 'yr' ? (d.plan?.priceUsd ?? d.plan?.monthlyUsd) : (d.plan?.monthlyUsd ?? d.plan?.priceUsd);
-    const text = `Plan: ${d.plan?.label} ($${_price}/${_per})\nBalance: ${d.balanceCredits} credits\nAuto-reload: ${arLine}\nCard on file: ${d.paymentMethodOnFile ? `yes${d.card ? ` (${d.card.brand} ····${d.card.last4})` : ''}` : 'no'}\nYour billing role: ${d.role}${d.isAdmin ? ' — you can change the plan / auto-reload' : ' — read-only; ask an admin to change the plan or auto-reload'}`;
+    const text = `Plan: ${d.plan?.label} ($${_price}/${_per})\nBalance: ${d.balanceCredits} credits\nAuto-reload: ${arLine}\nCard on file: ${cardLine}\nYour billing role: ${d.role}${d.isAdmin ? ' — you can change the plan / auto-reload' : ' — read-only; ask an admin to change the plan or auto-reload'}${withheld && d.billingNote ? `\n${d.billingNote}` : ''}`;
     return ok(text, d);
   }));
 
@@ -596,7 +667,7 @@ export function registerTools(server) {
 
   server.registerTool('list_brands', {
     title: 'List brands',
-    description: "List every brand on this account (id + name) and which one this connection currently acts on, PLUS any brand another account shared with you (a team workspace). Multi-brand accounts: call this, then use_brand to switch. A SHARED brand is not switched into with use_brand — it needs two environment values, which this tool prints. Read-only, free.",
+    description: "List every brand on this account (id + name) and which one this connection currently acts on, PLUS any brand another account shared with you (a team workspace). Multi-brand accounts: call this, then use_brand to switch. A SHARED workspace is switched into the SAME way — pass its name or the profile id printed here to use_brand. If a brand looks empty (no connected accounts, no Library) when the app shows it full, you are almost certainly acting on a different workspace: call this first. Read-only, free.",
     inputSchema: {}, outputSchema: {
       brands: z.array(z.any()).optional().describe('every brand on the account ({id, name, active})'),
       sharedWorkspaces: z.array(z.any()).optional().describe('brands another account shared with you ({name, ownerAccountId, profileUuid, role})'),
@@ -611,30 +682,58 @@ export function registerTools(server) {
     // failure here must never take the brand list down with it.
     let shared = [];
     try { shared = (await apiGet('/api/team/workspaces'))?.workspaces || []; } catch { shared = []; }
+    // THE REMEDY HAS TO WORK ON THE SURFACE IT IS PRINTED ON. This used to say "set both values in this MCP server's
+    // environment and restart it", which is impossible for the HOSTED connector — there is no local process to
+    // configure — so the one surface where a teammate is most likely to be reading it got advice it could not act
+    // on, under an empty workspace it could not explain. use_brand now pins a shared workspace server-side (on the
+    // agent key, membership-checked), so the SAME sentence works everywhere; the env vars stay as a stdio-only
+    // convenience, named only when this build actually reads an environment.
     const sharedTxt = shared.length
       ? `\n\nShared with you (owned by another account — ${shared.length}):\n` + shared.map(w =>
-        `• ${w.name || 'Shared workspace'}${w.ownerName ? ` — ${w.ownerName}` : ''} (${w.role || 'member'})\n    ${ENV_PREFIX}_OWNER=${w.ownerAccountId}\n    ${ENV_PREFIX}_PROFILE=${w.profileUuid}`).join('\n')
-        + '\n\nTo act on a shared brand, set BOTH values in this MCP server\'s environment and restart it — use_brand does NOT reach them. Use the profileUuid exactly as printed: a brand\'s short slug is refused (403).'
+        `• ${w.name || 'Shared workspace'}${w.ownerName ? ` — ${w.ownerName}` : ''} (${w.role || 'member'})\n    use_brand "${w.name || w.profileUuid}"  ← switch this connection into it\n    profile ${w.profileUuid} · owner ${w.ownerAccountId}`).join('\n')
+        + `\n\nSwitch into one with use_brand, exactly like a brand of your own — it stays pinned on this connection until you switch again, and its connected accounts, Library and memory are what every tool then sees.${isRemote() ? '' : ` (Or pin it before startup with ${ENV_PREFIX}_OWNER + ${ENV_PREFIX}_PROFILE set to the two values above — use the profile id exactly as printed, a brand's short slug is refused.)`}`
       : '';
     return ok(`Brands on this account:\n${lines}\n\nSwitch with use_brand.${sharedTxt}`, { ...d, sharedWorkspaces: shared });
   }));
 
   server.registerTool('use_brand', {
     title: 'Switch brand',
-    description: "Pin which brand this connection generates for (multi-brand accounts). Pass the brand id or exact name from list_brands. Persists for this API key until changed.",
-    inputSchema: { brand: z.string().describe('brand id (e.g. default / p_xxx) or its exact name from list_brands') },
+    description: "Pin which brand this connection acts on (multi-brand accounts). Pass the brand id or exact name from list_brands. Works for a brand on your own account AND for a workspace another account SHARED with you — for a shared one pass its name or the profile id list_brands prints, and access is verified against your real membership before it is pinned. Persists for this API key until changed, on every surface (hosted connector included — no environment variables, no restart).",
+    inputSchema: { brand: z.string().describe('brand id (e.g. default / p_xxx), its exact name from list_brands, or the profile id of a workspace shared with you') },
     outputSchema: {
       ok: z.boolean().optional().describe('true when the brand switch persisted'),
       brand: z.any().optional().describe('the now-active brand ({id, name})'),
+      shared: z.boolean().optional().describe('true when the pinned workspace is owned by another account'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async ({ brand }) => {
     const d = await apiGet('/api/brands');
     const want = String(brand || '').trim().toLowerCase();
     const hit = (d.brands || []).find(b => b.id.toLowerCase() === want || String(b.name || '').toLowerCase() === want);
-    if (!hit) return { content: [{ type: 'text', text: `No brand matching "${brand}". Available:\n${(d.brands || []).map(b => `• ${b.name} (id: ${b.id})`).join('\n')}` }], isError: true };
-    await apiPost('/api/keys/brand', { profileId: hit.id });
-    return ok(`Now acting on ${hit.name} (${hit.id}) — brand, memory, renders and Library all scope to it.`, { ok: true, brand: hit });
+    // Pin the pair EVERY time: switching back to an own brand must clear a previous shared pin, which is why the
+    // server always writes both fields rather than leaving an omitted one alone.
+    if (hit) {
+      await apiPost('/api/keys/brand', { profileId: hit.id });
+      forgetWorkspaceScope(); // the store namespace just changed server-side — a memo from before the switch would write the OLD brand
+      return ok(`Now acting on ${hit.name} (${hit.id}) — brand, memory, renders and Library all scope to it.`, { ok: true, brand: hit, shared: false });
+    }
+    // A SHARED WORKSPACE IS SWITCHED INTO THE SAME WAY. It used to need two environment variables and a restart,
+    // which the hosted connector cannot do at all — so a teammate on Claude.ai saw an empty workspace and a remedy
+    // that did not apply to them. The server authorizes (owner, profile, caller) against profile_members before it
+    // pins anything, and re-authorizes on every request afterwards; nothing here is taken on the caller's word.
+    // Best-effort read: it must never turn "no brand by that name" into a crash.
+    let shared = [];
+    try { shared = (await apiGet('/api/team/workspaces'))?.workspaces || []; } catch { shared = []; }
+    const sh = shared.find(w => String(w.profileUuid || '').toLowerCase() === want || String(w.name || '').toLowerCase() === want);
+    if (sh) {
+      await apiPost('/api/keys/brand', { profileId: sh.profileUuid, ownerAccountId: sh.ownerAccountId });
+      forgetWorkspaceScope(); // a shared workspace re-keys to BARE — re-resolve rather than carry the previous brand's suffix
+      return ok(`Now acting on ${sh.name || 'that shared workspace'}${sh.ownerName ? ` — ${sh.ownerName}'s workspace` : ''} (profile ${sh.profileUuid}). Its brand, memory, Library and CONNECTED ACCOUNTS are what every tool sees from here; switch back by naming one of your own brands.`,
+        { ok: true, brand: { id: sh.profileUuid, name: sh.name || null, ownerAccountId: sh.ownerAccountId, role: sh.role || 'member' }, shared: true });
+    }
+    const own = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})`).join('\n');
+    const shr = shared.map(w => `• ${w.name || 'Shared workspace'}${w.ownerName ? ` — ${w.ownerName}` : ''} (id: ${w.profileUuid}, shared with you)`).join('\n');
+    return { content: [{ type: 'text', text: `No brand matching "${brand}". Available:\n${own}${shr ? `\n${shr}` : ''}` }], isError: true };
   }));
 
   // ── BRAND WORKSPACE LIFECYCLE. draft_brand OVERWRITES the active workspace's brand; it does not mint one — so
@@ -657,7 +756,7 @@ export function registerTools(server) {
     if (a.activate !== false) {
       // Best-effort: /api/keys/brand only applies to an agent KEY (a session-token connection picks brands in the
       // UI). A workspace that got created but not pinned is still a success — say which, never claim both.
-      try { await apiPost('/api/keys/brand', { profileId: b.id }); active = true; } catch {}
+      try { await apiPost('/api/keys/brand', { profileId: b.id }); active = true; forgetWorkspaceScope(); } catch {}
     }
     return ok(`${d.created ? 'Created' : 'That brand already exists:'} ${b.name} (id: ${b.id}).${active ? ' Now acting on it — brand, memory, renders and Library all scope here.' : ' Call use_brand to switch to it.'}\nNext: draft_brand to research and fill it in.`, { ...d, active });
   }));
@@ -952,11 +1051,15 @@ export function registerTools(server) {
 
   server.registerTool('post_to_meta', {
     title: 'Post to Facebook, Instagram or Threads',
-    description: 'Publish to a connected Facebook Page, its linked Instagram, OR the brand’s Threads account — text/link/image/VIDEO. target:"facebook" (default) posts to the Page; target:"instagram" publishes a photo or Reel to the linked IG business account (needs an image or video); target:"threads" posts to the connected Threads account (text, image, or video). Works with ANY media — a finished Hermoso ad OR an arbitrary user file: imageUrl/videoUrl accept a public https URL, a data: URI, or a Hermoso /generated path; for a LOCAL file (e.g. on the user’s desktop) call upload_file first and pass the url it returns. This PUBLISHES immediately — confirm the copy + media with the user first. Needs a connected Meta account (Settings ▸ Connectors ▸ Meta) with posting permission; Threads needs its own connection.',
+    description: 'Publish to a connected Facebook Page, its linked Instagram, OR the brand’s Threads account — text/link/image/VIDEO/CAROUSEL. A MULTI-SLIDE creative is a CAROUSEL, not several posts: pass the slides in order as imageUrls[] and they publish as ONE swipeable post (Instagram album, Threads carousel, Facebook multi-photo post). Never publish slide 1 of a deck on its own — the creative tells the viewer to swipe. target:"facebook" (default) posts to the Page; target:"instagram" publishes a photo or Reel to the linked IG business account (needs an image or video); target:"threads" posts to the connected Threads account (text, image, or video). Works with ANY media — a finished Hermoso ad OR an arbitrary user file: imageUrl/videoUrl accept a public https URL, a data: URI, or a Hermoso /generated path; for a LOCAL file (e.g. on the user’s desktop) call upload_file first and pass the url it returns. This PUBLISHES immediately — confirm the copy + media with the user first. Needs a connected Meta account (Settings ▸ Connectors ▸ Meta) with posting permission; Threads needs its own connection.',
     inputSchema: {
       message: z.string().optional().describe('post text / caption'),
       imageUrl: z.string().optional().describe('public https URL, a data: URI, or a Hermoso /generated path (upload_file gives you one for a local file)'),
       videoUrl: z.string().optional().describe('public https URL, data: URI, or /generated path — FB video post / IG Reel'),
+      imageUrls: z.array(z.string()).optional().describe('CAROUSEL — an ORDERED list of image (and, where the channel allows, video) URLs published as ONE post the viewer swipes through. THIS IS NOT “post several” — it is a single post with several slides, which is what a multi-slide creative (a listicle, a “1/6 · SWIPE” deck) actually needs; publishing only its first slide tells the viewer to swipe at something that cannot. The ORDER is the product. Limits per channel: Instagram 2–10 (images, videos or a mix), Threads 2–20 (mix allowed), Facebook 2+ (Meta publishes no documented maximum; Hermoso caps the upload fan-out at 30 and says so), LinkedIn company Pages 2–20 (images only), Pinterest 2–5 (images only), TikTok up to 35. One url here is simply an ordinary single post. Anything a channel cannot do is REFUSED with the real reason — nothing is ever quietly downgraded to one slide.'),
+      idempotencyKey: z.string().optional().describe('SAFE RETRIES. Publishing can take minutes (a video upload, a carousel of ten slides) and a transport can time out while the post SUCCEEDS — retrying blind is how the same thing gets posted twice. Pass any stable string here and a repeat of the SAME publish returns the ORIGINAL post id instead of posting again (24h). You do not have to: an identical publish is auto-recognised for 10 minutes anyway. If a call times out or errors ambiguously, CALL AGAIN WITH THE SAME KEY — that is the safe move, and it will either report the original post or publish it for the first time. It never posts twice.'),
+      allowDuplicate: z.boolean().optional().describe('post it even though an identical post was just made or attempted. Only pass this when the user genuinely wants the same thing posted twice, or when you have LOOKED at the account and confirmed a timed-out attempt did not land.'),
+      async: z.boolean().optional().describe('publish in the BACKGROUND and return a job id to poll with get_job, instead of waiting. USE THIS FOR VIDEO: a Facebook or Instagram video publish routinely outlives an agent transport, and a timeout on the synchronous path leaves you unable to tell whether the post is live. With async:true nothing can time out — the job reports the post id and url when it lands.'),
       link: z.string().optional().describe('a URL to attach (FB text post only)'),
       target: z.enum(['facebook', 'instagram', 'threads']).optional().describe('default facebook; instagram → the Page’s linked IG; threads → the brand’s connected Threads account'),
       scheduleAt: z.string().optional().describe('FACEBOOK ONLY — schedule instead of posting now. ISO timestamp (2026-08-01T09:00:00Z) or unix seconds; must be 10 minutes to 30 days ahead. Facebook holds the post and publishes it at that time, so nothing has to stay running on our side. Instagram and Threads have NO scheduling in Meta’s API — passing this for them is refused rather than silently posted immediately.'),
@@ -965,25 +1068,68 @@ export function registerTools(server) {
     },
     outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), url: z.string().optional(), target: z.string().optional(), page: z.string().optional(), account: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async (a) => {
+  }, publishWrap(async (a) => {
     const d = await apiPost('/api/meta/post', a);
+    if (d?.queued) return ok(`${d.note} Nothing is live yet — poll get_job("${d.jobId}") and report the post id and url it returns.`, d);
     if (d?.scheduled) return ok(`Scheduled on ${d.page} for ${d.scheduledFor} — Facebook will publish it then. It is NOT live yet.`, d);
-    return ok(`Published to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).`, d);
+    // A REPLAY IS NOT A NEW POST, and saying so is the whole point: an agent that retried a timeout must be told it
+    // got the ORIGINAL back, or it will report two posts to the user.
+    if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
+    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL` : ''} to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).`, d);
   }));
   // ── SCHEDULING (2026-07-30). ONE mechanism for every channel — our durable queue, not a per-platform special case.
   // Dave: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
   // no need for one edge case just for Facebook."
   server.registerTool('schedule_post', {
     title: 'Schedule a post for later',
-    description: 'Queue a post to go out at a future time, to one or more connected channels at once (facebook, instagram, threads, tiktok, youtube, linkedin, x, pinterest, google_business). This is how you run a content calendar: schedule now, and Hermoso publishes at the time you set — you do not need to be around. Pass a Hermoso render URL as imageUrl/videoUrl (or an upload_file URL for external media). Use `captions` to give each channel its own wording; anything not listed falls back to `message`. Channels are attempted INDEPENDENTLY, so one failing channel never blocks the others. A scheduled post GOES LIVE PUBLICLY by default on every channel — that is what scheduling means, and nothing is ever quietly downgraded to a draft or an unlisted upload. If the user genuinely wants something staged instead, set `visibility` (or `visibilityByChannel` for just one channel): ‘public’ (default, live) · ‘unlisted’ (YouTube only — link-only) · ‘private’ (YouTube private, or TikTok posted SELF_ONLY) · ‘draft’ (TikTok drafts, or an unpublished Facebook Page post for a human to publish). Ask for a weaker visibility only if the user asked for one. If a channel cannot do the visibility requested, the call is REFUSED right now with the reason, rather than posting something weaker later. Most channels publish publicly and nothing else: only YouTube has unlisted/private, only TikTok has private/draft, and only Facebook has draft.',
+    description: 'Queue a post to go out at a future time, to one or more connected channels at once (facebook, instagram, threads, tiktok, youtube, linkedin, x, pinterest, google_business). A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order — never schedule just its first slide. This is how you run a content calendar: schedule now, and Hermoso publishes at the time you set — you do not need to be around. Either name the exact time in `at`, or pass `useQueue:true` to take the brand’s next free POSTING SLOT (its saved posting times, skipping any already occupied) — that is what “just queue it” means and it saves the user picking a minute. Pass a Hermoso render URL as imageUrl/videoUrl (or an upload_file URL for external media). PINTEREST AND YOUTUBE ALSO SHOW A TITLE: pass `title` (max 100 chars) — omit it and Hermoso derives one from the caption\u2019s first sentence rather than truncating the caption mid-word, which is what a Pin headline used to be. A YOUTUBE ITEM’S CAPTION IS ITS TITLE, NOT ITS DESCRIPTION: pass `description` (≤5000 chars) for the box under the video — the links, the CTA and everything YouTube search reads — plus `tags` (up to 30). Omit them and the upload lands with an empty description, which is not recoverable by the time anyone notices. Use `captions` to give each channel its own wording; anything not listed falls back to `message`. PER-CHANNEL SETTINGS, all carried straight through to the real publisher: TIKTOK takes the paid-partnership disclosure (`brandedContent`) and the own-brand one (`yourBrand`) — set them whenever the post is commercial, they are compliance declarations — plus `disableComment` and, on a video, `disableDuet` / `disableStitch` / `coverTimestampMs`. GOOGLE BUSINESS takes `topicType` (STANDARD / EVENT / OFFER / ALERT) with `event` and `offer`, and a real `actionType` button instead of the hard-coded Learn more. X takes a whole `thread`, a `poll`, `replySettings` and `madeWithAi`. Channels are attempted INDEPENDENTLY, so one failing channel never blocks the others. SOME CHANNELS MUST BE TOLD WHICH ACCOUNT, and Hermoso never guesses one: a Pinterest pin needs `boardId` (list_pinterest_boards) or it is refused outright; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages) and without it the post goes to the connected person’s own profile; a brand with more than one connected Facebook Page needs `pageId` (list_meta_pages) and an account managing more than one Google Business listing needs `locationId` (list_business_locations) — resolve those FIRST and let the user pick, because with several to choose from and no id the post is refused when it fires, hours later. A scheduled post GOES LIVE PUBLICLY by default on every channel — that is what scheduling means, and nothing is ever quietly downgraded to a draft or an unlisted upload. If the user genuinely wants something staged instead, set `visibility` (or `visibilityByChannel` for just one channel): ‘public’ (default, live) · ‘unlisted’ (YouTube only — link-only) · ‘private’ (YouTube private, or TikTok posted SELF_ONLY) · ‘draft’ (TikTok drafts, or an unpublished Facebook Page post for a human to publish). Ask for a weaker visibility only if the user asked for one. If a channel cannot do the visibility requested, the call is REFUSED right now with the reason, rather than posting something weaker later. Most channels publish publicly and nothing else: only YouTube has unlisted/private, only TikTok has private/draft, and only Facebook has draft.',
     inputSchema: {
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business'])).describe('one or more channels to post to at that time'),
-      at: z.string().describe('when to post — ISO timestamp (2026-08-01T09:00:00Z) or epoch milliseconds. Must be in the future, at most 365 days out.'),
+      at: z.string().optional().describe('when to post — ISO timestamp (2026-08-01T09:00:00Z) or epoch milliseconds. Must be in the future, at most 365 days out. Give this OR useQueue, never both.'),
+      useQueue: z.boolean().optional().describe('instead of naming a minute, drop this into the brand’s POSTING QUEUE: Hermoso takes the earliest of its saved posting times that is still free (skipping any slot another queued post already holds). This is the natural answer to “just queue it” / “post it at my next opening”. Mutually exclusive with `at` — passing both is refused rather than one being silently preferred. If the brand has no posting times set, or every slot for the next 90 days is taken, it is refused by name and nothing is scheduled.'),
+      timezone: z.string().optional().describe('IANA zone for the queue, e.g. "America/New_York" — only meaningful with useQueue, and it overrides the brand’s saved zone for this one post. A saved slot of "09:00" is a WALL-CLOCK time, so the zone is what turns it into an instant; without either the brand’s saved zone or this, the queue resolves in UTC.'),
       message: z.string().optional().describe('the caption/text used for every channel unless overridden in captions'),
       captions: z.record(z.string()).optional().describe('per-channel caption overrides, e.g. { "instagram": "…", "threads": "…" } — platforms want different lengths and hashtag conventions'),
       imageUrl: z.string().optional().describe('public https URL, data: URI, or a Hermoso /generated path'),
       videoUrl: z.string().optional().describe('public https URL, data: URI, or /generated path — required for youtube, and for tiktok unless you pass an imageUrl (TikTok takes a photo post too)'),
+      imageUrls: z.array(z.string()).optional().describe('CAROUSEL — an ORDERED list of image URLs to publish as ONE swipeable post on every channel that supports it (Instagram 2–10, Threads 2–20, Facebook, LinkedIn company Pages 2–20, Pinterest 2–5, TikTok up to 35 as a photo post). Use this whenever the creative is a multi-slide deck: a scheduled post carrying only slide 1 of a “1/6 · SWIPE” set is a broken ad that nobody is watching when it fires. THE ORDER IS THE PRODUCT. A channel on this schedule that cannot do carousels — X, YouTube, Google Business Profile — is REFUSED NOW, with the reason, so you can drop it or give it its own single image; it is never quietly downgraded hours later.'),
+      // PINTEREST / YOUTUBE HEADLINE. Both platforms show a title and neither can infer one; before this field
+      // existed the worker sent the caption sliced at 100 characters, so every scheduled Pin was headlined by a
+      // mid-sentence fragment of the text repeated directly underneath it.
+      title: z.string().optional().describe('PINTEREST / YOUTUBE — the headline, max 100 characters. Pinterest shows it in search and under the pin; YouTube requires one. Leave it out and Hermoso derives one from that channel\u2019s caption (first sentence, cut on a word boundary, trailing hashtags dropped) — set a real one whenever the caption does not open with a usable headline.'),
+      // YOUTUBE PUBLISH METADATA (server-side SCHED_META_FIELDS). youtubeUpload has always accepted both and
+      // post_to_youtube declares both; the QUEUE had nowhere to put them, so every scheduled upload landed with an
+      // empty description box and no tags. The caption cannot stand in for them — it becomes the video TITLE.
+      description: z.string().optional().describe('YOUTUBE — the video DESCRIPTION, max 5000 characters: the box under the video carrying the links, the CTA and everything YouTube search reads. It is NOT the caption — a scheduled YouTube item’s text becomes its TITLE — so omitting this publishes the video with an empty description.'),
+      tags: z.array(z.string()).optional().describe('YOUTUBE — up to 30 search tags for the video (plain words, no #).'),
+      altText: z.string().optional().describe('ACCESSIBILITY — the screen-reader description of the attached image. X (max 1000 characters), Pinterest (max 500) and LinkedIn COMPANY PAGE posts each attach it to the picture; the schedule is REFUSED if it is longer than the tightest of the channels on it, rather than truncated on the way out. Write one whenever the post carries an image: describe what is IN the picture, never a repeat of the caption, which a screen reader already reads. A LinkedIn post to a PERSONAL profile carries none \u2014 LinkedIn\u2019s member posting API has no alt-text field at all.'),
       link: z.string().optional().describe('a link to attach (Facebook)'),
+      // ── PER-CHANNEL PUBLISH SETTINGS (server-side SCHED_META_FIELDS, 2026-08-03). Every one of these has been on
+      // the immediate publish helper since the day it was written — tiktokPost's disclosures and interaction
+      // toggles, gbpCreatePost's topic type / event / offer / CTA, xPost's thread, poll and reply settings — and the
+      // QUEUE could carry none of them, so a post composed with a paid-partnership declaration, an Offer or a poll
+      // became a plain post the moment it was scheduled instead of sent. Bounds and enums are the vendors' own, read
+      // 2026-08-03: TikTok's video/photo Post Info tables, Google's v4 LocalPost reference, docs.x.com create-post.
+      brandedContent: z.boolean().optional().describe('TIKTOK — the PAID-PARTNERSHIP disclosure (TikTok’s brand_content_toggle): true when this post promotes a THIRD-PARTY business. It is a compliance declaration, not a preference — set it whenever the post is sponsored. TikTok only accepts branded content on a public or friends-only post, so it cannot ride a private/SELF_ONLY or draft TikTok item and the schedule is refused with the reason.'),
+      yourBrand: z.boolean().optional().describe('TIKTOK — the OWN-BRAND disclosure (brand_organic_toggle): true when the post promotes the creator’s own business. TikTok asks for at least one of this and brandedContent once a post is commercial.'),
+      disableComment: z.boolean().optional().describe('TIKTOK — turn comments off on this post.'),
+      disableDuet: z.boolean().optional().describe('TIKTOK VIDEO ONLY — block Duets. TikTok’s photo-post API has no Duets, so this is refused on a photo/slideshow item rather than silently dropped.'),
+      disableStitch: z.boolean().optional().describe('TIKTOK VIDEO ONLY — block Stitches. Same photo-post rule as disableDuet.'),
+      coverTimestampMs: z.number().optional().describe('TIKTOK VIDEO ONLY — which frame TikTok uses as the cover, in milliseconds from the start. Omit and TikTok uses the first frame.'),
+      topicType: z.enum(['STANDARD', 'EVENT', 'OFFER', 'ALERT']).optional().describe('GOOGLE BUSINESS — the KIND of Post. STANDARD is the default; EVENT and OFFER both REQUIRE `event` (title + start date), and OFFER also takes `offer`.'),
+      actionType: z.enum(['BOOK', 'ORDER', 'SHOP', 'LEARN_MORE', 'SIGN_UP', 'CALL']).optional().describe('GOOGLE BUSINESS — the call-to-action button. Every button except CALL needs `link` (CALL dials the number on the listing and takes none). Google IGNORES the button link on an OFFER post — put the destination in offer.redeemOnlineUrl. Omit and a post carrying a link gets LEARN_MORE.'),
+      event: z.object({ title: z.string().optional(), startDate: z.string().optional(), startTime: z.string().optional(), endDate: z.string().optional(), endTime: z.string().optional() }).optional().describe('GOOGLE BUSINESS — required for an EVENT or OFFER post: {title, startDate:"YYYY-MM-DD", endDate, startTime:"HH:MM", endTime}. `title` is the EVENT’s headline, a different thing from the post `title` (which is the Pinterest/YouTube one). Google documents its TimeInterval as needing all four date/time parts to be valid, so send the times whenever you know them.'),
+      offer: z.object({ couponCode: z.string().optional(), redeemOnlineUrl: z.string().optional(), termsConditions: z.string().optional() }).optional().describe('GOOGLE BUSINESS — OFFER posts only: {couponCode, redeemOnlineUrl, termsConditions}. redeemOnlineUrl is where an offer actually sends people, since the button link is ignored on an Offer.'),
+      thread: z.array(z.string()).optional().describe('X — publish a THREAD, one entry per post, each replying to the one before (at most 25, each ≤280 characters). It REPLACES the X caption: with a thread set, `message`/`captions.x` is not sent to X at all. A thread cannot carry a poll.'),
+      poll: z.object({ options: z.array(z.string()), durationMinutes: z.number().optional() }).optional().describe('X — attach a poll: {options:["…","…"], durationMinutes}. 2–4 options of at most 25 characters each; voting runs 5–10080 minutes (7 days), default 1440. X makes a poll MUTUALLY EXCLUSIVE with media, so an item carrying an image or video is refused — schedule the poll as its own X-only post.'),
+      replySettings: z.enum(['following', 'mentionedUsers', 'subscribers', 'verified']).optional().describe('X — who may reply. Omit for everyone, which is the right default for a brand post.'),
+      madeWithAi: z.boolean().optional().describe('X — X’s AI-media label on this post. Opt-in: X treats it as the poster’s own claim about their media, so it is never set on the user’s behalf.'),
+      // ── WHICH ACCOUNT (server-side SCHED_ID_FIELDS). Every one of these is an answer the publish helper REFUSES
+      // to guess, so a schedule that cannot carry it can only fail at fire time with nobody watching.
+      boardId: z.string().optional().describe('PINTEREST — REQUIRED whenever pinterest is a channel: the board the Pin goes on, from list_pinterest_boards. The user picks it; a Pin on the wrong board is a public mistake. Scheduling pinterest without one is refused immediately.'),
+      linkedinOrganizationId: z.string().optional().describe('LINKEDIN — publish as a COMPANY PAGE instead of the connected personal profile. The organization id from list_linkedin_pages. Omit and it posts as the person: an unset id means the profile, never “probably the company”. A Page can also carry VIDEO, which a personal profile cannot.'),
+      pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — which connected Facebook Page (and its linked Instagram) publishes, from list_meta_pages. Needed when the brand has more than one Page connected; with several and no id the post is refused at fire time rather than sent from the wrong brand.'),
+      locationId: z.string().optional().describe("GOOGLE BUSINESS PROFILE — which listing, e.g. 'locations/123' from list_business_locations. Needed when the account manages more than one storefront; it is never chosen for the user."),
       visibility: z.enum(['public', 'unlisted', 'private', 'draft']).optional().describe("how it should be published — DEFAULT 'public' (live). Only pass something else if the user explicitly asked to stage/hide it. Not every channel supports every value; an impossible combination is refused when you schedule it, with the reason."),
       visibilityByChannel: z.record(z.string()).optional().describe('override visibility for one channel, e.g. { "tiktok": "draft" } to go live everywhere but stage TikTok for review'),
     },
@@ -1012,6 +1158,58 @@ export function registerTools(server) {
     const badLine = bad.length ? ` ${bad.length} of those did NOT fully publish: ${bad.slice(0, 5).map(r => `${r.id} (${(Array.isArray(r.results) ? r.results.filter(x => x && x.ok === false).map(x => `${x.channel}: ${x.error || 'failed'}`).join('; ') : '') || r.error || 'failed'})`).join(' · ')}.` : '';
     return ok(`${q} post${q === 1 ? '' : 's'} queued, ${h} already fired.${badLine}`, d);
   }));
+  // RESCHEDULE. `PATCH /api/schedule/:id` has existed since drag-to-reschedule shipped and NO agent surface wrapped
+  // it, so the only move an agent had was cancel + retype — which is exactly how a calendar loses a caption, and the
+  // reason the edit path was built in the first place. postiz and post-bridge both expose an update; post-bridge's
+  // notably CANNOT move a post onto a queue slot (their `use_queue` is create-only), so a full partial update here
+  // is a strictly better shape than theirs.
+  server.registerTool('reschedule_post', {
+    title: 'Change a scheduled post',
+    description: 'Change a post that is still QUEUED — move it to a different time, rewrite the caption, swap the media, add or drop a channel, or change which board / Page / company Page / listing it goes to. PASS ONLY WHAT CHANGES: an omitted field is left exactly as it was, and an explicit empty string CLEARS one (linkedinOrganizationId:"" moves a company-Page post back to the person\u2019s own profile). The edited item is re-checked against the identical rules its create passed — visibility the channel can honour, per-channel length, media the channel can carry — so an edit can never slip past a refusal that a create would have caught. Get the id from list_scheduled. Something that already went out cannot be changed: a published post is edited or removed with manage_meta_post / manage_linkedin_post / delete_x_post, not rescheduled.',
+    inputSchema: {
+      id: z.string().describe('the scheduled post id from list_scheduled'),
+      at: z.string().optional().describe('the new time — ISO timestamp (2026-08-05T09:00:00Z) or epoch milliseconds. Must be in the future, at most 365 days out.'),
+      message: z.string().optional().describe('replace the caption used for every channel that has no override'),
+      captions: z.record(z.string()).optional().describe('replaces the WHOLE per-channel caption map — send every override you want to keep, not just the new one'),
+      channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business'])).optional().describe('replaces the channel list'),
+      imageUrl: z.string().optional().describe('swap the image; "" removes it'),
+      videoUrl: z.string().optional().describe('swap the video; "" removes it'),
+      imageUrls: z.array(z.string()).optional().describe('replace the CAROUSEL slides, in order; an empty array [] drops the carousel and goes back to a single image. Omit to leave the slides exactly as they are. The edited item is re-checked against the same carousel rules the create passed, so adding a channel that cannot swipe is refused now rather than posting slide 1 later.'),
+      title: z.string().optional().describe('PINTEREST / YOUTUBE — replace the headline; "" clears it and goes back to deriving one from the caption'),
+      description: z.string().optional().describe('YOUTUBE — replace the video description; "" clears it. Remember the caption is the TITLE, not the description.'),
+      tags: z.array(z.string()).optional().describe('YOUTUBE — replaces the WHOLE tag list; an empty array [] clears the tags.'),
+      altText: z.string().optional().describe('ACCESSIBILITY — replace the image\u2019s screen-reader description (used by X, Pinterest and LinkedIn company Pages); "" clears it.'),
+      link: z.string().optional(),
+      // The per-channel publish settings (SCHED_META_FIELDS), on the same omitted-means-keep rule as everything else
+      // here: send only what changes. A whole-record field (`event`, `offer`, `poll`, `thread`) REPLACES the record.
+      brandedContent: z.boolean().optional().describe('TIKTOK — the paid-partnership disclosure; false turns it off.'),
+      yourBrand: z.boolean().optional().describe('TIKTOK — the own-brand disclosure; false turns it off.'),
+      disableComment: z.boolean().optional().describe('TIKTOK — comments off on this post.'),
+      disableDuet: z.boolean().optional().describe('TIKTOK VIDEO ONLY — block Duets.'),
+      disableStitch: z.boolean().optional().describe('TIKTOK VIDEO ONLY — block Stitches.'),
+      coverTimestampMs: z.number().optional().describe('TIKTOK VIDEO ONLY — cover frame in milliseconds.'),
+      topicType: z.enum(['STANDARD', 'EVENT', 'OFFER', 'ALERT']).optional().describe('GOOGLE BUSINESS — the kind of Post; EVENT and OFFER both require `event`.'),
+      actionType: z.enum(['BOOK', 'ORDER', 'SHOP', 'LEARN_MORE', 'SIGN_UP', 'CALL']).optional().describe('GOOGLE BUSINESS — the call-to-action button; "" clears it.'),
+      event: z.object({ title: z.string().optional(), startDate: z.string().optional(), startTime: z.string().optional(), endDate: z.string().optional(), endTime: z.string().optional() }).optional().describe('GOOGLE BUSINESS — replaces the whole event record {title, startDate, startTime, endDate, endTime}.'),
+      offer: z.object({ couponCode: z.string().optional(), redeemOnlineUrl: z.string().optional(), termsConditions: z.string().optional() }).optional().describe('GOOGLE BUSINESS — replaces the whole offer record {couponCode, redeemOnlineUrl, termsConditions}.'),
+      thread: z.array(z.string()).optional().describe('X — replaces the WHOLE thread; an explicit [] drops back to a single post using the caption.'),
+      poll: z.object({ options: z.array(z.string()), durationMinutes: z.number().optional() }).optional().describe('X — replaces the poll; an empty options list removes it.'),
+      replySettings: z.enum(['following', 'mentionedUsers', 'subscribers', 'verified']).optional().describe('X — who may reply; "" goes back to everyone.'),
+      madeWithAi: z.boolean().optional().describe('X — the AI-media label; false turns it off.'),
+      boardId: z.string().optional().describe('PINTEREST — move the Pin to a different board (list_pinterest_boards)'),
+      linkedinOrganizationId: z.string().optional().describe('LINKEDIN — target a different company Page, or "" to post as the connected person instead'),
+      pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — publish from a different connected Page (list_meta_pages)'),
+      locationId: z.string().optional().describe('GOOGLE BUSINESS — a different listing (list_business_locations)'),
+      visibility: z.enum(['public', 'unlisted', 'private', 'draft']).optional().describe('NOTE: changing this without also naming visibilityByChannel clears any per-channel overrides, so "make it all draft" is not a no-op'),
+      visibilityByChannel: z.record(z.string()).optional(),
+    },
+    outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), visibility: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const { id, ...patch } = a;
+    const d = await apiPatch(`/api/schedule/${encodeURIComponent(id)}`, patch);
+    return ok(`Moved — ${d.id} now goes out at ${d.at} → ${(d.channels || []).join(', ')} (${d.visibility}). It is still NOT posted; confirm the new time back to the user.`, d);
+  }));
   server.registerTool('cancel_scheduled', {
     title: 'Cancel a scheduled post',
     description: 'Remove a queued post before it goes out. Get the id from list_scheduled. Only works while it is still queued — something already published cannot be unsent (use manage_meta_post to delete a Facebook/Instagram post after the fact).',
@@ -1022,18 +1220,92 @@ export function registerTools(server) {
     const d = await apiDelete(`/api/schedule/${encodeURIComponent(a.id)}`);
     return ok(`Cancelled ${d.cancelled}.`, d);
   }));
+  // ── THE POSTING REFILL (2026-08-03) ───────────────────────────────────────────────────────────────────────────
+  // Keeping a calendar full is the part of "post three times a day" that nobody sustains by hand, and it was
+  // browser-only for about an hour. These three wrap the SAME routes the app uses; there is no second queue —
+  // every post the refill makes is an ordinary scheduled item that list_scheduled shows and cancel_scheduled cancels.
+  server.registerTool('get_post_refill', {
+    title: 'Posting refill status',
+    description: 'Show the automatic posting refill for this brand: whether it is on, whether it is in dry-run (preview) mode, how many days ahead it fills, its render budget, when it next runs, and how many posts are queued right now. It also names the channels that CANNOT be posted to and why. Read-only, free.',
+    inputSchema: {},
+    outputSchema: {
+      enabled: z.boolean().optional(), dryRun: z.boolean().optional(), daysAhead: z.number().optional(),
+      postsPerDay: z.number().optional(), running: z.boolean().optional(), nextRunAt: z.number().optional(),
+      queuedPosts: z.number().optional(), postingSchedule: z.any().optional(), excluded: z.any().optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, wrap(async () => {
+    const d = await apiGet('/api/schedule/refill', {});
+    const cadence = d.postsPerDay > 0 ? d.postsPerDay : (d.postingSchedule?.slots || []).length;
+    const state = !d.enabled ? 'OFF' : (d.dryRun ? 'ON, but in DRY RUN — it plans and previews, it queues nothing' : 'ON and LIVE — it queues real posts');
+    return ok(`Posting refill: ${state}.\n${cadence} post(s) a day at ${(d.postingSchedule?.slots || []).join(', ') || 'no posting times set'} ${d.postingSchedule?.timezone || 'UTC'}, filling ${d.daysAhead} day(s) ahead. ${d.queuedPosts} post(s) queued now.\nRender budget: ${d.maxImagesPerDay || 0} image(s) + ${d.maxVideosPerDay || 0} video(s) a day, ${d.maxCreditsPerDay || 0} credit ceiling — at 0 it reuses the Library and spends nothing on creative.\nCannot post to: ${Object.entries(d.excluded || {}).map(([c, why]) => `${c} — ${why}`).join('\n  ') || 'nothing'}`, d);
+  }));
+  server.registerTool('set_post_refill', {
+    title: 'Configure the posting refill',
+    description: 'Turn the automatic posting refill on or off and set how it behaves. PASS ONLY WHAT CHANGES. `enabled:false` is the PAUSE — it removes the recurring job outright, and posts already queued are left alone (cancel those with cancel_scheduled if you want them gone). It starts in dryRun, which plans and previews without queueing; set dryRun:false only once a human has read a preview from run_post_refill. THE CADENCE IS THE BRAND’S POSTING TIMES, not a number here: three posting times means three posts a day. Raising maxImagesPerDay / maxVideosPerDay / maxCreditsPerDay above 0 lets it SPEND on new creative — at 0 (the default) it only reuses renders already in the Library and costs nothing.',
+    inputSchema: {
+      enabled: z.boolean().optional().describe('on/off. false PAUSES it: the recurring job is deleted and nothing new is queued. Already-queued posts are untouched.'),
+      dryRun: z.boolean().optional().describe('true (the default) = plan and preview only, queue nothing. Set false ONLY after a human has read a preview.'),
+      daysAhead: z.number().optional().describe('how far ahead to keep the queue full, 1–30 (default 7)'),
+      postsPerDay: z.number().optional().describe('cap the posts per day BELOW the number of posting times. 0 (default) = use every posting time, which is where "3 a day" comes from. To post MORE per day, add posting times instead.'),
+      assetCooldownDays: z.number().optional().describe('how long before a Library render may be posted again (default 30). It never repeats one inside this window — it queues fewer posts and says so.'),
+      maxImagesPerDay: z.number().optional().describe('how many NEW images a day it may render when the Library runs dry. 0 (default) = none, spend nothing.'),
+      maxVideosPerDay: z.number().optional().describe('how many NEW videos a day it may render. 0 (default) = none. Video is the expensive one — hundreds of credits each.'),
+      maxCreditsPerDay: z.number().optional().describe('a hard credit ceiling per day, checked BEFORE any render starts. It binds independently of the counts above.'),
+      channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest'])).optional().describe('restrict it to these channels. Omit (or send an empty list) to use every connected channel that can carry each post.'),
+      boardId: z.string().optional().describe('PINTEREST — which board Pins go on (list_pinterest_boards). Without one, Pinterest is skipped: a Pin on the wrong board is a public mistake, so it is never guessed.'),
+      linkedinOrganizationId: z.string().optional().describe('LINKEDIN — which company Page to post as (list_linkedin_pages). A single shared Page is used automatically; a Page that is not shared with this brand is ignored rather than failing the whole post.'),
+      pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — which connected Page to publish from (list_meta_pages). Omit for the brand’s only Page.'),
+    },
+    outputSchema: { enabled: z.boolean().optional(), dryRun: z.boolean().optional(), running: z.boolean().optional(), daysAhead: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPut('/api/schedule/refill', a);
+    return ok(d.enabled
+      ? `Posting refill is ON${d.dryRun ? ' in DRY RUN — it will preview a plan each day and queue nothing. Run run_post_refill to see the plan, and only set dryRun:false once a human has read one.' : ' and LIVE — it will queue real posts every day.'}`
+      : 'Posting refill is OFF. The recurring job is gone and nothing new will be queued. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.', d);
+  }));
+  server.registerTool('run_post_refill', {
+    title: 'Run the posting refill',
+    description: 'Run the refill NOW instead of waiting for its daily turn. DRY BY DEFAULT: it returns the exact posts it WOULD queue — the caption, the creative, the channels and the per-channel visibility — without queueing anything or spending anything on creative. Pass dryRun:false to actually queue them. SHOW THE PREVIEW TO THE USER BEFORE EVER PASSING dryRun:false; these go onto real public accounts. Every caption is screened against the brand’s own voice rules and a failing one is dropped, so a plan can legitimately come back shorter than the cadence — the reason is in the notes.',
+    inputSchema: {
+      dryRun: z.boolean().optional().describe('default TRUE (preview only). false actually queues the posts.'),
+      force: z.boolean().optional().describe('plan even while the refill is switched off — useful for showing someone what it would do before they turn it on. Combined with dryRun:false it still respects a stored dryRun.'),
+    },
+    outputSchema: {
+      enabled: z.boolean().optional(), dryRun: z.boolean().optional(), summary: z.string().optional(),
+      posts: z.array(z.any()).optional(), queued: z.array(z.any()).optional(), skippedSlots: z.array(z.any()).optional(),
+      notes: z.array(z.string()).optional(), spend: z.any().optional(), perChannel: z.any().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/schedule/refill/run', { dryRun: a.dryRun === false ? false : true, force: !!a.force });
+    const lines = (d.posts || []).map((p, i) => `  ${i + 1}. ${p.at} → ${(p.channels || []).map(c => `${c}[${(p.visibilityByChannel || {})[c] || 'public'}]`).join(', ')}\n     ${String(p.message || '').replace(/\n+/g, ' / ').slice(0, 220)}\n     creative: ${p.kind} · ${p.asset?.model || 'Library render'} (${p.asset?.credits || 0} credits)`);
+    const q = (d.queued || []).filter(x => x && x.id).length, qFail = (d.queued || []).filter(x => x && x.error);
+    return ok([
+      d.summary || '',
+      lines.length ? `\nThe posts:\n${lines.join('\n')}` : '',
+      d.dryRun ? '\nNOTHING WAS QUEUED AND NOTHING WAS SPENT — this was a preview. Show it to the user; call again with dryRun:false only if they say yes.' : `\n${q} post(s) queued.`,
+      qFail.length ? `\n${qFail.length} could not be queued: ${qFail.map(x => `${x.at} — ${x.error}`).join(' · ')}` : '',
+      (d.notes || []).length ? `\nNotes: ${d.notes.join(' · ')}` : '',
+    ].filter(Boolean).join('\n'), d);
+  }));
   server.registerTool('post_to_linkedin', {
     title: 'Publish to LinkedIn',
     description: 'Publish a post to the user’s connected LinkedIn profile — text, and optionally a Hermoso render image (pass its served URL as imageUrl). This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Needs a connected LinkedIn account (Settings ▸ Connectors ▸ LinkedIn).',
     inputSchema: {
       text: z.string().describe('the post text'),
       imageUrl: z.string().optional().describe('a Hermoso render image URL to attach (≤12MB; external hosts refused)'),
+      imageUrls: z.array(z.string()).optional().describe('A CAROUSEL IS NOT AVAILABLE ON A PERSONAL PROFILE — LinkedIn\'s organic multi-image post publishes from a COMPANY PAGE. Passing several here is refused by name rather than posting slide 1; use post_to_linkedin_page instead.'),
+      idempotencyKey: z.string().optional().describe('SAFE RETRIES. Publishing can take minutes (a video upload, a carousel of ten slides) and a transport can time out while the post SUCCEEDS — retrying blind is how the same thing gets posted twice. Pass any stable string here and a repeat of the SAME publish returns the ORIGINAL post id instead of posting again (24h). You do not have to: an identical publish is auto-recognised for 10 minutes anyway. If a call times out or errors ambiguously, CALL AGAIN WITH THE SAME KEY — that is the safe move, and it will either report the original post or publish it for the first time. It never posts twice.'),
+      allowDuplicate: z.boolean().optional().describe('post it even though an identical post was just made or attempted. Only pass this when the user genuinely wants the same thing posted twice, or when you have LOOKED at the account and confirmed a timed-out attempt did not land.'),
       visibility: z.enum(['PUBLIC', 'CONNECTIONS']).optional().describe('default PUBLIC'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async (a) => {
+  }, publishWrap(async (a) => {
     const d = await apiPost('/api/linkedin/post', a);
+    if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
     return ok(`Published to LinkedIn${d.url ? ` — ${d.url}` : '.'}`, d);
   }));
   // ── X / TWITTER (docs/connector-roadmap.md §2). UNLIKE EVERY OTHER CONNECTOR, X BILLS PER CALL — the descriptions
@@ -1209,11 +1481,14 @@ export function registerTools(server) {
   }));
   server.registerTool('post_to_pinterest', {
     title: 'Create a Pin',
-    description: 'Create a Pin on one of the user’s Pinterest boards from a finished render — image or video — with a title, description and destination link. The link is what makes a Pin drive traffic, so ask for it rather than omitting it, and the description is the text Pinterest search actually reads. boardId is REQUIRED: call list_pinterest_boards first and let the user choose. This PUBLISHES to their public profile — confirm the board, title and link before calling. Video Pins take a minute or two while Pinterest ingests the file. Needs Pinterest connected (Settings ▸ Connectors ▸ Pinterest).',
+    description: 'Create a Pin on one of the user’s Pinterest boards from a finished render — image, video, or a 2–5 slide CAROUSEL (pass the slides in order as imageUrls[] and Pinterest publishes one swipeable Pin). Title, description and destination link ride along. The link is what makes a Pin drive traffic, so ask for it rather than omitting it, and the description is the text Pinterest search actually reads. boardId is REQUIRED: call list_pinterest_boards first and let the user choose. This PUBLISHES to their public profile — confirm the board, title and link before calling. Video Pins take a minute or two while Pinterest ingests the file. Needs Pinterest connected (Settings ▸ Connectors ▸ Pinterest).',
     inputSchema: {
       boardId: z.string().describe('numeric board id from list_pinterest_boards — the user picks it, never guess'),
       imageUrl: z.string().optional().describe('a Hermoso render image URL (or an upload_file url)'),
       videoUrl: z.string().optional().describe('a Hermoso render video URL — takes 1–2 minutes to ingest'),
+      imageUrls: z.array(z.string()).optional().describe('CAROUSEL — an ORDERED list of image (and, where the channel allows, video) URLs published as ONE post the viewer swipes through. THIS IS NOT “post several” — it is a single post with several slides, which is what a multi-slide creative (a listicle, a “1/6 · SWIPE” deck) actually needs; publishing only its first slide tells the viewer to swipe at something that cannot. The ORDER is the product. Limits per channel: Instagram 2–10 (images, videos or a mix), Threads 2–20 (mix allowed), Facebook 2+ (Meta publishes no documented maximum; Hermoso caps the upload fan-out at 30 and says so), LinkedIn company Pages 2–20 (images only), Pinterest 2–5 (images only), TikTok up to 35. One url here is simply an ordinary single post. Anything a channel cannot do is REFUSED with the real reason — nothing is ever quietly downgraded to one slide.'),
+      idempotencyKey: z.string().optional().describe('SAFE RETRIES. Publishing can take minutes (a video upload, a carousel of ten slides) and a transport can time out while the post SUCCEEDS — retrying blind is how the same thing gets posted twice. Pass any stable string here and a repeat of the SAME publish returns the ORIGINAL post id instead of posting again (24h). You do not have to: an identical publish is auto-recognised for 10 minutes anyway. If a call times out or errors ambiguously, CALL AGAIN WITH THE SAME KEY — that is the safe move, and it will either report the original post or publish it for the first time. It never posts twice.'),
+      allowDuplicate: z.boolean().optional().describe('post it even though an identical post was just made or attempted. Only pass this when the user genuinely wants the same thing posted twice, or when you have LOOKED at the account and confirmed a timed-out attempt did not land.'),
       title: z.string().optional().describe('Pin title, max 100 characters'),
       description: z.string().optional().describe('Pin description, max 800 characters — this is what Pinterest search reads'),
       link: z.string().optional().describe('destination URL the Pin clicks through to'),
@@ -1223,9 +1498,10 @@ export function registerTools(server) {
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().nullable().optional(), url: z.string().nullable().optional(), boardId: z.string().optional(), title: z.string().optional(), kind: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async (a) => {
+  }, publishWrap(async (a) => {
     const d = await apiPost('/api/pinterest/pin', a);
-    return ok(`Pinned to Pinterest${d.url ? ` — ${d.url}` : '.'}`, d);
+    if (d?.idempotentReplay) return ok(`${d.note} (Nothing was pinned a second time.)`, d);
+    return ok(`Pinned to Pinterest${d.carousel ? ` as a ${d.slides}-slide carousel` : ''}${d.url ? ` — ${d.url}` : '.'}`, d);
   }));
   // ── GOOGLE BUSINESS PROFILE (2026-07-30). The local-SEO channel: the listing panel on Google Search + Maps.
   // Posting is on Google's LEGACY v4 service (localPosts was never migrated); the server owns that, these are thin.
@@ -1364,6 +1640,29 @@ export function registerTools(server) {
     const d = await apiPost('/api/youtube/update-video', a);
     return ok(`Updated — “${d.title}” is now ${d.privacy}. ${d.url}`, d);
   }));
+  // DELETE. Every other channel we publish to has a removal path (delete_x_post, manage_meta_post,
+  // manage_linkedin_post, delete_thread, delete_google_business_post); YouTube had only update_youtube_video, so the
+  // best a headless caller could do was flip a video to private. `videos.delete` accepts youtube.force-ssl — which
+  // this connection already holds — so it was a WIRING gap, not a scope gap, and needs no reconnect.
+  // The gate is SERVER-side (see ytDeleteGate in server.js): the unconfirmed call deletes nothing and answers with
+  // the video's REAL title, privacy, views and comments, read back from YouTube. That is deliberate — a confirm the
+  // caller can satisfy without ever looking at the target is the gate that let a live brand be destroyed.
+  server.registerTool('delete_youtube_video', {
+    title: 'Delete a video from the connected YouTube channel',
+    description: 'PERMANENTLY delete a video from the connected YouTube channel. IRREVERSIBLE — YouTube has no trash and no undelete, and the video\'s views, comments and every link or embed pointing at it go with it. Call it WITHOUT confirm first: nothing is deleted, and it reports the video\'s REAL title, privacy, view count and comment count read back from YouTube. Show the user that, get an unambiguous yes, then call again with confirm:true — plus, once the video is public or has any views or comments, confirmTitle set to its exact title. confirmTitle exists because confirming that you meant to delete SOMETHING does not prove you aimed at the right video, and a wrong id must not be confirmable blind. If the user only wants it out of public view, use update_youtube_video(privacy:"private") instead — that is reversible and this is not. Get the videoId from list_youtube_videos. 0 credits. Needs a connected YouTube channel.',
+    inputSchema: {
+      videoId: z.string().describe('the YouTube video id (from list_youtube_videos)'),
+      confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent and cannot be undone'),
+      confirmTitle: z.string().optional().describe('the video\'s EXACT title as the unconfirmed call reported it — required once the video is public or has any views or comments'),
+    },
+    outputSchema: { ok: z.boolean().optional(), videoId: z.string().optional(), title: z.string().optional(), deleted: z.boolean().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/youtube/delete-video', { videoId: a.videoId, confirm: a.confirm === true, ...(a.confirmTitle != null ? { confirmTitle: a.confirmTitle } : {}) });
+    // REPORT THE READ-BACK, never the 204: `note` is built from re-reading the id on the server, so an accepted
+    // delete that did not take says so instead of being narrated as gone.
+    return ok(d.note, d);
+  }));
   // CUSTOM THUMBNAIL. The scope this needs (youtube.force-ssl) is one the connection already holds — verified
   // against developers.google.com/youtube/v3/docs/thumbnails/set, which lists it among the accepted scopes — so
   // there is no reconnect here.
@@ -1387,7 +1686,11 @@ export function registerTools(server) {
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/comments', { videoId: a.videoId, ...(a.limit ? { limit: a.limit } : {}) });
-    return ok(`${d.count} comment${d.count === 1 ? '' : 's'} on ${d.videoId}.`, d);
+    // The comments ARE the answer — "12 comments on abc123" is a receipt, not a read. Newlines inside a comment are
+    // collapsed so one rambling reply cannot swamp the list, and each is capped; the untouched text stays in
+    // structuredContent for anything that needs it verbatim.
+    const cl = (d.comments || []).map(c => `  • ${c.author || 'someone'}${c.likes ? ` (${c.likes} like${c.likes === 1 ? '' : 's'})` : ''}: ${String(c.text || '').replace(/\s+/g, ' ').trim().slice(0, 400)}${c.replies ? ` — ${c.replies} repl${c.replies === 1 ? 'y' : 'ies'}` : ''}`);
+    return ok(`${d.count} comment${d.count === 1 ? '' : 's'} on ${d.videoId}:\n${cl.join('\n') || '  (none)'}`, d);
   }));
   server.registerTool('reply_to_youtube_comment', {
     title: 'Reply to a YouTube comment',
@@ -1652,14 +1955,14 @@ export function registerTools(server) {
   }));
   server.registerTool('meta_insights', {
     title: 'Meta ad performance metrics',
-    description: 'Pull performance INSIGHTS (spend, impressions, reach, clicks, CTR, CPC, CPM, conversions) for a connected ad account, or a specific campaign / ad set / ad. Pass adAccountId (for auth); optionally objectId to scope to one object and level to break the numbers down. BREAKDOWNS are what make the numbers actionable — a flat total says an ad cost $X, never WHO it worked on: pass breakdowns:"age,gender", "publisher_platform,platform_position" (which placement), "country" / "region" / "dma" (where), "impression_device" / "device_platform" (what they held). Comma-separated; "placement", "device" and "geo" are accepted as aliases; an unknown value is REJECTED, never silently ignored. Date window: datePreset (today | yesterday | last_7d | last_30d | last_90d | this_month | lifetime …) OR since+until (YYYY-MM-DD). Read-only.',
+    description: 'Pull performance INSIGHTS (spend, impressions, reach, clicks, CTR, CPC, CPM, conversions) for a connected ad account, or a specific campaign / ad set / ad. Pass adAccountId (for auth); optionally objectId to scope to one object and level to break the numbers down. BREAKDOWNS are what make the numbers actionable — a flat total says an ad cost $X, never WHO it worked on: pass breakdowns:"age,gender", "publisher_platform,platform_position" (which placement), "country" / "region" / "dma" (where), "impression_device" / "device_platform" (what they held). Comma-separated; "placement", "device" and "geo" are accepted as aliases; an unknown value is REJECTED, never silently ignored. Date window: datePreset OR since+until (YYYY-MM-DD). datePreset is Meta\'s OWN enum — today, yesterday, last_3d, last_7d, last_14d, last_28d, last_30d, last_90d, this_week_mon_today, this_week_sun_today, last_week_mon_sun, last_week_sun_sat, this_month, last_month, this_quarter, last_quarter, this_year, last_year, maximum, data_maximum. THERE IS NO "lifetime": Meta disabled it in Graph API v10.0 and replaced it with "maximum" (the last 37 months); anything unrecognised is refused by name here rather than 400ing at Meta. Read-only.',
     inputSchema: {
       adAccountId: z.string().describe('ad account id (act_… or digits)'),
       objectId: z.string().optional().describe('a campaign / ad set / ad id to scope to (default: the whole account)'),
       level: z.enum(['account', 'campaign', 'adset', 'ad']).optional().describe('break the numbers down by this level'),
       breakdowns: z.string().optional().describe('comma-separated, e.g. "age,gender" | "publisher_platform,platform_position" | "country" | "impression_device"'),
       actionBreakdowns: z.string().optional().describe('comma-separated, e.g. "action_type,action_device" — splits the conversion/action counts'),
-      datePreset: z.string().optional().describe('today | yesterday | last_7d | last_30d | last_90d | this_month | lifetime … (default last_30d)'),
+      datePreset: z.string().optional().describe('Meta\'s date_preset enum, default last_30d: today | yesterday | last_3d | last_7d | last_14d | last_28d | last_30d | last_90d | this_week_mon_today | this_week_sun_today | last_week_mon_sun | last_week_sun_sat | this_month | last_month | this_quarter | last_quarter | this_year | last_year | maximum | data_maximum. NOT "lifetime" — Meta retired it in v10.0; use "maximum" (37 months) or since+until.'),
       since: z.string().optional().describe('start date YYYY-MM-DD (use with until)'),
       until: z.string().optional().describe('end date YYYY-MM-DD'),
     },
@@ -1802,7 +2105,7 @@ export function registerTools(server) {
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/report', a);
-    return ok(`${d.count} row(s) from Google Ads.`, d);
+    return ok(`${d.count} row(s) from Google Ads${d.customerId ? ` (customer ${d.customerId})` : ''}:\n${rowLines(d.rows)}`, d);
   }));
   // ── Google Ads: campaign → ad group → ad → keywords → targeting → bidding. Google's object graph REQUIRES all
   //    three levels: a campaign alone can never serve an impression, so create_google_ads_campaign can build the
@@ -2231,10 +2534,14 @@ export function registerTools(server) {
   }));
   server.registerTool('microsoft_ads_geo_search', {
     title: 'Find Microsoft Advertising location ids',
-    description: 'Resolve country / region / city names to the Microsoft Advertising location ids that create_microsoft_ads_campaign needs. Read-only, free, 0 credits. Use it when a location ask is ambiguous ("Springfield") — this returns EVERY candidate with its id so the USER can pick, and you never guess between two places. Accepts names, ISO country codes ("CA"), or numeric location ids. Postal codes and neighbourhoods are not name-searchable — pass their numeric location id straight through; the campaign read-back reports the name Microsoft resolves for it.',
+    description: 'Resolve country / region / city names to the Microsoft Advertising location ids that create_microsoft_ads_campaign needs. Read-only, free, 0 credits. Use it when a location ask is ambiguous ("Springfield") — this returns EVERY candidate with its id so the USER can pick, and you never guess between two places. Accepts names, ISO country codes ("CA"), or numeric location ids. Pass `query` as ONE ask (a plain string) or SEVERAL (an array of strings) — a comma is part of a place\'s name ("Seattle, Washington, United States"), never a separator. Postal codes and neighbourhoods are not name-searchable — pass their numeric location id straight through; the campaign read-back reports the name Microsoft resolves for it.',
     inputSchema: {
       accountId: z.string().optional().describe('Microsoft ad account id \u2014 omit to use the brand\u2019s single shared account'),
-      query: z.array(z.string()).describe('one or more location asks \u2014 names, ISO country codes, or numeric Microsoft location ids'),
+      // A STRING IS ACCEPTED, not only an array. The server has always normalized a lone string, but the schema
+      // REJECTED one before it reached the server \u2014 so the obvious single-location call ("Canada") failed validation
+      // on a parameter whose array-ness nothing explained. Commas are never split: they occur INSIDE real Microsoft
+      // location names, so splitting on them would silently turn one valid ask into three that match nothing.
+      query: z.union([z.string(), z.array(z.string())]).describe('ONE location ask as a plain string, or several as an array of strings \u2014 names, ISO country codes, or numeric Microsoft location ids. A comma belongs to a name ("Seattle, Washington, United States") and is NOT a separator: pass several places as several array items, never one comma-joined string.'),
     },
     outputSchema: { ok: z.boolean().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, openWorldHint: true },
@@ -3207,21 +3514,25 @@ export function registerTools(server) {
   }));
   server.registerTool('post_to_linkedin_page', {
     title: 'Publish to a LinkedIn company Page',
-    description: 'Publish a post to one of the user’s LinkedIn COMPANY PAGES — text, plus optionally a Hermoso render image OR video. This is a DIFFERENT thing from post_to_linkedin, which publishes to the person’s own profile: pick the one the user actually asked for and never substitute. organizationId comes from list_linkedin_pages; omit it only when the account administers exactly one Page. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. LinkedIn does NOT allow the image or video of a published post to be swapped afterwards, so get the visual right first (the copy can still be edited with manage_linkedin_post).',
+    description: 'Publish a post to one of the user’s LinkedIn COMPANY PAGES — text, plus optionally a Hermoso render image, video, or a 2–20 image CAROUSEL (LinkedIn calls it a MultiImage post; pass the slides in order as imageUrls[]). ORGANIC CAROUSELS ARE COMPANY-PAGE ONLY — a personal profile cannot publish one and is refused by name, so send a deck here rather than to post_to_linkedin. This is a DIFFERENT thing from post_to_linkedin, which publishes to the person’s own profile: pick the one the user actually asked for and never substitute. organizationId comes from list_linkedin_pages; omit it only when the account administers exactly one Page. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. LinkedIn does NOT allow the image or video of a published post to be swapped afterwards, so get the visual right first (the copy can still be edited with manage_linkedin_post).',
     inputSchema: {
       organizationId: z.string().optional().describe('numeric Page id from list_linkedin_pages'),
       text: z.string().describe('the post text'),
       imageUrl: z.string().optional().describe('a Hermoso render image URL (from list_library — external hosts are refused)'),
       videoUrl: z.string().optional().describe('a Hermoso render video URL — LinkedIn processes it before publishing, which takes a minute'),
+      imageUrls: z.array(z.string()).optional().describe('CAROUSEL — an ORDERED list of image (and, where the channel allows, video) URLs published as ONE post the viewer swipes through. THIS IS NOT “post several” — it is a single post with several slides, which is what a multi-slide creative (a listicle, a “1/6 · SWIPE” deck) actually needs; publishing only its first slide tells the viewer to swipe at something that cannot. The ORDER is the product. Limits per channel: Instagram 2–10 (images, videos or a mix), Threads 2–20 (mix allowed), Facebook 2+ (Meta publishes no documented maximum; Hermoso caps the upload fan-out at 30 and says so), LinkedIn company Pages 2–20 (images only), Pinterest 2–5 (images only), TikTok up to 35. One url here is simply an ordinary single post. Anything a channel cannot do is REFUSED with the real reason — nothing is ever quietly downgraded to one slide.'),
+      idempotencyKey: z.string().optional().describe('SAFE RETRIES. Publishing can take minutes (a video upload, a carousel of ten slides) and a transport can time out while the post SUCCEEDS — retrying blind is how the same thing gets posted twice. Pass any stable string here and a repeat of the SAME publish returns the ORIGINAL post id instead of posting again (24h). You do not have to: an identical publish is auto-recognised for 10 minutes anyway. If a call times out or errors ambiguously, CALL AGAIN WITH THE SAME KEY — that is the safe move, and it will either report the original post or publish it for the first time. It never posts twice.'),
+      allowDuplicate: z.boolean().optional().describe('post it even though an identical post was just made or attempted. Only pass this when the user genuinely wants the same thing posted twice, or when you have LOOKED at the account and confirmed a timed-out attempt did not land.'),
       altText: z.string().optional(),
       title: z.string().optional().describe('video title'),
       visibility: z.enum(['PUBLIC', 'CONNECTIONS']).optional().describe('default PUBLIC'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional(), organizationId: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async (a) => {
+  }, publishWrap(async (a) => {
     const d = await apiPost('/api/linkedin/org-post', a);
-    return ok(`${d.note} ${d.url || ''}`, d);
+    if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
+    return ok(`${d.note}${d.carousel ? ` It is a ${d.slides}-slide MultiImage post — one post the reader swipes through.` : ''} ${d.url || ''}`, d);
   }));
   server.registerTool('manage_linkedin_post', {
     title: 'Edit or delete a LinkedIn post',
@@ -3307,14 +3618,16 @@ export function registerTools(server) {
   }));
   server.registerTool('create_linkedin_ads_campaign_group', {
     title: 'Create a LinkedIn campaign group (draft)',
-    description: 'Create a LinkedIn CAMPAIGN GROUP — the container LinkedIn has required every campaign to live inside since 2020. Created DRAFT, which is LinkedIn’s own structural safety net: it REFUSES to hold an ACTIVE campaign inside a DRAFT group, so while the group is a draft nothing beneath it can serve whatever its own status says. Creating it ACTIVE removes that protection and therefore requires confirm:true. Read back from LinkedIn before you are told it exists.',
+    description: 'Create a LinkedIn CAMPAIGN GROUP — the container LinkedIn has required every campaign to live inside since 2020. Created DRAFT, which is LinkedIn’s own structural safety net: it REFUSES to hold an ACTIVE campaign inside a DRAFT group, so while the group is a draft nothing beneath it can serve whatever its own status says. Creating it ACTIVE removes that protection and therefore requires confirm:true. LinkedIn REQUIRES a run schedule on a campaign group: it starts today unless you pass startDate, and if you set totalBudget you MUST also pass endDate — that pairing is LinkedIn’s own rule and it is refused here before anything is created. Read back from LinkedIn before you are told it exists.',
     inputSchema: {
       adAccountId: z.string().optional(),
       name: z.string().describe('campaign group name'),
       totalBudget: z.number().optional().describe('optional group-level total budget, in the ad account’s currency'),
       currencyCode: z.string().optional().describe('must match the ad account’s currency or LinkedIn refuses it'),
       status: z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'ARCHIVED']).optional().describe('default DRAFT'),
-      runSchedule: z.record(z.any()).optional().describe('LinkedIn runSchedule object, passed through'),
+      startDate: z.string().optional().describe('YYYY-MM-DD — when campaigns under this group may start; defaults to today'),
+      endDate: z.string().optional().describe('YYYY-MM-DD — REQUIRED by LinkedIn whenever totalBudget is set'),
+      runSchedule: z.record(z.any()).optional().describe('LinkedIn raw runSchedule object, passed through; startDate/endDate are easier'),
       confirm: z.boolean().optional().describe('REQUIRED true to create it ACTIVE'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignGroupId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
@@ -4124,25 +4437,34 @@ export function registerTools(server) {
 
   server.registerTool('make_explainer', {
     title: 'Make an explainer video',
-    description: "Turn a TOPIC into a finished narrated, captioned explainer video. Writes a sectioned script, paints one image per section, narrates each with TTS, adds gentle Ken-Burns motion, then composites the on-screen text + end card with the Chrome+ffmpeg engine the ads use (text is never model-painted, so it never garbles). It is an image-slide film WITH motion, not N video-model renders — that's what keeps it affordable. `style` picks the visual family: the default 'cinematic' is photoreal editorial; every other id is a STYLED, strictly non-photoreal look (illustrated / collage / clay / pixel …) that first renders ONE style-key image and then locks every scene to it, so the whole film holds one look. Cost: a ~31-credit hold for a ~6-section 60s explainer on the default style; a styled one renders that extra key and routes each scene through the compositing model, so budget a hold of up to ~58 credits for the same 6 sections. Both settle to the exact per-section image + narration spend (a longer target = more sections = more). Needs the writing model and a narration voice engine connected. NOT the tool for a short product ad — use render_ad or generate_video for those, and make_template_ad for the deterministic native formats.",
+    description: "Turn a TOPIC into a finished narrated, captioned explainer video. Writes a sectioned script, paints a BURST of pictures per section (about one every 1.5s — most of them one-detail edits of the frame before, so it reads as movement rather than a slideshow), narrates each section with TTS, adds gentle Ken-Burns motion, then composites the on-screen text + end card with the Chrome+ffmpeg engine the ads use (text is never model-painted, so it never garbles). It is an image film WITH motion, not N video-model renders — that's what keeps it affordable. `style` picks the visual family: the default 'cinematic' is photoreal editorial; every other id is a STYLED, strictly non-photoreal look (illustrated / collage / clay / pixel …) that first renders ONE style-key image and then locks every scene to it, so the whole film holds one look. Cost at the default frame density: a ~130-credit hold for a 60s explainer on the default style, ~100 styled; `frameDensity:'lean'` roughly halves it and `'minimal'` (one picture per section) is ~30. All settle to the exact per-frame image + narration spend (a longer target = more sections = more). Takes SEVERAL minutes — one image render per frame; independent frames are painted concurrently, so it is far faster than the frame count suggests. Needs the writing model and a narration voice engine connected. NOT the tool for a short product ad — use render_ad or generate_video for those, and make_template_ad for the deterministic native formats.",
     inputSchema: {
       topic: z.string().describe('what the explainer should teach or explain — a topic or a short brief'),
       durationSeconds: z.number().optional().describe('target length 20-120s (default 60); drives the section count — ~10s of narration each, 3-8 sections'),
+      frameDensity: z.enum(['standard', 'lean', 'minimal']).optional().describe("how many pictures per second of narration, and therefore what it costs. 'standard' (default) is a frame about every 1.5s — the density Higgsfield's own stills pipeline enforces; 'lean' is one about every 2.5s (the longest hold that still reads as a film, ~40% of the frames and ~40% of the cost); 'minimal' is ONE picture per narration section, which is cheapest and is frankly a slideshow. Only drop below the default if the user asked for something cheaper."),
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:5', '3:4']).optional().describe("'9:16' default"),
-      style: z.enum(['cinematic', 'editorial_collage', 'flat_vector', 'stickman', 'whiteboard', 'ink_marker', 'silhouette', 'storybook', 'paper_diorama', 'isometric', 'claymation', 'pixel_art', 'watercolor', 'fluffy_toy', 'low_poly', 'stylized_3d']).optional().describe("visual style. 'cinematic' (default) is photoreal; the rest are non-photoreal styled looks — editorial_collage (halftone cutouts + marker accents), flat_vector, stickman, whiteboard, ink_marker, silhouette, storybook (gouache), paper_diorama, isometric, claymation, pixel_art, watercolor, fluffy_toy (felted plush), low_poly, stylized_3d (matte clay render). Ask the user which they want rather than picking silently; a styled pick costs more (see the cost note)."),
+      style: z.enum(['cinematic', 'editorial_collage', 'flat_vector', 'stickman', 'whiteboard', 'ink_marker', 'silhouette', 'storybook', 'paper_diorama', 'isometric', 'claymation', 'pixel_art', 'watercolor', 'fluffy_toy', 'low_poly', 'stylized_3d', 'studio_3d', 'mannequin']).optional().describe("visual style. 'cinematic' (default) is photoreal; the rest are non-photoreal styled looks — editorial_collage (halftone cutouts + marker accents), flat_vector, stickman, whiteboard, ink_marker, silhouette, storybook (gouache), paper_diorama, isometric, claymation, pixel_art, watercolor, fluffy_toy (felted plush), low_poly, stylized_3d (matte clay render), studio_3d (preschool toy 3D on a white sweep — the Kids default), mannequin (clay-render reenactment figures — a History alternate). Ask the user which they want rather than picking silently; a styled pick costs more (see the cost note)."),
       channel: z.enum(['explainer', 'history', 'kids', 'fairytale']).optional().describe("the CHANNEL TYPE — it sets the pacing, the narration register and the default look, and is orthogonal to `style` (a named style always wins): explainer (casual second-person, fast cuts), history (witty chronological retelling / documentary), kids (fastest, question-first, warm teacher), fairytale (slow, atmospheric myth or folklore). Default 'explainer'."),
       voice: z.string().optional().describe('narration voice name — omit for the default warm read'),
       captions: z.boolean().optional().describe('burn on-screen text (default true)'),
       subtitles: z.boolean().optional().describe('burn CAPS SUBTITLES timed to the narration instead of one held key point per section (default false). Free — no extra render, no extra credits.'),
+      music: z.string().optional().describe("music bed under the narration, ducked under the voice. Omit and the KIDS and FAIRYTALE channels get their recommended bed from the curated library FREE (and simply ship dry when no track is on file); the other channels are dry. 'off' forces silence. NAME A MOOD — upbeat / calm / warm / epic / tense / playful / elegant / hype / chill / dramatic — and a bespoke instrumental is COMPOSED for this film, which costs a small flat fee on top. hermoso_capabilities reports the exact figure as explainerMusicCredits; quote it before you pick a mood."),
+      upscale: z.number().optional().describe("optional FINAL upscale — 2 doubles each side, 4 quadruples. Captions and the end card are burned BEFORE it so they upscale with the frame. It is priced BY LENGTH and it is the expensive part — several times the cost of rendering the film itself. hermoso_capabilities reports the exact figures per length as explainerUpscaleCredits. Never turn it on unasked: quote the number and let the user choose."),
       endCard: z.boolean().optional().describe('append the branded end card (default true)'),
       brandName: z.string().optional().describe('brand name for the end card — omit to leave it unbranded'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const r = await renderJob('explainer', { topic: a.topic, durationSeconds: a.durationSeconds, aspectRatio: a.aspectRatio, style: a.style, channel: a.channel, subtitles: a.subtitles, voice: a.voice, captions: a.captions, endCard: a.endCard, brandName: a.brandName }, 'MCP explainer');
+    const r = await renderJob('explainer', { topic: a.topic, durationSeconds: a.durationSeconds, aspectRatio: a.aspectRatio, style: a.style, channel: a.channel, frameDensity: a.frameDensity, subtitles: a.subtitles, voice: a.voice, captions: a.captions, music: a.music, upscale: a.upscale, endCard: a.endCard, brandName: a.brandName }, 'MCP explainer');
     const d = r?.raw || {};
-    return okVideo(`Explainer ready${d.sections ? ` — ${d.sections} sections, ${d.durationSeconds}s` : ''}${d.style && d.style !== 'cinematic' ? ` in the ${String(d.style).replace(/_/g, ' ')} style${d.styleLocked ? '' : ' (style key unavailable — the look rides on the prompt only)'}` : ''}: ${r.url}  [job ${r.jobId}]`, r);
+    // MUSIC + UPSCALE are REPORTED off the result, never assumed from the ask: a composed bed that failed to mux
+    // ships the film dry and is not billed, and a failed upscale delivers at the render resolution. `musicNote`
+    // fires only when a channel that reads best WITH a bed shipped without one, and it carries the price.
+    const fin = `${d.music ? ` · ${d.music.source === 'composed' ? 'composed' : 'library'} ${d.music.mood} music bed` : ''}${d.upscaled ? ` · upscaled ${d.upscaled}×` : ''}`;
+    // The length is whatever ffprobe measured on the DELIVERED file, and `null` means it could not be measured — print
+    // the `—` placeholder rather than inventing a number from the ask (the read-back law: only a measurement ships).
+    return okVideo(`Explainer ready${d.sections ? ` — ${d.sections} sections, ${d.frames || d.sections} frames, ${d.durationSeconds == null ? '—' : d.durationSeconds + 's'}` : ''}${d.lengthNote ? ` (${d.lengthNote})` : ''}${d.style && d.style !== 'cinematic' ? ` in the ${String(d.style).replace(/_/g, ' ')} style${d.styleLocked ? '' : ' (style key unavailable — the look rides on the prompt only)'}` : ''}${fin}: ${r.url}  [job ${r.jobId}]${d.musicNote ? `\n${d.musicNote}` : ''}${d.upscaleNote ? `\n⚠ ${d.upscaleNote}` : ''}`, r);
   }));
 
   server.registerTool('product_sizzle', {
@@ -4422,6 +4744,163 @@ export function registerTools(server) {
     await writeStore('heist.memory.v1', list.filter(m => m && m.id !== id));
     return ok(`Forgot memory ${id}.`, { ok: true, removed: true });
   }));
+
+  // ── SWIPEFILE — the workspace's saved-ad research board: named COLLECTIONS holding the ads and creatives the user
+  // kept. It is a SERVER-SYNCED store, not browser state: `adInspo.swipefile.v1` is in the client's PROFILE_SCOPED_SYNC
+  // list and adapters/sync-merge.js union-merges its collections by `id` and its ads by `key`, so the ♥ on every web ad
+  // card and the Studio chat's create_collection/save_to_collection write the SAME rows these read and write. Without
+  // them a headless caller could research all day and had nowhere to PUT what it found — the ads it surfaced lived and
+  // died inside one conversation, while the web user's own board sat untouched beside them.
+  // These are typed writers on purpose (see the store_set note above): they mint ids, de-dupe on the ad `key`, respect
+  // the per-store caps and write the two-level tombstone a genuine delete needs.
+  const SWIPE_KEY = 'adInspo.swipefile.v1';
+  const swipeEmpty = () => ({ collections: [{ id: 'default', name: 'My Swipefile' }], activeId: 'default', ads: [] });
+  // Mirror the webapp's Swipe.read(): anything that isn't the {collections[], ads[]} shape is treated as an empty
+  // board, never partially trusted — a half-parsed object written back would drop the other device's collections.
+  const readSwipe = async () => { const s = await readStore(SWIPE_KEY); return (s && Array.isArray(s.collections) && s.collections.length && Array.isArray(s.ads)) ? s : swipeEmpty(); };
+  // A swipefile ad is keyed by `key`, not by a minted id — that is what makes saving the same ad twice idempotent
+  // across surfaces (the web ♥ uses the ad's own identity too). Prefer the caller's key, then the most identity-like
+  // field it gave us, and only mint as a last resort.
+  const swipeKeyOf = (it) => String(it.key || it.link || it.url || it.video || it.image || `${it.advertiser || ''}|${it.title || ''}|${it.body || ''}`.slice(0, 200) || '').trim() || newId('sw');
+  server.registerTool('list_swipefile', {
+    title: 'List the swipefile',
+    description: 'List this workspace\'s SWIPEFILE — the saved-ad research board: every named collection and the ads/creatives kept in it (advertiser, headline, body copy, media URL, platform, when it was saved, and any taste tags). The SAME board the web app\'s Swipefile tab shows. Use it to answer "what have we saved?", to mine the user\'s own taste before planning an ad, or to find a reference to remix. Read-only, free.',
+    inputSchema: {
+      collection: z.string().optional().describe('only list ads in this collection (by name or id) — omit for every collection'),
+      limit: z.number().optional().describe('max ads to return (default 50, max 500)'),
+    },
+    outputSchema: {
+      collections: z.array(z.any()).optional().describe('the named collections ({id, name, ads} counts)'),
+      ads: z.array(z.any()).optional().describe('the saved ads ({key, collection, advertiser, title, body, image, video, link, platform, savedAt, tags})'),
+      total: z.number().optional().describe('how many ads the board holds in total, before any collection filter or limit'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const s = await readSwipe();
+    const lim = Math.min(500, Math.max(1, +a.limit || 50));
+    const want = String(a.collection || '').trim().toLowerCase();
+    const hit = want ? s.collections.find(c => String(c.id).toLowerCase() === want || String(c.name || '').toLowerCase() === want) : null;
+    if (want && !hit) return { content: [{ type: 'text', text: `No swipefile collection called "${a.collection}". This board has: ${s.collections.map(c => c.name).join(', ') || '(none)'}.` }], isError: true };
+    const nameOf = (id) => (s.collections.find(c => c.id === id) || {}).name || 'My Swipefile';
+    const rows = s.ads.filter(x => x && (!hit || x.collectionId === hit.id));
+    const ads = rows.slice(0, lim).map(x => ({ key: x.key, collection: nameOf(x.collectionId), advertiser: x.advertiser || '', title: x.title || '', body: String(x.body || '').slice(0, 400), image: abs(x.image || ''), video: abs(x.video || ''), link: x.link || '', platform: x.platform || '', savedAt: x.savedAt || 0, tags: x.tags || null }));
+    const collections = s.collections.map(c => ({ id: c.id, name: c.name, ads: s.ads.filter(x => x && x.collectionId === c.id).length }));
+    if (!ads.length) return ok(`The swipefile is empty${hit ? ` in "${hit.name}"` : ''}. Collections: ${collections.map(c => `${c.name} (${c.ads})`).join(', ')}.`, { collections, ads: [], total: rows.length });
+    const text = `${rows.length} saved ad(s)${hit ? ` in "${hit.name}"` : ''}${ads.length < rows.length ? ` — showing ${ads.length}` : ''}:\n`
+      + ads.map(x => `  • [${x.collection}] ${x.advertiser || 'unknown advertiser'}${x.platform ? ` · ${x.platform}` : ''} — ${x.title || String(x.body || '').slice(0, 90) || '(no copy)'}${x.link ? `  ${x.link}` : ''}  (${x.key})`).join('\n')
+      + `\nCollections: ${collections.map(c => `${c.name} (${c.ads})`).join(', ')}.`;
+    return ok(text, { collections, ads, total: rows.length });
+  }));
+  server.registerTool('save_to_swipefile', {
+    title: 'Save ads to the swipefile',
+    description: 'Save one or more ads/creatives to a named SWIPEFILE collection, creating the collection if it does not exist — the headless twin of the ♥ on every ad card in the web app. Use it whenever research turns up something worth keeping: a competitor ad from search_meta_ads / pull_competitor_ads, an organic post, or one of your own renders. Saved ads persist to the workspace board the web Swipefile tab shows, and feed the taste signal every future ad is planned against. De-dupes: re-saving the same ad (same key/link/media) MOVES it into the named collection instead of duplicating it. Free.',
+    inputSchema: {
+      collection: z.string().describe('the collection name — an existing one, or a new one to create'),
+      items: z.array(z.object({
+        key: z.string().optional().describe('a stable id for this ad if you have one (an ad_archive_id, creativeId, …). Omit and one is derived from the link/media so re-saving is idempotent'),
+        advertiser: z.string().optional().describe('the brand running the ad'),
+        title: z.string().optional().describe('headline / hook'),
+        body: z.string().optional().describe('the ad copy'),
+        image: z.string().optional().describe('image URL'),
+        video: z.string().optional().describe('video URL'),
+        link: z.string().optional().describe('link to the ad in its library / the destination URL'),
+        platform: z.string().optional().describe("where it ran — 'meta', 'google', 'linkedin', 'tiktok', 'generated', …"),
+      }).passthrough()).min(1).describe('the ads to save'),
+    },
+    outputSchema: { ok: z.boolean().optional(), collection: z.string().optional(), collectionId: z.string().optional(), saved: z.number().optional(), moved: z.number().optional(), total: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const name = String(a.collection || '').trim();
+    const items = (Array.isArray(a.items) ? a.items : []).filter(x => x && typeof x === 'object');
+    if (!name) return { content: [{ type: 'text', text: 'Name the collection to save into.' }], isError: true };
+    if (!items.length) return { content: [{ type: 'text', text: 'Pass at least one item to save.' }], isError: true };
+    const s = await readSwipe();
+    let col = s.collections.find(c => String(c.name || '').toLowerCase() === name.toLowerCase());
+    const created = !col;
+    if (!col) { col = { id: newId('c'), name }; s.collections.push(col); }
+    let saved = 0, moved = 0;
+    for (const it of items.slice(0, 200)) {
+      const key = swipeKeyOf(it);
+      const ex = s.ads.find(x => x && x.key === key);
+      if (ex) { if (ex.collectionId !== col.id) moved++; ex.collectionId = col.id; continue; }
+      s.ads.push({ key, collectionId: col.id, advertiser: String(it.advertiser || '').slice(0, 120), title: String(it.title || '').slice(0, 300), body: String(it.body || '').slice(0, 2000), image: String(it.image || ''), video: String(it.video || ''), link: String(it.link || it.url || ''), platform: String(it.platform || '').slice(0, 40), savedAt: Date.now() });
+      saved++;
+    }
+    s.activeId = col.id;
+    await writeStore(SWIPE_KEY, s);
+    return ok(`${saved} ad(s) saved${moved ? `, ${moved} moved` : ''} into “${col.name}”${created ? ' (new collection)' : ''} — it’s on the workspace swipefile now (list_swipefile to read it back).`, { ok: true, collection: col.name, collectionId: col.id, saved, moved, total: s.ads.length });
+  }));
+
+  // ── PLAYBOOKS — the "what's working + the plays to run" cards, distinct from the swipefile's raw creative. Same
+  // server-synced store seam (`heist.playbooks.v1`, union-merged by id in adapters/sync-merge.js); the web app has a
+  // Playbooks tab that lists, runs and deletes them, and the Studio chat can save one. Headlessly there was no way to
+  // keep a teardown's conclusions at all — competitor_teardown and mine_angles returned strategy that evaporated with
+  // the conversation. delete_playbook writes the tombstone first so the delete survives the next device's sync.
+  const PB_KEY = 'heist.playbooks.v1';
+  const readPlaybooks = async () => { const l = await readStore(PB_KEY); return Array.isArray(l) ? l : []; };
+  const pbLine = (p) => `  • ${p.headline || '(untitled)'}${p.brand ? ` · ${p.brand}` : ''}${(p.plays || []).length ? ` — ${(p.plays || []).length} play(s)` : ''}${(p.hooks || []).length ? `, ${(p.hooks || []).length} hook(s)` : ''}  (${p.id})`;
+  server.registerTool('list_playbooks', {
+    title: 'List playbooks',
+    description: 'List the PLAYBOOKS saved in this workspace — the reusable strategy cards (winning hooks, angles, formats and the concrete plays to run) kept from teardowns, angle mining and creatives worth repeating. The same Playbooks the web app\'s Playbooks tab lists. Read one before planning an ad so you re-run what already worked instead of starting cold. Read-only, free.',
+    inputSchema: { limit: z.number().optional().describe('max playbooks to return (default 25, max 100)'), full: z.boolean().optional().describe('true to return every hook/angle/play in the text, not just the headline counts') },
+    outputSchema: { playbooks: z.array(z.any()).optional(), total: z.number().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const list = await readPlaybooks();
+    const lim = Math.min(100, Math.max(1, +a.limit || 25));
+    const playbooks = list.slice(0, lim);
+    if (!playbooks.length) return ok('No playbooks saved in this workspace yet — save_playbook keeps a teardown’s conclusions or a creative worth repeating.', { playbooks: [], total: 0 });
+    const detail = (p) => [pbLine(p),
+      ...(p.hooks || []).slice(0, 8).map(h => `      hook: ${h.text || h}`),
+      ...(p.angles || []).slice(0, 8).map(x => `      angle: ${x.title || ''}${x.detail ? ` — ${x.detail}` : ''}`),
+      ...(p.plays || []).slice(0, 8).map(x => `      play: ${x.title || ''}${x.detail ? ` — ${x.detail}` : ''}`)].join('\n');
+    return ok(`${list.length} playbook(s)${playbooks.length < list.length ? ` — showing ${playbooks.length}` : ''}:\n` + playbooks.map(a.full ? detail : pbLine).join('\n'), { playbooks, total: list.length });
+  }));
+  server.registerTool('save_playbook', {
+    title: 'Save a playbook',
+    description: 'Save a reusable PLAYBOOK — the strategy takeaways worth re-running: the hooks that work, the angles, the formats, and the concrete plays. Use it to keep what a competitor_teardown or mine_angles just found, or to bank a creative you want to repeat. Lands in the same Playbooks library the web app lists, runs and manages. Distinct from save_skill (a directive applied to every ad) and from the swipefile (raw saved creative). Free.',
+    inputSchema: {
+      name: z.string().describe('the playbook headline — what it is, in a few words'),
+      hooks: z.array(z.string()).optional().describe('the opening hooks worth reusing, verbatim'),
+      angles: z.array(z.object({ title: z.string(), detail: z.string().optional() }).passthrough()).optional().describe('the persuasion angles ({title, detail})'),
+      formats: z.array(z.string()).optional().describe('the formats/recipes this plays best in (e.g. ugc_selfie, cinematic, static)'),
+      plays: z.array(z.object({ title: z.string(), detail: z.string().optional() }).passthrough()).optional().describe('the concrete plays to run ({title, detail}) — the actionable half'),
+      brand: z.string().optional().describe('which brand this is for (defaults to the workspace brand)'),
+      source: z.string().optional().describe('where it came from, e.g. “teardown · Ridge”'),
+    },
+    outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const headline = String(a.name || '').trim();
+    if (!headline) return { content: [{ type: 'text', text: 'A playbook needs a name.' }], isError: true };
+    const list = await readPlaybooks();
+    const brand = String(a.brand || '').trim() || String((await readStore('heist.brand.v1'))?.name || '');
+    const item = {
+      id: newId('pb'), headline: headline.slice(0, 200),
+      hooks: (a.hooks || []).slice(0, 20).map(t => ({ text: String(t).slice(0, 400), why: 'saved by an agent' })),
+      angles: (a.angles || []).slice(0, 20).map(x => ({ title: String(x.title || '').slice(0, 160), detail: String(x.detail || '').slice(0, 600) })),
+      formats: (a.formats || []).slice(0, 12).map(x => String(x).slice(0, 60)),
+      plays: (a.plays || []).slice(0, 20).map(x => ({ title: String(x.title || '').slice(0, 160), detail: String(x.detail || '').slice(0, 600) })),
+      brand, source: String(a.source || 'mcp · saved by an agent').slice(0, 120), savedAt: Date.now(),
+    };
+    await writeStore(PB_KEY, [item, ...list].slice(0, 200));
+    return ok(`Saved playbook “${item.headline}” — it’s in the workspace Playbooks library (list_playbooks, and the app’s Playbooks tab can run it).`, { ok: true, id: item.id });
+  }));
+  server.registerTool('delete_playbook', {
+    title: 'Delete a playbook',
+    description: 'Delete a saved playbook by id (from list_playbooks). Records a cross-device delete so it does not come back on the next sync. Minor + re-creatable, so no confirm needed.',
+    inputSchema: { id: z.string().describe('the playbook id (from list_playbooks)') },
+    outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const id = String(a.id || '').trim(); if (!id) return { content: [{ type: 'text', text: 'Pass the playbook id (from list_playbooks).' }], isError: true };
+    const list = await readPlaybooks();
+    if (!list.some(p => p && p.id === id)) return ok(`No playbook ${id}.`, { ok: false, removed: false });
+    await tombstone(PB_KEY, id); // the delete is written BEFORE the content so the union-merge already sees it
+    await writeStore(PB_KEY, list.filter(p => p && p.id !== id));
+    return ok(`Deleted playbook ${id}.`, { ok: true, removed: true });
+  }));
+
   server.registerTool('list_employees', {
     title: 'List AI employees',
     description: 'List the hireable AI Employee personas in this workspace — the built-in specialists (Short-Form Ad Strategist, UGC Scriptwriter, Product Photographer, …) PLUS any custom personas saved here, and which one is currently active. Read-only, free.',
@@ -4471,6 +4950,85 @@ export function registerTools(server) {
     if (!found) return { content: [{ type: 'text', text: `No employee ${id} — call list_employees for the ids.` }], isError: true };
     await writeStore('heist.employee.active.v1', id);
     return ok(`Hired ${found.name}${found.title ? `, ${found.title}` : ''}.`, { ok: true, activeId: id });
+  }));
+  // ── SAVED CREATORS — the workspace's reusable on-camera cast (`heist.avatars.v1`) ──────────────────────────────
+  // Closed 2026-08-01 (feature-surface sweep §4b, "on the web, absent from MCP"). The app has the whole lifecycle —
+  // generate a creator, pull one off a social profile, upload a consented photo, pose plates, a cloned voice, the
+  // ＋ picker that locks that face across every frame — and MCP had `generate_avatar` and nothing else. So a
+  // customer's agent could render a NEW person every single time and never cast the SAME one twice, which is the
+  // entire point of a saved creator, and "use Sarah again" worked in the app and nowhere else.
+  // READ IS ROUTE-BACKED (`GET /api/creators`): resolveWs re-authorizes the workspace pin per request, and
+  // route-backed reads were the ones that stayed correct through the use_brand scoping bug (sweep D2) — so an agency
+  // that switches brands gets THAT brand's cast. WRITES are the same typed store read-modify-write every other
+  // writer here uses (remember / save_skill / save_employee), so the row union-merges server-side and lands in the
+  // very `heist.avatars.v1` the web Studio's creator picker renders — save it here, it is in the app's picker.
+  server.registerTool('list_creators', {
+    title: 'List saved creators',
+    description: 'List this workspace’s SAVED CREATORS — the reusable on-camera cast (AI creators made here, a person pulled from a social profile, a consented photo upload). Read-only, FREE. Each entry gives the name, the PORTRAIT URL, where the portrait came from and whether a real person’s likeness consent is on file, how many extra pose plates exist, and any chosen or cloned voice. THE PORTRAIT URL IS THE REUSE HANDLE — pass it as generate_avatar’s `image` (a talking clip of them), generate_video’s `refImage` (they star in the scene), recast_motion’s `image` (they perform a reference clip’s motion), or generate_image’s `refImages`. CALL THIS BEFORE OFFERING TO GENERATE A NEW PERSON: re-casting somebody the workspace already has keeps the SAME face across every ad, while a fresh person costs credits and breaks that continuity. An empty answer means the workspace genuinely has no cast yet — say so and offer generate_avatar / save_creator, never invent a roster.',
+    inputSchema: { limit: z.number().optional().describe('max creators to return (default 24)') },
+    outputSchema: { creators: z.array(z.any()).optional().describe('the saved cast — {id, name, image, source, consented, poses, voice, voiceClone, look}'), count: z.number().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/creators', a.limit ? { limit: Math.max(1, Math.min(200, Math.round(+a.limit) || 24)) } : {});
+    const creators = (d.creators || []).map(c => ({ ...c, image: abs(c.image) })); // portraits ride abs() like every other asset url here
+    if (!creators.length) return ok('This workspace has no saved creators yet — there is nobody to re-cast, so do not offer one. generate_avatar renders a talking clip from a portrait you supply, and save_creator adds a portrait to the reusable cast so the same person can star in later ads.', { creators: [], count: 0 });
+    return ok(`${creators.length} saved creator(s) in this workspace:\n${creators.map(creatorLine).join('\n')}\nRe-cast any of them by passing their portrait url as generate_avatar.image / generate_video.refImage / recast_motion.image / generate_image.refImages — that is what keeps the same face across ads.`, { creators, count: creators.length });
+  }));
+  server.registerTool('save_creator', {
+    title: 'Save a creator',
+    description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s ＋ ▸ Pick a creator ▸ save. Pass the portrait’s public url (a generate_image render of a person, a headshot, any public photo) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS — `source` says what the portrait IS: leave it "generated" for an AI-made person, and use "upload"/"social" ONLY for a REAL person. Pass consented:true only when the user has told you that person agreed to their likeness being used; never assert that on their behalf.',
+    inputSchema: {
+      name: z.string().describe('what to call this creator (e.g. “Sarah”) — list_creators and the app’s picker match on it'),
+      image: z.string().describe('public https url of the portrait (an existing render’s url, or any public photo). Not a local file path — upload it with upload_file first and save the url that returns'),
+      source: z.enum(['generated', 'upload', 'social']).optional().describe('"generated" (default) = an AI-made person; "upload" / "social" = a REAL person'),
+      consented: z.boolean().optional().describe('REAL people only: the user has confirmed that person consented to their likeness being used in ads'),
+      voice: z.string().optional().describe('a default voice name for this persona (engines + voices are in hermoso_capabilities)'),
+      poses: z.array(z.string()).optional().describe('up to 4 extra full-body / angle plates of the SAME person (public urls) — they make a wider shot hold the identity'),
+      look: z.string().optional().describe('their canonical wardrobe/appearance in words — reused to hold the look steady across ads'),
+    },
+    outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), creator: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const name = String(a.name || '').trim(), image = String(a.image || '').trim();
+    if (!name || !image) return { content: [{ type: 'text', text: 'A creator needs both a name and a portrait url.' }], isError: true };
+    // The portrait must be FETCHABLE by every render lane that will consume it. A data: blob or a local path is a
+    // reference nothing downstream can resolve, so refuse here with the fix rather than saving a dead entry that
+    // only fails later, inside a paid render.
+    if (!/^https?:\/\//i.test(image) && !image.startsWith('/generated/')) return { content: [{ type: 'text', text: 'The portrait must be a public https url (or a Hermoso /generated/ path) — a data: blob or a local file path cannot be handed to a render as a reference. Upload the file with upload_file first, then save the url it returns.' }], isError: true };
+    const source = ['generated', 'upload', 'social'].includes(a.source) ? a.source : 'generated';
+    let list = await readStore('heist.avatars.v1'); if (!Array.isArray(list)) list = [];
+    // IDEMPOTENT ON (name, portrait): a retrying agent must get the SAME creator back, not a twin nobody can tell
+    // apart in the picker. A same-name creator with a DIFFERENT portrait is a deliberate re-shoot and still saves.
+    const dupe = list.find(x => x && String(x.name || '').trim().toLowerCase() === name.toLowerCase() && String(x.image || '') === image);
+    if (dupe) return ok(`“${name}” is already in the workspace cast.`, { ok: true, id: dupe.id, creator: { id: dupe.id, name, image: abs(image), source: dupe.source || source } });
+    const item = {
+      id: newId('av'), name, image,
+      poses: (Array.isArray(a.poses) ? a.poses : []).filter(p => typeof p === 'string' && p.trim()).slice(0, 4),
+      voice: String(a.voice || '').trim(), source,
+      // The consent stamp is recorded ONLY when the caller states it, and never for a synthetic creator (which needs
+      // none) — the same rule as the web's Avatars.add(source) → consentAt.
+      consentAt: (source !== 'generated' && a.consented === true) ? Date.now() : null,
+      ...(String(a.look || '').trim() ? { desc: String(a.look).trim().slice(0, 400) } : {}),
+      createdAt: Date.now(),
+    };
+    await writeStore('heist.avatars.v1', [item, ...list].slice(0, 200));
+    const warn = (source !== 'generated' && !item.consentAt) ? ' ⚠ This is a REAL person and NO likeness consent is on file — say so to the user, and do not put them in a published ad until they confirm that person agreed.' : '';
+    return ok(`Saved “${item.name}” to the workspace cast — they now show up in list_creators and in the app’s creator picker. Re-cast them any time by passing ${abs(item.image)} as generate_avatar.image / generate_video.refImage / recast_motion.image.${warn}`, { ok: true, id: item.id, creator: { id: item.id, name: item.name, image: abs(item.image), source } });
+  }));
+  server.registerTool('delete_creator', {
+    title: 'Delete a creator',
+    description: 'Remove a saved creator from this workspace’s cast by id (from list_creators). Records a cross-device delete so they don’t reappear on the user’s other devices. It only drops the roster entry — ads already rendered with that person are untouched — and the same portrait can be saved again with save_creator, so no confirm is needed.',
+    inputSchema: { id: z.string().describe('the creator id (from list_creators)') },
+    outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const id = String(a.id || '').trim(); if (!id) return { content: [{ type: 'text', text: 'Pass the creator id (from list_creators).' }], isError: true };
+    let list = await readStore('heist.avatars.v1'); if (!Array.isArray(list)) list = [];
+    const hit = list.find(x => x && x.id === id);
+    if (!hit) return ok(`No saved creator ${id} — call list_creators for the ids.`, { ok: false, removed: false });
+    await tombstone('heist.avatars.v1', id); // written BEFORE the content PUT so the union-merge already sees the delete
+    await writeStore('heist.avatars.v1', list.filter(x => x && x.id !== id));
+    return ok(`Removed “${hit.name || 'Creator'}” from the workspace cast.`, { ok: true, removed: true });
   }));
   server.registerTool('update_brand', {
     title: 'Update brand fields',
@@ -4549,8 +5107,17 @@ export function registerTools(server) {
   }, wrap(async () => {
     const d = await apiGet('/api/connectors');
     const on = (d.connectors || []).filter(c => c && c.status !== 'revoked');
+    // "0 connected" HAS TWO CAUSES AND ONLY ONE OF THEM IS "nothing is connected". The other is that this connection
+    // is pointed at a different WORKSPACE than the one the user is looking at in the app — which is what a teammate
+    // hits, because connectors are per-brand and a brand shared with them lives on somebody else's account. That
+    // read is silent by nature: an empty list is a perfectly well-formed answer. Name the other cause, on the one
+    // screen where it is actually being wondered about, and name the tool that settles it.
+    // …and a THIRD cause, which used to be indistinguishable from the first: the caller's ACCESS to the shared
+    // workspace was revoked. The route now 403s that case by name instead of quietly scoping the read to the
+    // caller's own empty account (R6-6), so it surfaces as an error through wrap() rather than as "0 connected".
+    const empty = '\nIf this brand should have connected accounts, check WHICH workspace this connection is on: list_brands names every brand on this account plus every one shared with you, and use_brand switches. Otherwise connect one in the app — Workspace ▸ Connectors (linking needs a browser).';
     const lines = on.map(c => `  • ${c.provider}${c.accountLabel ? ` — ${c.accountLabel}` : ''} (${c.status || 'active'})`);
-    return ok(`${on.length} connected:\n${lines.join('\n') || '  (none)'}\nAvailable to connect: ${(d.providers || []).join(', ') || '(none configured)'}.`, d);
+    return ok(`${on.length} connected:\n${lines.join('\n') || '  (none)'}\nAvailable to connect: ${(d.providers || []).join(', ') || '(none configured)'}.${on.length ? '' : empty}`, d);
   }));
   // ── CONNECTOR WRITES. Connecting needs a browser (OAuth consent) and is correctly NOT headless — but the other two
   // halves of connector management are, and were web-only: DISCONNECTING, and choosing WHICH accounts a brand may
@@ -4695,6 +5262,9 @@ export function registerTools(server) {
   }, wrap(async (a) => {
     if (a.confirm !== true) return ok(`This will invite ${a.email || '(no email)'} as ${a.role || 'member'} to the workspace. Confirm with the user, then call again with confirm:true.`, { ok: false });
     const d = await apiPost('/api/team/invite', { email: a.email, role: a.role });
+    // Re-inviting an ALREADY-ACTIVE member is a deliberate no-op server-side (it must never briefly revoke a live
+    // teammate). It used to be narrated as "Invited …" while the emailed token was never stored, so the click 404'd.
+    if (d.alreadyMember) return ok(d.message || `${a.email} is already an active member of this workspace — no new invite was sent.`, { ok: false, invited: false, alreadyMember: true, email: a.email, role: d.role });
     return ok(`Invited ${a.email} (${a.role || 'member'})${d.link ? ` — share link: ${d.link}` : d.emailed ? ' — invite emailed.' : '.'}`, { ok: true, invited: !!d.invited, link: d.link });
   }));
   server.registerTool('remove_member', {
@@ -4704,12 +5274,17 @@ export function registerTools(server) {
       email: z.string().describe('the member’s email'),
       confirm: z.boolean().optional().describe('REQUIRED true'),
     },
-    outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional(), email: z.string().optional(), members: z.array(z.any()).optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.confirm !== true) return ok(`This will remove ${a.email || '(no email)'} from the workspace. Confirm with the user, then call again with confirm:true.`, { ok: false });
+    // The route 404s BY NAME when the address is not a member (a typo, a stale address, the wrong brand) — that error
+    // surfaces through wrap(). What reaches here is a real change or an honest no-op, and the sentence comes from the
+    // server's READ-BACK of the members list, never from what we asked for.
     const d = await apiPost('/api/team/remove', { email: a.email });
-    return ok(`Removed ${a.email} from the workspace.`, { ok: true, removed: !!d.removed });
+    if (d.alreadyRemoved) return ok(d.message || `${a.email} already had no access to this workspace — nothing changed.`, { ok: false, removed: false, alreadyRemoved: true, email: a.email });
+    const left = (d.members || []).map(m => `  \u2022 ${m.email} \u2014 ${m.role || 'member'}`);
+    return ok(`${d.message || `${a.email} no longer has access to this workspace.`}${left.length ? `\nStill on this workspace:\n${left.join('\n')}` : ''}`, { ok: true, removed: !!d.removed, email: d.email || a.email, members: d.members });
   }));
   server.registerTool('set_role', {
     title: 'Change a teammate’s role',
@@ -4719,12 +5294,14 @@ export function registerTools(server) {
       role: z.enum(['admin', 'member']).describe('the new role'),
       confirm: z.boolean().optional().describe('REQUIRED true'),
     },
-    outputSchema: { ok: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), email: z.string().optional(), role: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.confirm !== true) return ok(`This will set ${a.email || '(no email)'} to ${a.role}. Confirm with the user, then call again with confirm:true.`, { ok: false });
+    // Naming somebody who is not a member 404s server-side and surfaces as an error here. On success the role we
+    // report is the one the workspace NOW HOLDS (server read-back), not the one that was requested.
     const d = await apiPost('/api/team/role', { email: a.email, role: a.role });
-    return ok(`${a.email} is now ${a.role}.`, { ok: true });
+    return ok(d.message || `${d.email || a.email} is now ${d.role || a.role}.`, { ok: true, email: d.email || a.email, role: d.role || a.role });
   }));
 
   server.registerTool('list_jobs', {
@@ -5155,8 +5732,11 @@ export function registerTools(server) {
       try {
         const cur = save === true ? null : await apiGet('/api/brand/current').catch(() => null);
         if (save === true || !cur?.hasBrand) {
-          const bk = PROFILE && PROFILE !== 'default' ? `heist.brand.v1.${PROFILE}` : 'heist.brand.v1'; // mirror the webapp's per-profile key namespacing
-          await apiPut(`/api/store/${encodeURIComponent(bk)}`, { value: JSON.stringify(p) });
+          // The SAME server-resolved namespace every other store write uses. Hand-rolling it from HEIST_PROFILE is
+          // what made `create_brand` → `use_brand` → `draft_brand` overwrite the ACCOUNT'S DEFAULT BRAND while
+          // leaving the new workspace empty — the sharpest edge of the whole defect, in the exact agency flow
+          // these tools exist for. This one write must go through pk(), not near it.
+          await apiPut(`/api/store/${encodeURIComponent(await pk('heist.brand.v1'))}`, { value: JSON.stringify(p) });
           saved = true;
         }
       } catch {} // saving is best-effort — the drafted profile is still returned either way
@@ -5267,6 +5847,30 @@ export function registerTools(server) {
     return okVideo(`Upscaled video: ${r.url}`, r);
   }));
 
+  // GENERATIVE clip editing — the one post-production lane that existed only inside the web Studio. `post_edit` is
+  // mechanical (ffmpeg: trim, speed, mute, append a card); `recast_motion` maps a creator's face onto a clip's motion;
+  // neither can answer "make it nighttime" or "change the background to a city street". That is video-to-video, it has
+  // been a job worker (`videoedit`) all along, and only `editVideoClip` in public/app.js ever submitted one — so a
+  // headless caller's only route to a restyled clip was paying for a whole new render.
+  server.registerTool('edit_video', {
+    title: 'Edit a video clip',
+    description: "EDIT/transform an existing video clip with a natural-language instruction (video-to-video) — KEEPS the original motion, timing and edit, changes the subject/setting/style. Use for 'change the background to a city', 'make it nighttime', 'restyle it as claymation', 'swap the product'. Best on 3–10s clips. NOT for mechanical cuts, trims, end cards or watermarks (use post_edit — seconds, ~2 credits, no AI model), NOT for making a new video (generate_video / render_ad), NOT for translating the spoken track (dub_video) and NOT for putting a saved creator's face on the motion (recast_motion). Paid render; returns the served URL of the edited clip.",
+    inputSchema: {
+      video: z.string().describe('the source video URL (from a previous render, a job result, or list_library)'),
+      instruction: z.string().describe('the exact transformation to apply, in the user’s own words'),
+      keepAudio: z.boolean().optional().describe('default true — keep the source clip’s audio track. Set false to return the edit silent'),
+      elements: z.array(z.object({ frontal: z.string().describe('the reference image URL'), refs: z.array(z.string()).optional().describe('up to 2 extra angles of the SAME subject') }).passthrough()).optional().describe('OPTIONAL identity/product grounding (≤4): a creator portrait or the real product photo, so the edit restores the REAL thing instead of re-inventing it. Describe each one in the instruction. Leave out for a plain restyle'),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async ({ video, instruction, keepAudio, elements }) => {
+    const prompt = String(instruction || '').trim();
+    if (!prompt) return { content: [{ type: 'text', text: 'Say what to change — edit_video needs an instruction.' }], isError: true };
+    const els = (Array.isArray(elements) ? elements : []).filter(e => e && e.frontal).slice(0, 4);
+    const r = await renderJob('videoedit', { video, prompt, keepAudio: keepAudio !== false, ...(els.length ? { elements: els } : {}) }, `Video edit · ${prompt.slice(0, 40)}`);
+    return okVideo(`Edited clip: ${r.url}`, r);
+  }));
+
   server.registerTool('dub_video', {
     title: 'Dub video',
     description: "Localize a finished video into another language WITHOUT re-rendering it: the spoken track is transcribed, translated, re-voiced and lip-synced back onto the SAME footage, so the visuals, timing and edit are untouched. Just pass the video and the language — the script is read off the source automatically (pass `script` only to override what it heard). Paid; returns the served URL of the localized video.",
@@ -5348,6 +5952,7 @@ export function registerTools(server) {
       const hit = (list.brands || []).find(b => b.id.toLowerCase() === want || String(b.name || '').toLowerCase() === want);
       if (!hit) throw new Error(`No brand matching "${brandId}" — call list_brands for the available brands.`);
       await apiPost('/api/keys/brand', { profileId: hit.id }); // pin it (use_brand semantics — persists for this key)
+      forgetWorkspaceScope(); // same pin, same rule: the store namespace moved with it
     }
     const cur = await apiGet('/api/brand/current').catch(() => null);
     return cur?.hasBrand ? cur.brand : null;
@@ -5497,5 +6102,44 @@ export function registerTools(server) {
     const url = abs(d.url);
     const img = await imageBlock(url); // show the locked product inline
     return { content: [{ type: 'text', text: `${d.summary}\nProduct photo: ${url}` }, ...(img ? [img] : [])], structuredContent: { ...d, url } };
+  }));
+
+  // APP SCREENS — the one asset class a headless caller could never acquire after onboarding. `draft_brand` pulls them
+  // when it drafts, but a brand onboarded from a website (or drafted before it had an app) has none, and re-drafting to
+  // get them OVERWRITES the whole profile. Meanwhile make_template_ad's `app-ui-tour` HARD-REQUIRES them: the plan is
+  // stripped server-side when the brand's inventory can't fill it, so an app brand hit a dead end with the fix sitting
+  // behind a web-only chat tool. FREE — the same keyless App Store lookup GET /api/brand/app-screens does for the web
+  // Brand tab; nothing is billed, so nothing is booked.
+  server.registerTool('fetch_app_screens', {
+    title: 'Fetch App Store screens',
+    description: "Pull an APP brand's REAL App Store screenshots into the workspace brand, so a screen-hungry native format can use them. Use when the brand has 0–1 app screens on file and you want make_template_ad(template:'app-ui-tour'), or the user asks to 'pull my app's screenshots'. Pass appName (defaults to the saved brand's name). FREE — a keyless App Store lookup. It needs a CONFIDENT match: an ambiguous or unknown app returns 0 screens and saves nothing, which you should relay plainly rather than retrying with guesses. On success the screens are saved to the brand (durable URLs) and are immediately usable.",
+    inputSchema: {
+      appName: z.string().optional().describe("the app's name to look up on the App Store — defaults to the saved brand's name"),
+      brandId: z.string().optional().describe('a brand id/name from list_brands to save the screens onto; omit to use the active brand'),
+    },
+    outputSchema: {
+      screens: z.array(z.string()).optional().describe('the durable served URLs of the App Store screenshots'),
+      appName: z.string().optional().describe('the app the store matched'),
+      appStoreUrl: z.string().optional().describe('the matched App Store listing'),
+      saved: z.boolean().optional().describe('true when the screens were written onto the brand profile'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ appName, brandId }) => {
+    const brand = await activeBrand(brandId);
+    const name = String(appName || brand?.name || '').trim();
+    if (!name) return { content: [{ type: 'text', text: "I need the app's name — this workspace has no saved brand to fall back on. Pass appName." }], isError: true };
+    const d = await apiGet(`/api/brand/app-screens?name=${encodeURIComponent(name)}&domain=${encodeURIComponent(brand?.domain || '')}`);
+    const found = d?.data || d || {};
+    const screens = (found.screens || []).map(s => abs(s && (s.image || s.url) ? (s.image || s.url) : s)).filter(Boolean);
+    if (!screens.length) return ok(`No confident App Store match for “${name}”, so nothing was saved. Say that plainly — ask the user for the exact app name, or pick a format that needs no app screens (value-prop, myth-vs-fact, chatgpt-chat).`, { screens: [], appName: '', saved: false });
+    // Typed single-field write (never a blind blob PUT): merge `appScreens` onto the saved brand and leave every other
+    // field exactly as it was — the same rule update_brand follows.
+    let saved = false;
+    try {
+      let b = await readStore('heist.brand.v1'); if (!b || typeof b !== 'object' || Array.isArray(b)) b = {};
+      await writeStore('heist.brand.v1', { ...b, appScreens: found });
+      saved = true;
+    } catch { saved = false; }
+    return ok(`Pulled ${screens.length} App Store screen(s) for “${found.appName || name}”${saved ? ' and saved them to the brand' : ' (they could NOT be saved to the brand — pass them as reference URLs instead)'}.\n${screens.join('\n')}\n${saved ? "You can render the app UI tour now — make_template_ad(template:'app-ui-tour') with one punchy caption per screen (≤42 chars)." : ''}`, { screens, appName: found.appName || name, appStoreUrl: found.appStoreUrl || '', saved });
   }));
 }
