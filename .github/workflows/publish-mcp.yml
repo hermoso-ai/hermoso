@@ -28,6 +28,11 @@ on:
         description: 'Version to publish (must already be live on npm). Blank = use server.json as committed.'
         required: false
         type: string
+      dry_run:
+        description: 'Verify everything — npm version, mcpName, OIDC login — but do NOT publish. Leaves the registry untouched.'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -98,10 +103,24 @@ jobs:
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
 
+      # `!inputs.dry_run` is true for a tag push (where `inputs` is empty) and for an explicit
+      # dry_run:false — so the ONLY thing that stops a publish is asking for a dry run.
+      - name: Dry run — everything verified, stopping before publish
+        if: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          PKG="$(jq -r '.packages[0].identifier' server.json)"
+          echo "DRY RUN — all checks passed:"
+          echo "  npm has $PKG@${{ steps.ver.outputs.version }} and its mcpName matches server.json"
+          echo "  OIDC login to the MCP registry succeeded"
+          echo "Nothing was published. The registry entry is untouched."
+
       - name: Publish server to MCP Registry
+        if: ${{ !inputs.dry_run }}
         run: ./mcp-publisher publish
 
       - name: Confirm the registry read-back
+        if: ${{ !inputs.dry_run }}
         # Report what the registry ACTUALLY stored, never what we asked it to store.
         # Response shape (verified live 2026-08-03): servers[].server.{name,version} with the
         # registry's own status as a SIBLING under servers[]._meta."io.modelcontextprotocol.registry/official".
