@@ -1,6 +1,7 @@
 # Hermoso — MCP, CLI & Skills
 
 [![smithery badge](https://smithery.ai/badge/hermoso/hermoso)](https://smithery.ai/servers/hermoso/hermoso) [![npm version](https://img.shields.io/npm/v/hermoso.svg)](https://www.npmjs.com/package/hermoso) [![MCP registry](https://img.shields.io/badge/MCP_registry-io.github.hermoso--ai%2Fhermoso-cc4f33)](https://registry.modelcontextprotocol.io/v0/servers?search=hermoso)
+[![MCP Queen operational grade](https://mcpqueen.com/badge/io.github.hermoso-ai/hermoso.svg)](https://mcpqueen.com/s/io.github.hermoso-ai/hermoso)
 
 
 Run your whole marketing operation from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
