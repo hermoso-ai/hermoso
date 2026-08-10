@@ -1,15 +1,19 @@
 # Hermoso — MCP, CLI & Skills
 
-[![smithery badge](https://smithery.ai/badge/hermoso/hermoso)](https://smithery.ai/servers/hermoso/hermoso) [![npm version](https://img.shields.io/npm/v/hermoso.svg)](https://www.npmjs.com/package/hermoso) [![MCP registry](https://img.shields.io/badge/MCP_registry-io.github.hermoso--ai%2Fhermoso-cc4f33)](https://registry.modelcontextprotocol.io/v0/servers?search=hermoso)
-
-
 Run your whole marketing operation from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
 scripts. Research the ads already winning in a market, generate finished image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**262 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**372 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
+
+**It is not all-or-nothing.** Research, creation, publishing/scheduling and ads management are four *independent*
+areas — no tool requires that you used another one first. Publish or schedule creative you already have and
+generate nothing here (`upload_file` turns any local or external file into a URL every publish, schedule and
+ad-build tool accepts); build and read campaigns on your own ad accounts with your own creative; research
+competitors with no brand drafted and no channel connected; or generate a file with nothing connected at all and
+just download it. Use the one piece you need, or all of it together.
 
 ## Instant: the hosted Claude.ai connector
 
@@ -49,7 +53,7 @@ Cursor / Codex — add to `mcp.json` (Codex uses the TOML equivalent):
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 262 tools cover
+### What the 372 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -64,8 +68,13 @@ The workspace's **saved cast** is reusable: `list_creators` returns every saved 
 Also `make_template_ad` (native HTML ad formats), `make_explainer`, `product_sizzle`, `make_thumbnail`,
 `remix_static`, `recast_motion`, `reframe_video`, `upscale_video`, `dub_video`, `change_voice`, `finish_video`,
 `fix_beat`, `stitch_video`, `clip_video`, `post_edit`, plus `plan_variations` + `score_ad` to fan out and rank.
-**Length is yours to set:** pass `durationSeconds` to `plan_ad` and the storyboard is *authored* to it — ≤15s
-renders as one continuous clip, longer is stitched from acts (40s = 15+15+10), never time-compressed.
+**Length is yours to set:** pass `durationSeconds` to `plan_ad` and the storyboard is *authored* to it — a length
+that fits one clip of the render model renders as a single continuous take, longer is stitched from acts (on a
+15s-clip model, 40s = 15+15+10), never time-compressed. What fits one clip is the model's own maximum, not a fixed
+number: most video models cap a clip at 15 seconds and the longest-clip one takes **30 seconds in one unbroken
+take** with native synchronized audio. `hermoso_capabilities` is the live list — durations, resolutions and the
+exact credit cost of every tier — and naming that model in `model` is how you get it, since an unnamed render is
+routed by a narrower auto-pool.
 
 **Raw model playground** — the full catalog (30+ image / video / voice / writing models, each with its exact
 per-render credit cost) with no ad framing: `generate_image` / `generate_video` with `useBrand:false`,
@@ -81,10 +90,23 @@ publish). `schedule_post` / `list_scheduled` / `cancel_scheduled` give you one c
 *X posting bills credits per API call (X charges per request); a post containing a link costs 13× one without.*
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
-change confirm-gated, on **Meta**, **Google Ads**, **LinkedIn Ads**, **Pinterest Ads**, **Microsoft Advertising**
-and **ChatGPT Ads** (OpenAI's Advertiser API). Each has list + report + create + budget/status tools
+change confirm-gated, on **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**, **Pinterest Ads**,
+**Microsoft Advertising** and **ChatGPT Ads** (OpenAI's Advertiser API). Each has list + report + create + budget/status tools
 (e.g. `list_google_ads_campaigns`, `google_ads_report`, `create_google_ads_campaign`, `set_google_ads_budget`,
 `set_google_ads_status`). *X Ads are not supported — X posting only.*
+
+**Measure what the ads achieved** — Google Analytics 4 closes the loop. Every other connector here reports what an
+ad *cost*; this is the one that reports what it *did*. `analytics_report` breaks sessions, users, conversions and
+revenue down by channel, source/medium, campaign, landing page, country, device or date, so the campaign Hermoso
+built and the revenue it drove sit in one conversation. `analytics_realtime` shows who is on the site right now.
+Start at `list_analytics_properties` — the tools take a numeric property id, not the `G-XXXXXXXXX` Measurement ID
+from your tracking snippet, and this is what resolves one from the other. It writes as well as reads:
+`create_analytics_key_event` marks an event GA4 already collects as a key event — which is what makes it importable
+into Google Ads as a conversion — and `create_analytics_custom_dimension` registers an event parameter so reports
+can break down by it, with `list_analytics_definitions` showing what the property already measures. It signs in
+with the same Google account as Google Ads, YouTube and Drive, but it is its own connection.
+*GA4 only — the API has no Universal Analytics surface. A custom dimension can be archived but never deleted, and a
+property holds 50 event-scoped ones.*
 
 **Files** — Google Drive CRUD (`save_to_drive`, `list_drive_files`, `update_drive_file`, `delete_drive_file`,
 `create_drive_folder`), Google Sheets (`create_sheet`, `append_to_sheet`, `read_sheet`), Google Docs

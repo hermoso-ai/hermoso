@@ -32,6 +32,13 @@ export const OWNER = process.env.HERMOSO_OWNER || '';
 // hardcode either name when it tells a user which variables to set — it asks its own client.
 export const ENV_PREFIX = 'HERMOSO';
 
+// WHICH TOOL IS RUNNING. The error ledger groups on the OP, and a path alone cannot name the tool: `plan_ad`,
+// `render_ad` and `make_template_ad` all fail through POST /api/create, so without this every MCP defect would be
+// filed under one row called "POST /api/create" and be unfixable. wrap() sets it around each tool call; headers()
+// stamps it on every /api request that call makes, so route() records the tool NAME and nothing has to be reported
+// twice. Deliberately a per-call AsyncLocalStorage and not a module variable — concurrent tool calls interleave.
+export const toolCtx = new AsyncLocalStorage();
+
 function headers(extra = {}) {
   const ctx = mcpCtx.getStore();
   // A HOSTED-CONNECTOR request (mcp/http.mjs) is a DIFFERENT TENANT from the process serving it, so its ctx is the
@@ -41,7 +48,8 @@ function headers(extra = {}) {
   // same person. Presence of the ctx store IS "remote" (see isRemote below).
   const prof = ctx ? (ctx.profile || '') : PROFILE; // omitted when unpinned so the key's saved brand wins server-side
   const own = ctx ? (ctx.owner || '') : OWNER; // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
-  const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-hermoso-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...extra };
+  const tool = toolCtx.getStore()?.tool || '';
+  const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-hermoso-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...(tool ? { 'x-hermoso-tool': tool } : {}), ...extra };
   const tok = ctx?.token || TOKEN;
   if (tok) h.Authorization = `Bearer ${tok}`;
   return h;
@@ -53,9 +61,35 @@ async function unwrap(res) {
   try { body = await res.json(); } catch {}
   if (!res.ok) {
     const msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
-    throw Object.assign(new Error(msg), { status: res.status });
+    // `_viaApi` MARKS AN ERROR THAT ALREADY REACHED THE SERVER, so route() has already recorded it in the error
+    // ledger with the tool name off x-hermoso-tool. wrap() reports ONLY the errors that lack this marker — a local
+    // throw, a schema rejection, a socket reset — which is what stops the twins double-counting every 4xx.
+    throw Object.assign(new Error(msg), { status: res.status, _viaApi: true, ...(body?.connector ? { connector: body.connector } : {}) });
   }
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
+}
+
+/**
+ * Report an error that never reached our API. Fire-and-forget, bounded, and it can NEVER throw or recurse: it uses
+ * plain fetch (not apiPost, whose own failure would report itself forever) and swallows everything.
+ */
+let _reportedThisProcess = 0;
+export function reportToolError(tool, err) {
+  try {
+    if (_reportedThisProcess++ > 200) return; // a client stuck in a retry loop must not become the traffic
+    const e = err && typeof err === 'object' ? err : {};
+    fetch(`${API_BASE}/api/errors/report`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        op: String(tool || 'unknown').slice(0, 60),
+        errorClass: String(e.name || 'Error').slice(0, 40),
+        status: Number(e.status) || 0,
+        message: String(e.message || e).slice(0, 300),
+        ...(e.connector ? { connector: String(e.connector).slice(0, 32) } : {}),
+      }),
+    }).catch(() => {});
+  } catch { /* an instrument never breaks the thing it measures */ }
 }
 
 export async function apiGet(p, query) {

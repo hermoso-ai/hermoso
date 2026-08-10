@@ -8,7 +8,7 @@
 // stdout is the JSON-RPC channel — NEVER print to it. All logging goes to stderr (console.error).
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { registerTools, MCP_INSTRUCTIONS } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, parseToolScope } from './tools.mjs';
 import { API_BASE } from './client.mjs';
 
 // instructions = the full capability map (ad spy · create · raw model playground · account) — one source of truth
@@ -17,7 +17,13 @@ const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' }, {
   instructions: MCP_INSTRUCTIONS,
 });
 
-registerTools(server);
+// Optional roster scoping, same groups as the hosted connector's ?tools= (see registerTools). A client that
+// loads every tool definition eagerly spends ~154k tokens on the full roster; HERMOSO_TOOLS=channels,ads narrows it.
+// An unknown group EXITS rather than silently serving all of them — a scoped connection you did not get is
+// worse than one you were told you could not have.
+const _scope = parseToolScope(process.env.HERMOSO_TOOLS);
+if (_scope.error) { console.error(`[hermoso-mcp] ${_scope.error}`); process.exit(1); }
+registerTools(server, { only: _scope.groups });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

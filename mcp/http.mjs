@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { registerTools, MCP_INSTRUCTIONS } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, parseToolScope } from './tools.mjs';
 import { mcpCtx } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
@@ -107,9 +107,19 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     const methods = arr.map((m) => m && m.method).filter((v) => typeof v === 'string');
     return methods.length > 0 && methods.every((m) => PREAUTH_METHODS.has(m)); // a batch mixing in tools/call is NOT pre-auth
   };
-  async function serveAnonDiscovery(req, res) {
+  // `?tools=research,create` narrows the roster this connection advertises (see registerTools). Read here rather
+  // than inside registerTools so BOTH the anonymous discovery handshake and a real session honour the same query,
+  // and so an unknown group is refused at the door with the valid list instead of silently serving all 301.
+  // The scope is fixed at initialize and stored on the session: tools/list must not change under a live client.
+  function scopeFor(req, res) {
+    const { groups, error } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
+    if (error) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: error }, id: null }); return false; }
+    return { groups };
+  }
+
+  async function serveAnonDiscovery(req, res, scope) {
     const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-    registerTools(server); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
     await server.connect(transport);
@@ -122,7 +132,11 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     const user = token ? await verifyBearer(token).catch(() => null) : null;
     if (!user) {
       // No valid bearer: allow ONLY the read-only discovery handshake (POST), fail CLOSED for everything else.
-      if (req.method === 'POST' && isAllPreauth(req.body)) return serveAnonDiscovery(req, res).catch(() => { try { challenge(res); } catch {} });
+      if (req.method === 'POST' && isAllPreauth(req.body)) {
+        const scope = scopeFor(req, res);
+        if (scope === false) return; // unknown group — already answered 400
+        return serveAnonDiscovery(req, res, scope).catch(() => { try { challenge(res); } catch {} });
+      }
       return challenge(res);
     }
 
@@ -140,9 +154,11 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       // Only an `initialize` may mint a session. Anything else naming no session at all is the SDK's own 400 —
       // answered here so we never pay 36 MB to build a server whose only job would be to reject the request.
       if (!init) return needSession(res);
+      const scope = scopeFor(req, res);
+      if (scope === false) return; // unknown group — already answered 400, and nothing was allocated
       sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server); // the SAME tools as stdio — but here every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
