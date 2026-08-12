@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**372 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**415 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **It is not all-or-nothing.** Research, creation, publishing/scheduling and ads management are four *independent*
@@ -53,7 +53,7 @@ Cursor / Codex — add to `mcp.json` (Codex uses the TOML equivalent):
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 372 tools cover
+### What the 415 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -90,10 +90,12 @@ publish). `schedule_post` / `list_scheduled` / `cancel_scheduled` give you one c
 *X posting bills credits per API call (X charges per request); a post containing a link costs 13× one without.*
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
-change confirm-gated, on **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**, **Pinterest Ads**,
-**Microsoft Advertising** and **ChatGPT Ads** (OpenAI's Advertiser API). Each has list + report + create + budget/status tools
+change confirm-gated, on **ten** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
+**Pinterest Ads**, **Microsoft Advertising**, **ChatGPT Ads** (OpenAI's Advertiser API), **X Ads**, **TikTok Ads**
+and **Snapchat Ads**. Each has list + report + create + budget/status tools
 (e.g. `list_google_ads_campaigns`, `google_ads_report`, `create_google_ads_campaign`, `set_google_ads_budget`,
-`set_google_ads_status`). *X Ads are not supported — X posting only.*
+`set_google_ads_status`). *Snapchat needs one extra step the others do not: an ad points at a CREATIVE, and every
+Snapchat creative must carry a Public Profile id — build it with `upload_snapchat_ads_creative`.*
 
 **Measure what the ads achieved** — Google Analytics 4 closes the loop. Every other connector here reports what an
 ad *cost*; this is the one that reports what it *did*. `analytics_report` breaks sessions, users, conversions and
@@ -114,8 +116,8 @@ property holds 50 event-scoped ones.*
 
 **Workspace & account** — brand workspaces (`list_brands`, `create_brand`, `use_brand`, `update_brand`,
 `delete_brand` — one account holds many brands, so an agency runs every client through here), memory
-(`remember`, `forget`, `list_memory`), custom skills (`save_skill`, `delete_skill`), AI employees
-(`save_employee`, `list_employees`, `set_active_employee`), team (`list_team`, `invite_member`, `remove_member`,
+(`remember`, `forget`, `list_memory`), custom skills (`save_skill`, `get_skill`, `list_skills`,
+`delete_skill` — the one library, which absorbed the old AI-Employee personas), team (`list_team`, `invite_member`, `remove_member`,
 `set_role`), settings (`get_settings`, `update_settings` — including the **language** every ad, script and plan
 is written in), connectors (`list_connectors`, `list_connector_accounts`, `set_connector_accounts`,
 `disconnect_connector`), and billing (`hermoso_credits`, `billing_status`, `buy_credits`, `upgrade_plan`,

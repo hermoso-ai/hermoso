@@ -173,6 +173,15 @@ export async function apiUpload(p, buf, { contentType = 'application/octet-strea
   const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: h, body: buf });
   return unwrap(res);
 }
+// Ingest by URL: the SERVER fetches the bytes (SSRF-guarded on every redirect hop) so nothing has to cross this
+// transport. Deliberately no body — /api/upload treats "a body AND a url" as an error rather than picking one.
+export async function apiUploadUrl(p, url, { fileName = '' } = {}) {
+  const h = headers({});
+  delete h['Content-Type']; // a body-less POST must not claim one; the server sniffs the FETCHED bytes
+  if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
+  const res = await fetch(`${API_BASE}${p}?url=${encodeURIComponent(url)}`, { method: 'POST', headers: h });
+  return unwrap(res);
+}
 
 // /api/explore/chat streams Server-Sent-Events; collect to the terminal `done` payload {reply, results, actions}.
 export async function apiSSE(p, body = {}) {

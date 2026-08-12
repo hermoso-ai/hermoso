@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
-  "description": "AI ad studio: ad research, image + video ads, publishing, campaigns. Each usable alone. 372 tools.",
-  "version": "0.1.71",
+  "description": "AI ad studio: ad research, image + video ads, publishing, campaigns. Each usable alone. 415 tools.",
+  "version": "0.1.85",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.71",
+      "version": "0.1.85",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
