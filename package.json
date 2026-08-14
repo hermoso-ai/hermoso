@@ -1,8 +1,8 @@
 {
   "name": "hermoso",
-  "version": "0.1.88",
+  "version": "0.1.89",
   "mcpName": "io.github.hermoso-ai/hermoso",
-  "description": "AI ad studio + marketing MCP (415 tools): build and manage ad campaigns on Meta, Google Ads, Reddit, X, TikTok, Snapchat, LinkedIn, Pinterest, Microsoft Advertising and ChatGPT Ads \u2014 generate finished video, image and UGC avatar ads, publish them to Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn and Pinterest, spy on competitor ads across the Meta, Google and LinkedIn ad libraries plus organic TikTok/Instagram/YouTube/Reddit, and read what they achieved in Google Analytics 4. CLI and Claude skills for Hermoso, the AI ad studio: brand onboarding, 30+ image/video models, finished-ad pipeline (script, voiceover, music, brand end card), ad scoring and competitor teardowns.",
+  "description": "AI ad studio + marketing MCP (420 tools): build and manage ad campaigns on Meta, Google Ads, Reddit, X, TikTok, Snapchat, LinkedIn, Pinterest, Microsoft Advertising and ChatGPT Ads \u2014 generate finished video, image and UGC avatar ads, publish them to Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn and Pinterest, spy on competitor ads across the Meta, Google and LinkedIn ad libraries plus organic TikTok/Instagram/YouTube/Reddit, and read what they achieved in Google Analytics 4. CLI and Claude skills for Hermoso, the AI ad studio: brand onboarding, 30+ image/video models, finished-ad pipeline (script, voiceover, music, brand end card), ad scoring and competitor teardowns.",
   "type": "module",
   "bin": {
     "hermoso": "bin/hermoso.mjs"

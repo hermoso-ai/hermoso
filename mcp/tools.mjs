@@ -4514,6 +4514,65 @@ export function registerTools(rawServer, opts = {}) {
     outputSchema: { campaignId: z.string().nullable().optional(), lineItemId: z.string().nullable().optional(), status: z.string().optional(), parentStatus: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/status', a); return ok(d.note, d); }));
+  // ── APPLE ADS (Apple Search Ads) — READ-ONLY (2026-08-14) ──────────────────────────────────────────────────────
+  // Every description says read-only in its own words, because an agent that believes it can build a campaign here
+  // will try, fail, and the user will blame Hermoso ([[prompt-rosters-go-stale]]). When write tools land, these
+  // sentences move with them.
+  server.registerTool('list_apple_ads_campaigns', {
+    title: 'List Apple Ads campaigns',
+    description: 'Read the brand’s connected Apple Ads (Apple Search Ads) campaigns — App Store search ads. Each row carries status, servingStatus, daily and total budget, the countries it runs in and, when a campaign cannot run, servingStateReasons stating exactly why. Read-only, free, zero spend risk. Needs Apple Ads connected (Settings ▸ Connectors ▸ Apple Ads): there is no OAuth — Hermoso generates an EC signing key, the user pastes the public half into Apple Ads ▸ Account Settings ▸ API and pastes back clientId / teamId / keyId. Hermoso CANNOT create or edit Apple Ads campaigns — never offer that.',
+    inputSchema: {
+      limit: z.number().optional().describe('page size, default 100, Apple’s max is 1000'),
+      offset: z.number().optional().describe('offset pagination'),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), campaigns: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/apple-ads/campaigns', a); return ok(`${d.count} Apple Ads campaign(s):\n${d.note}`, d); }));
+  server.registerTool('list_apple_ads_ad_groups', {
+    title: 'List Apple Ads ad groups',
+    description: 'Ad groups inside one Apple Ads campaign — status, servingStatus, default bid, and whether Search Match (Apple’s automated keyword matching) is on. campaignId is REQUIRED: Apple publishes no org-wide ad-group list, so an ad group can only be reached through its campaign. Read-only, free.',
+    inputSchema: {
+      campaignId: z.string().describe('REQUIRED — from list_apple_ads_campaigns'),
+      limit: z.number().optional(), offset: z.number().optional(),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), campaignId: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), adGroups: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/apple-ads/adgroups', a); return ok(`${d.count} ad group(s) in Apple Ads campaign ${d.campaignId}:\n${d.note}`, d); }));
+  server.registerTool('list_apple_ads_keywords', {
+    title: 'List Apple Ads targeting or negative keywords',
+    description: 'Targeting or negative keywords with their match type, status and bid. Apple splits these four ways and the paths are not interchangeable: TARGETING keywords are listed PER AD GROUP, so pass campaignId AND adGroupId. NEGATIVE keywords (negative:true) exist at campaign level — pass campaignId alone — or per ad group with both ids. Apple allows up to 5000 keywords per ad group. Read-only, free.',
+    inputSchema: {
+      campaignId: z.string().describe('REQUIRED'),
+      adGroupId: z.string().optional().describe('required for TARGETING keywords; optional for negatives'),
+      negative: z.boolean().optional().describe('list negative keywords instead of targeting keywords'),
+      limit: z.number().optional(), offset: z.number().optional(),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), campaignId: z.string().optional(), adGroupId: z.string().nullable().optional(), count: z.number().optional(), total: z.number().nullable().optional(), keywords: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/apple-ads/keywords', a); return ok(`${d.count} ${d.level === 'negativeKeyword' ? 'negative ' : ''}keyword(s):\n${d.note}`, d); }));
+  server.registerTool('apple_ads_report', {
+    title: 'Apple Ads performance report',
+    description: 'Apple Ads performance — impressions, taps, installs, spend, TTR, CPT, CPA. level is campaign (organization-wide) or adgroup / keyword / searchterm / ad, and every level except campaign REQUIRES campaignId. startTime and endTime are REQUIRED, as YYYY-MM-DD. Apple enforces three interlocking rules and the reply reports back which were applied: with no granularity row totals are forced on; with granularity grand totals are forced off; grouping by a demographic or geo dimension forces BOTH off — so a total of zero can mean "Apple did not return that total", not "no spend". A report with NO rows genuinely means there was NO delivery in that window: say exactly that, and never present zeros as measured performance. Read-only and free, so run it first after connecting — it proves the credentials work with zero spend risk.',
+    inputSchema: {
+      level: z.enum(['campaign', 'adgroup', 'keyword', 'searchterm', 'ad']).optional().describe('default campaign'),
+      campaignId: z.string().optional().describe('REQUIRED for every level except campaign'),
+      startTime: z.string().describe('YYYY-MM-DD (required)'),
+      endTime: z.string().describe('YYYY-MM-DD (required)'),
+      granularity: z.enum(['HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY']).optional(),
+      groupBy: z.array(z.string()).optional().describe('adminArea, ageRange, countryCode, countryOrRegion, deviceClass, gender, locality'),
+      timeZone: z.enum(['ORTZ', 'UTC']).optional().describe('ORTZ = the organization time zone, Apple’s default'),
+      limit: z.number().optional(),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), grandTotals: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/report', a); return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d); }));
+  server.registerTool('list_apple_ads_orgs', {
+    title: 'List Apple Ads organizations',
+    description: 'The Apple Ads organizations these credentials can act as, with each one’s currency, time zone, payment model and the API roles held. Apple treats an orgId like a CAMPAIGN GROUP, so one login can cover several — an agency managing multiple clients has one per client. Reading this does NOT switch organization: Apple Ads is pinned to the ONE organization chosen when the connection was made, so an agent can never act as another client’s campaign group. To use a different one, reconnect Apple Ads and name it there. A payment model of null is worth reporting: Apple states that without one, campaigns cannot run. Read-only, free.',
+    inputSchema: {},
+    outputSchema: { ok: z.boolean().optional(), active: z.string().nullable().optional(), count: z.number().optional(), orgs: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, wrap(async () => { const d = await apiGet('/api/apple-ads/orgs', {}); return ok(d.note, d); }));
   // ── X: managing what you built — update, remove, and the reads both depend on (2026-08-05) ────────────────────
   // Hermoso could build an X campaign and activate it and then change NOTHING about it, and could remove nothing at
   // all: X was the eighth ad platform in the product and the only one with no removal path. Every field offered
