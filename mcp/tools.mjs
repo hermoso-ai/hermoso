@@ -87,9 +87,9 @@ const okVideo = async (text, r) => {
 // bytes and answers exactly such a URL, so it is the universal bridge and the honest thing to tell an agent.
 //
 // ONE const, spliced into BOTH the capability map and MCP_INSTRUCTIONS, so this fact cannot be live on one surface
-// and stale on the other. The "ten ad platforms" count is asserted against the roster by
+// and stale on the other. The "eleven ad platforms" count is asserted against the roster by
 // tools/agent-independence-check.mjs — a hand-written number in a prompt is how a roster goes stale silently.
-export const INDEPENDENCE = 'INDEPENDENT AREAS, NOT A PIPELINE — research, creation, publishing/scheduling and ads management each work ON THEIR OWN, and NO tool requires that you used another one first: publish or schedule media the user already has and generate nothing here (upload_file turns any local or external file into a URL the publish, schedule and ad-build tools accept), build and read campaigns on their OWN ad accounts with their OWN creative across all ten ad platforms, research competitors with no brand drafted and no channel connected, or generate a file with nothing connected at all and simply hand back the URL. Use one area, several, or all of it together — never tell a user they have to start somewhere else first.';
+export const INDEPENDENCE = 'INDEPENDENT AREAS, NOT A PIPELINE — research, creation, publishing/scheduling and ads management each work ON THEIR OWN, and NO tool requires that you used another one first: publish or schedule media the user already has and generate nothing here (upload_file turns any local or external file into a URL the publish, schedule and ad-build tools accept), build and read campaigns on their OWN ad accounts with their OWN creative across all eleven ad platforms, research competitors with no brand drafted and no channel connected, or generate a file with nothing connected at all and simply hand back the URL. Use one area, several, or all of it together — never tell a user they have to start somewhere else first.';
 
 // X ADS: THE ENTRY BELOW USED TO BE A DENIAL, AND IT WAS FALSE (fixed 2026-08-10). It read "X ADS ARE NOT
 // AVAILABLE: … Hermoso cannot create or manage X ad campaigns, so say that plainly instead of offering it" — an
@@ -4514,13 +4514,13 @@ export function registerTools(rawServer, opts = {}) {
     outputSchema: { campaignId: z.string().nullable().optional(), lineItemId: z.string().nullable().optional(), status: z.string().optional(), parentStatus: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/status', a); return ok(d.note, d); }));
-  // ── APPLE ADS (Apple Search Ads) — READ-ONLY (2026-08-14) ──────────────────────────────────────────────────────
+  // ── APPLE ADS (Apple Search Ads) — READS on the Campaign Management API v5 (2026-08-14) ───────────────────────
   // Every description says read-only in its own words, because an agent that believes it can build a campaign here
   // will try, fail, and the user will blame Hermoso ([[prompt-rosters-go-stale]]). When write tools land, these
   // sentences move with them.
   server.registerTool('list_apple_ads_campaigns', {
     title: 'List Apple Ads campaigns',
-    description: 'Read the brand’s connected Apple Ads (Apple Search Ads) campaigns — App Store search ads. Each row carries status, servingStatus, daily and total budget, the countries it runs in and, when a campaign cannot run, servingStateReasons stating exactly why. Read-only, free, zero spend risk. Needs Apple Ads connected (Settings ▸ Connectors ▸ Apple Ads): there is no OAuth — Hermoso generates an EC signing key, the user pastes the public half into Apple Ads ▸ Account Settings ▸ API and pastes back clientId / teamId / keyId. Hermoso CANNOT create or edit Apple Ads campaigns — never offer that.',
+    description: 'Read the brand’s connected Apple Ads (Apple Search Ads) campaigns — App Store search ads. Each row carries status, servingStatus, daily and total budget, the countries it runs in and, when a campaign cannot run, servingStateReasons stating exactly why. Read-only, free, zero spend risk. Needs Apple Ads connected (Settings ▸ Connectors ▸ Apple Ads): there is no OAuth — Hermoso generates an EC signing key, the user pastes the public half into Apple Ads ▸ Account Settings ▸ API and pastes back clientId / teamId / keyId. To BUILD on this account, use create_apple_ads_campaign / create_apple_ads_ad_group / add_apple_ads_keywords: everything is created PAUSED and only set_apple_ads_status(confirm:true) can arm spend.',
     inputSchema: {
       limit: z.number().optional().describe('page size, default 100, Apple’s max is 1000'),
       offset: z.number().optional().describe('offset pagination'),
@@ -4573,6 +4573,112 @@ export function registerTools(rawServer, opts = {}) {
     outputSchema: { ok: z.boolean().optional(), active: z.string().nullable().optional(), count: z.number().optional(), orgs: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, wrap(async () => { const d = await apiGet('/api/apple-ads/orgs', {}); return ok(d.note, d); }));
+  // ── APPLE ADS: BUILDING, NOT JUST READING (2026-08-14) ────────────────────────────────────────────────────────
+  // These run on Apple's OTHER API — the Apple Ads Platform API (api.ads.apple.com/v1) — while the reads above stay
+  // on the Campaign Management API (v5). THE CREDENTIAL IS THE SAME: verified live by spending one minted token on
+  // both hosts in the same second, so a connection made before this shipped can write with no reconnect and no new
+  // scope. Everything is created PAUSED with no caller override, every reply is built from a read-back of what
+  // Apple stored (never from what we sent), and exactly two switches take a confirmation — enabling, which is the
+  // only thing that arms real money, and deleting, which Apple cannot undo.
+  server.registerTool('create_apple_ads_campaign', {
+    title: 'Create an Apple Ads campaign',
+    description: 'Create an Apple Ads (Apple Search Ads) campaign promoting an iOS app on the App Store. CREATED PAUSED ALWAYS — there is no override, so nothing can spend until you separately call set_apple_ads_status(status:"ENABLED", confirm:true). REQUIRED: name (unique across the whole Apple Ads ORGANIZATION, not just this ad account — Apple 400s DUPLICATE_CAMPAIGN_NAME, and the org can contain campaigns you cannot see), appAdamId (the App Store id, e.g. "6752439949" — read it off any existing campaign’s promotedObjectId), dailyBudget (decimal string, e.g. "25.00"), countries (ISO 3166-1 alpha-2). placements defaults to APPSTORE_SEARCH_RESULTS, the classic Search Ads placement, which needs NO creative — Apple renders your App Store product page. bidStrategyType defaults to MANUAL_CPT (a fixed price per tap); MAX_CONVERSIONS optimizes for installs and is the only strategy that takes a campaign-level bid, where it means the target CPA. A MANUAL_CPT per-tap bid does NOT belong here: Apple refuses it at campaign level with an error naming a field you never sent — pass defaultBid to create_apple_ads_ad_group instead. Free.',
+    inputSchema: {
+      name: z.string().describe('REQUIRED. Unique across the entire Apple Ads organization.'),
+      appAdamId: z.string().describe('REQUIRED. App Store id of the promoted app, e.g. "6752439949".'),
+      dailyBudget: z.string().describe('REQUIRED. Decimal string, e.g. "25.00".'),
+      countries: z.array(z.string()).describe('REQUIRED. ISO 3166-1 alpha-2 codes, e.g. ["US","CA"].'),
+      placements: z.array(z.string()).optional().describe('Default ["APPSTORE_SEARCH_RESULTS"]. Also APPSTORE_SEARCH_TAB, APPSTORE_TODAY_TAB, APPSTORE_PRODUCT_PAGES, or MAPS_SEARCH_RESULTS / MAPS_SEARCH_HOME. One campaign cannot mix App Store and Maps placements.'),
+      bidStrategyType: z.enum(['MANUAL_CPT', 'MAX_CONVERSIONS']).optional().describe('Default MANUAL_CPT.'),
+      bid: z.string().optional().describe('MAX_CONVERSIONS only — the target CPA. Refused on MANUAL_CPT.'),
+      currency: z.string().optional().describe('Defaults to the connected ad account’s currency; an account cannot mix currencies.'),
+      startTime: z.string().optional(), endTime: z.string().optional().describe('Omit to run indefinitely.'),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), bornPaused: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/campaign', a); return ok(`Apple Ads campaign created PAUSED:\n${d.summary}\n${d.note || ''}`, d); }));
+
+  server.registerTool('create_apple_ads_ad_group', {
+    title: 'Create an Apple Ads ad group',
+    description: 'Create an ad group inside an Apple Ads campaign — this is where the bid and the keywords live. CREATED PAUSED ALWAYS. REQUIRED: campaignId, name. defaultBid is the most you will pay per tap (decimal string, e.g. "1.50") and applies to every keyword with no bid of its own. startTime is optional here and defaults to now: Apple documents it as optional and then REJECTS the create without it, so Hermoso always supplies one. searchMatch:true opts into Apple’s automated keyword matching, which targets relevant search terms beyond your keyword list. pricingModel defaults to CPT and must match the campaign’s billing event. Keywords cannot be created inline — make the ad group, then call add_apple_ads_keywords. Like the campaign it lives in, it stays PAUSED until set_apple_ads_status(status:"ENABLED", confirm:true) arms it. Free.',
+    inputSchema: {
+      campaignId: z.string().describe('REQUIRED.'), name: z.string().describe('REQUIRED.'),
+      defaultBid: z.string().optional().describe('Max cost per tap, e.g. "1.50".'),
+      currency: z.string().optional(), startTime: z.string().optional().describe('Defaults to now.'),
+      endTime: z.string().optional().describe('Omit to inherit the campaign end date.'),
+      searchMatch: z.boolean().optional().describe('Opt into Apple’s automated keyword matching.'),
+      pricingModel: z.enum(['CPT', 'CPM', 'CPA']).optional().describe('Default CPT; must match the campaign billing event.'),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), bornPaused: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/adgroup', a); return ok(`Apple Ads ad group created PAUSED:\n${d.summary}\n${d.note || ''}`, d); }));
+
+  server.registerTool('add_apple_ads_keywords', {
+    title: 'Add Apple Ads keywords',
+    description: 'Add targeting keywords to an Apple Ads ad group. keywords is [{text, matchType, bid}] — matchType EXACT (default), BROAD, PHRASE or CATEGORY, and bid optionally overrides the ad group default for that one term. Up to 1000 per call and 5000 per ad group. They are sent ONE AT A TIME on purpose: a single term Apple refuses cannot take the rest of the batch down, and the reply names every refusal with Apple’s own reason, then reads the ad group’s keywords back to prove what actually landed. Keyword text and match type are IMMUTABLE — to change either, delete the keyword and add it again. A keyword is created ENABLED because it cannot serve unless its ad group and campaign are enabled too; if the ad group is ALREADY live, adding keywords serves on the next auction and therefore takes confirm:true. Free.',
+    inputSchema: {
+      adGroupId: z.string().describe('REQUIRED.'),
+      keywords: z.array(z.object({ text: z.string(), matchType: z.string().optional(), bid: z.string().optional() })).describe('REQUIRED. Up to 1000.'),
+      matchType: z.enum(['EXACT', 'BROAD', 'PHRASE', 'CATEGORY']).optional().describe('Default for entries that do not set one.'),
+      currency: z.string().optional(),
+      confirm: z.boolean().optional().describe('Required ONLY when the ad group is already ENABLED.'),
+    },
+    outputSchema: { ok: z.boolean().optional(), adGroupId: z.string().optional(), added: z.number().optional(), failed: z.array(z.any()).optional(), verified: z.boolean().optional(), keywords: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/keywords', a); return ok(`Added ${d.added} keyword(s) to Apple Ads ad group ${d.adGroupId} (verified: ${d.verified}).\n${(d.keywords || []).join('\n')}\n${d.note || ''}`, d); }));
+
+  server.registerTool('add_apple_ads_negative_keywords', {
+    title: 'Add Apple Ads negative keywords',
+    description: 'Add negative keywords to an Apple Ads campaign or ad group — search terms your ads must NOT show for. Pass exactly one of campaignId (campaign-wide) or adGroupId (that ad group only); Apple rejects a request carrying both. keywords is [{text, matchType}] with matchType BROAD (default) or EXACT. Never confirm-gated and never a spend risk, because a negative keyword only ever RESTRICTS where you show. Text and match type are immutable — delete and re-add to change either. Free.',
+    inputSchema: {
+      campaignId: z.string().optional().describe('Campaign-wide. Pass this OR adGroupId, never both.'),
+      adGroupId: z.string().optional().describe('One ad group. Pass this OR campaignId, never both.'),
+      keywords: z.array(z.object({ text: z.string(), matchType: z.string().optional() })).describe('REQUIRED.'),
+      matchType: z.enum(['EXACT', 'BROAD', 'PHRASE', 'CATEGORY']).optional().describe('Default BROAD.'),
+    },
+    outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), added: z.number().optional(), failed: z.array(z.any()).optional(), verified: z.boolean().optional(), keywords: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/negative-keywords', a); return ok(`Added ${d.added} negative keyword(s) (${d.scope}, verified: ${d.verified}).\n${(d.keywords || []).join('\n')}\n${d.note || ''}`, d); }));
+
+  server.registerTool('update_apple_ads_object', {
+    title: 'Edit an Apple Ads campaign, ad group or keyword',
+    description: 'Edit an existing Apple Ads campaign, ad group or keyword. Pass level and id plus ONLY the fields you want to change — Apple leaves every field you omit exactly as it is. Campaign: name, dailyBudget, startTime, endTime, countries, bidStrategyType. Ad group: name, defaultBid, startTime, endTime, searchMatch. Keyword: bid only — its text and match type are immutable, so delete and re-add to change either. WARNING on countries: an ARRAY REPLACES rather than merges, so the list you send becomes the campaign’s entire geographic targeting — send every country you want to keep, not just the new one. This tool deliberately CANNOT change a status: enabling arms real spend, so it lives behind set_apple_ads_status and its confirmation. Free.',
+    inputSchema: {
+      level: z.enum(['campaign', 'adgroup', 'keyword']).describe('REQUIRED.'), id: z.string().describe('REQUIRED.'),
+      name: z.string().optional(), dailyBudget: z.string().optional().describe('Campaign only.'),
+      defaultBid: z.string().optional().describe('Ad group only.'), bid: z.string().optional().describe('Keyword only.'),
+      countries: z.array(z.string()).optional().describe('Campaign only. REPLACES the whole list.'),
+      bidStrategyType: z.enum(['MANUAL_CPT', 'MAX_CONVERSIONS']).optional().describe('Campaign only.'),
+      searchMatch: z.boolean().optional().describe('Ad group only.'),
+      startTime: z.string().optional(), endTime: z.string().optional(), currency: z.string().optional(),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/update', a); return ok(`Apple Ads ${d.level} ${d.id} updated (verified: ${d.verified}):\n${d.summary}\n${d.note || ''}`, d); }));
+
+  server.registerTool('set_apple_ads_status', {
+    title: 'Pause or enable an Apple Ads object',
+    description: 'Pause or enable an Apple Ads campaign, ad group, keyword or ad. PAUSING is immediate and needs no confirmation. ENABLING IS THE ONE SWITCH THAT ARMS REAL MONEY: it requires confirm:true, and without it nothing changes and the refusal names the object Apple actually holds under that id — read back from Apple, never echoed from your input, because aiming at the wrong campaign is invisible until money moves. An object serves only when it AND every parent above it are ENABLED, so enabling a keyword inside a paused campaign spends nothing. Prefer pausing to deleting: pausing is reversible and Apple’s delete is not. The reply reports the status Apple STORED, which is a different claim from the one it accepted. Free.',
+    inputSchema: {
+      level: z.enum(['campaign', 'adgroup', 'keyword', 'negative_keyword', 'ad']).describe('REQUIRED.'),
+      id: z.string().describe('REQUIRED.'), status: z.enum(['ENABLED', 'PAUSED']).describe('REQUIRED.'),
+      confirm: z.boolean().optional().describe('REQUIRED to ENABLE — it arms real spend. Pausing needs none.'),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), armsSpend: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/status', a); return ok(`Apple Ads ${d.level} ${d.id} → ${d.requested?.status} (verified: ${d.verified}${d.armsSpend ? ', SPEND ARMED' : ''}):\n${d.summary}\n${d.note || ''}`, d); }));
+
+  server.registerTool('delete_apple_ads_object', {
+    title: 'Delete an Apple Ads object',
+    description: 'Delete an Apple Ads campaign, ad group, keyword, negative keyword or ad. Requires confirm:true, and optionally confirmName echoed back to prove you aimed at the right object. THIS CASCADES AND CANNOT BE UNDONE: Apple soft-deletes with no undelete, and deleting a campaign takes every ad group, keyword and ad underneath it. In almost every case set_apple_ads_status(status:"PAUSED") is what you actually want — it stops all spend and is reversible. The reply is confirmed by RE-READING the object: for a delete, an absent or deleted-flagged row is the proof, never the HTTP 200. Free.',
+    inputSchema: {
+      level: z.enum(['campaign', 'adgroup', 'keyword', 'negative_keyword', 'ad']).describe('REQUIRED.'),
+      id: z.string().describe('REQUIRED.'), confirm: z.boolean().optional().describe('REQUIRED. Nothing is deleted without it.'),
+      confirmName: z.string().optional().describe('Optional — echo the object’s exact name to prove you aimed at the right one.'),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), deleted: z.string().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/delete', a); return ok(`${d.summary}\n${d.note || ''}`, d); }));
   // ── X: managing what you built — update, remove, and the reads both depend on (2026-08-05) ────────────────────
   // Hermoso could build an X campaign and activate it and then change NOTHING about it, and could remove nothing at
   // all: X was the eighth ad platform in the product and the only one with no removal path. Every field offered
