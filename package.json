@@ -1,8 +1,8 @@
 {
   "name": "hermoso",
-  "version": "0.1.90",
+  "version": "0.1.139",
   "mcpName": "io.github.hermoso-ai/hermoso",
-  "description": "AI ad studio + marketing MCP (427 tools): build and manage ad campaigns on Meta, Google Ads, Reddit, X, TikTok, Snapchat, LinkedIn, Pinterest, Microsoft Advertising and ChatGPT Ads \u2014 generate finished video, image and UGC avatar ads, publish them to Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn and Pinterest, spy on competitor ads across the Meta, Google and LinkedIn ad libraries plus organic TikTok/Instagram/YouTube/Reddit, and read what they achieved in Google Analytics 4. CLI and Claude skills for Hermoso, the AI ad studio: brand onboarding, 30+ image/video models, finished-ad pipeline (script, voiceover, music, brand end card), ad scoring and competitor teardowns.",
+  "description": "AI ad studio and marketing MCP server with 681 tools. Research the ads already running in any market, generate finished image, video and UGC avatar ads, publish and schedule them to your own channels, build and manage the ad campaigns behind them, and read what they achieved. AD PLATFORMS: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in Google Merchant Center. PUBLISHING AND SCHEDULING: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. AD RESEARCH: the Meta, Google and LinkedIn ad libraries plus organic TikTok, Instagram, YouTube, Threads and Reddit. ANALYTICS: Google Analytics 4, Google Search Console and every connected platform's own post and campaign insights. Also brand onboarding, 50+ image and video generation models, ad scoring, competitor teardowns, Google Drive and OneDrive, a CLI and installable Claude skills.",
   "type": "module",
   "bin": {
     "hermoso": "bin/hermoso.mjs"
@@ -12,16 +12,20 @@
     "prepublishOnly": "node ../tools/publish-preflight.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "keywords": [
     "ad-generator",
     "ad-library",
+    "ad-spy",
     "ads",
     "advertising",
     "ai-ads",
     "ai-agents",
     "ai-video",
+    "apple-search-ads",
+    "campaign-management",
+    "chatgpt-ads",
     "claude",
     "cli",
     "competitor-analysis",
@@ -29,17 +33,26 @@
     "google-ads",
     "google-analytics",
     "image-generation",
+    "linkedin-ads",
     "marketing",
     "mcp",
     "mcp-server",
     "meta-ads",
+    "microsoft-advertising",
     "model-context-protocol",
+    "pinterest-ads",
+    "reddit-ads",
+    "search-console",
     "seedance",
+    "snapchat-ads",
     "social-media-publishing",
+    "social-media-scheduling",
+    "tiktok-ads",
     "ugc",
     "veo",
     "video-ads",
-    "video-generation"
+    "video-generation",
+    "x-ads"
   ],
   "homepage": "https://hermoso.ai",
   "repository": {

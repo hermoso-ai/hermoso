@@ -5,8 +5,15 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**415 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**681 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
+
+**What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
+Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in
+Google Merchant Center. Publishing and scheduling: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn,
+Pinterest, Bluesky and Telegram. Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
+Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
+connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
 
 **It is not all-or-nothing.** Research, creation, publishing/scheduling and ads management are four *independent*
 areas — no tool requires that you used another one first. Publish or schedule creative you already have and
@@ -53,7 +60,7 @@ Cursor / Codex — add to `mcp.json` (Codex uses the TOML equivalent):
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 415 tools cover
+### What the 681 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -90,12 +97,21 @@ publish). `schedule_post` / `list_scheduled` / `cancel_scheduled` give you one c
 *X posting bills credits per API call (X charges per request); a post containing a link costs 13× one without.*
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
-change confirm-gated, on **ten** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
-**Pinterest Ads**, **Microsoft Advertising**, **ChatGPT Ads** (OpenAI's Advertiser API), **X Ads**, **TikTok Ads**
-and **Snapchat Ads**. Each has list + report + create + budget/status tools
+change confirm-gated, on **eleven** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
+**Pinterest Ads**, **Microsoft Advertising**, **ChatGPT Ads** (OpenAI's Advertiser API), **X Ads**, **TikTok Ads**,
+**Snapchat Ads** and **Apple Ads** (Apple Search Ads on the App Store). Each has list + report + create + budget/status tools
 (e.g. `list_google_ads_campaigns`, `google_ads_report`, `create_google_ads_campaign`, `set_google_ads_budget`,
 `set_google_ads_status`). *Snapchat needs one extra step the others do not: an ad points at a CREATIVE, and every
 Snapchat creative must carry a Public Profile id — build it with `upload_snapchat_ads_creative`.*
+
+**Feed the shopping surfaces** — **Google Merchant Center** is the catalog a retail Performance Max or Shopping
+campaign advertises (`create_google_ads_performance_max_campaign` takes a `merchantCenterId`), and you manage it
+from here: accounts and account status, data sources, product upsert / update / delete, per-region inventory,
+quota, `merchant_report` for product-level performance, notifications and conversion sources, plus the disapproval
+loop — `list_merchant_issues` says what is wrong and `merchant_issue_help` returns Google's own documented fix.
+*Promotions need the merchant's own enrolment in Google's promotions program; without it Google refuses that
+sub-API outright.* **Microsoft Merchant Center** is covered on the same shape (stores, catalogs, products, issues)
+for Bing Shopping.
 
 **Measure what the ads achieved** — Google Analytics 4 closes the loop. Every other connector here reports what an
 ad *cost*; this is the one that reports what it *did*. `analytics_report` breaks sessions, users, conversions and

@@ -9,6 +9,14 @@
 //   hermoso create --brand Flourish --product "protein pancakes" --format image
 //   hermoso generate image --prompt "…" --ref ./bag.png --wait
 //
+// EVERY tool the MCP server registers is also callable here. The terminal gets the same product as the connector,
+// reached a cheaper way:
+//   hermoso tools                                        # every tool, name + one line, grouped
+//   hermoso tools --group ads --search reddit            # narrow it
+//   hermoso tools post_to_x                              # one tool's full schema
+//   hermoso call post_to_x --json '{"text":"hello"}'     # run it
+// The curated subcommands above stay as ergonomics for the common path; `call` is the ceiling.
+//
 // Auth today: none locally (the server resolves the dev account). `hermoso auth login --token <t>` stores a Bearer
 // for when real auth lands — the seam, not a requirement.
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
@@ -100,7 +108,12 @@ async function main() {
         console.log(`recipes: ${(d.recipes || []).map(r => r.id).join(', ')}`);
         return;
       }
-      case 'credits': { const d = await api.apiGet('/api/credits'); return out(`Balance: ${d.balance} credits · session used: ${d.sessionUsed ?? 0}`, d); }
+      case 'credits': { const d = await api.apiGet('/api/credits');
+        // accountBalance = the caller's Hermoso credits (authoritative when authed); balance = the local-dev usage
+        // pill. Reading only `balance` printed "Balance: undefined credits" against prod for every signed-in user
+        // (measured 2026-08-19). Same expression the hermoso_credits MCP tool uses, so the two cannot disagree.
+        const bal = d.accountBalance ?? d.balance;
+        return out(`Balance: ${bal ?? '—'} credits`, d); }
       case 'brand': {
         if (sub !== 'draft') return die('usage: hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');
         const body = flags.domain ? { domain: flags.domain } : flags.description ? { description: flags.description } : flags.social ? { socialHandle: flags.social, platform: flags.platform || 'instagram' } : null;
@@ -157,7 +170,89 @@ async function main() {
       }
       case 'research': { const q = sub || flags.query; if (!q) return die('usage: hermoso research "<request>"'); const d = await api.apiSSE('/api/explore/chat', { messages: [{ role: 'user', content: q }] }); if (flags.json) return console.log(JSON.stringify(d, null, 2)); console.log(d.reply || ''); console.log(`\n(${(d.results || []).length} ads found)`); return; }
       case 'fetch': { const url = sub; if (!url) return die('usage: hermoso fetch <url> [--out <name>]'); const r = await fetch(`${api.API_BASE}/api/download?url=${encodeURIComponent(url)}`); if (!r.ok) return die(`download failed (HTTP ${r.status})`); const buf = Buffer.from(await r.arrayBuffer()); const name = flags.out || path.basename(url.split(/[?#]/)[0]) || 'asset'; await writeFile(name, buf); return console.log(`✓ saved ${name} (${buf.length} bytes)`); }
+      // ── TELLING US SOMETHING IS BROKEN OR MISSING ──────────────────────────────────────────────────────────
+      // `report_bug` / `request_feature` are reachable through the generic passthrough like everything else, and
+      // these two shortcuts exist anyway because of WHEN they get reached for: mid-task, right after something has
+      // just failed. `hermoso call report_bug --json '{"summary":"…","details":"…"}'` is a lot of ceremony at that
+      // moment, and a report that does not get written is the one case this whole channel exists to prevent.
+      //
+      // NOTHING IS INVENTED. With no --details, the text you typed becomes the details and its FIRST SENTENCE
+      // becomes the summary — your own words in both fields, under a rule stated here and in --help. It never
+      // writes a sentence you did not.
+      case 'bug': case 'feature': {
+        const tool = group === 'bug' ? 'report_bug' : 'request_feature';
+        const text = [sub, ...pos.slice(2)].filter(Boolean).join(' ').trim() || String(flags.summary || '').trim();
+        if (!text) return die(`usage: hermoso ${group} "what happened" [--details "…"]${group === 'bug' ? ' [--severity low|medium|high]' : ''}`);
+        const firstSentence = (text.split(/(?<=[.!?])\s/)[0] || text).trim();
+        const preset = {
+          summary: String(flags.summary || firstSentence).slice(0, 200),
+          details: String(flags.details || text),
+          ...(group === 'bug' && flags.severity ? { severity: String(flags.severity) } : {}),
+        };
+        const reg = await import('../mcp/registry.mjs');
+        return await runTool(reg, tool, flags, [], preset);
+      }
+      // ── FULL TOOL SURFACE ──────────────────────────────────────────────────────────────────────────────────
+      // `tools` is what replaces a tool manifest: the agent greps this list for the one tool it needs and reads
+      // that schema alone, instead of carrying several hundred schemas before the user has said anything.
+      case 'tools': {
+        const reg = await import('../mcp/registry.mjs');
+        const name = sub;
+        if (name) return await printToolSchema(reg, name, flags);
+        const inv = reg.inventory();
+        const q = String(flags.search || flags.grep || '').toLowerCase();
+        const wantGroup = flags.group ? String(flags.group).toLowerCase() : '';
+        if (wantGroup && !reg.TOOL_GROUP_NAMES.includes(wantGroup)) {
+          // Refused by name, never quietly ignored — a filter that silently matched everything would hand back the
+          // whole roster to someone who asked for one slice and believed they got it.
+          return die(`Unknown group "${wantGroup}". Groups: ${reg.TOOL_GROUP_NAMES.join(', ')}.`);
+        }
+        // Sorted by group (in the order enable_tools names them) then by name, so a group heads its own block
+        // exactly once. Registration order interleaves the sections and prints `core` four times.
+        const order = (g) => { const i = reg.TOOL_GROUP_NAMES.indexOf(g); return i < 0 ? 99 : i; };
+        const rows = inv.filter((t) => (!wantGroup || t.group === wantGroup)
+          && (!q || t.name.includes(q) || t.description.toLowerCase().includes(q) || (t.title || '').toLowerCase().includes(q)))
+          .sort((a, b) => order(a.group) - order(b.group) || a.name.localeCompare(b.name));
+        if (flags.json === true) return console.log(JSON.stringify(rows, null, 2));
+        if (flags.names) return console.log(rows.map((t) => t.name).join('\n'));
+        if (!rows.length) return console.log(`No tool matches${wantGroup ? ` in ${wantGroup}` : ''}${q ? ` "${q}"` : ''}. Try: hermoso tools`);
+        const counts = {};
+        for (const t of inv) counts[t.group] = (counts[t.group] || 0) + 1;
+        console.log(`${inv.length} tools · ${reg.TOOL_GROUP_NAMES.map((g) => `${g}(${counts[g] || 0})`).join(' ')}`);
+        if (rows.length !== inv.length) console.log(`showing ${rows.length}`);
+        const width = Math.max(40, (process.stdout.columns || 100) - 30);
+        let last = null;
+        for (const t of rows) {
+          if (t.group !== last) {
+            // The group's own one-line purpose, straight from the table `enable_tools` uses, so an agent scanning
+            // for where to look is reading the same description the connector shows.
+            const blurb = reg.TOOL_GROUPS[t.group] || '';
+            console.log(`\n${t.group}${blurb ? `  ${blurb}` : ''}`);
+            last = t.group;
+          }
+          const one = t.description.split(/(?<=[.!?])\s|\n/)[0].trim();
+          console.log(`  ${t.name.padEnd(34)} ${one.length > width ? one.slice(0, width - 1) + '…' : one}`);
+        }
+        console.log(`\nhermoso tools <name>            one tool's full schema`);
+        console.log(`hermoso call <name> --json '{…}'  run it`);
+        return;
+      }
+      // `call` runs ANY registered tool through the same handler, the same argument validation and the same
+      // confirm/spend gates the MCP twins use. There is no second implementation here to drift or to bypass.
+      case 'call': {
+        if (!sub) return die(`usage: hermoso call <tool_name> --json '{"key":"value"}'   ·   hermoso tools  lists them`);
+        const reg = await import('../mcp/registry.mjs');
+        return await runTool(reg, sub, flags, pos.slice(2));
+      }
       default:
+      {
+        // A BARE TOOL NAME IS A CALL. `hermoso post_to_x --text hi` is the same thing as
+        // `hermoso call post_to_x --text hi`, so an agent that read a name out of `hermoso tools` can just run it.
+        // Checked against the REAL registry, so nothing has to be listed here and kept in step.
+        if (group) {
+          const reg = await import('../mcp/registry.mjs');
+          if (reg.inventory().some((t) => t.name === group)) return await runTool(reg, group, flags, pos.slice(1));
+        }
         console.log(`hermoso <command>
   auth login [--url <base>] [--token <t>]   credits          capabilities
   brand draft (--domain|--description|--social …)             create --brand --product [--format]
@@ -165,10 +260,118 @@ async function main() {
   jobs list | jobs get <id> [--wait]                          competitors <domain>
   ads pull (--company|--domain)                               research "<request>"
   fetch <url> [--out]                                         mcp   (run the stdio MCP server)
+  bug "what broke" [--details] [--severity]                   feature "what you need" [--details]
   version
+
+The full tool surface (every tool the MCP server has):
+  tools [--group <g>] [--search <q>] [--names]               list every tool, name + one line
+  tools <name>                                               that tool's full input schema
+  call <name> --json '{"key":"value"}'                       run it
+  <name> --key value                                         same thing, shorter
 add --json to any command for machine output.`);
+        if (group) console.error(`\n✗ Unknown command "${group}". It is not a subcommand and not a tool name. Try: hermoso tools --search ${JSON.stringify(String(group).slice(0, 24))}`);
+        if (group) process.exitCode = 1;
+        return;
+      }
     }
   } catch (e) { die(e?.message || String(e)); }
+}
+
+// ---- the full-tool-surface commands ---------------------------------------------------------------------------
+// Flags THIS command consumes. Everything else is a tool argument, so the list stays as short as it can be:
+// `--raw` is a real property on generate_image / generate_text / generate_video, and reserving it would make three
+// tools uncallable from the shorthand. A tool that ever needs a `--json` or `--args` argument can still pass it
+// inside --args '{"json":…}'.
+const CALL_FLAGS = new Set(['json', 'args', 'args-file', 'structured']);
+
+async function readArgsPayload(flags) {
+  let src = null;
+  if (typeof flags.args === 'string') src = flags.args;
+  else if (typeof flags.json === 'string') src = flags.json;      // `--json '{…}'`; a bare `--json` means machine output
+  if (flags['args-file']) src = await readFile(String(flags['args-file']), 'utf8');
+  if (src === '-') src = await new Promise((res, rej) => { let b = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (c) => { b += c; }); process.stdin.on('end', () => res(b)); process.stdin.on('error', rej); });
+  if (src == null || String(src).trim() === '') return {};
+  let parsed;
+  try { parsed = JSON.parse(src); }
+  catch (e) { throw new Error(`arguments are not valid JSON: ${e.message}. Wrap the whole object in single quotes: --json '{"key":"value"}'`); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('arguments must be a JSON object, e.g. --json \'{"key":"value"}\'');
+  return parsed;
+}
+
+async function printToolSchema(reg, name, flags) {
+  const { client, close } = await reg.openRegistry();
+  try {
+    const all = await reg.listTools(client);
+    const tool = all.find((t) => t.name === name);
+    if (!tool) return die(suggestTool(reg, name));
+    const group = reg.inventory().find((t) => t.name === name)?.group || '?';
+    if (flags.json === true) return console.log(JSON.stringify({ ...tool, group }, null, 2));
+    console.log(`${tool.name}   [${group}]${tool.title ? '  ·  ' + tool.title : ''}`);
+    console.log(`\n${tool.description || ''}\n`);
+    const fields = reg.schemaFields(tool.inputSchema);
+    if (!fields.length) console.log('Arguments: none.');
+    else {
+      console.log('Arguments:');
+      const width = Math.max(40, (process.stdout.columns || 100) - 40);
+      for (const f of fields) {
+        const head = `  ${f.required ? '*' : ' '} ${f.name}${f.type ? ` <${f.type}>` : ''}`;
+        const d = f.enum ? `one of: ${f.enum.join(' | ')}` : f.description;
+        console.log(`${head.padEnd(38)} ${d.length > width ? d.slice(0, width - 1) + '…' : d}`);
+      }
+      console.log('  (* = required)');
+    }
+    const req = fields.filter((f) => f.required);
+    const example = Object.fromEntries(req.map((f) => [f.name, f.enum ? f.enum[0] : f.type === 'number' || f.type === 'integer' ? 0 : f.type === 'boolean' ? true : f.type === 'array' ? [] : '…']));
+    console.log(`\nhermoso call ${tool.name} --json '${JSON.stringify(example)}'`);
+    console.log(`hermoso tools ${tool.name} --json      the raw JSON Schema`);
+  } finally { await close(); }
+}
+
+function suggestTool(reg, name) {
+  const inv = reg.inventory();
+  const needle = String(name).toLowerCase();
+  const near = inv.filter((t) => t.name.includes(needle) || needle.includes(t.name.split('_')[0])).slice(0, 6).map((t) => t.name);
+  return `No tool named "${name}".${near.length ? ` Did you mean: ${near.join(', ')}?` : ''} Run: hermoso tools --search ${JSON.stringify(needle.slice(0, 24))}`;
+}
+
+// RUN A TOOL. The arguments are assembled here and passed through UNTOUCHED — nothing is defaulted, injected or
+// dropped on the way. That is what keeps a confirm-gated tool confirm-gated from a terminal: the gate lives in the
+// handler, and the CLI is not allowed to answer it on the caller's behalf.
+// `preset` is the ONLY way anything reaches the arguments other than the caller's own --json/--flags, and it is
+// supplied by exactly two call sites: the `bug` and `feature` shortcuts, which shape text the user typed into the
+// two fields those tools require. A caller's own value always wins over it. It is deliberately not a general
+// mechanism — every other command either passes the arguments through untouched or does not use runTool at all,
+// which is what keeps a confirm-gated tool something only the caller can answer.
+async function runTool(reg, name, flags, extraPos = [], preset = null) {
+  const { client, close } = await reg.openRegistry();
+  try {
+    const all = await reg.listTools(client);
+    const tool = all.find((t) => t.name === name);
+    if (!tool) return die(suggestTool(reg, name));
+    const args = { ...(preset || {}), ...(await readArgsPayload(flags)) };
+    // Per-flag arguments, coerced against the TOOL'S OWN schema and refused by name when unrecognised. The SDK
+    // builds a non-strict object, so an unknown key would otherwise be stripped in silence — a typo'd `--confrim`
+    // would send an unconfirmed call and read as a clean success.
+    const bad = [];
+    for (const [k, v] of Object.entries(flags)) {
+      if (CALL_FLAGS.has(k)) continue;
+      const c = reg.coerceArg(tool.inputSchema, k, v);
+      if (c.ok) { args[k] = c.value; continue; }
+      bad.push(c.unknown ? `--${k} is not an argument of ${name}` : c.message);
+    }
+    if (extraPos.length) bad.push(`unexpected value${extraPos.length > 1 ? 's' : ''} ${extraPos.map((v) => JSON.stringify(v)).join(', ')} . Every argument is a --flag or goes inside --json`);
+    if (bad.length) return die(`${bad.join('\n  ')}\n  Run: hermoso tools ${name}`);
+
+    const res = await client.callTool({ name, arguments: args });
+    const text = (res.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    if (flags.json === true) console.log(JSON.stringify(res, null, 2));
+    else if (flags.structured) console.log(JSON.stringify(res.structuredContent ?? null, null, 2));
+    else if (text) console.log(text);
+    else console.log(JSON.stringify(res.structuredContent ?? res, null, 2));
+    // A TOOL THAT FAILED MUST EXIT NON-ZERO. `isError` is how MCP reports a refused gate, a missing connector or a
+    // provider failure, and a shelling-out agent reads the exit code before it reads the text.
+    if (res.isError) process.exitCode = 1;
+  } finally { await close(); }
 }
 
 // ---- browser sign-in (loopback OAuth, like gh/firebase): spin a 127.0.0.1 server, open the app's cli-auth page,
