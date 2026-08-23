@@ -397,8 +397,32 @@ const JOB_OUT = {
 const UI_MIME = 'text/html+skybridge';
 const AD_RESULT_URI = 'ui://widget/ad-result.html';
 const CAPABILITIES_URI = 'ui://widget/capabilities.html';
-// Where the widgets' <img>/<video> srcs live: served app media + the R2 asset origins (GEN_PUBLIC_BASE/R2_PUBLIC_BASE).
-const WIDGET_CSP = { connect_domains: [], resource_domains: ['https://app.hermoso.ai', 'https://assets.hermoso.ai', 'https://*.r2.dev'] };
+// EVERY ORIGIN A HERMOSO ASSET URL CAN CARRY — DERIVED, never hand-listed (2026-08-23). A widget <img>/<video>
+// whose host is missing from resource_domains is BLOCKED by the skybridge CSP and paints an EMPTY FRAME, which on
+// this card is indistinguishable from "the render produced nothing" — so a hand-written list is a silent-blank
+// generator, and the hand-written one was already wrong: it named `https://*.r2.dev` (a fallback we do not use)
+// and omitted `storage.googleapis.com`, which is exactly what the GCS blob adapter serves. The server can mint an
+// asset URL on the same three bases every ownRenderAbs test in server.js uses — GEN_PUBLIC_BASE, R2_PUBLIC_BASE,
+// APP_URL — and each blob adapter ALSO has a default it falls back to when its *_PUBLIC_BASE env is unset
+// (adapters/blob/gcs.js -> storage.googleapis.com/<GEN_BUCKET>, adapters/blob/r2.js -> <bucket>.r2.dev). Those
+// defaults are what a config flip lands on, so they are covered too. The npm twin ships with none of this env
+// set, so the production origins ride as a static floor rather than vanishing off a stdio install.
+const WIDGET_MEDIA_FLOOR = ['https://app.hermoso.ai', 'https://assets.hermoso.ai', 'https://storage.googleapis.com', 'https://*.r2.dev'];
+export const widgetMediaOrigins = (env = process.env, apiBase = API_BASE) => {
+  const out = [];
+  const add = (u) => {
+    if (!u) return;
+    let o = String(u).replace(/\/+$/, '');
+    if (!o.includes('*')) { try { o = new URL(o).origin; } catch { return; } }   // a wildcard host is not a parseable URL
+    if (o && !out.includes(o)) out.push(o);
+  };
+  WIDGET_MEDIA_FLOOR.forEach(add);
+  add(env.GEN_PUBLIC_BASE); add(env.GEN_BUCKET && 'https://storage.googleapis.com/' + env.GEN_BUCKET);
+  add(env.R2_PUBLIC_BASE); add(env.R2_BUCKET && 'https://' + env.R2_BUCKET + '.r2.dev');
+  add(env.APP_URL); add(env.PUBLIC_BASE); add(apiBase);
+  return out;
+};
+const WIDGET_CSP = { connect_domains: [], resource_domains: widgetMediaOrigins() };
 const openaiMeta = (template, invoking, invoked) => ({ 'openai/outputTemplate': template, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked }); // status strings ≤64 chars
 
 // String.raw so regex backslashes inside the inline widget JS survive the template literal (no ${} used).
@@ -417,35 +441,103 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
   .spacer { flex: 1; }
   .wordmark { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .4; }
   .empty { padding: 18px 16px; font-size: 13px; opacity: .75; }
+  .pending { display: flex; gap: 10px; align-items: flex-start; padding: 18px 16px; font-size: 13px; }
+  .spin { flex: none; width: 15px; height: 15px; margin-top: 1px; border: 2px solid rgba(128,128,128,.35); border-top-color: currentColor; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sub { display: block; margin-top: 4px; opacity: .6; font-size: 12px; }
+  .bad { color: #c0392b; }
+  @media (prefers-color-scheme: dark) { .bad { color: #ff8a80; } }
 </style>
 <script>
 (function () {
   var root = document.getElementById('root');
+  // A LONG RENDER IS DELIVERED IN TWO PARTS, AND THIS CARD OWNS THE SECOND ONE (2026-08-23). On the hosted
+  // transport renderJob gives up polling at 45s and answers {jobId, stillRendering:true} — so for every video the
+  // tool result this widget is attached to NEVER contains the video. Before this, the card froze there forever:
+  // the finished file arrived only through get_job, which declared no widget at all, so a user who asked for a
+  // video ended on a dead card. The widget now finishes the job itself: while a render is pending it calls the
+  // free, read-only get_job over the host bridge (get_job carries openai/widgetAccessible for exactly this) until
+  // the media exists, then renders it. The model's own get_job loop still works and is unaffected — whichever
+  // arrives first wins, because both paths land in the same view().
+  var live = null;                 // the payload OUR poll resolved — it is newer than a frozen toolOutput, so it wins
+  var polls = 0, timer = null, pollErr = '', missed = 0;
+  var POLL_MS = 5000, FIRST_MS = 1500, MAX_POLLS = 72, MAX_MISSES = 3;   // 72 x 5s = 6 min, past any render this card carries
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
   function looksVideo(u) { return /\.(mp4|webm|mov|m4v)([?#]|$)/i.test(String(u || '')); }
-  function render() {
-    var out = (window.openai && window.openai.toolOutput) || {};
-    var raw = out.raw || {};
-    var pills = '';
-    if (out.model) pills += '<span class="pill">' + esc(out.model) + '</span>';
-    var credits = out.creditsUsed != null ? out.creditsUsed : (out.credits != null ? out.credits : raw.creditsUsed);
-    if (credits != null) pills += '<span class="pill">' + esc(credits) + ' credits</span>';
-    var footer = '<div class="meta">' + pills + '<span class="spacer"></span><span class="wordmark">Hermoso</span></div>';
-    var slides = Array.isArray(raw.images) && raw.images.length ? raw.images : null;
-    var vid = out.video || raw.video || null;
-    var img = out.image || raw.image || null;
+  // THREE RESULT SHAPES REACH THIS ONE WIDGET and only one of them is flat. Reading just the flat one is why a
+  // finished job rendered as "No media": renderJob nests under .raw, but get_job returns the JOB, whose payload is
+  // at .result.data. One resolver, so a field added to either reader is found by both.
+  //   renderJob   {jobId, url, model, stillRendering, raw:{video|image|images|poster|creditsUsed}}
+  //   get_job     {id, status, progress, error, url, type, result:{data:{video|image|images|poster}}}
+  //   generate_*  {image} / {video}
+  function view() {
+    var out = live || (window.openai && window.openai.toolOutput) || {};
+    var raw = out.raw || (out.result && (out.result.data || out.result)) || {};
+    var v = {};
+    v.jobId = out.jobId || out.id || null;
+    v.status = out.status || '';
+    v.error = out.error || '';
+    v.model = out.model || raw.model || '';
+    // creditsUsed sits BESIDE data on a job envelope ({result:{data:{…}, creditsUsed}}), not inside it — read off a real job row.
+    var c = out.creditsUsed != null ? out.creditsUsed : (out.credits != null ? out.credits : (raw.creditsUsed != null ? raw.creditsUsed : (out.result ? out.result.creditsUsed : null)));
+    v.credits = c;
+    v.slides = (Array.isArray(raw.images) && raw.images.length) ? raw.images : ((Array.isArray(out.images) && out.images.length) ? out.images : null);
+    v.video = out.video || raw.video || null;
+    v.image = out.image || raw.image || null;
+    v.poster = out.poster || raw.poster || null;
     var any = out.url || raw.url || null;
-    if (!vid && !img && any) { if (looksVideo(any)) { vid = any; } else { img = any; } }
+    if (!v.video && !v.image && any) { if (looksVideo(any)) { v.video = any; } else { v.image = any; } }
+    v.media = !!(v.slides || v.video || v.image);
+    // MEDIA BEATS A STALE STATUS, and an error only counts when nothing was delivered.
+    v.pending = !v.media && !v.error && (!!out.stillRendering || v.status === 'queued' || v.status === 'running' || (!!v.jobId && v.status !== 'done' && v.status !== 'error'));
+    return v;
+  }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+  function schedule() {
+    if (timer || polls >= MAX_POLLS || missed >= MAX_MISSES) return;
+    timer = setTimeout(function () { timer = null; poll(); }, polls === 0 ? FIRST_MS : POLL_MS);
+  }
+  function poll() {
+    var v = view();
+    if (!v.jobId || !v.pending) return;
+    var api = window.openai;
+    // A HOST WITHOUT callTool IS NOT A FAILURE — the model's own get_job loop still delivers the file. Say that
+    // rather than spinning forever against a bridge that is not there.
+    if (!api || typeof api.callTool !== 'function') { pollErr = 'nohost'; render(); return; }
+    polls++;
+    api.callTool('get_job', { id: v.jobId }).then(function (r) {
+      var d = r && (r.structuredContent || r.toolOutput || r);
+      if (d && typeof d === 'object' && (d.status || d.url || d.result)) { live = d; pollErr = ''; missed = 0; }
+      else { missed++; }
+      render();
+    }).catch(function (e) { missed++; pollErr = String((e && e.message) || e || 'poll failed'); render(); });
+  }
+  function render() {
+    var v = view();
+    var pills = '';
+    if (v.model) pills += '<span class="pill">' + esc(v.model) + '</span>';
+    if (v.credits != null) pills += '<span class="pill">' + esc(v.credits) + ' credits</span>';
+    var footer = '<div class="meta">' + pills + '<span class="spacer"></span><span class="wordmark">Hermoso</span></div>';
     var body;
-    if (out.stillRendering) body = '<div class="empty">Still rendering' + (out.jobId ? ' — job ' + esc(out.jobId) : '') + '. Video renders take 1–3 minutes; the finished ad appears here.</div>';
-    else if (slides) body = '<div class="grid">' + slides.map(function (u) { return '<img src="' + esc(u) + '" alt="carousel slide" loading="lazy">'; }).join('') + '</div>';
-    else if (vid) body = '<div class="media"><video controls muted autoplay loop playsinline preload="metadata" src="' + esc(vid) + '"></video></div>';
-    else if (img) body = '<div class="media"><img src="' + esc(img) + '" alt="generated ad"></div>';
+    if (v.slides) body = '<div class="grid">' + v.slides.map(function (u) { return '<img src="' + esc(u) + '" alt="carousel slide" loading="lazy">'; }).join('') + '</div>';
+    else if (v.video) body = '<div class="media"><video controls muted autoplay loop playsinline preload="metadata"' + (v.poster ? ' poster="' + esc(v.poster) + '"' : '') + ' src="' + esc(v.video) + '"></video></div>';
+    else if (v.image) body = '<div class="media"><img src="' + esc(v.image) + '" alt="generated ad"></div>';
+    else if (v.error) body = '<div class="empty bad">This render did not finish: ' + esc(v.error) + '</div>';
+    else if (v.pending) {
+      var note;
+      if (pollErr === 'nohost') note = 'Ask me to check on it and the finished file will be posted here.';
+      else if (missed >= MAX_MISSES) note = 'I have stopped checking automatically — ask me to check on job ' + esc(v.jobId) + '.';
+      else if (polls >= MAX_POLLS) note = 'Still going after several minutes — ask me to check on job ' + esc(v.jobId) + '.';
+      else note = 'Checking every few seconds; this card updates itself the moment it is ready.';
+      body = '<div class="pending"><span class="spin"></span><span>Rendering' + (v.jobId ? ' — job ' + esc(v.jobId) : '') + '. Video renders take 1–3 minutes.<span class="sub">' + note + '</span></span></div>';
+    }
     else body = '<div class="empty">No media in this result yet.</div>';
     root.innerHTML = '<div class="card">' + body + footer + '</div>';
+    if (v.pending) { schedule(); } else { stop(); }
   }
   render();
-  window.addEventListener('openai:set_globals', render);
+  // toolOutput can arrive after the iframe boots, and it also lands again when the model itself polls get_job.
+  window.addEventListener('openai:set_globals', function () { live = null; render(); });
 })();
 </script>`;
 
@@ -843,6 +935,20 @@ export function registerTools(rawServer, opts = {}) {
       if (p === 'registerTool') return (name, def, handler) => {
         groupOf[name] = group;
         try { if (handler) handler._hermosoTool = name; } catch {}
+        // TITLE IS MIRRORED INTO `annotations`, and it is deliberately a DUPLICATE rather than a move.
+        // The MCP spec ranks the TOP-LEVEL `title` above `annotations.title`, and the SDK emits it top-level, so
+        // that is the correct home and it stays. But Anthropic's directory requirements list `title` AMONG the
+        // annotations, and if their portal literally reads `annotations.title`, an absent one reads as 681 tools
+        // with no title. Carrying both costs a few bytes per tool and satisfies either reading; a spec-correct
+        // client keeps using the top-level one, because it wins by precedence.
+        // Done HERE, at the ONE registration seam every tool passes through, rather than at 681 call sites, so
+        // tool 682 inherits it without anyone having to remember.
+        try {
+          if (def && typeof def.title === 'string' && def.title && def.annotations && typeof def.annotations === 'object'
+              && typeof def.annotations.title !== 'string') {
+            def = { ...def, annotations: { ...def.annotations, title: def.title } };
+          }
+        } catch {}
         const h = t.registerTool(name, looseOutput(def), handler);
         handleOf[name] = h;
         // DISABLED, NOT SKIPPED — see (1) above. `disable()` is the SDK's own call and removes it from tools/list.
@@ -881,6 +987,7 @@ export function registerTools(rawServer, opts = {}) {
       toolsAdded: z.number().describe('how many tools became callable'),
       note: z.string().describe('a sentence to relay'),
     },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ groups }) => {
     const want = (Array.isArray(groups) ? groups : []).map((g) => String(g || '').trim().toLowerCase()).filter(Boolean);
     if (!want.length) return { content: [{ type: 'text', text: "Name at least one group to turn on, e.g. groups:['ads']." }], isError: true };
@@ -930,6 +1037,7 @@ export function registerTools(rawServer, opts = {}) {
       linkCard: z.union([z.boolean(), z.record(z.any())]).optional().describe('Rich link card (`app.bsky.embed.external`). OMIT for the default (a card is built automatically when the post has a URL and no media). `false` never builds one. `true` builds one from the first URL in the text. An object {uri,title,description,thumbUrl} overrides any field — supply BOTH title and description and the page is never fetched. Cannot be combined with imageUrls/videoUrl: a post has ONE embed, so an explicit linkCard beside media is refused.'),
     },
     outputSchema: { url: z.string().optional(), uri: z.string().optional(), handle: z.string().optional(), note: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await apiPost('/api/bluesky/post', a);
     return ok(r.note || `Posted to Bluesky — ${r.url || ''}`, r);
@@ -1024,7 +1132,7 @@ export function registerTools(rawServer, opts = {}) {
   }));
 
   server.registerTool('list_inbox', {
-    title: 'One inbox — comments, replies, mentions and reviews',
+    title: 'One inbox for comments, replies, mentions and reviews',
     description: "EVERYTHING PEOPLE SAID TO THIS BRAND, across every connected channel, in one list: Facebook and "
       + "Instagram comments, Threads replies and mentions, YouTube and Reddit comments, Google Business reviews, "
       + "Bluesky replies and mentions, and X mentions. Use this for 'what do I need to reply to', 'any new comments', 'how are people responding'. Each "
@@ -1043,7 +1151,7 @@ export function registerTools(rawServer, opts = {}) {
       count: z.number(),
       notes: z.array(z.string()).describe('sources that could not be read, and why — never silently dropped'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ sources, postId, videoId, limit, unansweredOnly }) => {
     const want = Array.isArray(sources) && sources.length
       ? sources.map((x) => String(x).trim().toLowerCase())
@@ -1091,6 +1199,7 @@ export function registerTools(rawServer, opts = {}) {
       text: z.string().describe('The reply, exactly as it should appear publicly.'),
     },
     outputSchema: { ok: z.boolean(), source: z.string().optional(), id: z.string().optional(), note: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ id, text }) => {
     const body = String(text || '').trim();
     if (!body) return { content: [{ type: 'text', text: 'Nothing to post — pass the reply text.' }], isError: true };
@@ -1117,19 +1226,20 @@ export function registerTools(rawServer, opts = {}) {
   // without this every core tool below would inherit `channels` and vanish from a `?tools=core` roster.
   server.group('core');
   server.registerTool('hermoso_capabilities', {
-    title: 'Hermoso capabilities',
-    description: 'Probe what this Hermoso account can do RIGHT NOW: available image/video model ids + their exact credit costs, aspect ratios, video durations, the recipe ids, and the canEdit/canAvatar/canPublish flags. Call this FIRST so you generate with valid model ids and known costs. Read-only, free.',
+    // The title a directory renders. It has to say CALL THIS FIRST without saying "call this first", because the
+    // listing shows it out of context, beside 680 siblings, to somebody who has never used Hermoso.
+    title: 'Start here: what Hermoso can do and what it costs',
+    description: 'Probe what this Hermoso account can do RIGHT NOW: available image/video model ids + their exact credit costs, aspect ratios, video durations, the recipe ids, and the canEdit/canAvatar flags. Call this FIRST so you generate with valid model ids and known costs. Read-only, free.',
     inputSchema: {}, outputSchema: {
       image: z.boolean().optional().describe('TRUE when image generation is available on this account. A BOOLEAN, never a provider name — /api/generate/status deliberately reports availability only and never leaks the underlying provider, so there is no label here to report. The model ids live in options.image.models[].'),
       video: z.boolean().optional().describe('TRUE when video generation is available. A BOOLEAN, never a provider name (same never-leak-the-provider rule as image). The model ids live in options.video.models[].'),
       canEdit: z.boolean().optional().describe('whether image editing is enabled on this account'),
       canAvatar: z.boolean().optional().describe('whether talking-avatar generation is enabled'),
-      canPublish: z.boolean().optional().describe('whether ad publishing is enabled'),
       editCredits: z.number().nullable().optional().describe('credit cost of one image edit (null when image editing is not configured)'),
       options: z.any().optional().describe('the live model catalog — image/video/voice/llm model lists with per-model credit costs'),
       recipes: z.array(z.any()).optional().describe('the creative recipe catalog (id + label per recipe)'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     _meta: openaiMeta(CAPABILITIES_URI, 'Loading the model catalog…', 'Model catalog ready'),
   }, wrap(async () => {
     const d = await apiGet('/api/generate/status');
@@ -1169,7 +1279,7 @@ export function registerTools(rawServer, opts = {}) {
     const _pickLine = 'NAMING A MODEL IS HOW YOU GET ONE: a render that passes no `model` is routed by the server\'s own auto-pool, which is deliberately NARROWER than this catalog — the `best` flag and the longest-clip row do NOT decide it. If you need a particular model\'s length, resolution, audio or reference-count capability, pass its id in `model`; that is a deliberate pick and the server will not swap it without telling you.';
     // RESOLUTION IS PER MODEL, and asking outside the list is not an error — it is a quiet downgrade.
     const _resLine = 'RESOLUTION: each model\'s `resolutions` list is its REAL enum (and `creditsByRes` prices every tier). Ask for a tier a model does not list and the render is delivered at that model\'s best available tier instead — the reply does not say so — so read `resolutions` here before promising anyone 1080p or 4k.';
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar} canPublish:${d.canPublish}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
     return ok(text + connLine, d);
   }));
 
@@ -1184,7 +1294,7 @@ export function registerTools(rawServer, opts = {}) {
       heistCreditsUsed: z.number().optional().describe('credits this ACCOUNT spent across recentCalls — the per-account figure that is always returned, and the one to quote'),
       recentCalls: z.array(z.any()).optional().describe('recent priced calls with their credit deltas'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/credits');
     const bal = d.accountBalance ?? d.balance; // accountBalance = the caller's Hermoso credits (authed); balance = the local-dev usage pill
@@ -1306,7 +1416,7 @@ export function registerTools(rawServer, opts = {}) {
       billingWithheld: z.array(z.string()).optional().describe('the fields withheld because they belong to the workspace owner'),
       billingNote: z.string().optional().describe('why those fields are absent'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/billing/status');
     const ar = d.autoReload || {};
@@ -1347,7 +1457,7 @@ export function registerTools(rawServer, opts = {}) {
       action: z.string().optional().describe("the in-app action required ('upgrade' or 'downgrade')"),
       guidance: z.string().optional().describe('exact instructions when the change must be made in the app'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true }, // creates no server-side charge; the human pays on Stripe / in-app
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, // not read-only: with `plan` set it mints a Stripe Checkout Session. It still charges nothing — the human pays.
   }, wrap(async ({ plan, period }) => {
     const cfg = await apiGet('/api/billing/config');
     const plans = (cfg.plans || []).filter(p => p.priceUsd > 0).map(p => ({ id: p.id, name: p.name, priceUsd: p.priceUsd, credits: p.credits }));
@@ -1396,7 +1506,7 @@ export function registerTools(rawServer, opts = {}) {
       brands: z.array(z.any()).optional().describe('every brand on the account ({id, name, active})'),
       sharedWorkspaces: z.array(z.any()).optional().describe('brands another account shared with you ({name, ownerAccountId, profileUuid, role})'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/brands');
     const lines = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})${b.active ? '  ← active' : ''}`).join('\n');
@@ -1544,7 +1654,7 @@ export function registerTools(rawServer, opts = {}) {
       period: z.enum(['day', 'week', 'days_28']).optional().describe('window (default week)'),
     },
     outputSchema: { pageName: z.string().optional(), page: z.array(z.any()).optional(), instagram: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/page-insights', { pageId: a.pageId, period: a.period });
     const fmt = (arr) => (arr || []).map(m => `  • ${m.name}: ${m.value ?? '—'}`).join('\n');
@@ -1560,7 +1670,7 @@ export function registerTools(rawServer, opts = {}) {
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
     },
     outputSchema: { postId: z.string().optional(), metrics: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/post-insights', { postId: a.postId, target: a.target, pageId: a.pageId });
     return ok(`${d.target} post ${d.postId}:\n${(d.metrics || []).map(m => `• ${m.name}: ${m.value ?? '— (no value returned — MISSING, not zero)'}`).join('\n') || '(no metrics)'}${d.note ? `\n${d.note}` : ''}`, d);
@@ -1581,7 +1691,7 @@ export function registerTools(rawServer, opts = {}) {
       pageId: z.string().optional().describe('Facebook Page id the Instagram account is linked to — omit when only one Page is connected'),
     },
     outputSchema: { instagramId: z.string().optional(), profile: z.any().optional(), metrics: z.array(z.any()).optional(), demographics: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/instagram/insights', { metrics: (a.metrics || []).join(','), breakdown: (a.breakdown || []).join(','), timeframe: a.timeframe, period: a.period, since: a.since, until: a.until, pageId: a.pageId });
     const lines = (d.metrics || []).map(m => `• ${m.name}: ${m.value ?? '— (no value returned — MISSING, not zero)'}`);
@@ -1597,7 +1707,7 @@ export function registerTools(rawServer, opts = {}) {
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { instagramId: z.string().optional(), count: z.number().optional(), media: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/instagram/media', { limit: a.limit, pageId: a.pageId });
     return ok(`${d.count} Instagram post(s):\n${(d.media || []).map(m => `• [${m.media_product_type || m.media_type}] ${String(m.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 90)} — ${m.like_count ?? '—'} likes, ${m.comments_count ?? '—'} comments · ${m.timestamp || ''}\n  id ${m.id}${m.permalink ? ` · ${m.permalink}` : ''}`).join('\n') || '  (none)'}`, d);
@@ -1615,7 +1725,7 @@ export function registerTools(rawServer, opts = {}) {
       pageId: z.string().optional().describe('Facebook Page id \u2014 omit when only one Page is connected'),
     },
     outputSchema: { mediaId: z.string().optional(), count: z.number().optional(), collaborators: z.array(z.any()).optional(), summary: z.string().optional(), accepted: z.array(z.string()).optional(), pending: z.array(z.string()).optional(), declined: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/instagram/collaborators', { mediaId: a.mediaId, pageId: a.pageId });
     if (!d.count) return ok(`Instagram records no collaborators on media ${a.mediaId} \u2014 it is an ordinary single-author post.`, d);
@@ -1632,7 +1742,7 @@ export function registerTools(rawServer, opts = {}) {
       cursor: z.string().optional().describe('the cursor from a previous call. A post with more comments than one page comes back with hasMore + a truncationNote — counts or sentiment drawn from ONE page describe a sample, not the conversation.'),
     },
     outputSchema: { count: z.number().optional(), comments: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/comments', { postId: a.postId, pageId: a.pageId, limit: a.limit, cursor: a.cursor });
     // `hidden` is TRI-STATE: true / false / null = "could not tell" (the server returns null when NEITHER
@@ -1686,7 +1796,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List recent posts on the brand’s connected Threads account (id, text, media, permalink, timestamp). Use it to find a post id for threads_insights, list_threads_replies, reply_to_thread or delete_thread.',
     inputSchema: { limit: z.number().optional().describe('how many posts (1–50, default 15)') },
     outputSchema: { username: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/posts', { limit: a.limit });
     const lines = (d.posts || []).map(p => `• ${String(p.text || '(no text)').replace(/\s+/g, ' ').slice(0, 80)} — ${p.id} · ${String(p.timestamp || '').slice(0, 10)} · ${p.permalink || ''}`);
@@ -1704,7 +1814,7 @@ export function registerTools(rawServer, opts = {}) {
       until: z.string().optional().describe('YYYY-MM-DD window end (account scope)'),
     },
     outputSchema: { scope: z.string().optional(), metrics: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/insights', { postId: a.postId, metrics: (a.metrics || []).join(','), breakdown: (a.breakdown || []).join(','), since: a.since, until: a.until });
     const lines = (d.metrics || []).map(m => `• ${m.name}: ${m.values?.[0]?.value ?? m.total_value?.value ?? (m.total_value?.breakdowns ? JSON.stringify(m.total_value.breakdowns).slice(0, 900) : '— (no value returned — MISSING, not zero)')}`);
@@ -1720,7 +1830,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('how many replies (1–50, default 25)'),
     },
     outputSchema: { count: z.number().optional(), replies: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/replies', { postId: a.postId, conversation: a.conversation ? 'true' : undefined, limit: a.limit });
     const lines = (d.replies || []).map(r => `• @${r.username}: ${String(r.text || '').replace(/\s+/g, ' ').slice(0, 90)} — ${r.id}${r.hide_status === 'HIDDEN' ? ' [hidden]' : ''}`);
@@ -1795,7 +1905,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'How much of the brand’s Threads quota is left right now — posts (250 per rolling 24 hours), replies (1,000), DELETIONS (100) and location searches (500) — each as used, total and REMAINING. Check it before any bulk operation, and read it the moment Threads starts refusing: a quota refusal is otherwise indistinguishable from a broken connection or a missing permission, and reconnecting cannot fix it. A number comes back null when Threads did not report it, never as 0 — "none left" and "we could not tell" are different answers. Read-only, 0 credits. Needs Threads connected.',
     inputSchema: {},
     outputSchema: { username: z.string().optional(), posts: z.any().optional(), replies: z.any().optional(), deletes: z.any().optional(), locationSearches: z.any().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/threads/publishing-limit', {});
     const line = (label, p) => `${label} ${p?.remaining == null ? 'unknown' : `${p.remaining} left`} (${p?.used ?? '?'}/${p?.quota ?? '?'})`;
@@ -1808,7 +1918,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Posts where someone MENTIONED the brand on Threads — anywhere, not just under your own posts. This is brand listening: real objections, questions and the exact language customers use, which is strong raw material for ad copy and for mine_angles. Use list_threads_replies instead when you want the conversation under one specific post.',
     inputSchema: { limit: z.number().optional().describe('how many mentions (1–50, default 25)') },
     outputSchema: { username: z.string().optional(), count: z.number().optional(), mentions: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/mentions', { limit: a.limit });
     const lines = (d.mentions || []).map(m => `• @${m.author}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 90)} — ${m.permalink || m.id}`);
@@ -1827,7 +1937,7 @@ export function registerTools(rawServer, opts = {}) {
       searchType: z.enum(['TOP', 'RECENT']).optional().describe('TOP (default) or RECENT'),
     },
     outputSchema: { count: z.number().optional(), posts: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/search', { q: a.q, searchType: a.searchType });
     const lines = (d.posts || []).map(p => `• @${p.username}: ${String(p.text || '').replace(/\s+/g, ' ').slice(0, 90)} — ${p.permalink || p.id}`);
@@ -1845,7 +1955,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the Facebook Pages (with any linked Instagram business account) and ad accounts on the connected Meta account — use before post_to_meta / create_meta_campaign to pick the target. Requires the user to have connected Meta (Settings ▸ Connectors ▸ Meta); returns a connect hint if not.',
     inputSchema: {},
     outputSchema: { pages: z.array(z.any()).optional(), adAccounts: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const [pg, aa] = await Promise.all([apiGet('/api/meta/pages').catch((e) => ({ __err: e.message })), apiGet('/api/meta/adaccounts').catch((e) => ({ __err: e.message }))]);
     if (pg.__err && /connect/i.test(pg.__err)) return { content: [{ type: 'text', text: 'No Meta account connected yet — connect it in Settings ▸ Connectors ▸ Meta, then try again.' }], isError: true };
@@ -1912,7 +2022,7 @@ export function registerTools(rawServer, opts = {}) {
       longitude: z.number().optional().describe('longitude'),
     },
     outputSchema: { count: z.number().optional(), locations: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/locations', { q: a.q, latitude: a.latitude, longitude: a.longitude });
     const lines = (d.locations || []).map(l => `• ${l.name}${l.address ? ` — ${l.address}` : ''}${l.city ? `, ${l.city}` : ''} — id ${l.id}`);
@@ -2060,7 +2170,7 @@ export function registerTools(rawServer, opts = {}) {
       scheduled: z.array(z.object({ id: z.string().optional(), at: z.string().nullable().optional(), channels: z.array(z.string()).optional(), message: z.string().optional(), status: z.string().optional() })).optional(),
       history: z.array(z.object({ id: z.string().optional(), at: z.string().nullable().optional(), channels: z.array(z.string()).optional(), status: z.string().optional(), results: z.array(z.object({ channel: z.string().optional(), ok: z.boolean().optional(), id: z.string().nullable().optional(), url: z.string().nullable().optional(), error: z.string().optional() })).nullable().optional(), error: z.string().nullable().optional() })).optional(),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/schedule', {});
     const q = (d.scheduled || []).length, h = (d.history || []).length;
@@ -2218,7 +2328,7 @@ export function registerTools(rawServer, opts = {}) {
       postsPerDay: z.number().optional(), running: z.boolean().optional(), nextRunAt: z.number().optional(),
       queuedPosts: z.number().optional(), postingSchedule: z.any().optional(), excluded: z.any().optional(),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/schedule/refill', {});
     const cadence = d.postsPerDay > 0 ? d.postsPerDay : (d.postingSchedule?.slots || []).length;
@@ -2339,7 +2449,7 @@ export function registerTools(rawServer, opts = {}) {
       publishedAt: z.number().optional().describe('epoch ms the post went out, if known — lets the private owned-post metrics be requested only inside X\'s 30-day window instead of costing a refused call'),
     },
     outputSchema: { id: z.string().optional(), found: z.boolean().optional(), note: z.string().optional(), text: z.string().optional(), postedAt: z.string().nullable().optional(), url: z.string().optional(), impressions: z.number().nullable().optional(), likes: z.number().nullable().optional(), reposts: z.number().nullable().optional(), replies: z.number().nullable().optional(), quotes: z.number().nullable().optional(), bookmarks: z.number().nullable().optional(), urlClicks: z.number().nullable().optional(), profileClicks: z.number().nullable().optional(), engagements: z.number().nullable().optional(), organicImpressions: z.number().nullable().optional(), organicLikes: z.number().nullable().optional(), privateMetrics: z.boolean().optional(), costCredits: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x/metrics', { id: a.id, publishedAt: a.publishedAt });
     // The private half is reported only when X actually served it — an absent link-click count means "outside the
@@ -2357,7 +2467,7 @@ export function registerTools(rawServer, opts = {}) {
       granularity: z.enum(['Total', 'Daily', 'Hourly', 'Weekly']).optional().describe('default Total'),
     },
     outputSchema: { granularity: z.string().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), metrics: z.record(z.number()).optional() })).optional(), errors: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x/insights', { ids: (a.ids || []).join(','), granularity: a.granularity });
     const rows = d.posts || [];
@@ -2383,7 +2493,7 @@ export function registerTools(rawServer, opts = {}) {
       granularity: z.enum(['Total', 'Daily', 'Hourly', 'Weekly']).optional().describe('default Total'),
     },
     outputSchema: { granularity: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), metrics: z.record(z.number()).optional() })).optional(), errors: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x/insights-historical', { ids: (a.ids || []).join(','), startTime: a.startDate, endTime: a.endDate, granularity: a.granularity });
     const rows = d.posts || [];
@@ -2406,7 +2516,7 @@ export function registerTools(rawServer, opts = {}) {
       paginationToken: z.string().optional().describe('next_token from a previous call, to page further back'),
     },
     outputSchema: { account: z.string().optional(), count: z.number().optional(), nextToken: z.string().nullable().optional(), costCredits: z.number().optional(), mentions: z.array(z.object({ id: z.string().optional(), text: z.string().optional(), author: z.string().optional(), authorName: z.string().optional(), postedAt: z.string().nullable().optional(), url: z.string().optional(), likes: z.number().nullable().optional(), replies: z.number().nullable().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x/mentions', { maxResults: a.maxResults, sinceId: a.sinceId, paginationToken: a.paginationToken });
     if (!d.count) return ok(`Nothing is mentioning ${d.account || 'that account'} in the window X returned. Cost ${d.costCredits ?? '?'} credits.`, d);
@@ -2445,7 +2555,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read one of the connected account’s Reddit posts back — score (net upvotes), comment count, upvote ratio, flair, and whether the subreddit removed it. Use it for "how did that post do" or to judge which framing a community actually rewarded before writing the next one. Read-only, 0 credits. Needs Reddit connected.',
     inputSchema: { postId: z.string().describe('the id returned by post_to_reddit, its t3_… fullname, or the full reddit.com permalink') },
     outputSchema: { id: z.string().optional(), fullname: z.string().optional(), title: z.string().optional(), subreddit: z.string().nullable().optional(), score: z.number().nullable().optional(), comments: z.number().nullable().optional(), upvoteRatio: z.number().nullable().optional(), url: z.string().nullable().optional(), flair: z.string().nullable().optional(), removed: z.boolean().optional(), postedAt: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit/post-stats', { postId: a.postId });
     return ok(`“${d.title}” in ${d.subreddit || 'that subreddit'}: ${d.score ?? '?'} score, ${d.comments ?? '?'} comments${d.upvoteRatio != null ? `, ${Math.round(d.upvoteRatio * 100)}% upvoted` : ''}${d.removed ? ' — REMOVED by the subreddit' : ''}.`, d);
@@ -2463,7 +2573,7 @@ export function registerTools(rawServer, opts = {}) {
       cursor: z.string().optional().describe('the cursor a previous call returned'),
     },
     outputSchema: { username: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit/posts', { ...(a.limit ? { limit: a.limit } : {}), ...(a.sort ? { sort: a.sort } : {}), ...(a.cursor ? { cursor: a.cursor } : {}) });
     if (!d.posts?.length) return ok(`u/${d.username} has no submissions Reddit will return.`, d);
@@ -2512,7 +2622,7 @@ export function registerTools(rawServer, opts = {}) {
       sort: z.enum(['top', 'new', 'confidence', 'controversial', 'old', 'qa']).optional().describe('default top'),
     },
     outputSchema: { postId: z.string().optional(), title: z.string().optional(), subreddit: z.string().nullable().optional(), total: z.number().nullable().optional(), count: z.number().optional(), comments: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit/comments', { postId: a.postId, ...(a.limit ? { limit: a.limit } : {}), ...(a.sort ? { sort: a.sort } : {}) });
     if (!d.comments?.length) return ok(`No comments on “${d.title || d.postId}” yet.`, d);
@@ -2538,7 +2648,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the boards on the user’s connected Pinterest account — id, name, privacy and pin count. ALWAYS call this before post_to_pinterest and let the USER pick: Pinterest requires a board and Hermoso never chooses one for them. Read-only, 0 credits. Needs Pinterest connected (Settings ▸ Connectors ▸ Pinterest).',
     inputSchema: { privacy: z.enum(['ALL', 'PUBLIC', 'PROTECTED', 'SECRET']).optional().describe('filter by board privacy; default is everything the connection can see') },
     outputSchema: { count: z.number().optional(), boards: z.array(z.object({ id: z.string().optional(), name: z.string().optional(), privacy: z.string().optional(), description: z.string().optional(), pins: z.number().nullable().optional(), followers: z.number().nullable().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/pinterest/boards', a.privacy ? { privacy: a.privacy } : {});
     if (!d.count) return ok('That Pinterest account has no boards yet — one has to be created on Pinterest before anything can be pinned.', d);
@@ -2562,7 +2672,7 @@ export function registerTools(rawServer, opts = {}) {
       splitField: z.string().optional().describe('account: NO_SPLIT | APP_TYPE | OWNED_CONTENT | SOURCE | PIN_FORMAT'),
     },
     outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), since: z.string().optional(), until: z.string().optional(), metricTypes: z.array(z.string()).optional(), data: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/pinterest/analytics', { scope: a.scope, pinId: a.pinId, video: a.video ? 'true' : undefined, metricTypes: (a.metricTypes || []).join(','), sortBy: a.sortBy, since: a.since, until: a.until, limit: a.limit, appTypes: a.appTypes, splitField: a.splitField });
     return ok(`${d.note}\n${JSON.stringify(d.data).slice(0, 4000)}`, d);
@@ -2621,7 +2731,7 @@ export function registerTools(rawServer, opts = {}) {
       cursor: z.string().optional().describe('the cursor a previous call returned'),
     },
     outputSchema: { boardId: z.string().nullable().optional(), count: z.number().optional(), pins: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/pinterest/pins', { ...(a.boardId ? { boardId: a.boardId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}) });
     if (!d.pins?.length) return ok(d.boardId ? 'That Pinterest board has no Pins on it.' : 'This Pinterest account has no Pins yet.', d);
@@ -2730,7 +2840,7 @@ export function registerTools(rawServer, opts = {}) {
       reportFormat: z.enum(['JSON', 'CSV']).optional(),
     },
     outputSchema: { ok: z.boolean().optional(), pending: z.boolean().optional(), token: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/pinterest/ads-async-report', a);
     return ok(d.pending ? d.note : `${d.note}\n${JSON.stringify(d.rows || []).slice(0, 4000)}`, d);
@@ -2750,7 +2860,7 @@ export function registerTools(rawServer, opts = {}) {
       columns: z.array(z.string()).optional(),
     },
     outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/pinterest/targeting-analytics', { adAccountId: a.adAccountId, scope: a.scope, targetingTypes: (a.targetingTypes || []).join(','), campaignIds: (a.campaignIds || []).join(','), adGroupIds: (a.adGroupIds || []).join(','), adIds: (a.adIds || []).join(','), since: a.since, until: a.until, granularity: a.granularity, columns: (a.columns || []).join(',') });
     return ok(`${d.note}\n${JSON.stringify(d.rows || []).slice(0, 4000)}`, d);
@@ -2760,7 +2870,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'WHO the Pinterest audience IS, rather than what it did — interest categories each carrying an affinity INDEX, plus demographics (ages, countries, devices, genders, metros). Three audiences: YOUR_TOTAL_AUDIENCE, YOUR_ENGAGED_AUDIENCE, and PINTEREST_TOTAL_AUDIENCE as the baseline to compare the other two against. This is an input to a creative brief, not a performance report. SAY THIS WHEN REPORTING: an affinity index is how much MORE likely this audience is to engage with a category than Pinterest\u2019s baseline — it is a comparison, never a count — and when Pinterest flags size_is_upper_bound the audience size is an upper bound, not a measurement. There is no date range: Pinterest returns its current snapshot and names the date it is for. Read-only, 0 credits.',
     inputSchema: { adAccountId: z.string().optional(), insightType: z.enum(['YOUR_TOTAL_AUDIENCE', 'YOUR_ENGAGED_AUDIENCE', 'PINTEREST_TOTAL_AUDIENCE']).optional().describe('default YOUR_TOTAL_AUDIENCE') },
     outputSchema: { ok: z.boolean().optional(), insightType: z.string().optional(), categories: z.number().optional(), data: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/pinterest/audience-insights', { adAccountId: a.adAccountId, insightType: a.insightType });
     return ok(`${d.note}\n${JSON.stringify(d.data).slice(0, 4000)}`, d);
@@ -2776,7 +2886,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('1–500, default 100'),
     },
     outputSchema: { ok: z.boolean().optional(), targetingType: z.string().optional(), count: z.number().optional(), total: z.number().optional(), options: z.array(z.any()).optional(), interest: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/pinterest/targeting-options', { adAccountId: a.adAccountId, targetingType: a.targetingType, query: a.query, interestId: a.interestId, limit: a.limit });
     return ok(`${d.note}\n${JSON.stringify((d.options || []).slice(0, 60))}`, d);
@@ -2790,7 +2900,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the Google Business Profile listings SHARED WITH THIS BRAND — id, title, address, website and Maps link. These are the only listings anything here can post to or read: one Google login often manages several businesses (an agency manages its clients’), and the user ticks which of them belong to this brand. Call this before posting whenever more than one is shared and let the USER pick: a Post on the wrong storefront is a public mistake Hermoso will not make for them. If nothing is shared, ask the user to choose — list_connector_accounts("google_business") then set_connector_accounts — and never name or guess a listing. Read-only, 0 credits. Needs Google Business Profile connected (Settings ▸ Connectors ▸ Google Business Profile).',
     inputSchema: {},
     outputSchema: { count: z.number().optional(), shared: z.number().optional(), missing: z.array(z.string()).optional(), locations: z.array(z.object({ id: z.string().optional(), account: z.string().optional(), accountName: z.string().optional(), title: z.string().optional(), address: z.string().optional(), website: z.string().optional(), phone: z.string().optional(), mapsUrl: z.string().optional(), canPost: z.boolean().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     // THE SHARED SET, NEVER THE ROSTER. /api/google-business/locations walks every Business Profile account the
     // Google login manages; it is the owner-only PICKER route, reached through list_connector_accounts alone.
@@ -2829,7 +2939,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the Posts currently on the brand’s Google Business Profile listing — text, topic type, state (LIVE / PROCESSING / REJECTED / SCHEDULED / RECURRING), button and timestamps. Use it to see what is already showing before writing another, or to get the id of one to remove. Read-only, 0 credits. Needs Google Business Profile connected.',
     inputSchema: { locationId: z.string().optional().describe('which listing, from list_business_locations — only needed when there is more than one'), limit: z.number().optional().describe('how many to return, max 100 (default 20)') },
     outputSchema: { count: z.number().optional(), location: z.string().optional(), locationId: z.string().optional(), posts: z.array(z.object({ id: z.string().optional(), summary: z.string().optional(), topicType: z.string().optional(), state: z.string().nullable().optional(), url: z.string().nullable().optional(), cta: z.string().nullable().optional(), ctaUrl: z.string().nullable().optional(), createdAt: z.string().nullable().optional(), updatedAt: z.string().nullable().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/posts', { ...(a.locationId ? { locationId: a.locationId } : {}), ...(a.limit ? { limit: a.limit } : {}) });
     if (!d.count) return ok(`No Posts on the “${d.location}” listing right now.`, d);
@@ -2857,7 +2967,7 @@ export function registerTools(rawServer, opts = {}) {
       pageToken: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), location: z.string().optional(), count: z.number().optional(), averageRating: z.number().optional(), totalReviewCount: z.number().optional(), reviews: z.array(z.any()).optional(), nextPageToken: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/reviews', a);
     return ok(`${d.note}\n${(d.reviews || []).map(r => `• ${r.stars ?? '?'}★ ${r.reviewer || '(anonymous)'} — ${String(r.comment || '(no text)').replace(/\s+/g, ' ').slice(0, 140)}${r.reply ? `\n    ↳ replied: ${String(r.reply).slice(0, 100)}` : '\n    ↳ NO REPLY YET'}  [${r.reviewId}]`).join('\n')}`, d);
@@ -2880,7 +2990,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The questions the public has asked on the brand’s Google Business Profile listing, with the answers so far and how many people upvoted each question. Unanswered questions sit publicly on the listing and are read as "this business does not respond" — the reply names the ones with no answer at all. Read-only, 0 credits. Needs Google Business Profile connected and the project approved.',
     inputSchema: { locationId: z.string().optional(), limit: z.number().optional().describe('1–20, default 10'), pageToken: z.string().optional() },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), questions: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/questions', a);
     return ok(`${d.note}\n${(d.questions || []).map(q => `• “${String(q.text).replace(/\s+/g, ' ').slice(0, 130)}” — ${q.totalAnswers} answer(s), ${q.upvotes ?? 0} upvotes [${q.questionId}]${(q.answers || []).map(x => `\n    ↳ ${x.authorType}: ${String(x.text).slice(0, 100)}`).join('')}`).join('\n')}`, d);
@@ -2907,7 +3017,7 @@ export function registerTools(rawServer, opts = {}) {
       metrics: z.array(z.string()).optional().describe('optional subset of Google’s daily metrics (BUSINESS_IMPRESSIONS_DESKTOP_MAPS, BUSINESS_IMPRESSIONS_DESKTOP_SEARCH, BUSINESS_IMPRESSIONS_MOBILE_MAPS, BUSINESS_IMPRESSIONS_MOBILE_SEARCH, BUSINESS_CONVERSATIONS, BUSINESS_DIRECTION_REQUESTS, CALL_CLICKS, WEBSITE_CLICKS, BUSINESS_BOOKINGS, BUSINESS_FOOD_ORDERS, BUSINESS_FOOD_MENU_CLICKS). Omit for all of them. An unknown name is refused rather than quietly dropped, so a total is never reported under a metric you did not get.'),
     },
     outputSchema: { location: z.string().optional(), locationId: z.string().optional(), days: z.number().optional(), from: z.string().optional(), to: z.string().optional(), impressions: z.number().optional(), calls: z.number().optional(), websiteClicks: z.number().optional(), directionRequests: z.number().optional(), conversations: z.number().optional(), bookings: z.number().optional(), totals: z.record(z.number()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/insights', { ...(a.locationId ? { locationId: a.locationId } : {}), ...(a.days ? { days: a.days } : {}), ...(Array.isArray(a.metrics) && a.metrics.length ? { metrics: a.metrics.join(',') } : {}) });
     return ok(`“${d.location}” over ${d.days} days (${d.from} → ${d.to}): ${d.impressions} Search + Maps impressions, ${d.calls} calls, ${d.websiteClicks} website clicks, ${d.directionRequests} direction requests, ${d.conversations} messages, ${d.bookings} bookings.`, d);
@@ -2921,7 +3031,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read everything Google holds on one of the brand’s Google Business Profile listings — business name, address, phone numbers, website, categories, description, regular and special hours, service area, labels, store code, open state, and whether the listing can carry a Post at all. This is the listing AS THE MERCHANT LAST SET IT, which is exactly what update_business_location edits; it can differ from what Google Maps shows today, because Google and the public can suggest changes on top. Call it before offering to change anything, and to answer “what does our Google listing actually say?”. Read-only, 0 credits. Needs Google Business Profile connected (Settings ▸ Connectors ▸ Google Business Profile).',
     inputSchema: { locationId: z.string().optional().describe('which listing, e.g. \'locations/123\' from list_business_locations — only needed when more than one is shared with this brand') },
     outputSchema: { locationId: z.string().optional(), account: z.string().optional(), title: z.string().optional(), readMask: z.string().optional(), location: z.record(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/location', { ...(a.locationId ? { locationId: a.locationId } : {}) });
     const l = d.location || {};
@@ -2959,7 +3069,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the Google Business Profile ACCOUNT that owns one of the brand’s listings — the account name, its type (a personal Google account, a location group, a user group or an organization), the connected user’s role on it (primary owner / owner / manager / site manager), the account’s verification state and the permission level. Use it to answer “can we actually edit this listing?” and “whose account is it on?” before offering an edit that Google would refuse anyway. It reads exactly ONE account — the parent of a listing already shared with this brand — and never lists the other accounts the connected Google login can reach; that roster belongs to the account picker (list_connector_accounts). Read-only, 0 credits. Needs Google Business Profile connected.',
     inputSchema: { locationId: z.string().optional().describe('which listing, from list_business_locations — only needed when more than one is shared with this brand') },
     outputSchema: { id: z.string().optional(), accountName: z.string().optional(), type: z.string().nullable().optional(), role: z.string().nullable().optional(), permissionLevel: z.string().nullable().optional(), verificationState: z.string().nullable().optional(), vettedState: z.string().nullable().optional(), accountNumber: z.string().optional(), organizationName: z.string().optional(), location: z.string().optional(), locationId: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/account', { ...(a.locationId ? { locationId: a.locationId } : {}) });
     return ok(`“${d.location}” (${d.locationId}) sits on Business Profile account ${d.id}${d.accountName ? ` — “${d.accountName}”` : ''}. Type ${d.type || 'unknown'}; the connected Google account’s role on it is ${d.role || 'unknown'} (${d.permissionLevel || 'permission level unknown'}); account verification ${d.verificationState || 'unknown'}.${/OWNER|MANAGER/.test(String(d.role || '')) ? ' That role can edit the listing.' : ' If that role is not an owner or manager, Google will refuse edits whatever we send.'}`, d);
@@ -2993,7 +3103,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the brand’s connected YouTube channel — title + subscriber / view / video counts (for reporting). Needs a connected YouTube channel.',
     inputSchema: {},
     outputSchema: { id: z.string().optional(), title: z.string().optional(), subscribers: z.string().optional(), views: z.string().optional(), videos: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/youtube/channel', {});
     return ok(`${d.title} — ${d.subscribers} subscribers, ${d.videos} videos, ${d.views} total views.`, d);
@@ -3011,7 +3121,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the connected channel’s OWN recent uploads — video id, title, publish date and privacy — so you can resolve a video WITHOUT asking the user for a link. Call this whenever the user names a video loosely ("my latest", "the shorts one", part of a title) and match it yourself; only ask them when two titles are genuinely ambiguous. This is the tool that gets you the videoId every other YouTube tool needs — youtube_channel returns counts only, and search_youtube searches the PUBLIC index, not your uploads. Includes UNLISTED and PRIVATE videos, which are invisible to any public search. Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { limit: z.number().optional().describe('how many recent uploads to return (default 25, max 50)') },
     outputSchema: { videos: z.array(z.object({ videoId: z.string().optional(), title: z.string().optional(), publishedAt: z.string().optional(), privacy: z.string().optional(), url: z.string().optional() })).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/videos', { ...(a.limit ? { limit: a.limit } : {}) });
     const rows = (d.videos || []).map(v => `• ${v.title || '(untitled)'} — ${v.videoId}${v.publishedAt ? ` · ${String(v.publishedAt).slice(0, 10)}` : ''}${v.privacy ? ` · ${v.privacy}` : ''}`);
@@ -3022,7 +3132,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Per-VIDEO performance for a video on the connected channel — views, estimated minutes watched, average view duration, average view PERCENTAGE (the retention number that tells you whether the hook held), likes, comments, shares and subscribers gained. Use it for "how did that video do", "which upload performed best", or to judge an ad before spending more behind it. youtube_channel only returns channel-wide totals and cannot answer this. Defaults to the last 28 days; pass startDate/endDate (YYYY-MM-DD) for another window. Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { videoId: z.string().describe('the YouTube video id (the v= part of the watch URL, or the videoId returned by post_to_youtube)'), startDate: z.string().optional().describe('YYYY-MM-DD, default 28 days ago'), endDate: z.string().optional().describe('YYYY-MM-DD, default today') },
     outputSchema: { videoId: z.string().optional(), startDate: z.string().optional(), endDate: z.string().optional(), views: z.number().optional(), estimatedMinutesWatched: z.number().optional(), averageViewDuration: z.number().optional(), averageViewPercentage: z.number().optional(), likes: z.number().optional(), comments: z.number().optional(), shares: z.number().optional(), subscribersGained: z.number().optional(), url: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/video-insights', { videoId: a.videoId, ...(a.startDate ? { startDate: a.startDate } : {}), ...(a.endDate ? { endDate: a.endDate } : {}) });
     return ok(`${d.views ?? 0} views, ${d.averageViewPercentage ?? 0}% average retention, ${d.estimatedMinutesWatched ?? 0} minutes watched (${d.startDate} → ${d.endDate}).`, d);
@@ -3041,7 +3151,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('rows, within YouTube’s own cap for that report'),
     },
     outputSchema: { report: z.string().optional(), dimensions: z.string().optional(), count: z.number().optional(), columns: z.array(z.string()).optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/report', { report: a.report, videoIds: (a.videoIds || []).join(','), parent: a.parent, startDate: a.startDate, endDate: a.endDate, limit: a.limit });
     return ok(`${d.note}\n${rowLines(d.rows)}`, d);
@@ -3061,7 +3171,7 @@ export function registerTools(rawServer, opts = {}) {
       schedule: z.boolean().optional().describe('false = do not create the job if it is missing; just report that none exists'),
     },
     outputSchema: { report: z.string().optional(), reportTypeId: z.string().optional(), jobId: z.string().optional(), scheduled: z.boolean().optional(), justCreated: z.boolean().optional(), days: z.array(z.string()).optional(), columns: z.array(z.string()).optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/bulk-report', { report: a.report, days: a.days, since: a.since, until: a.until, schedule: a.schedule === false ? 'false' : undefined });
     return ok(`${d.note}\n${rowLines(d.rows)}`, d);
@@ -3071,7 +3181,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The YouTube BULK reporting jobs running on this channel — which report each one generates, its report type id, and when it was scheduled. Call this to find out whether thumbnail-CTR history is already accumulating, and since when, BEFORE promising a user a number: the bulk API can only answer about days after a job existed. Read-only, 0 credits.',
     inputSchema: {},
     outputSchema: { count: z.number().optional(), jobs: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/youtube/report-jobs', {});
     return ok(`${d.note}\n${(d.jobs || []).map(j => `\u2022 ${j.report || j.reportTypeId} \u2014 job ${j.id}${j.createTime ? `, scheduled ${String(j.createTime).slice(0, 10)}` : ''}`).join('\n')}`, d);
@@ -3195,7 +3305,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the comments under a video on the connected channel — the questions, objections and exact wording real viewers use. Same raw material for ad copy that list_meta_comments gives you on Meta. Returns author, text, like count, timestamp and reply count, newest first. Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { videoId: z.string().describe('the YouTube video id'), limit: z.number().optional().describe('max comments, default 25, cap 100') },
     outputSchema: { videoId: z.string().optional(), count: z.number().optional(), comments: z.array(z.object({ id: z.string().optional(), author: z.string().optional(), text: z.string().optional(), likes: z.number().optional(), at: z.string().optional(), replies: z.number().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/comments', { videoId: a.videoId, ...(a.limit ? { limit: a.limit } : {}) });
     // The comments ARE the answer — "12 comments on abc123" is a receipt, not a read. Newlines inside a comment are
@@ -3223,7 +3333,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the playlists on the connected YouTube channel — id, title, description, privacy and video count. Pass a playlistId to get that ONE playlist plus its entries in order. IMPORTANT: each entry carries BOTH a `videoId` and an `itemId`; `itemId` is the playlist-ENTRY id and is what manage_youtube_playlist_items needs to remove or re-order a row, because one video can appear in a playlist more than once so a videoId does not identify the entry. Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { playlistId: z.string().optional().describe('one playlist to open, with its entries. Omit to list the channel’s playlists.'), limit: z.number().optional().describe('max rows, default 25, cap 50 (YouTube’s own maximum)'), pageToken: z.string().optional().describe('nextPageToken from a previous call') },
     outputSchema: { playlists: z.array(z.object({ playlistId: z.string().optional(), title: z.string().optional(), description: z.string().optional(), privacy: z.string().optional(), itemCount: z.number().optional(), url: z.string().optional() })).optional(), count: z.number().optional(), playlistId: z.string().optional(), title: z.string().optional(), privacy: z.string().optional(), itemCount: z.number().optional(), items: z.array(z.object({ itemId: z.string().optional(), videoId: z.string().optional(), title: z.string().optional(), position: z.number().optional(), privacy: z.string().optional() })).optional(), itemsReturned: z.number().optional(), nextPageToken: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/playlists', { ...(a.playlistId ? { playlistId: a.playlistId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.pageToken ? { pageToken: a.pageToken } : {}) });
     if (d.items) return ok(`“${d.title}” (${d.playlistId}) — ${d.privacy}, ${d.itemCount} video(s):\n${d.items.map(i => `  ${i.position}. ${i.title} — videoId ${i.videoId}, itemId ${i.itemId}`).join('\n') || '  (empty)'}\n${d.note}`, d);
@@ -3294,7 +3404,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the caption/subtitle tracks on one of the connected channel’s videos, and optionally DOWNLOAD one as text. A caption TRACK is not the same thing as burned-in captions: a track is what YouTube indexes the video by, what a viewer toggles on, and what accessibility depends on. Each row says whether YouTube generated it automatically (`isAutoGenerated`, trackKind ASR) — those are read-only and cannot be edited or deleted. Downloading is also the fastest way to get an existing video’s full script back for repurposing. Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { videoId: z.string().describe('the YouTube video id — captions are listed per video'), download: z.string().optional().describe('a captionId or a language code to also download as text'), format: z.enum(['srt', 'vtt', 'sbv']).optional().describe('download format, default srt') },
     outputSchema: { videoId: z.string().optional(), count: z.number().optional(), captions: z.array(z.object({ captionId: z.string().optional(), language: z.string().optional(), name: z.string().optional(), trackKind: z.string().optional(), isAutoGenerated: z.boolean().optional(), isDraft: z.boolean().optional(), status: z.string().optional() })).optional(), downloaded: z.object({ captionId: z.string().optional(), language: z.string().optional(), format: z.string().optional(), text: z.string().optional(), truncated: z.boolean().optional() }).optional(), downloadError: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/captions', { videoId: a.videoId, ...(a.download ? { download: a.download } : {}), ...(a.format ? { format: a.format } : {}) });
     const list = (d.captions || []).map(c => `  • ${c.language}${c.name ? ` “${c.name}”` : ''} — ${c.captionId}${c.isAutoGenerated ? ' (auto-generated by YouTube, read-only)' : ''}${c.isDraft ? ' [draft]' : ''}${c.status ? ` · ${c.status}` : ''}`);
@@ -3319,7 +3429,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the video categories YouTube will accept on an upload in a given country. post_to_youtube takes a `categoryId` and this is the only way to discover a valid one — the id set AND the names differ by country, which is why regionCode is required rather than defaulted. Categories YouTube marks not-assignable are filtered out by default because an upload using one is refused. Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { regionCode: z.string().describe('ISO 3166-1 alpha-2 country code — US, GB, DE. YouTube’s category ids differ by country, so this cannot be guessed.'), includeUnassignable: z.boolean().optional().describe('also return categories YouTube will refuse on upload (default false)') },
     outputSchema: { regionCode: z.string().optional(), count: z.number().optional(), categories: z.array(z.object({ categoryId: z.string().optional(), title: z.string().optional(), assignable: z.boolean().optional() })).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/categories', { regionCode: a.regionCode, ...(a.includeUnassignable ? { includeUnassignable: 'true' } : {}) });
     return ok(`${d.count} category(ies) for ${d.regionCode}:\n${(d.categories || []).map(c => `  • ${c.categoryId} — ${c.title}${c.assignable === false ? ' (NOT assignable)' : ''}`).join('\n')}\n${d.note}`, d);
@@ -3329,7 +3439,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The actual search terms people typed on Google Search and Maps before this business listing appeared — the only keyword data a local business gets for free, and the direct input to their Google Ads keyword set, page titles and profile description. google_business_insights answers HOW MANY people found the listing; this answers WHICH WORDS they used. ⚠ LOW-VOLUME TERMS ARE SUPPRESSED: Google withholds an exact count for them and returns only an upper bound, so those rows come back with impressions=null and below=<threshold>. Report those as “fewer than N” — NEVER as zero and never as the threshold itself, both of which are numbers a marketer would act on and neither is true. Counts are UNIQUE USERS per month summed across the window, not impressions; the two are not comparable. Google keeps roughly 12 months of history. Read-only, 0 credits. Needs Google Business Profile connected.',
     inputSchema: { locationId: z.string().optional().describe('which listing, when the brand has more than one (list_business_locations)'), months: z.number().optional().describe('how many whole months back, default 3, cap 12. The current month is excluded because it is always partial.'), limit: z.number().optional().describe('max terms, default 100, which is also Google’s maximum'), pageToken: z.string().optional().describe('nextPageToken from a previous call') },
     outputSchema: { location: z.string().optional(), locationId: z.string().optional(), from: z.string().optional(), to: z.string().optional(), months: z.number().optional(), count: z.number().optional(), keywords: z.array(z.object({ keyword: z.string().optional(), impressions: z.number().nullable().optional(), suppressed: z.boolean().optional(), below: z.number().nullable().optional(), display: z.string().optional() })).optional(), nextPageToken: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-business/search-keywords', { ...(a.locationId ? { locationId: a.locationId } : {}), ...(a.months ? { months: a.months } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.pageToken ? { pageToken: a.pageToken } : {}) });
     return ok(`${d.count} search term(s) for ${d.location} (${d.from} → ${d.to}):\n${(d.keywords || []).map(k => `  • ${k.keyword} — ${k.display}${k.suppressed ? ' unique users (suppressed: Google gives only an upper bound)' : ' unique users'}`).join('\n') || '  (none)'}\n${d.note}`, d);
@@ -3343,7 +3453,7 @@ export function registerTools(rawServer, opts = {}) {
       filter: z.string().optional().describe('posts_no_replies | posts_with_media | posts_with_replies | posts_and_author_threads'),
     },
     outputSchema: { handle: z.string().optional(), did: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional(), nextCursor: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bluesky/my-posts', { limit: a.limit, cursor: a.cursor, filter: a.filter });
     const lines = (d.posts || []).map(p => `• ${p.isRepost ? '[REPOST] ' : ''}${p.isReply ? '[reply] ' : ''}${(p.text || '').slice(0, 90)} — ${p.uri}`).join('\n');
@@ -3354,7 +3464,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read live engagement for up to 25 of the connected account’s Bluesky posts — likes, reposts, replies, quotes and bookmarks. Address a post by its AT-URI (the `at://…` value post_to_bluesky returns), not its web URL. Bluesky publishes NO impression or view count in any AT Protocol lexicon, so these are COUNTS with no denominator and no engagement rate can be computed from them — do not present one. A uri Bluesky returns nothing for is reported as MISSING (deleted, or not on the connected account), never as zero engagement. Read-only, 0 credits. Needs Bluesky connected.',
     inputSchema: { uris: z.array(z.string()).describe('AT-URIs of the posts, at most 25 (Bluesky’s own maximum for one call)') },
     outputSchema: { handle: z.string().optional(), count: z.number().optional(), found: z.number().optional(), missing: z.number().optional(), posts: z.array(z.object({ uri: z.string().optional(), found: z.boolean().optional(), handle: z.string().optional(), text: z.string().optional(), url: z.string().optional(), indexedAt: z.string().optional(), metrics: z.record(z.number()).optional(), absent: z.record(z.string()).optional() })).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bluesky/post-metrics', { uris: (a.uris || []).join(',') });
     const rows = (d.posts || []).map(p => p.found
@@ -3373,7 +3483,7 @@ export function registerTools(rawServer, opts = {}) {
       kind: z.enum(['direct', 'group']).optional(),
     },
     outputSchema: { handle: z.string().optional(), convos: z.array(z.any()).optional(), unreadTotal: z.number().optional(), requests: z.number().optional(), cursor: z.string().optional(), hasMore: z.boolean().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bluesky/convos', a);
     const rows = (d.convos || []).map(c => `  \u2022 ${c.with}${c.isRequest ? ' [REQUEST]' : ''}${c.unread ? ` \u2014 ${c.unread} unread` : ''}${c.lastMessage ? `: \u201c${c.lastMessage.slice(0, 70)}${c.lastMessage.length > 70 ? '\u2026' : ''}\u201d` : c.lastMessageDeleted ? ': (last message deleted)' : ''}\n    convoId ${c.convoId}`);
@@ -3388,7 +3498,7 @@ export function registerTools(rawServer, opts = {}) {
       cursor: z.string().optional().describe('walk further back through older messages'),
     },
     outputSchema: { convoId: z.string().optional(), messages: z.array(z.any()).optional(), handle: z.string().optional(), cursor: z.string().optional(), hasMore: z.boolean().optional(), truncationNote: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bluesky/messages', a);
     const rows = (d.messages || []).map(m => `  ${m.fromMe ? '\u2192 you' : '\u2190 them'} ${m.sentAt ? `(${m.sentAt})` : ''}: ${m.deleted ? '(deleted)' : m.text}`);
@@ -3427,7 +3537,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the connected TikTok creator’s REAL posting options BEFORE posting: which privacy levels THEY are allowed to use, whether comments / duet / stitch are available on their account, their maximum video length, and their nickname. TikTok REQUIRES that the user is shown these actual options and picks a privacy level — never assume or default one. Call this first, show the options, get the user’s pick, then call post_to_tiktok with destination:"post". The SAME privacy options govern PHOTO posts (slideshows), not just video — TikTok takes the same four levels on both. Needs TikTok connected (Settings ▸ Connectors ▸ TikTok).',
     inputSchema: {},
     outputSchema: { nickname: z.string().nullable().optional(), username: z.string().nullable().optional(), avatar: z.string().nullable().optional(), privacyOptions: z.array(z.string()).optional(), commentDisabled: z.boolean().optional(), duetDisabled: z.boolean().optional(), stitchDisabled: z.boolean().optional(), maxDurationSeconds: z.number().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/tiktok/creator-info', {});
     return ok(`TikTok creator ${d.nickname || d.username || '(unnamed)'} — privacy levels they can use: ${(d.privacyOptions || []).join(', ') || '(none returned)'}; comments ${d.commentDisabled ? 'disabled' : 'available'}, duet ${d.duetDisabled ? 'disabled' : 'available'}, stitch ${d.stitchDisabled ? 'disabled' : 'available'}; max ${d.maxDurationSeconds || '?'}s. Show the user these exact options and let THEM choose the privacy level.`, d);
@@ -3465,7 +3575,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the connected TikTok account: display name, username, bio, verified status, and their follower / following / total-likes / video counts. Use it for “how many followers do we have on TikTok”, “how is our TikTok doing”, or to confirm whose account is linked before posting. Read-only. Needs TikTok connected (Settings ▸ Connectors ▸ TikTok).',
     inputSchema: {},
     outputSchema: { openId: z.string().nullable().optional(), displayName: z.string().nullable().optional(), username: z.string().nullable().optional(), avatar: z.string().nullable().optional(), bio: z.string().nullable().optional(), profileLink: z.string().nullable().optional(), verified: z.boolean().optional(), followers: z.number().nullable().optional(), following: z.number().nullable().optional(), likes: z.number().nullable().optional(), videos: z.number().nullable().optional(), partial: z.boolean().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/tiktok/me', { full: '1' });
     const bits = [d.followers != null ? `${d.followers} followers` : null, d.likes != null ? `${d.likes} total likes` : null, d.videos != null ? `${d.videos} videos` : null].filter(Boolean);
@@ -3487,7 +3597,7 @@ export function registerTools(rawServer, opts = {}) {
       videoIds: z.array(z.string()).optional().describe('read these specific TikTok video ids instead of listing recent ones — up to 20 per call'),
     },
     outputSchema: { videos: z.array(z.object({ id: z.string().nullable().optional(), title: z.string().optional(), durationSeconds: z.number().nullable().optional(), cover: z.string().nullable().optional(), url: z.string().nullable().optional(), postedAt: z.string().nullable().optional(), views: z.number().nullable().optional(), likes: z.number().nullable().optional(), comments: z.number().nullable().optional(), shares: z.number().nullable().optional() })).optional(), cursor: z.number().nullable().optional(), hasMore: z.boolean().optional(), unresolved: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const ids = (a.videoIds || []).filter(Boolean);
     const d = await apiGet('/api/tiktok/videos', ids.length ? { videoIds: ids.join(',') } : (a.limit ? { limit: a.limit } : {}));
@@ -3667,7 +3777,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { count: z.number().optional(), results: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/targeting-search', a);
     if (!d.count) return ok(`Meta has no ${a.type} matching "${a.q || ''}". Try a broader word.`, d);
@@ -3688,7 +3798,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max rows (1–200, default 50)'),
     },
     outputSchema: { level: z.string().optional(), count: z.number().optional(), items: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/objects', a);
     const lines = (d.items || []).map(o => `• ${o.name} (${o.id}) — ${o.effective_status || o.status}${o.dailyBudgetUsd ? `, $${o.dailyBudgetUsd}/day` : ''}${o.objective ? `, ${o.objective}` : ''}`);
@@ -3708,7 +3818,7 @@ export function registerTools(rawServer, opts = {}) {
       until: z.string().optional().describe('end date YYYY-MM-DD'),
     },
     outputSchema: { objectId: z.string().optional(), rows: z.array(z.any()).optional(), breakdowns: z.array(z.string()).optional(), breakdownsRequested: z.array(z.string()).optional(), droppedBreakdowns: z.array(z.string()).optional(), breakdownStatus: z.string().optional(), actionBreakdowns: z.array(z.string()).optional(), lines: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/insights', a);
     const r = (d.rows || [])[0];
@@ -3737,7 +3847,7 @@ export function registerTools(rawServer, opts = {}) {
       placements: z.string().optional().describe('comma-separated placements (see the list above)'),
     },
     outputSchema: { objectId: z.string().optional(), count: z.number().optional(), previews: z.array(z.any()).optional(), expiresHours: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/ad-preview', a);
     const live = (d.previews || []).filter(p => p.url);
@@ -3759,7 +3869,7 @@ export function registerTools(rawServer, opts = {}) {
       conversionEvent: z.string().optional().describe('e.g. PURCHASE — used with pixelId'),
     },
     outputSchema: { monthlyActiveLowerBound: z.number().nullable().optional(), monthlyActiveUpperBound: z.number().nullable().optional(), dailyActiveEstimate: z.number().nullable().optional(), estimateReady: z.boolean().optional(), narrow: z.boolean().optional(), summary: z.string().optional(), dailyOutcomesCurve: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/delivery-estimate', a);
     return ok(d.summary, d);
@@ -3772,7 +3882,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max rows (1–200, default 50)'),
     },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), audiences: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/audiences', a);
     if (!d.count) return ok(`That ad account has no custom audiences yet. Build one with create_meta_audience (website retargeting, Page/Instagram engagement, or a lookalike).`, d);
@@ -3801,7 +3911,7 @@ export function registerTools(rawServer, opts = {}) {
       prefill: z.boolean().optional().describe('website/engagement: seed it with activity from BEFORE the audience existed (default true)'),
     },
     outputSchema: { ok: z.boolean().optional(), audienceId: z.string().optional(), kind: z.string().optional(), audience: z.any().optional(), verified: z.boolean().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/audience', a);
     return ok(d.summary, d); // print the READ-BACK sentence verbatim — never narrate an object we did not read back
@@ -3819,7 +3929,7 @@ export function registerTools(rawServer, opts = {}) {
       includeCode: z.boolean().optional().describe('also return the full pixel <script> snippet — only ask when the user is about to install it'),
     },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), totalCount: z.number().optional(), pixels: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/pixels', a);
     return ok(d.note, d);
@@ -3832,7 +3942,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().describe('what it will be called in Events Manager — name it after the website or brand it measures'),
     },
     outputSchema: { ok: z.boolean().optional(), pixelId: z.string().optional(), adAccountId: z.string().optional(), name: z.string().optional(), verified: z.boolean().optional(), pixel: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/pixel', a);
     return ok(d.note, d); // print the READ-BACK sentence verbatim — never narrate an object we did not read back
@@ -3845,7 +3955,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max rows (1–100, default 25)'),
     },
     outputSchema: { pageId: z.string().optional(), pageName: z.string().optional(), count: z.number().optional(), forms: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/lead-forms', a);
     if (!d.count) return ok(`Page “${d.pageName}” has no instant lead forms yet. Build one with create_meta_lead_form, then attach it to an ad with create_meta_ad(objective:"OUTCOME_LEADS", leadFormId:"…").`, d);
@@ -3871,7 +3981,7 @@ export function registerTools(rawServer, opts = {}) {
       trackingParameters: z.record(z.any()).optional(),
     },
     outputSchema: { ok: z.boolean().optional(), formId: z.string().optional(), pageId: z.string().optional(), form: z.any().optional(), verified: z.boolean().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/lead-form', a);
     return ok(d.summary, d); // print the READ-BACK sentence verbatim — never narrate an object we did not read back
@@ -3886,7 +3996,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('must be true to actually change it — without it nothing changes and you get the read-back to show the user'),
     },
     outputSchema: { ok: z.boolean().optional(), formId: z.string().optional(), pageId: z.string().optional(), status: z.string().nullable().optional(), requestedStatus: z.string().optional(), changed: z.boolean().nullable().optional(), alreadyInState: z.boolean().optional(), form: z.any().optional(), verified: z.boolean().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true }, // destructive: Meta refuses to un-archive, and it cascades to children
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/lead-form/status', a);
     return ok(d.summary, d); // print the READ-BACK sentence verbatim — never narrate a status we did not read back
@@ -3905,7 +4015,7 @@ export function registerTools(rawServer, opts = {}) {
       redact: z.boolean().optional().describe('mask the contact values, keeping counts / dates / attribution — use when the user only wants to know the form is working'),
     },
     outputSchema: { source: z.string().optional(), sourceId: z.string().optional(), count: z.number().optional(), redacted: z.boolean().optional(), leads: z.array(z.any()).optional(), cursor: z.string().nullable().optional(), retentionDays: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/leads', a);
     if (!d.count) return ok(`No leads on that ${d.source} yet. ${d.note || ''}`, d);
@@ -3940,17 +4050,21 @@ export function registerTools(rawServer, opts = {}) {
   // every tool keeps its typed contract, and a schema cannot be added without returning structuredContent. Both
   // halves are the same fix: `ok(sentence, d)` prints the sentence AND carries the route's real object.
   server.registerTool('register_merchant_developer', {
+    title: 'Register Hermoso with a Merchant Center account',
     description: "ONE-TIME SETUP, and the FIRST thing to run when Merchant Center calls are being refused. Google blocks every Merchant API call until Hermoso's Google Cloud project is registered against the merchant's account, and says so verbatim (\"GCP project ... is not registered with the merchant account\"). This performs that link. It is NOT a broken connection and reconnecting cannot fix it. Google asks for up to 5 minutes afterwards before the API starts answering.",
     inputSchema: { merchantCenterId: z.string().describe('the numeric id shown top-right in Merchant Center'), developerEmail: z.string().describe('a contact address Google records against the registration; it is not used to sign in') },
     outputSchema: { merchantCenterId: z.string().optional(), developerEmail: z.string().optional(), gcpIds: z.array(z.string()).optional(), verified: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/register', { merchantCenterId: a.merchantCenterId, developerEmail: a.developerEmail });
     return ok(d.note, d); // print the READ-BACK sentence verbatim — it names the GCP project Google actually stored
   }));
   server.registerTool('list_merchant_accounts', {
+    title: 'List Merchant Center accounts',
     description: "List the Google Merchant Center accounts this brand's connected Google account can reach. EVERY other Merchant tool needs the merchantCenterId this returns, and an agency often has several, so never guess one — ask the user which store. Read-only and free. If it is refused, the Merchant Center permission has not been granted yet; that is not a broken connection and reconnecting will not change it.",
     inputSchema: {},
     outputSchema: { accounts: z.array(z.any()).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/merchant/accounts');
     const rows = d?.accounts || [];
@@ -3958,9 +4072,11 @@ export function registerTools(rawServer, opts = {}) {
       : 'This Google account can reach no Merchant Center accounts.', d);
   }));
   server.registerTool('list_merchant_products', {
+    title: 'List Merchant Center products',
     description: "Read the products in a Merchant Center feed — what the merchant actually offers, which is what Shopping and retail Performance Max campaigns serve. Needs merchantCenterId from list_merchant_accounts. Read-only and free.",
     inputSchema: { merchantCenterId: z.string().describe('from list_merchant_accounts'), limit: z.number().optional().describe('max products (default 50, max 250)') },
     outputSchema: { merchantCenterId: z.string().optional(), count: z.number().optional(), products: z.array(z.any()).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/merchant/products', { merchantCenterId: a.merchantCenterId, limit: a.limit });
     return ok(`Merchant Center ${d.merchantCenterId}: ${d.count} product(s).\n${JSON.stringify(d.products || []).slice(0, 4000)}`, d);
@@ -3986,7 +4102,7 @@ export function registerTools(rawServer, opts = {}) {
       cursor: z.string().optional().describe('pageInfo.endCursor from a previous call, to page further'),
     },
     outputSchema: { shop: z.string().optional(), products: z.array(z.any()).optional(), pageInfo: z.any().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/shopify/products', { limit: a.limit, cursor: a.cursor });
     const list = d.products || [];
@@ -4003,6 +4119,7 @@ export function registerTools(rawServer, opts = {}) {
       alt: z.string().optional().describe('alt text for accessibility and SEO; defaults to a generic credit'),
     },
     outputSchema: { shop: z.string().optional(), ok: z.boolean().optional(), productId: z.string().optional(), productUrl: z.string().optional(), media: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/shopify/publish-to-product', { productId: a.productId, imageUrl: a.imageUrl, alt: a.alt });
     const st = d.media?.status || 'UNKNOWN';
@@ -4013,7 +4130,7 @@ export function registerTools(rawServer, opts = {}) {
 
   server.group('ads'); // back to Merchant Center — the product feed Shopping ads and retail PMax serve
   server.registerTool('merchant_report', {
-    title: 'Merchant Center reports — competitive visibility, best sellers, price benchmarks',
+    title: 'Merchant Center competitive visibility, best sellers and price benchmarks',
     description: "COMPETITOR INTELLIGENCE GOOGLE COMPUTES FOR FREE, for any retail brand with a Merchant Center. Ten report views, read with a SQL-like MCQL query. The three worth reaching for first: `competitive_visibility_competitor_view` (WHICH other domains appear beside this merchant, their rank, page-overlap and higher-position rates — i.e. who is actually beating them), `best_sellers_product_cluster_view` (what is SELLING on Google in a category right now, with an inventory_status saying whether this merchant even stocks it) and `price_insights_product_view` (Google's own suggested price plus the predicted click and conversion change). Also: competitive_visibility_benchmark_view, competitive_visibility_top_merchant_view, best_sellers_brand_view, price_competitiveness_product_view, product_view, product_performance_view, non_product_performance_view.\n\nMCQL IS NOT SQL: no OR, no subqueries, no GROUP BY, no aggregates, no JOIN, and ORDER BY may only name fields already in SELECT. Date filters use `WHERE date BETWEEN '2026-01-01' AND '2026-01-31'` or `WHERE date DURING LAST_30_DAYS`. Several views REQUIRE specific fields in SELECT and in WHERE — competitive visibility needs report_category_id + report_country_code + traffic_source, and top_merchant uniquely REQUIRES a date condition while FORBIDDING date in SELECT. An unknown view is refused by name with the list.\n\nNOT AVAILABLE ON MULTI-CLIENT (MCA) ACCOUNTS — pass a subaccount id. An empty result is often a normal state (price insights are only produced where Google predicts a substantial gain), and the note says which kind of empty it is. Read-only, free, no new permission.",
     inputSchema: {
       merchantCenterId: z.string().describe('from list_merchant_accounts — a STANDALONE account or a SUBACCOUNT, never a multi-client (MCA) account'),
@@ -4022,15 +4139,17 @@ export function registerTools(rawServer, opts = {}) {
       pageToken: z.string().optional().describe('nextPageToken from a previous call — resend the IDENTICAL query and pageSize with it, which Google requires'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), view: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), pageSize: z.number().optional(), truncated: z.boolean().optional(), nextPageToken: z.string().optional(), query: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/report', { merchantCenterId: a.merchantCenterId, query: a.query, pageSize: a.pageSize, pageToken: a.pageToken });
     return ok(`${d.note}\n${JSON.stringify(d.rows || []).slice(0, 4000)}`, d);
   }));
   server.registerTool('list_merchant_issues', {
+    title: 'List Merchant Center account issues',
     description: "Read the account-level issues Google reports on a Merchant Center — the answer to \"why is this product not showing?\", which Google Ads reporting CANNOT give you, because a disapproved product has no impressions to report on. Needs merchantCenterId from list_merchant_accounts. Read-only and free.",
     inputSchema: { merchantCenterId: z.string().describe('from list_merchant_accounts') },
     outputSchema: { merchantCenterId: z.string().optional(), count: z.number().optional(), issues: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/merchant/issues', { merchantCenterId: a.merchantCenterId });
     return ok(`${d.note}\n${JSON.stringify(d.issues || []).slice(0, 4000)}`, d);
@@ -4047,7 +4166,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('up to 250, default 50'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), count: z.number().optional(), promotions: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/merchant/promotions', a);
     const rows = (d.promotions || []).map(p => `${p.promotionId} — "${p.longTitle}" ${p.couponValueType}${p.percentOff ? ` ${p.percentOff}%` : ''} · ${String(p.startTime).slice(0, 10)}→${String(p.endTime).slice(0, 10)} · ${(p.destinationStatuses || []).map(s => `${s.destination}=${s.status}`).join(', ') || 'no destination status yet'}${(p.issues || []).length ? ` · ${p.issues.length} issue(s)` : ''}`);
@@ -4095,7 +4214,7 @@ export function registerTools(rawServer, opts = {}) {
       timeZone: z.string().optional().describe("IANA zone for times inside the content, e.g. 'America/Los_Angeles'"),
     },
     outputSchema: { merchantCenterId: z.string().optional(), scope: z.string().optional(), count: z.number().optional(), issues: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/issue-help', a);
     const rows = (d.issues || []).map(i => [`▸ ${i.title}${i.severity ? ` (${i.severity})` : ''}${i.impact ? ` — ${i.impact}` : ''}`, i.howToFix,
@@ -4245,15 +4364,18 @@ export function registerTools(rawServer, opts = {}) {
     return ok([d.note, ...rows].filter(Boolean).join('\n'), d);
   }));
   server.registerTool('list_merchant_data_sources', {
+    title: 'List Merchant Center product feeds',
     description: "List the data sources (feeds) on a Merchant Center account and say which of them can actually take a product write. Do this BEFORE creating or deleting a product: writes go into a data source, and Google only accepts them into an API-input product feed — a file feed, the feed Merchant Center's own UI creates, and an autofeed all list here and all REFUSE writes, so picking the first row would pick a feed that cannot be written to. Needs merchantCenterId from list_merchant_accounts. Read-only and free.",
     inputSchema: { merchantCenterId: z.string().describe('from list_merchant_accounts') },
     outputSchema: { merchantCenterId: z.string().optional(), count: z.number().optional(), writableCount: z.number().optional(), dataSources: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/merchant/datasources', { merchantCenterId: a.merchantCenterId });
     const rows = (d?.dataSources || []).map(s => `${s.displayName || '(unnamed)'} — ${s.dataSource} · ${s.input || '?'} input · ${s.kind}${s.feedLabel ? ` · ${s.feedLabel}/${s.contentLanguage}` : ' · any market'} · ${s.writable ? 'WRITABLE' : 'read-only for products'}`);
     return ok([d?.note, ...rows].filter(Boolean).join('\n'), d);
   }));
   server.registerTool('create_merchant_data_source', {
+    title: 'Create a Merchant Center product feed',
     description: "Create an API product feed on a Merchant Center account — the container upsert_merchant_product writes into. Most accounts have none until one is made: a store set up through the Merchant Center UI has a UI feed, which is read-only. feedLabel and contentLanguage must be set TOGETHER or not at all and BOTH ARE IMMUTABLE — leave them off and the feed accepts products for any market and language, which is the safer default because a wrong feed label can never be corrected. Omit destinations to inherit wherever the account already sells. Creating a feed costs nothing and cannot spend.",
     inputSchema: {
       merchantCenterId: z.string().describe('from list_merchant_accounts'),
@@ -4264,11 +4386,13 @@ export function registerTools(rawServer, opts = {}) {
       destinations: z.array(z.string()).optional().describe('omit to inherit the account\'s own program participation (SHOPPING_ADS, FREE_LISTINGS, …)'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), dataSource: z.string().optional(), dataSourceId: z.string().optional(), displayName: z.string().optional(), input: z.string().optional(), kind: z.string().optional(), feedLabel: z.string().optional(), contentLanguage: z.string().optional(), writable: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/datasource', a);
     return ok(d.note, d); // the READ-BACK sentence — it reports the input type Google stored, not the one we asked for
   }));
   server.registerTool('upsert_merchant_product', {
+    title: 'Create or replace a Merchant Center product',
     description: "Create or replace a product in a Merchant Center feed — this is how a merchant's catalogue gets populated, and it is what Shopping ads, free listings and retail Performance Max actually serve. It is an UPSERT and a WHOLE-ROW write: calling it again for the same offerId REPLACES the product rather than patching it, so send every field you want kept each time. You do not have to find a feed first — omit dataSource and it resolves the account's one writable feed, creates one if there is none, and REFUSES by name if there are several rather than putting the product in a market the campaigns may not target. offerId, contentLanguage and feedLabel together ARE the product's identity and are all immutable; contentLanguage and feedLabel are taken from the feed when the feed declares them. For the product to serve at all Google needs title, description, link, imageLink, availability and price — a row missing any of them is stored and then disapproved, and the reply says so rather than letting you believe it published. The reply reports what GOOGLE STORED, not what was sent. Free: a feed edit cannot spend.",
     inputSchema: {
       merchantCenterId: z.string().describe('from list_merchant_accounts'),
@@ -4293,11 +4417,13 @@ export function registerTools(rawServer, opts = {}) {
       customAttributes: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
     },
     outputSchema: { merchantCenterId: z.string().optional(), offerId: z.string().optional(), productInput: z.string().optional(), product: z.string().optional(), contentLanguage: z.string().optional(), feedLabel: z.string().optional(), dataSource: z.string().optional(), dataSourceCreated: z.boolean().optional(), attributes: z.record(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // destructive: a WHOLE-ROW write — anything left out is wiped, not kept
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/product', a);
     return ok(d.note, d); // built from Google's stored ProductInput, never from what was sent
   }));
   server.registerTool('delete_merchant_product', {
+    title: 'Delete a Merchant Center product',
     description: "Delete a product from a Merchant Center feed. CONFIRM-GATED: without confirm:true nothing is deleted and it reports the real product it WOULD delete — title, price and availability read back from Google — because the id you were given proves nothing about what is actually there. It is recoverable: re-inserting the same offerId re-creates the product. Needs the same offerId + contentLanguage + feedLabel that identify the product (contentLanguage and feedLabel come from the feed when it declares them). Free.",
     inputSchema: {
       merchantCenterId: z.string().describe('from list_merchant_accounts'),
@@ -4307,11 +4433,13 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('must be true to actually delete; without it nothing is deleted and the real product is reported back'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), offerId: z.string().optional(), deleted: z.boolean().optional(), confirmed: z.boolean().optional(), found: z.boolean().optional(), stillVisible: z.boolean().optional(), product: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/product/delete', a);
     return ok(d.note, d);
   }));
   server.registerTool('update_merchant_product', {
+    title: 'Update fields on a Merchant Center product',
     description: "Change SOME fields on a product already in a Merchant Center feed — the everyday operation, because price and availability move daily. This is a PATCH: only the attributes you name are touched and everything else on the product survives, which is the difference from upsert_merchant_product (a whole-row write that wipes anything you leave out). It refuses if the product does not exist rather than quietly creating a half-populated one, and it refuses an empty change rather than sending an update mask with nothing behind it. The reply reports every field Google now holds, so you can see what survived. Free.",
     inputSchema: {
       merchantCenterId: z.string().describe('from list_merchant_accounts'),
@@ -4330,11 +4458,13 @@ export function registerTools(rawServer, opts = {}) {
       attributes: z.record(z.any()).optional().describe('any other product attribute by its Merchant API name'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), offerId: z.string().optional(), productInput: z.string().optional(), dataSource: z.string().optional(), updated: z.array(z.string()).optional(), attributes: z.record(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/product/update', a);
     return ok(d.note, d); // reports what Google now holds, not the patch that was sent
   }));
   server.registerTool('delete_merchant_data_source', {
+    title: 'Delete a Merchant Center product feed',
     description: "Delete a data source (feed) from a Merchant Center account. CONFIRM-GATED and the heavier of the two deletes: without confirm:true nothing is deleted and it reports the feed plus HOW MANY PRODUCTS would be destroyed with it, counted live from Google. This is NOT recoverable the way a product delete is — the products would have to be re-inserted into a new feed, and feedLabel/contentLanguage are immutable so a replacement may not be identical. Free.",
     inputSchema: {
       merchantCenterId: z.string().describe('from list_merchant_accounts'),
@@ -4342,6 +4472,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('must be true to actually delete; without it nothing is deleted and the product count that would go with it is reported'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), dataSource: z.string().optional(), displayName: z.string().optional(), productsInFeed: z.number().nullable().optional(), deleted: z.boolean().optional(), confirmed: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // destructive: the feed AND every product in it, and feedLabel is immutable so a replacement may not match
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/datasource/delete', a);
     return ok(d.note, d);
@@ -4360,7 +4491,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max campaigns (1–500, default 100)'),
     },
     outputSchema: { accounts: z.array(z.any()).optional(), customerId: z.string().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.customerId) {
       // SHARED SET ONLY. This used to call /api/google-ads/customers — the OWNER'S PICKER route, which lists every
@@ -4386,7 +4517,7 @@ export function registerTools(rawServer, opts = {}) {
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { customerId: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/report', a);
     return ok(`${d.count} row(s) from Google Ads${d.customerId ? ` (customer ${d.customerId})` : ''}:\n${rowLines(d.rows)}`, d);
@@ -4436,7 +4567,7 @@ export function registerTools(rawServer, opts = {}) {
       loginCustomerId: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), customerId: z.string().optional(), source: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-ads/change-history', { customerId: a.customerId, source: a.source, since: a.since, until: a.until, limit: a.limit, detail: a.detail === true ? 'true' : undefined, loginCustomerId: a.loginCustomerId });
     return ok(`${d.note}\n${JSON.stringify(d.rows || []).slice(0, 4000)}`, d);
@@ -4576,7 +4707,7 @@ export function registerTools(rawServer, opts = {}) {
       loginCustomerId: z.string().optional(),
     },
     outputSchema: { count: z.number().optional(), locations: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/google-ads/locations', a);
     if (!d.count) return ok(`Google has no location matching "${a.query}". Try a broader name (the country, or the city without the region).`, d);
@@ -4614,7 +4745,7 @@ export function registerTools(rawServer, opts = {}) {
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), resourceName: z.string().optional(), status: z.string().optional(), verifiedStatus: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // destructive: the enum carries REMOVED, and Google has no un-remove
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/status', a);
     // d.note is written from the READ-BACK and says so when Google reports a status different to the one we asked
@@ -4791,7 +4922,7 @@ export function registerTools(rawServer, opts = {}) {
     return ok(`${d.note || 'Performance Max campaign created PAUSED.'}${d.dryRun ? '' : ' To make it spend, use set_google_ads_status(confirm:true) after the user approves.'}`, d);
   }));
   server.registerTool('google_ads_keyword_ideas', {
-    title: 'Google Keyword Planner — keyword ideas with real search volume',
+    title: 'Keyword ideas with real Google search volume',
     description: 'Google’s own KEYWORD PLANNER: real keyword ideas with average monthly search volume, competition level and top-of-page bid estimates, so keyword choices are measured instead of guessed. Seed it with keywords[] (terms you already have), url (one landing page to mine) or site (a whole domain — the fastest way to size a competitor). Narrow by locations (place NAMES, resolved for you) and language. Results come back sorted by monthly volume. Use this BEFORE add_google_ads_keywords or create_google_ads_campaign so the ad group targets terms people actually search, and quote the volumes when you propose them. Read-only, free, spends nothing and creates nothing.',
     inputSchema: {
       customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
@@ -4830,7 +4961,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The GA4 properties SHARED WITH THIS BRAND, with their numeric property ids, display names and the Analytics account each sits under. CALL THIS FIRST — every other Analytics tool needs a PROPERTY ID, which is NUMERIC (e.g. 123456789) and is NOT the "G-XXXXXXX" Measurement ID people usually know from their tracking snippet; the API accepts the numeric id and nothing else. Resolve the property yourself from this list instead of asking the user to go and find one, and only ask when two names are genuinely ambiguous. THIS IS NOT EVERY PROPERTY THE GOOGLE ACCOUNT CAN SEE, deliberately: Analytics access is handed out freely, so one login often has Viewer on many different clients\' properties, and the user ticks which ones belong to THIS brand. Only ticked properties can be reported on, and any other one is refused by name. An empty list means nothing is ticked yet — say so and point the user at Settings ▸ Connectors ▸ Google Analytics ▸ Manage accounts (or call list_connector_accounts / set_connector_accounts with provider "google_analytics"); never name or guess a property. Read-only, 0 credits. Needs Google Analytics connected (Settings ▸ Connectors ▸ Google Analytics).',
     inputSchema: {},
     outputSchema: { properties: z.array(z.object({ property: z.string().optional(), displayName: z.string().optional(), account: z.string().optional(), propertyType: z.string().optional() })).optional(), count: z.number().optional(), shared: z.number().optional(), missing: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/analytics/properties', {});
     const rows = (d.properties || []).map(p => `• ${p.displayName || '(unnamed)'} — property ${p.property}${p.account ? ` · ${p.account}` : ''}`);
@@ -4858,7 +4989,7 @@ export function registerTools(rawServer, opts = {}) {
       metricFilter: z.record(z.any()).optional().describe('Filter the AGGREGATED rows, GA4\'s having-clause — same FilterExpression shape. Example: {"filter":{"fieldName":"sessions","numericFilter":{"operation":"GREATER_THAN","value":{"int64Value":"30"}}}}. DIMENSIONS CANNOT BE USED HERE — use dimensionFilter.'),
     },
     outputSchema: { property: z.string().optional(), rows: z.array(z.any()).optional(), rowCount: z.number().optional(), returned: z.number().optional(), offset: z.number().optional(), truncated: z.boolean().optional(), nextOffset: z.number().optional(), dimensions: z.array(z.string()).optional(), metrics: z.array(z.string()).optional(), filtered: z.boolean().optional(), sampled: z.boolean().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/analytics/report', a);
     // SAY WHETHER IT WAS FILTERED. A narrow answer and a small property look identical in a row list, so a reader
@@ -4880,7 +5011,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('rows, 1–1000 (default 50)'),
     },
     outputSchema: { property: z.string().optional(), rows: z.array(z.any()).optional(), activeUsers: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/analytics/realtime', a);
     return ok(`${d.activeUsers ?? 0} active user(s) on property ${d.property} right now.\n${rowLines(d.rows)}`, d);
@@ -4890,7 +5021,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'What a GA4 property already MEASURES — its key events (what GA4 counts as a conversion) and its custom dimensions, with each dimension\'s parameter name and scope. Two reasons to call it: to learn a property\'s own custom dimension names before using them in analytics_report, and to CHECK BEFORE CREATING — a custom dimension can never be deleted, only archived, and a property is capped at 50 event-scoped ones, so creating a duplicate permanently burns a slot. The property is the NUMERIC id from list_analytics_properties. Read-only, 0 credits.',
     inputSchema: { property: z.string().describe('the NUMERIC GA4 property id from list_analytics_properties — it must be one SHARED with this brand, and any other is refused by name') },
     outputSchema: { property: z.string().optional(), keyEvents: z.array(z.any()).optional(), customDimensions: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/analytics/definitions', { property: a.property });
     const ke = (d.keyEvents || []).map(k => `• key event: ${k.eventName}${k.countingMethod ? ` (${k.countingMethod})` : ''}`);
@@ -5023,7 +5154,7 @@ export function registerTools(rawServer, opts = {}) {
       compatibilityFilter: z.enum(['COMPATIBILITY_UNSPECIFIED', 'COMPATIBLE', 'INCOMPATIBLE']).optional().describe('narrow the answer — COMPATIBLE returns only the fields that CAN be added'),
     },
     outputSchema: { property: z.string().optional(), compatible: z.boolean().optional(), checked: z.number().optional(), incompatible: z.array(z.any()).optional(), dimensions: z.array(z.any()).optional(), metrics: z.array(z.any()).optional(), scope: z.string().optional(), warning: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/analytics/compatibility', a);
     const row = (x) => `• ${x.kind} ${x.apiName}${x.uiName && x.uiName !== x.apiName ? ` (${x.uiName})` : ''} — ${x.compatibility}`;
@@ -5040,7 +5171,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "Which Google Ads accounts a GA4 property is linked to, and whether each link has PERSONALIZED ADVERTISING on — the flag that decides whether GA4 audiences and remarketing events reach Google Ads at all. RUN THIS BEFORE two claims: that a GA4 audience can be remarketed to, and that a Google Ads campaign's missing conversion data is a Google Ads problem. For a GA4-first advertiser the conversions come from this link, so an unlinked property is the usual cause and no error anywhere says so. Read-only, 0 credits. Needs Google Analytics connected.",
     inputSchema: { property: z.string().describe('the NUMERIC GA4 property id from list_analytics_properties — never the G-XXXXXXX Measurement ID') },
     outputSchema: { property: z.string().optional(), count: z.number().optional(), links: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/analytics/google-ads-links', { property: a.property });
     const rows = (d.links || []).map(l => `• ${l.customerId}${l.canManageClients ? ' (manager account)' : ''} — personalized advertising ${l.adsPersonalizationEnabled ? 'ON' : 'OFF'}${l.creatorEmailAddress ? `, linked by ${l.creatorEmailAddress}` : ''}`);
@@ -5080,7 +5211,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "The GA4 audiences (remarketing lists) on a property, WITH whether they can actually be used in Google Ads — it reads the Google Ads link state alongside them, because an audience on an unlinked property is a silent dead end that reports no error anywhere. ARCHIVED audiences are not listed, so absence here is not proof one never existed. GA4's PREDEFINED audiences ('All Users', 'Purchasers') ARE returned — verified live against a real property — and they come back with clauseCount 0, because Google defines them internally rather than with filter clauses; that is normal and is not a broken audience. Read-only, 0 credits.",
     inputSchema: { property: z.string().describe('the NUMERIC GA4 property id') },
     outputSchema: { property: z.string().optional(), count: z.number().optional(), audiences: z.array(z.any()).optional(), googleAds: z.any().optional(), ready: z.boolean().nullable().optional(), note: z.string().optional(), listNote: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/analytics/audiences', { property: a.property });
     const rows = (d.audiences || []).map(x => `• ${x.displayName} (${x.audienceId}) — ${x.membershipDurationDays}-day membership, ${x.clauseCount} clause(s)${x.adsPersonalizationEnabled === false ? ' — NOT available for ads personalization' : ''}`);
@@ -5243,7 +5374,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "The Google Tag Manager containers SHARED WITH THIS BRAND, with the exact containerPath every other Tag Manager tool needs. CALL THIS FIRST. A container is addressed by PATH, \"accounts/<id>/containers/<id>\", never by the GTM-XXXXXX public id a human reads off the snippet: no Tag Manager method accepts the public id, so passing one is refused. Each row carries the public id beside the path so you can match what the user says to what the API wants. THIS IS NOT EVERY CONTAINER THE GOOGLE ACCOUNT CAN SEE: one agency login routinely administers every client's container, and a container is not data about a client, it is control of what runs on their website, so the user ticks which containers belong to THIS brand and only those are reachable. An empty list means nothing is ticked yet: say so and point the user at Settings, Connectors, Google Tag Manager, Manage accounts. Never name or guess a container. Read-only, free. Read-only, 0 credits. Needs Google Tag Manager connected.",
     inputSchema: {},
     outputSchema: { containers: z.array(z.object({ containerPath: z.string().optional(), publicId: z.string().optional(), name: z.string().optional(), accountName: z.string().optional() })).optional(), count: z.number().optional(), shared: z.number().optional(), missing: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/tag-manager/containers', {});
     const rows = (d.containers || []).map(c => `• ${c.name || c.containerPath}${c.publicId ? ` (${c.publicId})` : ''} — ${c.containerPath}`);
@@ -5261,7 +5392,7 @@ export function registerTools(rawServer, opts = {}) {
       workspace: z.string().optional().describe('workspace id or name. Defaults to the Default Workspace, and the answer always states which one it read.'),
     },
     outputSchema: { container: z.object({}).passthrough().optional(), workspace: z.object({}).passthrough().optional(), tags: z.array(z.object({ tagId: z.string().optional(), name: z.string().optional(), type: z.string().optional(), paused: z.boolean().optional(), live: z.boolean().nullable().optional(), firingTriggers: z.array(z.string()).optional() })).optional(), triggers: z.array(z.object({}).passthrough()).optional(), summary: z.string().optional(), livePublished: z.boolean().optional(), liveReadable: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tag-manager/tags', { containerPath: a.containerPath, workspace: a.workspace });
     // THREE-VALUED `live`, PRINTED AS THREE ANSWERS. null is "could not tell", never "no": reporting an
@@ -5405,7 +5536,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The Google Search Console properties SHARED WITH THIS BRAND, each with the exact property string every other Search Console tool takes and the connected account\'s permission level on it. CALL THIS FIRST. A property is EITHER "sc-domain:example.com" (a Domain property, covering every scheme and subdomain) OR the full URL-prefix form "https://example.com/" including scheme and trailing slash — Google treats those as different properties and one of them will 403, so resolve it here rather than guessing, and never pass a bare domain. THIS IS NOT EVERY PROPERTY THE GOOGLE ACCOUNT CAN SEE, deliberately: one login commonly holds a dozen clients\' properties, so the user ticks which belong to THIS brand and any other one is refused by name. An empty list means nothing is ticked yet — say so and point the user at Settings ▸ Connectors ▸ Google Search Console ▸ Manage accounts (or call list_connector_accounts / set_connector_accounts with provider "google_search_console"); never name or guess a property. A row whose permissionLevel is siteUnverifiedUser will refuse every later call. Read-only, 0 credits. Needs Google Search Console connected.',
     inputSchema: {},
     outputSchema: { sites: z.array(z.object({ siteUrl: z.string().optional(), permissionLevel: z.string().optional() })).optional(), count: z.number().optional(), shared: z.number().optional(), missing: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/search-console/sites', {});
     const rows = (d.sites || []).map(s => `• ${s.siteUrl}${s.permissionLevel ? ` — ${s.permissionLevel}` : ''}`);
@@ -5431,7 +5562,7 @@ export function registerTools(rawServer, opts = {}) {
       startRow: z.number().optional().describe('zero-based, for paging past rowLimit'),
     },
     outputSchema: { siteUrl: z.string().optional(), rows: z.array(z.any()).optional(), rowCount: z.number().optional(), dimensions: z.array(z.string()).optional(), rowTotals: z.record(z.any()).optional(), filtered: z.boolean().optional(), dataState: z.string().optional(), caveats: z.string().optional(), firstIncompleteDate: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/search-console/performance', a);
     // SAY WHETHER IT WAS FILTERED. A narrow answer and a small property look identical in a row list, so a reader
@@ -5450,7 +5581,7 @@ export function registerTools(rawServer, opts = {}) {
       languageCode: z.string().optional().describe('BCP-47 code for translated issue messages, e.g. "de-CH". Default en-US.'),
     },
     outputSchema: { siteUrl: z.string().optional(), inspectionUrl: z.string().optional(), verdict: z.string().optional(), coverageState: z.string().optional(), robotsTxtState: z.string().optional(), indexingState: z.string().optional(), lastCrawlTime: z.string().optional(), googleCanonical: z.string().optional(), userCanonical: z.string().optional(), sitemap: z.array(z.string()).optional(), richResults: z.record(z.any()).optional(), mobileUsability: z.record(z.any()).optional(), inspectionResultLink: z.string().optional(), quota: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/search-console/inspect', a);
     const bits = [`verdict ${d.verdict || 'unknown'}`, d.coverageState, d.robotsTxtState ? `robots ${d.robotsTxtState}` : '', d.indexingState, d.lastCrawlTime ? `last crawled ${d.lastCrawlTime}` : ''].filter(Boolean);
@@ -5469,7 +5600,7 @@ export function registerTools(rawServer, opts = {}) {
       sitemapIndex: z.string().optional().describe('the FULL url of a sitemap INDEX, to list the sitemaps it contains'),
     },
     outputSchema: { siteUrl: z.string().optional(), sitemaps: z.array(z.any()).optional(), count: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/search-console/sitemaps', { siteUrl: a.siteUrl, feedpath: a.feedpath, sitemapIndex: a.sitemapIndex });
     const rows = (d.sitemaps || []).map(s => {
@@ -5486,7 +5617,7 @@ export function registerTools(rawServer, opts = {}) {
       feedpath: z.string().describe('the FULL sitemap URL, e.g. "https://example.com/sitemap.xml"'),
     },
     outputSchema: { siteUrl: z.string().optional(), feedpath: z.string().optional(), submitted: z.boolean().optional(), sitemap: z.record(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/search-console/sitemap', a);
     return ok(`${d.feedpath} → ${d.siteUrl}. ${d.note || ''}`, d);
@@ -5513,7 +5644,7 @@ export function registerTools(rawServer, opts = {}) {
       siteUrl: z.string().describe('"sc-domain:example.com" for a Domain property (covers every scheme and subdomain), or the full URL-prefix form "https://example.com/". These are different properties — pick deliberately.'),
     },
     outputSchema: { siteUrl: z.string().optional(), added: z.boolean().optional(), permissionLevel: z.string().optional(), shared: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/search-console/site', a);
     return ok(d.note || `${d.siteUrl} added.`, d);
@@ -5546,7 +5677,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The Bing Webmaster Tools sites SHARED WITH THIS BRAND, each exactly as Bing holds it (e.g. "https://example.com"). CALL THIS FIRST — every other Bing tool takes that exact string. THIS IS NOT EVERY SITE THE CONNECTION CAN REACH: Microsoft issues one key per USER covering every site that Bing account verified, so the user ticks which belong to THIS brand and any other one is refused by name. An empty list means nothing is ticked yet — point the user at Settings ▸ Connectors ▸ Bing Webmaster Tools ▸ Manage accounts (or call set_connector_accounts with provider "bing_webmaster") and never name or guess a site. A site flagged not verified will refuse every later call. Read-only, 0 credits.',
     inputSchema: {},
     outputSchema: { sites: z.array(z.object({ siteUrl: z.string().optional(), isVerified: z.boolean().optional() })).optional(), count: z.number().optional(), shared: z.number().optional(), missing: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/bing-webmaster/sites', {});
     const rows = (d.sites || []).map(s => `• ${s.siteUrl}${s.isVerified ? '' : ' (NOT VERIFIED in Bing — every call on it will be refused)'}`);
@@ -5565,7 +5696,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional().describe('zero-based results page, directory mode'),
     },
     outputSchema: { siteUrl: z.string().optional(), mode: z.string().optional(), method: z.string().optional(), rows: z.array(z.any()).optional(), count: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/traffic', a);
     return ok(`${d.count || 0} row(s) from Bing (${d.method}) for ${d.siteUrl}.\n${rowLines(d.rows)}`, d);
@@ -5580,7 +5711,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.string().optional().describe('the full page URL — required for pageQueries and queryPageDetail'),
     },
     outputSchema: { siteUrl: z.string().optional(), mode: z.string().optional(), method: z.string().optional(), rows: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/query-stats', a);
     return ok(`${d.count || 0} row(s) from Bing (${d.method}) for ${d.siteUrl}.\n${rowLines(d.rows)}\n\n${d.note || ''}`, d);
@@ -5597,7 +5728,7 @@ export function registerTools(rawServer, opts = {}) {
       endDate: z.string().optional().describe('YYYY-MM-DD — required for keyword and related modes'),
     },
     outputSchema: { mode: z.string().optional(), method: z.string().optional(), q: z.string().optional(), country: z.string().optional(), language: z.string().optional(), rows: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/keywords', a);
     return ok(`${d.count || 0} keyword row(s) for "${d.q}" (${d.country}/${d.language}, ${d.method}).\n${rowLines(d.rows)}\n\n${d.note || ''}`, d);
@@ -5612,7 +5743,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional().describe('zero-based results page, directory mode'),
     },
     outputSchema: { siteUrl: z.string().optional(), mode: z.string().optional(), method: z.string().optional(), rows: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/crawl', a);
     return ok(`${d.count || 0} row(s) from Bing (${d.method}) for ${d.siteUrl}.\n${rowLines(d.rows)}${d.note ? `\n\n${d.note}` : ''}`, d);
@@ -5627,7 +5758,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional().describe('zero-based results page'),
     },
     outputSchema: { siteUrl: z.string().optional(), mode: z.string().optional(), method: z.string().optional(), rows: z.array(z.any()).optional(), count: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/links', a);
     return ok(`${d.count || 0} row(s) from Bing (${d.method}) for ${d.siteUrl}.\n${rowLines(d.rows)}`, d);
@@ -5637,7 +5768,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'How many URLs this site may still submit to Bing today and this month, plus the separate content-submission budget. BING SETS THIS PER SITE AND IT VARIES — Microsoft\'s own documented example allows 5 a day and 24 a month — so it is always read live and never assumed. Check it before promising anyone a bulk submission, because Bing rejects an over-quota batch as a WHOLE rather than taking what fits. Read-only, 0 credits.',
     inputSchema: { siteUrl: z.string().describe('the exact site string from list_bing_webmaster_sites') },
     outputSchema: { siteUrl: z.string().optional(), urlSubmission: z.record(z.any()).optional(), contentSubmission: z.record(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/quota', { siteUrl: a.siteUrl });
     return ok(`${d.siteUrl}: ${d.urlSubmission?.daily ?? '?'} URL submission(s) left today, ${d.urlSubmission?.monthly ?? '?'} this month${d.contentSubmission ? `; content submissions ${d.contentSubmission.daily}/day, ${d.contentSubmission.monthly}/month` : ''}. ${d.note || ''}`, d);
@@ -5650,7 +5781,7 @@ export function registerTools(rawServer, opts = {}) {
       urls: z.array(z.string()).describe('full URLs on THIS site — a URL on another host is refused before anything is submitted'),
     },
     outputSchema: { siteUrl: z.string().optional(), submitted: z.number().optional(), urls: z.array(z.string()).optional(), method: z.string().optional(), quotaBefore: z.number().optional(), quotaAfter: z.number().optional(), quotaSpent: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bing-webmaster/submit', a);
     return ok(`${d.submitted} URL(s) to Bing for ${d.siteUrl}. ${d.note || ''}`, d);
@@ -5669,7 +5800,7 @@ export function registerTools(rawServer, opts = {}) {
       feedUrl: z.string().optional().describe('optional — the full URL of a sitemap INDEX, to list its children'),
     },
     outputSchema: { siteUrl: z.string().optional(), feedUrl: z.string().optional(), method: z.string().optional(), sitemaps: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/sitemaps', a);
     return ok(`${d.count || 0} sitemap(s) from Bing (${d.method}) for ${d.siteUrl}.\n${rowLines(d.sitemaps)}\n\n${d.note || ''}`, d);
@@ -5682,7 +5813,7 @@ export function registerTools(rawServer, opts = {}) {
       feedUrl: z.string().describe('the FULL sitemap URL, e.g. "https://example.com/sitemap.xml"'),
     },
     outputSchema: { siteUrl: z.string().optional(), feedUrl: z.string().optional(), submitted: z.boolean().optional(), confirmed: z.boolean().nullable().optional(), sitemap: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bing-webmaster/sitemap', a);
     return ok(`${d.feedUrl} → ${d.siteUrl}. ${d.note || ''}`, d);
@@ -5711,7 +5842,7 @@ export function registerTools(rawServer, opts = {}) {
       url: z.string().optional().describe('optional — one full URL, for the stored detail of that fetch'),
     },
     outputSchema: { siteUrl: z.string().optional(), url: z.string().optional(), method: z.string().optional(), rows: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/bing-webmaster/fetched-urls', a);
     return ok(`${d.count || 0} row(s) from Bing (${d.method}) for ${d.siteUrl}.\n${rowLines(d.rows)}\n\n${d.note || ''}`, d);
@@ -5724,7 +5855,7 @@ export function registerTools(rawServer, opts = {}) {
       url: z.string().describe('the full URL on THIS site for Bingbot to fetch'),
     },
     outputSchema: { siteUrl: z.string().optional(), url: z.string().optional(), requested: z.boolean().optional(), confirmed: z.boolean().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bing-webmaster/fetch-url', a);
     return ok(d.note || `Requested a Bingbot fetch of ${d.url}.`, d);
@@ -5743,7 +5874,7 @@ export function registerTools(rawServer, opts = {}) {
       dynamicServing: z.string().optional().describe('none (default) | pc-laptop | mobile | amp | tablet | non-visual-browser'),
     },
     outputSchema: { siteUrl: z.string().optional(), url: z.string().optional(), submitted: z.boolean().optional(), bytes: z.number().optional(), dynamicServing: z.number().optional(), quotaBefore: z.number().nullable().optional(), quotaAfter: z.number().nullable().optional(), quotaSpent: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bing-webmaster/content', a);
     return ok(`${d.bytes} byte(s) of content for ${d.url}. ${d.note || ''}`, d);
@@ -5753,7 +5884,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Add a site to the connected Bing Webmaster account. 🚨 ADDING IS NOT VERIFYING, and saying so is most of this tool\'s value: the site arrives UNVERIFIED and every read on it is refused until an ownership proof is placed on the site itself — an XML file at the root, a meta tag in the home page <head>, or a CNAME DNS record — which no API can do. Place one, then call verify_bing_webmaster_site. Microsoft documents that adding a site which is already there does NOT error, so a success here is not even evidence anything changed, which is why the answer is read back from Bing\'s site list. It is also NOT shared with this brand until the user ticks it under Settings ▸ Connectors ▸ Bing Webmaster Tools ▸ Manage accounts. 0 credits.',
     inputSchema: { siteUrl: z.string().describe('the site with its scheme, e.g. "https://example.com"') },
     outputSchema: { siteUrl: z.string().optional(), added: z.boolean().optional(), confirmed: z.boolean().nullable().optional(), isVerified: z.boolean().nullable().optional(), shared: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bing-webmaster/site', a);
     return ok(d.note || `Added ${d.siteUrl}.`, d);
@@ -5763,7 +5894,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Ask Bing to CHECK the ownership proof for a site already on the account. IT DOES NOT PLACE THE PROOF — nothing can over an API. The user puts an XML file at the site root, a meta tag in the home page <head>, or a CNAME DNS record, and Bing Webmaster Tools shows the exact filename and value for each. A negative answer therefore means "the proof is not in place yet", never that Hermoso or the connection failed, and the reply says which three options exist. Bing refuses to verify a site that was never added, which is knowable for free, so that is refused here with add_bing_webmaster_site named as the fix. The verdict is read back from the site LIST rather than taken from the call\'s own return value — the two can disagree. 0 credits.',
     inputSchema: { siteUrl: z.string().describe('the site to verify, exactly as it was added') },
     outputSchema: { siteUrl: z.string().optional(), verifyReturned: z.boolean().optional(), isVerified: z.boolean().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bing-webmaster/site/verify', a);
     return ok(d.note || `Asked Bing to verify ${d.siteUrl}.`, d);
@@ -5797,7 +5928,7 @@ export function registerTools(rawServer, opts = {}) {
       keyLocation: z.string().optional().describe('the full URL of the key file if it is NOT at the site root. Moving it NARROWS the key to that directory only.'),
     },
     outputSchema: { submitted: z.number().optional(), urls: z.array(z.string()).optional(), host: z.string().optional(), keyLocation: z.string().optional(), status: z.number().optional(), keyFile: z.string().optional(), engines: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/indexnow/submit', a);
     return ok(`${d.submitted} URL(s) submitted to IndexNow for ${d.host} (HTTP ${d.status}). ${d.keyFile || ''}\n${d.note || ''}`, d);
@@ -5819,7 +5950,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The PostHog projects the connected personal API key can see, and which ONE this brand is pointed at. Only the ACTIVE project is readable. That is deliberate: PostHog\'s API otherwise falls back to "the last project you visited in the UI", which would make every answer depend on the user\'s browsing history, so Hermoso pins a project at connect time instead of relying on their implicit default. To move this brand to a different project, the user reconnects PostHog under Settings ▸ Connectors ▸ PostHog with that project id. Read-only, 0 credits.',
     inputSchema: {},
     outputSchema: { projects: z.array(z.any()).optional(), count: z.number().optional(), active: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/posthog/projects', {});
     const rows = (d.projects || []).map(p => `• ${p.name} (${p.id})${p.id === d.active ? '  ← ACTIVE, the only one readable' : ''}${p.organization ? ` · ${p.organization}` : ''}`);
@@ -5833,7 +5964,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('row cap, 1–1000 (default 1000). A LIMIT already in the query is honoured and clamped to the same ceiling'),
     },
     outputSchema: { project: z.string().optional(), query: z.string().optional(), columns: z.array(z.string()).optional(), rows: z.array(z.any()).optional(), rowCount: z.number().optional(), limit: z.number().optional(), capped: z.boolean().optional(), note: z.string().optional(), warning: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/posthog/query', { ...a, _tool: 'posthog_query' });
     const body = (d.rows || []).slice(0, 60).map(r => Object.entries(r).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')).join('\n');
@@ -5851,7 +5982,7 @@ export function registerTools(rawServer, opts = {}) {
       refresh: z.boolean().optional().describe('default true (recompute if stale); false = return the cached result even if stale'),
     },
     outputSchema: { project: z.string().optional(), insights: z.array(z.any()).optional(), count: z.number().optional(), insight: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posthog/insights', a);
     if (d.insight) return ok(`Insight "${d.insight.name}" (${d.insight.kind || 'unknown kind'}): ${JSON.stringify(d.insight.result ?? null).slice(0, 3000)}\n${d.insight.url}`, d);
@@ -5862,7 +5993,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'SESSION REPLAYS — the capability GA4 has no equivalent of at all. Lists recent recordings with who they belong to, how long they ran, how many clicks / keypresses / CONSOLE ERRORS each had, the URL they started on, and a link that opens the replay in PostHog. USE THE SIGNALS RATHER THAN JUST LISTING THEM: a session with console errors and a high keypress count on a checkout page is a bug report with a video attached, and that is the insight worth surfacing. THE RAW REPLAY IS NOT AVAILABLE OVER THE API — PostHog\'s words: "This endpoint does not provide the raw JSON of the replays. To get the raw JSON, you need to click Export as JSON in the replay options menu in-app." So describe and link; never promise a download and never claim to have watched one. Links need the user\'s own PostHog login. A publicly shareable link is minted in the PostHog UI and deliberately not by an agent, because it publishes a real person\'s session and PostHog themselves say they "make no guarantees about sensitive information contained in the recording". Read-only, 0 credits.',
     inputSchema: { limit: z.number().optional().describe('1–100, default 20') },
     outputSchema: { project: z.string().optional(), recordings: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posthog/recordings', a);
     return ok(`${d.count || 0} session replay(s):\n${(d.recordings || []).map(r => `• ${r.startTime} — ${r.durationSeconds ?? '?'}s (${r.activeSeconds ?? '?'}s active), ${r.clickCount ?? 0} clicks, ${r.keypressCount ?? 0} keypresses, ${r.consoleErrorCount ?? 0} console errors${r.person ? ` · ${r.person}` : ''}${r.startUrl ? ` · started ${r.startUrl}` : ''}\n  ${r.url}`).join('\n')}\n${d.note || ''}`, d);
@@ -5877,7 +6008,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('1–100, default 20'),
     },
     outputSchema: { project: z.string().optional(), persons: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posthog/persons', a);
     return ok(d.count ? `${d.count} person(s):\n${d.persons.map(p => `• ${p.email || p.name || '(no name)'} — distinct ids ${(p.distinctIds || []).slice(0, 3).join(', ')}${p.createdAt ? ` · first seen ${p.createdAt}` : ''}`).join('\n')}` : d.note, d);
@@ -5887,7 +6018,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'READ BACK A SAVED MIXPANEL REPORT by its bookmark id — and this is the PREFERRED Mixpanel lane, not a fallback. Mixpanel has put BOTH its Segmentation and its Funnels query APIs in maintenance mode and recommends in their place that the report is built in the Mixpanel UI and read programmatically through Insights, which is exactly what this does. THE BOOKMARK ID MUST COME FROM THE USER: Mixpanel publishes no endpoint that lists saved reports, so ask them to open the report in Mixpanel and copy the id out of its URL (the part after "report-"). Remember Mixpanel allows only 60 QUERIES PER HOUR across its entire Query API — the tightest budget of any connector here — so reuse an answer rather than re-asking. READ BACK dateRange, do not assume the window: a saved report\'s date range is configured in Mixpanel\'s own UI and not by this call, and it comes back stamped with the PROJECT\'s UTC offset — the only place this connector can observe that timezone at all. Read-only, 0 credits.',
     inputSchema: { bookmarkId: z.string().describe('the saved report\'s bookmark id, from its URL in Mixpanel') },
     outputSchema: { project: z.string().optional(), bookmarkId: z.string().optional(), series: z.any().optional(), headers: z.any().optional(), computedAt: z.string().nullable().optional(), dateRange: z.any().optional(), timezone: z.string().optional(), raw: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/mixpanel/insights', a);
     return ok(`Mixpanel saved report ${d.bookmarkId} (project ${d.project}):\n${JSON.stringify(d.series ?? d.raw).slice(0, 3000)}${d.note ? `\n${d.note}` : ''}`, d);
@@ -5911,7 +6042,7 @@ export function registerTools(rawServer, opts = {}) {
       unboundedRetention: z.boolean().optional().describe('accumulate right-to-left, so day N means "retained on day N or any day after"'),
     },
     outputSchema: { project: z.string().optional(), retentionType: z.string().optional(), cohorts: z.array(z.any()).optional(), count: z.number().optional(), from: z.string().optional(), to: z.string().optional(), timezone: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/mixpanel/retention', a);
     return ok(d.count ? `Mixpanel retention ${d.from} → ${d.to}, ${d.count} cohort(s):\n${d.cohorts.map(c => `• ${c.date}: ${c.first} started → ${(c.counts || []).join(', ')}`).join('\n')}` : d.note, d);
@@ -5931,7 +6062,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('top N property values; Mixpanel defaults to 60, max 10000, and it does nothing unless "on" is set'),
     },
     outputSchema: { project: z.string().optional(), event: z.string().optional(), series: z.array(z.any()).optional(), values: z.any().optional(), legendSize: z.number().nullable().optional(), maintenance: z.string().optional(), timezone: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/mixpanel/segmentation', a);
     return ok(`Mixpanel "${d.event}" (project ${d.project}):\n${JSON.stringify(d.values).slice(0, 2500)}\n⚠ ${d.maintenance}${d.note ? `\n${d.note}` : ''}`, d);
@@ -5952,7 +6083,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('top N property values; Mixpanel defaults to 255, max 10000, and it does nothing unless "on" is set'),
     },
     outputSchema: { project: z.string().optional(), funnelId: z.string().optional(), funnels: z.array(z.any()).optional(), count: z.number().optional(), data: z.any().optional(), meta: z.any().optional(), maintenance: z.string().optional(), timezone: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/mixpanel/funnels', a);
     const head = d.funnels
@@ -5970,7 +6101,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('Mixpanel own defaults are 255 for the vocabulary, 100 for today and 10 for properties'),
     },
     outputSchema: { project: z.string().optional(), events: z.array(z.any()).optional(), properties: z.array(z.any()).optional(), event: z.string().optional(), window: z.string().optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/mixpanel/events', a);
     if (d.properties) return ok(`Top properties on "${d.event}":\n${d.properties.map(p => `• ${p.name}${p.count != null ? ` — ${p.count}` : ''}`).join('\n') || '(none returned)'}`, d);
@@ -5991,7 +6122,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('≤1000'),
     },
     outputSchema: { series: z.array(z.any()).optional(), seriesLabels: z.array(z.any()).optional(), xValues: z.array(z.any()).optional(), raw: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/amplitude/segmentation', a);
     return ok(`Amplitude segmentation:\nlabels ${JSON.stringify(d.seriesLabels)}\nx ${JSON.stringify(d.xValues)}\nseries ${JSON.stringify(d.series).slice(0, 2500)}${d.note ? `\n${d.note}` : ''}`, d);
@@ -6008,7 +6139,7 @@ export function registerTools(rawServer, opts = {}) {
       groupBy: z.string().optional().describe('at most ONE — a second is refused'),
     },
     outputSchema: { steps: z.array(z.any()).optional(), rows: z.array(z.any()).optional(), conversionWindowSeconds: z.number().optional(), mode: z.string().optional(), raw: z.any().optional(), note: z.string().optional(), note2: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/amplitude/funnel', a);
     return ok(`Amplitude funnel ${(d.steps || []).join(' → ')} (mode ${d.mode}, conversion window ${d.conversionWindowSeconds}s):\n${JSON.stringify(d.rows).slice(0, 3000)}${d.note2 ? `\n${d.note2}` : ''}${d.note ? `\n${d.note}` : ''}`, d);
@@ -6026,7 +6157,7 @@ export function registerTools(rawServer, opts = {}) {
       interval: z.number().optional().describe('1 daily, 7 weekly, 30 monthly'),
     },
     outputSchema: { retention: z.any().optional(), raw: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/amplitude/retention', a);
     return ok(`Amplitude retention:\n${JSON.stringify(d.retention).slice(0, 3000)}${d.note ? `\n${d.note}` : ''}`, d);
@@ -6041,7 +6172,7 @@ export function registerTools(rawServer, opts = {}) {
       interval: z.number().optional().describe('1 daily, 7 weekly, 30 monthly'),
     },
     outputSchema: { series: z.array(z.any()).optional(), xValues: z.array(z.any()).optional(), seriesLabels: z.array(z.any()).optional(), raw: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/amplitude/users', a);
     return ok(`Amplitude users:\nx ${JSON.stringify(d.xValues)}\nseries ${JSON.stringify(d.series).slice(0, 2000)}${d.note ? `\n${d.note}` : ''}`, d);
@@ -6055,7 +6186,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { amplitudeId: z.string().optional(), userData: z.any().optional(), events: z.array(z.any()).optional(), matches: z.array(z.any()).optional(), query: z.string().optional(), count: z.number().optional(), type: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/amplitude/user', a);
     if (d.events) return ok(`Amplitude user ${d.amplitudeId} — ${d.count} recent event(s):\n${d.events.slice(0, 40).map(e => `• ${e.event_time || ''} ${e.event_type || ''}`).join('\n')}${d.note ? `\n${d.note}` : ''}`, d);
@@ -6066,7 +6197,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The Amplitude TAXONOMY — the project\'s declared events, event properties, user properties or group properties, so a query names something real instead of a guess. category is event (default) / category / event-property / user-property / group-property. IF AMPLITUDE REFUSES THIS, REPORT THEIR REFUSAL AND MOVE ON. The Taxonomy API is widely believed to require an enterprise/Govern entitlement, but Amplitude documents no such gating on either the taxonomy page or the Dashboard API page (both checked), so a 403 here is surfaced as AMPLITUDE\'S OWN message and is never presented as a Hermoso plan rule, as a broken connection, or as a fact about the user\'s plan that we cannot actually know. Every other Amplitude tool is unaffected by that refusal. Read-only, 0 credits.',
     inputSchema: { category: z.enum(['category', 'event', 'event-property', 'user-property', 'group-property']).optional().describe('default "event"') },
     outputSchema: { category: z.string().optional(), items: z.array(z.any()).optional(), count: z.number().optional(), available: z.boolean().optional(), warning: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/amplitude/taxonomy', a);
     if (d.available === false) return ok(`⚠ ${d.warning}`, d);
@@ -6083,7 +6214,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "READ BACK A SAVED AMPLITUDE CHART by its id — the chart the user already built in Amplitude's own UI, with whatever segments, filters and date range they configured there. This is Amplitude's equivalent of posthog_insight and mixpanel_insights, and it is the right lane whenever the report already exists: you inherit their definitions instead of rebuilding them from a segmentation query, and it costs one call rather than several. THE CHART ID MUST COME FROM THE USER — Amplitude publishes no endpoint that lists a project's charts — and it is the segment after '/chart/' in the chart's URL (e.g. 'abc123' in https://analytics.amplitude.com/demo/chart/abc123); pasting the whole URL works too. THE RESPONSE SHAPE VARIES BY CHART TYPE, in Amplitude's own words, so read what comes back rather than assuming a series: it may be JSON or a text/CSV body, and BOTH are correct answers rather than one being an error. Read-only, 0 credits.",
     inputSchema: { chartId: z.string().describe("the saved chart's id, or its full URL — the id is the segment after /chart/") },
     outputSchema: { chartId: z.string().optional(), format: z.string().optional(), data: z.any().optional(), text: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/amplitude/chart', a);
     const body = d.format === 'text' ? String(d.text || '').slice(0, 3000) : JSON.stringify(d.data).slice(0, 3000);
@@ -6099,7 +6230,7 @@ export function registerTools(rawServer, opts = {}) {
       end: z.string().optional().describe('ISO 8601'),
     },
     outputSchema: { annotations: z.array(z.any()).optional(), count: z.number().optional(), filter: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/amplitude/annotations', a);
     return ok(d.count ? `${d.count} Amplitude annotation(s):\n${d.annotations.map(x => `• ${x.start}${x.end ? ` → ${x.end}` : ''} — ${x.label}${x.category ? ` [${x.category}]` : ''}${x.chartId ? ` · chart ${x.chartId}` : ' · global'}`).join('\n')}` : d.note, d);
@@ -6131,7 +6262,7 @@ export function registerTools(rawServer, opts = {}) {
       search: z.string().optional().describe('free-text search over annotation content'),
     },
     outputSchema: { project: z.string().optional(), annotations: z.array(z.any()).optional(), count: z.number().optional(), total: z.number().nullable().optional(), nextOffset: z.number().optional(), more: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posthog/annotations', a);
     return ok(d.count ? `${d.count} PostHog annotation(s) in project ${d.project}:\n${d.annotations.map(x => `• ${x.dateMarker} — ${x.content} [${x.scope}${x.creationType ? `/${x.creationType}` : ''}]${x.createdBy ? ` · ${x.createdBy}` : ''}`).join('\n')}${d.more ? `\n${d.more}` : ''}` : d.note, d);
@@ -6159,7 +6290,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "THE SAVED COHORTS in the Mixpanel project — each with its id, name, description and CURRENT MEMBER COUNT. Two uses, and both matter for advertising: the counts alone answer \"how big is our converted audience\", and the id is what mixpanel_profiles needs to read the PEOPLE in one. A cohort hidden in Mixpanel's UI is still listed and flagged rather than dropped, because hidden is a display choice and it is still queryable by id. ONE CALL, and the cheapest thing on this connector — worth calling before mixpanel_profiles rather than guessing an id. Remember Mixpanel allows only 60 QUERIES PER HOUR across its entire Query API (5 concurrent), the tightest budget of any connector here, and this shares it with every other Mixpanel tool. Read-only, 0 credits.",
     inputSchema: {},
     outputSchema: { project: z.string().optional(), workspace: z.string().optional(), cohorts: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/mixpanel/cohorts', {});
     return ok(d.count ? `${d.count} Mixpanel cohort(s) in project ${d.project}:\n${d.cohorts.map(c => `• ${c.name} — id ${c.cohortId}, ${c.count ?? '?'} member(s)${c.visible ? '' : ' (hidden in the Mixpanel UI, still queryable)'}${c.description ? ` — ${c.description}` : ''}`).join('\n')}` : d.note, d);
@@ -6179,7 +6310,7 @@ export function registerTools(rawServer, opts = {}) {
       includeAllUsers: z.boolean().optional().describe('only applies alongside cohortId; false = only distinct ids that actually have a profile'),
     },
     outputSchema: { project: z.string().optional(), workspace: z.string().optional(), profiles: z.array(z.any()).optional(), count: z.number().optional(), total: z.number().nullable().optional(), page: z.number().nullable().optional(), pageSize: z.number().nullable().optional(), sessionId: z.string().optional(), cohortId: z.number().optional(), hasMore: z.boolean().optional(), nextPage: z.number().optional(), pageNote: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/mixpanel/profiles', a);
     const head = `${d.count || 0} profile(s) on this page${d.total != null ? ` of ${d.total} total` : ''} in Mixpanel project ${d.project}${d.cohortId ? ` (cohort ${d.cohortId})` : ''}.`;
@@ -6211,7 +6342,7 @@ export function registerTools(rawServer, opts = {}) {
       accountId: z.string().optional().describe('Microsoft ad account id — omit to list the accounts shared with this brand'),
     },
     outputSchema: { accounts: z.array(z.any()).optional(), accountId: z.string().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional(), allCampaignTypes: z.boolean().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.accountId) {
       const d = await apiGet('/api/microsoft-ads/shared-accounts', {});
@@ -6237,7 +6368,7 @@ export function registerTools(rawServer, opts = {}) {
       reportRequestId: z.string().optional().describe('pick up a report that came back pending — pass it back and this RESUMES that exact report instead of submitting a new one'),
     },
     outputSchema: { accountId: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), pending: z.boolean().optional(), reportRequestId: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/report', a);
     return ok(d.note || `${d.count || 0} row(s) from Microsoft Advertising.`, d);
@@ -6264,7 +6395,7 @@ export function registerTools(rawServer, opts = {}) {
       expandIdeas: z.boolean().optional().describe('false = do not expand; then keywords[] is mandatory'),
     },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), ideas: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/keyword-ideas', a);
     return ok(`${d.note}\n${JSON.stringify(d.ideas || []).slice(0, 4000)}`, d);
@@ -6281,7 +6412,7 @@ export function registerTools(rawServer, opts = {}) {
       language: z.string().optional(), network: z.string().optional(), dailyBudget: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), estimates: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/traffic-estimates', a);
     return ok(`${d.note}\n${JSON.stringify(d.estimates || []).slice(0, 4000)}`, d);
@@ -6291,7 +6422,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Where a Microsoft Advertising campaign is BUDGET-CONSTRAINED — Microsoft\u2019s own recommended budget against the current one, the estimated WEEKLY click and impression gain from raising it, and a budget/return curve. Omit campaignId for the whole account. SAY THIS WHEN REPORTING: these are Microsoft\u2019s FORECASTS, never measurements — a projected increase has not happened — and acting on one spends real money, so it takes set_microsoft_ads_budget and an explicit yes from the user. Microsoft EXCLUDES user-paused campaigns from this analysis, so a paused campaign is absent by design rather than well-funded. Read-only, 0 credits.',
     inputSchema: { accountId: z.string().optional(), campaignId: z.string().optional().describe('omit for the whole account') },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), opportunities: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/microsoft-ads/budget-opportunities', { accountId: a.accountId, campaignId: a.campaignId });
     return ok(`${d.note}\n${JSON.stringify(d.opportunities || []).slice(0, 4000)}`, d);
@@ -6308,7 +6439,7 @@ export function registerTools(rawServer, opts = {}) {
       query: z.union([z.string(), z.array(z.string())]).describe('ONE location ask as a plain string, or several as an array of strings \u2014 names, ISO country codes, or numeric Microsoft location ids. A comma belongs to a name ("Seattle, Washington, United States") and is NOT a separator: pass several places as several array items, never one comma-joined string.'),
     },
     outputSchema: { ok: z.boolean().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/locations', a);
     return ok(d.note, d);
@@ -6630,7 +6761,7 @@ export function registerTools(rawServer, opts = {}) {
       after: z.string().optional().describe('pagination cursor from a previous page'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), account: z.any().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional(), adGroups: z.array(z.any()).optional(), ads: z.array(z.any()).optional(), hasMore: z.boolean().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/campaigns', a);
     if (d.level === 'ad') return ok(`${d.count} ad(s) in ChatGPT Ads ad group ${d.adGroupId}:\n${(d.ads || []).map(x => `• ${x.title || x.name} (${x.id}) — ${x.status}, review ${x.reviewStatus || 'unknown'}${x.targetUrl ? ` → ${x.targetUrl}` : ''}`).join('\n') || '(none)'}`, d);
@@ -6650,7 +6781,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/report', a);
     return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d);
@@ -6660,7 +6791,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Look up ChatGPT Ads location ids by name — countries, regions and DMAs — so a campaign can be geo-targeted. GEO AND CUSTOM AUDIENCES ARE THE ONLY LIST-BASED TARGETING THIS PLATFORM HAS: there are no interests, no lookalikes, no age or gender. Everything else is semantic, through an ad group’s context hints. Custom audiences are targeted with customAudienceIds / excludedCustomAudienceIds (see list_openai_ads_audiences). Pass the returned ids as locationIds when creating or updating a campaign; a campaign with no location targeting runs everywhere available. Read-only, free.',
     inputSchema: { query: z.string().describe('a place name, e.g. "Toronto" or "United Kingdom"'), limit: z.number().optional() },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/geo', a);
     return ok(`${d.note}\n${(d.results || []).map(r => `• ${r.canonicalName || r.name} — id ${r.id} (${r.type}${r.countryCode ? `, ${r.countryCode}` : ''})`).join('\n')}`, d);
@@ -6671,7 +6802,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the X (Twitter) ad accounts this brand can act on, with the PERMISSION LEVEL held on each so you can tell an admin grant from a read-only one before attempting a write. X grants API access PER AD ACCOUNT, not per app: the customer adds Hermoso’s X user to their ad account at business.x.com → Account access, and it appears here. Read-only, free.',
     inputSchema: {},
     outputSchema: { count: z.number().optional(), accounts: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   // THE SHARED SET, never the roster route. X Ads runs on ONE OPERATOR CREDENTIAL, so /api/x-ads/accounts is
   // every ad account EVERY customer has ever granted Hermoso's X user; it is owner-gated and reachable only
   // through list_connector_accounts. This tool answers what THIS brand may act on.
@@ -6681,7 +6812,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List campaigns on an X ad account — status, budgets, and whether X considers each servable. Omit accountId when only one account is reachable and it resolves itself. Read-only, free.',
     inputSchema: { accountId: z.string().optional(), limit: z.number().optional() },
     outputSchema: { accountId: z.string().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/campaigns', a);
     return ok(`${d.note}\n${(d.campaigns || []).map(c => `• ${c.name} — ${c.status} (${c.id})`).join('\n')}`, d);
@@ -6699,7 +6830,7 @@ export function registerTools(rawServer, opts = {}) {
       endTime: z.string().optional(),
     },
     outputSchema: { campaignId: z.string().optional(), accountId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/campaign', a); return ok(d.note, d); }));
   server.registerTool('set_x_ads_status', {
     title: 'Pause or activate an X campaign or line item',
@@ -6712,7 +6843,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('required to set ACTIVE — real money'),
     },
     outputSchema: { campaignId: z.string().nullable().optional(), lineItemId: z.string().nullable().optional(), status: z.string().optional(), parentStatus: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/status', a); return ok(d.note, d); }));
   // ── MICROSOFT BULK SERVICE + MEASUREMENT (2026-08-20) ──────────────────────────────────────────────────────────
   // The last unbuilt Bing Ads service. The DOWNLOAD half reaches ~185 record types nothing else in the product can
@@ -6743,7 +6874,7 @@ export function registerTools(rawServer, opts = {}) {
       waitMs: z.number().optional().describe('how long to wait for Microsoft to build the file before returning pending, max 120000'),
     },
     outputSchema: { ok: z.boolean().optional(), pending: z.boolean().optional(), accountId: z.string().optional(), downloadRequestId: z.string().optional(), status: z.string().optional(), totalRows: z.number().optional(), byType: z.record(z.any()).optional(), file: z.string().nullable().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/bulk/download', a);
     return ok(`${d.note}\n${JSON.stringify(d.rows || []).slice(0, 4000)}`, d);
@@ -6779,7 +6910,7 @@ export function registerTools(rawServer, opts = {}) {
       goalType: z.string().optional().describe('filter to one Microsoft ConversionGoalType, e.g. OfflineConversion'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), count: z.number().optional(), goals: z.array(z.any()).optional(), offlineGoals: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/conversion-goals', a);
     return ok(`${d.note}\n${JSON.stringify(d.goals || []).slice(0, 4000)}`, d);
@@ -6803,7 +6934,7 @@ export function registerTools(rawServer, opts = {}) {
       })).describe('up to 1000 per request — Microsoft applies each request independently'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), sent: z.number().optional(), enhanced: z.number().optional(), rejected: z.array(z.any()).optional(), goals: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/offline-conversions', a);
     return ok(d.note, d);
@@ -6820,7 +6951,7 @@ export function registerTools(rawServer, opts = {}) {
       segments: z.array(z.enum(['Day', 'DayOfWeek', 'Device'])).optional().describe('at most three — Microsoft’s own limit'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), entityType: z.string().optional(), count: z.number().optional(), entries: z.array(z.any()).optional(), usedImpressions: z.number().nullable().optional(), usedKeywords: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/auction-insights', a);
     return ok(`${d.note}\n${JSON.stringify(d.entries || []).slice(0, 4000)}`, d);
@@ -6845,7 +6976,7 @@ export function registerTools(rawServer, opts = {}) {
       includeDismissed: z.boolean().optional().describe('also show recommendations already dismissed'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), count: z.number().optional(), byType: z.record(z.any()).optional(), costIncrease: z.number().optional(), priced: z.number().optional(), unpriced: z.number().optional(), budgetRaises: z.array(z.any()).optional(), recommendations: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/recommendations', a);
     return ok(`${d.note}\n${JSON.stringify(d.recommendations || []).slice(0, 4000)}`, d);
@@ -6872,7 +7003,7 @@ export function registerTools(rawServer, opts = {}) {
       recommendationIds: z.array(z.string()).describe('ids from microsoft_ads_recommendations, max 100'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), dismissed: z.number().optional(), rejected: z.array(z.string()).optional(), missing: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/microsoft-ads/recommendations/dismiss', a); return ok(d.note, d); }));
   server.registerTool('microsoft_ads_auto_apply', {
     title: 'Is Microsoft changing this ad account by itself?',
@@ -6882,7 +7013,7 @@ export function registerTools(rawServer, opts = {}) {
       types: z.array(z.string()).optional().describe('narrow to some of ResponsiveSearchAdsOpportunity, MultiMediaAdsOpportunity, RemoveConflictingNegativeKeywordOpportunity, FixConversionGoalSettingsOpportunity, CreateConversionGoalOpportunity, all five by default'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), status: z.record(z.any()).optional(), on: z.array(z.string()).optional(), off: z.array(z.string()).optional(), unread: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/microsoft-ads/auto-apply', a); return ok(d.note, d); }));
   server.registerTool('set_microsoft_ads_auto_apply', {
     title: 'Let Microsoft change the account by itself, or stop it (per type)',
@@ -6908,7 +7039,7 @@ export function registerTools(rawServer, opts = {}) {
       offset: z.number().optional().describe('offset pagination'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), hasMore: z.boolean().optional(), offset: z.number().optional(), campaigns: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/apple-ads/campaigns', a); return ok(`${d.count} Apple Ads campaign(s):\n${d.note}`, d); }));
   server.registerTool('list_apple_ads_ad_groups', {
     title: 'List Apple Ads ad groups',
@@ -6918,7 +7049,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), campaignId: z.string().nullable().optional(), count: z.number().optional(), total: z.number().nullable().optional(), hasMore: z.boolean().optional(), offset: z.number().optional(), adGroups: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/apple-ads/adgroups', a); return ok(`${d.count} ad group(s) ${d.campaignId ? `in Apple Ads campaign ${d.campaignId}` : 'across this Apple Ads ad account'}:\n${d.note}`, d); }));
   server.registerTool('list_apple_ads_keywords', {
     title: 'List Apple Ads targeting or negative keywords',
@@ -6931,7 +7062,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), scope: z.string().optional(), campaignId: z.string().nullable().optional(), adGroupId: z.string().nullable().optional(), count: z.number().optional(), total: z.number().nullable().optional(), hasMore: z.boolean().optional(), offset: z.number().optional(), keywords: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/apple-ads/keywords', a); return ok(`${d.count} ${d.level === 'negativeKeyword' ? 'negative ' : ''}keyword(s):\n${d.note}`, d); }));
   server.registerTool('apple_ads_report', {
     title: 'Apple Ads performance report',
@@ -6953,14 +7084,14 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('rows per page, up to 5000 (default 100)'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), promotedObjectType: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), hasMore: z.boolean().optional(), rows: z.array(z.any()).optional(), grandTotals: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/report', a); return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d); }));
   server.registerTool('list_apple_ads_orgs', {
     title: 'List Apple Ads organizations',
     description: 'The Apple Ads ad accounts these credentials can act as, with the roles held on each, plus the organization’s currency, time zone and payment model. NAMING: Apple’s older API called these “organizations” (campaign groups) and its Platform API calls them AD ACCOUNTS — the id is the same number, and `orgId` and `adAccountId` on each row are equal. One login can cover several: an agency managing multiple clients has one per client. Reading this does NOT switch account: Apple Ads is pinned to the ONE chosen when the connection was made, so an agent can never act as another client’s. To use a different one, pick it in Settings ▸ Connectors ▸ Apple Ads ▸ Manage accounts, with set_connector_accounts, or by reconnecting. A payment model of null is worth reporting: Apple states that without one, campaigns cannot run. Read-only, free.',
     inputSchema: {},
     outputSchema: { ok: z.boolean().optional(), active: z.string().nullable().optional(), count: z.number().optional(), orgs: z.array(z.any()).optional(), org: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => { const d = await apiGet('/api/apple-ads/orgs', {}); return ok(d.note, d); }));
   // ── APPLE ADS: BUILDING, NOT JUST READING (2026-08-14) ────────────────────────────────────────────────────────
   // These run on the Apple Ads Platform API (api.ads.apple.com/v1) — and since 2026-08-19 SO DO THE READS ABOVE.
@@ -7110,7 +7241,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), total: z.number().nullable().optional(), apps: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/apps', a); return ok(`${d.count} app(s):\n${d.note}`, d); }));
 
   server.registerTool('check_apple_ads_app_eligibility', {
@@ -7124,7 +7255,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), adamId: z.string().optional(), count: z.number().optional(), eligible: z.number().optional(), ineligible: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/eligibility', a); return ok(d.note, d); }));
 
   server.registerTool('list_apple_ads_product_pages', {
@@ -7140,7 +7271,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), adamId: z.string().nullable().optional(), productPageId: z.string().nullable().optional(), count: z.number().optional(), productPages: z.array(z.any()).optional(), localeDetails: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/product-pages', a); return ok(`${d.count} row(s):\n${d.note}`, d); }));
 
   server.registerTool('list_apple_ads_creatives', {
@@ -7156,7 +7287,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), creatives: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/creatives', a); return ok(`${d.count} Apple Ads creative(s):\n${d.note}`, d); }));
 
   server.registerTool('create_apple_ads_creative', {
@@ -7188,7 +7319,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), ads: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/ads', a); return ok(`${d.count} Apple Ads ad(s):\n${d.note}`, d); }));
 
   server.registerTool('create_apple_ads_ad', {
@@ -7227,7 +7358,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), assets: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/assets', a); return ok(`${d.count} Apple Ads asset(s):\n${d.note}`, d); }));
 
   // ── APPLE ADS: APPLE MAPS — THE LANE WHERE THE USER'S OWN IMAGE IS THE CREATIVE (2026-08-16) ──────────────────
@@ -7245,7 +7376,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), eligible: z.number().optional(), total: z.number().nullable().optional(), brands: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/brands', a); return ok(`${d.count} Apple Maps brand(s):\n${d.note}`, d); }));
 
   server.registerTool('list_apple_ads_locations', {
@@ -7262,7 +7393,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().optional(), limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), locations: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/locations', a); return ok(`${d.count} Apple Maps location(s):\n${d.note}`, d); }));
 
   server.registerTool('list_apple_ads_location_groups', {
@@ -7276,7 +7407,7 @@ export function registerTools(rawServer, opts = {}) {
       eligibilityStatus: z.string().optional(), limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), locationGroups: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/location-groups', a); return ok(`${d.count} Apple Maps location group(s):\n${d.note}`, d); }));
 
   server.registerTool('create_apple_ads_location_group', {
@@ -7313,7 +7444,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), kind: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), suggestions: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/suggestions', a); return ok(`${d.count} Apple Ads ${d.kind} suggestion(s):\n${d.note}`, d); }));
 
   server.registerTool('apple_ads_target_cpa_suggestion', {
@@ -7325,7 +7456,7 @@ export function registerTools(rawServer, opts = {}) {
       countriesOrRegions: z.array(z.string()).optional().describe('ISO 3166-1 alpha-2 markets to consider, e.g. ["US","GB","CA"].'),
     },
     outputSchema: { ok: z.boolean().optional(), kind: z.string().optional(), count: z.number().optional(), suggestions: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/suggestions', { ...a, kind: 'target_cpa' }); return ok(d.note, d); }));
 
   server.registerTool('list_apple_ads_recommendations', {
@@ -7339,7 +7470,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), type: z.string().optional(), category: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), recommendations: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/recommendations', a); return ok(`${d.count} Apple Ads ${d.type} recommendation(s):\n${d.note}`, d); }));
 
   server.registerTool('apply_apple_ads_recommendation', {
@@ -7384,7 +7515,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), kind: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/insights/impression-share', a); return ok(`${d.count} impression-share row(s):\n${d.note}`, d); }));
 
   server.registerTool('apple_ads_search_term_popularity', {
@@ -7399,7 +7530,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), kind: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/insights/search-terms', a); return ok(`${d.count} search-term row(s):\n${d.note}`, d); }));
 
   server.registerTool('apple_ads_change_history', {
@@ -7413,7 +7544,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), mode: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), changes: z.array(z.any()).optional(), details: z.array(z.any()).optional(), detailId: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/change-history', a); return ok(`${d.count} Apple Ads change ${d.mode === 'detail' ? 'field(s)' : 'transaction(s)'}:\n${d.note}`, d); }));
 
   server.registerTool('list_apple_ads_budget_orders', {
@@ -7425,7 +7556,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), budgetOrders: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/budget-orders', a); return ok(`${d.count} Apple Ads budget order(s):\n${d.note}`, d); }));
 
   server.registerTool('create_apple_ads_budget_order', {
@@ -7492,7 +7623,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), mode: z.string().optional(), count: z.number().optional(), total: z.number().nullable().optional(), geos: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/geo', a); return ok(`${d.count} geo location(s):\n${d.note}`, d); }));
 
   server.registerTool('list_apple_ads_supported_languages', {
@@ -7503,7 +7634,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), total: z.number().nullable().optional(), markets: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/languages', a); return ok(`${d.count} supported market(s):\n${d.note}`, d); }));
 
   server.registerTool('get_apple_ads_ad_account', {
@@ -7511,7 +7642,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The full record for an Apple Ads ad account — its name, currency, timezone, payment model, productFeatures and the advertiser resources delegated to it. Called with no id it returns the account this connection is pinned to. THE FIELD THAT DECIDES WHAT THIS ACCOUNT CAN DO IS productFeatures, and it is IMMUTABLE: APPSTORE_APP_MANUAL can never run Apple Maps ads and BUSINESS_BRAND_MANUAL can never run App Store ads, so an organization that needs both keeps a separate ad account for each. currency, timeZone and paymentModel are inherited from the organization and are immutable too — which is why a campaign’s amounts must be in this currency and cannot be mixed. Read-only, free.',
     inputSchema: { id: z.string().optional().describe('Defaults to the ad account this Apple Ads connection resolved.') },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), adAccount: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/ad-account', a); return ok(d.note, d); }));
 
   server.registerTool('list_apple_ads_advertiser_resources', {
@@ -7519,7 +7650,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The brands and content providers this Apple Ads ORGANIZATION can delegate to an ad account — the ids create_apple_ads_ad_account and update_apple_ads_ad_account need. resourceType CONTENT_PROVIDER returns App Store Connect content providers, each identified by its CPID, which is what links an ad account to App Store advertising; BUSINESS_BRAND returns Apple Maps brands by Brand ID. resourceType is REQUIRED — Apple errors without it. This list is ORGANIZATION-WIDE and is deliberately not scoped to any one ad account, which is why a resource can appear here that no account has claimed yet. Read-only, free.',
     inputSchema: { resourceType: z.enum(['CONTENT_PROVIDER', 'BUSINESS_BRAND']).describe('REQUIRED. CONTENT_PROVIDER = App Store (CPID); BUSINESS_BRAND = Apple Maps (Brand ID).') },
     outputSchema: { ok: z.boolean().optional(), resourceType: z.string().optional(), count: z.number().optional(), resources: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/advertiser-resources', a); return ok(`${d.count} advertiser resource(s):\n${d.note}`, d); }));
 
   server.registerTool('create_apple_ads_ad_account', {
@@ -7562,7 +7693,7 @@ export function registerTools(rawServer, opts = {}) {
       purchaseOrderNumber: z.string().optional(),
     },
     outputSchema: { accountId: z.string().optional(), campaignId: z.string().optional(), updated: z.array(z.string()).optional(), changed: z.number().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/campaign-update', a); return ok(d.note, d); }));
   server.registerTool('update_x_ads_line_item', {
     title: 'Change an X line item (ad group)',
@@ -7578,14 +7709,14 @@ export function registerTools(rawServer, opts = {}) {
       totalBudget: z.number().optional().describe('only if the campaign is not budget-optimised'),
     },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), updated: z.array(z.string()).optional(), changed: z.number().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/line-item-update', a); return ok(d.note, d); }));
   server.registerTool('list_x_ads_promoted_tweets', {
     title: 'List X promoted posts',
     description: "List the promoted posts (the CREATIVES) attached to an X line item, or across the whole ad account. Two things only this can tell you: each post's APPROVAL STATUS, so an ad X rejected — which can never serve however the statuses are set — is visible rather than mysterious; and the promoted-tweet ID, which is the only way to remove one. NOTE a promoted post cannot be PAUSED on X (its PUT accepts only an approval appeal), so the reversible way to stop it is to pause its LINE ITEM. Read-only, free.",
     inputSchema: { accountId: z.string(), lineItemId: z.string().optional().describe('scope to one line item'), limit: z.number().optional() },
     outputSchema: { accountId: z.string().optional(), count: z.number().optional(), promotedTweets: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/promoted-tweets', a);
     return ok(`${d.note}\n${(d.promotedTweets || []).map(p => `• promoted-tweet ${p.id} — post ${p.tweetId}, ${p.approvalStatus} (line item ${p.lineItemId})`).join('\n')}`, d);
@@ -7595,7 +7726,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "List every targeting criterion an X line item carries, WITH THE ID of each — the id needed to remove one with delete_x_ads_object. READ THE EMPTY CASE CORRECTLY: no targeting criteria on X means the line item is UNRESTRICTED and will reach the broadest possible audience once ACTIVE — it does NOT mean it cannot serve. Read-only, free.",
     inputSchema: { accountId: z.string(), lineItemId: z.string() },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), count: z.number().optional(), targeting: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/targeting', a);
     return ok(`${d.note}\n${(d.targeting || []).map(t => `• ${t.targetingType} ${t.name || t.targetingValue} — id ${t.id}`).join('\n')}`, d);
@@ -7605,7 +7736,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "List the funding instruments (payment methods) on an X ad account — type, currency, credit limit, credit remaining, and whether each can currently fund a campaign. THIS IS THE ANSWER TO “why is my X campaign not delivering?” whenever the cause is a cancelled card or an exhausted credit line, which is invisible from the campaign itself, and it shows what a campaign will spend against BEFORE anyone activates it. Hermoso cannot add a payment method — that is done at ads.x.com. Read-only, free.",
     inputSchema: { accountId: z.string() },
     outputSchema: { accountId: z.string().optional(), count: z.number().optional(), usableCount: z.number().optional(), fundingInstruments: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/x-ads/funding-instruments', a); return ok(d.note, d); }));
   server.registerTool('x_ads_targeting_search', {
     title: 'Find X targeting ids (interests, devices, languages…)',
@@ -7620,7 +7751,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { kind: z.string().optional(), count: z.number().optional(), returnedByX: z.number().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/targeting-search', a);
     return ok(`${d.note}\n${(d.results || []).map(t => `• ${t.name} — id ${t.id}`).join('\n')}`, d);
@@ -7638,7 +7769,7 @@ export function registerTools(rawServer, opts = {}) {
       confirmChildren: z.number().optional().describe('the real number of children, from the unconfirmed call'),
     },
     outputSchema: { ok: z.boolean().optional(), platform: z.string().optional(), type: z.string().optional(), id: z.string().optional(), deleted: z.boolean().optional(), verdict: z.string().optional(), blastRadius: z.any().optional(), note: z.string().optional() },
-    annotations: { destructiveHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/delete', a); return ok(d.note, d); }));
   // ── X: the rest of the tree (2026-08-05) ──────────────────────────────────────────────────────────────────────
   // campaign → LINE ITEM → PROMOTED POST. A campaign on its own can never serve, so until these landed
@@ -7649,7 +7780,7 @@ export function registerTools(rawServer, opts = {}) {
     description: "List the line items on an X ad account — X's name for an ad group, and the level that carries the objective, the placements, the bid, the targeting and the creatives. Pass campaignId to scope it to one campaign. `servable` is X's own verdict on whether the line item could run. Read-only, free.",
     inputSchema: { accountId: z.string().describe('from list_x_ads_accounts'), campaignId: z.string().optional(), limit: z.number().optional() },
     outputSchema: { accountId: z.string().optional(), count: z.number().optional(), lineItems: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/line-items', a);
     return ok(`${d.note}\n${(d.lineItems || []).map(l => `• ${l.name || l.id} — ${l.status}, ${l.objective}, ${(l.placements || []).join('+')} (${l.id})`).join('\n')}`, d);
@@ -7672,7 +7803,7 @@ export function registerTools(rawServer, opts = {}) {
       endTime: z.string().optional(),
     },
     outputSchema: { lineItemId: z.string().optional(), accountId: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/line-item', a); return ok(d.note, d); }));
   server.registerTool('create_x_ads_promoted_tweet', {
     title: 'Attach a post to an X line item (paused)',
@@ -7682,7 +7813,7 @@ export function registerTools(rawServer, opts = {}) {
       tweetIds: z.array(z.string()).describe('post ids — digits only, from the end of the post URL'),
     },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), promotedTweetIds: z.array(z.string()).optional(), verifiedCount: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/promoted-tweet', a); return ok(d.note, d); }));
   server.registerTool('add_x_ads_targeting', {
     title: 'Target an X ads line item',
@@ -7693,14 +7824,14 @@ export function registerTools(rawServer, opts = {}) {
       criteria: z.array(z.record(z.any())).optional().describe('[{targetingType, targetingValue, operatorType?}] — operatorType defaults to EQ'),
     },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), applied: z.array(z.any()).optional(), failed: z.array(z.any()).optional(), targetingOnLineItem: z.array(z.any()).nullable().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/targeting', a); return ok(d.note, d); }));
   server.registerTool('x_ads_geo_search', {
     title: 'Find X ads location ids',
     description: 'Look up X targeting location ids by name — countries, regions, metros, cities and postal codes. X location ids are opaque hashes (Canada is 3376992a082d67c7), so this is the ONLY way to obtain one and there is no name-based targeting parameter to fall back on. Pass the ids to add_x_ads_targeting as locationIds. Read-only, free.',
     inputSchema: { query: z.string().describe('a place name, e.g. "Canada" or "Austin"'), locationType: z.enum(['COUNTRIES', 'REGIONS', 'METROS', 'CITIES', 'POSTAL_CODES']).optional(), limit: z.number().optional() },
     outputSchema: { query: z.string().optional(), count: z.number().optional(), locations: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/geo', a);
     return ok(`${d.note}\n${(d.locations || []).map(l => `• ${l.name} — id ${l.id} (${l.locationType}${l.countryCode ? `, ${l.countryCode}` : ''})`).join('\n')}`, d);
@@ -7719,7 +7850,7 @@ export function registerTools(rawServer, opts = {}) {
       metricGroups: z.array(z.enum(['BILLING', 'ENGAGEMENT', 'LIFE_TIME_VALUE_MOBILE_CONVERSION', 'MEDIA', 'MOBILE_CONVERSION', 'VIDEO', 'WEB_CONVERSION'])).optional().describe('default ENGAGEMENT'),
     },
     outputSchema: { accountId: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x-ads/report', a);
     return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d);
@@ -7729,7 +7860,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the conversion event settings on the connected ChatGPT Ads account. Their ids are what a campaign points at (conversionEventSettingIds) so it optimises for CONVERSIONS rather than raw clicks — without one, conversion-optimised bidding has nothing to optimise toward. Read-only, free.',
     inputSchema: { limit: z.number().optional() },
     outputSchema: { count: z.number().optional(), events: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/conversion-events', a);
     return ok(`${d.note}\n${(d.events || []).map(e => `• ${e.name} — id ${e.id} (${e.eventType}${e.attributionWindowDays ? `, ${e.attributionWindowDays}d window` : ''})`).join('\n')}`, d);
@@ -7742,7 +7873,7 @@ export function registerTools(rawServer, opts = {}) {
       automaticAdvancedMatching: z.boolean().optional().describe('default true (OpenAI’s own default). false stops the Pixel collecting and hashing customer information from the page.'),
     },
     outputSchema: { pixelId: z.string().optional(), name: z.string().optional(), pixelSnippetId: z.string().optional(), automaticAdvancedMatching: z.boolean().nullable().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/pixel', a); return ok(d.note, d); }));
   server.registerTool('create_openai_ads_conversion_event', {
     title: 'Define a ChatGPT Ads conversion',
@@ -7755,14 +7886,14 @@ export function registerTools(rawServer, opts = {}) {
       attributionWindowDays: z.number().optional().describe('1-90'),
     },
     outputSchema: { conversionEventSettingId: z.string().optional(), name: z.string().optional(), eventType: z.string().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/conversion-event', a); return ok(d.note, d); }));
   server.registerTool('list_openai_ads_audiences', {
     title: 'List ChatGPT Ads custom audiences',
     description: 'List the custom audiences on the connected ChatGPT Ads account. Read-only, free.',
     inputSchema: { limit: z.number().optional() },
     outputSchema: { count: z.number().optional(), audiences: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/audiences', a);
     return ok(`${d.note}\n${(d.audiences || []).map(x => `• ${x.name} — id ${x.id}`).join('\n')}`, d);
@@ -7776,25 +7907,27 @@ export function registerTools(rawServer, opts = {}) {
       description: z.string().optional(),
     },
     outputSchema: { audienceId: z.string().optional(), name: z.string().optional(), membersSent: z.number().optional(), rejected: z.number().optional(), note: z.string().optional() },
-    annotations: { openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/audience', a); return ok(d.note, d); }));
   server.registerTool('create_openai_ads_campaign', {
     title: 'Build a ChatGPT Ads campaign (paused)',
-    description: 'Build a campaign on the connected ChatGPT Ads account — the ads that appear below ChatGPT answers. ALWAYS created PAUSED at every level, with no override: it spends NOTHING until you activate it with set_openai_ads_status(confirm:true). The object graph is campaign → ad group → ad, and a campaign ON ITS OWN CANNOT SERVE AN IMPRESSION, so pass adGroup{name, maxBid, contextHints, ad{creative}} and this builds the whole tree. THE CREATIVE IS A TEXT + IMAGE CARD AND NOTHING ELSE — title 3–50 characters, body 100 maximum, one landing page, one still image. THERE IS NO VIDEO ON THIS CHANNEL: never offer a video ad here, and if the brand only has video, pull a frame from it first. TARGETING IS SEMANTIC: context hints are natural-language descriptions of the conversations where this ad belongs (up to 2,000 per ad group). They guide matching, they are NOT exact-match keywords, and they do not guarantee delivery. OpenAI’s own guidance is BREADTH — many genuinely distinct hints and many distinct title/body angles beat one message repeated — which is exactly what plan_variations and mine_angles produce. OpenAI has no atomic multi-object write available here, so the whole tree is VALIDATED before the first write; if a level below the campaign is still rejected, the campaign is left PAUSED (spending nothing) and the note says exactly what exists — nothing is archived behind your back, because archiving is irreversible. Everything is READ BACK from OpenAI before you are told it exists: print the returned note verbatim, and if it says the campaign cannot serve yet, say that rather than calling it a finished ad.',
+    description: 'Build a campaign on the connected ChatGPT Ads account — the ads that appear below ChatGPT answers. ALWAYS created PAUSED at every level, with no override: it spends NOTHING until you activate it with set_openai_ads_status(confirm:true). The object graph is campaign → ad group → ad, and a campaign ON ITS OWN CANNOT SERVE AN IMPRESSION, so pass adGroup{name, maxBid, contextHints, ad{creative}} and this builds the whole tree. THE CREATIVE IS A TEXT + IMAGE CARD AND NOTHING ELSE — title 3–50 characters, body 100 maximum, one landing page, one still image. THERE IS NO VIDEO ON THIS CHANNEL: never offer a video ad here, and if the brand only has video, pull a frame from it first. TARGETING IS SEMANTIC: context hints are natural-language descriptions of the conversations where this ad belongs (up to 2,000 per ad group). Geo (countries / locationIds) and PLATFORMS (which of the iOS app, Android app and web the ad runs on) are the only other dimensions — leave platforms out to run on all three. They guide matching, they are NOT exact-match keywords, and they do not guarantee delivery. OpenAI’s own guidance is BREADTH — many genuinely distinct hints and many distinct title/body angles beat one message repeated — which is exactly what plan_variations and mine_angles produce. OpenAI has no atomic multi-object write available here, so the whole tree is VALIDATED before the first write; if a level below the campaign is still rejected, the campaign is left PAUSED (spending nothing) and the note says exactly what exists — nothing is archived behind your back, because archiving is irreversible. Everything is READ BACK from OpenAI before you are told it exists: print the returned note verbatim, and if it says the campaign cannot serve yet, say that rather than calling it a finished ad.',
     inputSchema: {
       name: z.string().describe('campaign name, at least 3 characters'),
       description: z.string().optional(),
       dailyBudget: z.number().optional().describe('daily cap in the AD ACCOUNT’S currency — ChatGPT Ads’ own minimum for a DAILY budget is 25.00'),
       lifetimeBudget: z.number().optional().describe('lifetime cap in the account currency — no 25.00 floor applies here, so use this to spend less than that in total. Pass this and/or dailyBudget; a budget is required.'),
-      biddingType: z.enum(['impressions', 'clicks']).optional().describe('default clicks (CPC). OpenAI suggests starting at a 3–5 max bid per click.'),
+      biddingType: z.enum(['impressions', 'clicks', 'conversions']).optional().describe('default clicks (CPC). OpenAI suggests starting at a 3–5 max bid per click. "conversions" is oCPC — you still pay per click, but ChatGPT Ads optimises toward a conversion event, and it REQUIRES conversionEventSettingIds naming exactly one active event setting.'),
       countries: z.array(z.string()).optional().describe('2-letter country codes'),
       locationIds: z.array(z.string()).optional().describe('ids from openai_ads_geo_search — up to 2,500'),
+      platforms: z.array(z.enum(['ios_app', 'android_app', 'web'])).optional().describe('WHICH CHATGPT SURFACES THIS CAMPAIGN RUNS ON — OpenAI’s “Eligible platforms”: any of ios_app (the ChatGPT iOS app), android_app (the Android app) and web (chatgpt.com in a browser). OMIT IT to run on all three, which is the default and almost always right; naming a subset STOPS the ad serving everywhere else. There is no empty state — ChatGPT Ads refuses an empty list — so widening back means naming all three.'),
       customAudienceIds: z.array(z.string()).optional().describe('TARGET a CUSTOM AUDIENCE — ids from list_openai_ads_audiences (created with create_openai_ads_audience, then filled with members). Until 2026-08-12 an audience could be created AND uploaded and then pointed at nothing: this is the field that consumes them. Combines with geo — the ad reaches people in the named locations who are ALSO in these audiences.'),
       excludedCustomAudienceIds: z.array(z.string()).optional().describe('EXCLUDE custom audiences — same ids, opposite effect (suppressing existing customers, say). An id in BOTH lists is refused rather than resolved by a guess, because OpenAI does not document which side wins.'),
       startTime: z.number().optional().describe('unix seconds'), endTime: z.number().optional().describe('unix seconds'),
       adGroup: z.object({
         name: z.string(), description: z.string().optional(),
-        maxBid: z.number().describe('max bid in the account currency'),
+        maxBid: z.number().optional().describe('max bid in the account currency — REQUIRED unless bidStrategy is a maximize_* one, which sets the bid itself'),
+        bidStrategy: z.enum(['fixed_bid', 'maximize_clicks', 'maximize_conversions']).optional().describe('HOW THIS AD GROUP BIDS — OpenAI’s “Maximize results”. fixed_bid (default) uses your maxBid as a hard cap; maximize_clicks and maximize_conversions let ChatGPT Ads set the bid to get the most of that outcome for the budget, and with either of those maxBid is OPTIONAL. maximize_conversions additionally needs the CAMPAIGN on biddingType "conversions" with a conversion event setting attached.'),
         billingEvent: z.enum(['click', 'impression']).optional(),
         contextHints: z.array(z.string()).optional().describe('up to 2,000 natural-language conversation/topic descriptions — make them genuinely distinct from each other'),
         ad: z.object({ name: z.string().optional(), creative: oaiCreativeShape }).optional(),
@@ -7808,10 +7941,11 @@ export function registerTools(rawServer, opts = {}) {
   }));
   server.registerTool('create_openai_ads_ad_group', {
     title: 'Add a ChatGPT Ads ad group',
-    description: 'Add an ad group to an existing ChatGPT Ads campaign. Created PAUSED by default. Its context hints ARE the targeting on this platform: up to 2,000 natural-language descriptions of the conversations, topics or questions where this offering is relevant — not exact-match keywords, and no guarantee of delivery. Write many distinct ones rather than variations of the same phrase. If the parent campaign is already LIVE (active), creating this ad group active starts REAL AD SPEND on the next auction, exactly like activating it — show the user what would begin serving, get an explicit yes, then pass confirm:true. Leaving it paused never needs confirmation. The whole tree is READ BACK from OpenAI before you are told it exists.',
+    description: 'Add an ad group to an existing ChatGPT Ads campaign. Created PAUSED by default. Bidding: pass maxBid for a fixed bid, or bidStrategy "maximize_clicks" / "maximize_conversions" to let ChatGPT Ads set the bid for the budget (OpenAI’s "Maximize results"), in which case maxBid is optional. Its context hints ARE the targeting on this platform: up to 2,000 natural-language descriptions of the conversations, topics or questions where this offering is relevant — not exact-match keywords, and no guarantee of delivery. Write many distinct ones rather than variations of the same phrase. If the parent campaign is already LIVE (active), creating this ad group active starts REAL AD SPEND on the next auction, exactly like activating it — show the user what would begin serving, get an explicit yes, then pass confirm:true. Leaving it paused never needs confirmation. The whole tree is READ BACK from OpenAI before you are told it exists.',
     inputSchema: {
       campaignId: z.string(), name: z.string(), description: z.string().optional(),
-      maxBid: z.number().describe('max bid in the account currency'),
+      maxBid: z.number().optional().describe('max bid in the account currency — REQUIRED unless bidStrategy is a maximize_* one, which sets the bid itself'),
+      bidStrategy: z.enum(['fixed_bid', 'maximize_clicks', 'maximize_conversions']).optional().describe('HOW THIS AD GROUP BIDS — OpenAI’s “Maximize results”. fixed_bid (default) uses your maxBid as a hard cap; maximize_clicks and maximize_conversions let ChatGPT Ads set the bid to get the most of that outcome for the budget, and with either of those maxBid is OPTIONAL. maximize_conversions additionally needs the CAMPAIGN on biddingType "conversions" with a conversion event setting attached.'),
       billingEvent: z.enum(['click', 'impression']).optional().describe('default click'),
       contextHints: z.array(z.string()).optional().describe('up to 2,000, deduplicated server-side'),
       status: z.enum(['active', 'paused']).optional().describe('default paused'),
@@ -7873,17 +8007,19 @@ export function registerTools(rawServer, opts = {}) {
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/feed-products', a); return ok(d.note, d); }));
   server.registerTool('update_openai_ads_object', {
     title: 'Edit a ChatGPT Ads campaign / ad group / ad',
-    description: 'EDIT an existing ChatGPT Ads object in place — rename it, change a campaign’s budget or geo targeting, rewrite an ad group’s context hints or bid, or replace an ad’s title, body, landing page or image. Pass level:"campaign" + campaignId, level:"adGroup" + adGroupId, or level:"ad" + adId. Only the fields you pass are changed, but note that context hints, bidding and the creative are REPLACED WHOLESALE rather than merged, so send the complete list. Changing the budget, the bid or the creative of a LIVE (active) object changes what real money buys immediately — show the user the old and new values, get an explicit yes, then pass confirm:true. The object is READ BACK after the change.',
+    description: 'EDIT an existing ChatGPT Ads object in place — rename it, change a campaign’s budget or geo targeting, rewrite an ad group’s context hints or bid, or replace an ad’s title, body, landing page or image. Pass level:"campaign" + campaignId, level:"adGroup" + adGroupId, or level:"ad" + adId. Only the fields you pass are changed, but note that context hints, bidding, TARGETING and the creative are REPLACED WHOLESALE rather than merged, so send the complete list. A patch that would silently DESTROY something is refused by name with what would have been lost, rather than going through: dropping a campaign’s geo, custom audiences or PLATFORM targeting, deleting an ad group’s max bid, or demoting a maximize_* bid strategy to a fixed bid. Changing the budget, the bid or the creative of a LIVE (active) object changes what real money buys immediately — show the user the old and new values, get an explicit yes, then pass confirm:true. The object is READ BACK after the change.',
     inputSchema: {
       level: z.enum(['campaign', 'adGroup', 'ad']).optional().describe('inferred from which id you pass'),
       campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(),
       name: z.string().optional(), description: z.string().optional(),
       dailyBudget: z.number().optional(), lifetimeBudget: z.number().optional(),
       countries: z.array(z.string()).optional(), locationIds: z.array(z.string()).optional(), endTime: z.number().optional(),
+      platforms: z.array(z.enum(['ios_app', 'android_app', 'web'])).optional().describe('REPLACES which ChatGPT surfaces the campaign runs on (ios_app / android_app / web). Wholesale like the rest of targeting: a patch that changes geo or audiences on a campaign that already restricts platforms is REFUSED by name rather than silently widening it back to every surface. There is no [] — name all three to go back to everywhere.'),
       customAudienceIds: z.array(z.string()).optional().describe('REPLACES the campaign’s targeted custom audiences. TARGETING IS REPLACED WHOLESALE, not merged — a patch that omits something the campaign already targets is REFUSED by name rather than silently dropping it, so restate it here or pass [] to clear it deliberately.'),
       excludedCustomAudienceIds: z.array(z.string()).optional().describe('REPLACES the campaign’s excluded custom audiences — same wholesale rule as customAudienceIds.'),
       contextHints: z.array(z.string()).optional().describe('REPLACES the existing list'),
       maxBid: z.number().optional(), billingEvent: z.enum(['click', 'impression']).optional().describe('required alongside maxBid — bidding is replaced wholesale'),
+      bidStrategy: z.enum(['fixed_bid', 'maximize_clicks', 'maximize_conversions']).optional().describe('CHANGE HOW THIS AD GROUP BIDS (OpenAI’s “Maximize results”). BIDDING IS REPLACED WHOLESALE, so a patch that moves the bid without restating the strategy would DEMOTE a maximize_* ad group to a fixed bid, and one that sets a strategy without restating maxBid DELETES the cap — both are refused by name with what would have been lost.'),
       creative: oaiCreativeShape.optional().describe('REPLACES the ad’s creative (text + image card only)'),
       confirm: z.boolean().optional().describe('REQUIRED true to change budget / bid / creative on a LIVE object'),
     },
@@ -7913,7 +8049,7 @@ export function registerTools(rawServer, opts = {}) {
       since: z.string().optional().describe('YYYY-MM-DD'), until: z.string().optional().describe('YYYY-MM-DD'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/conversions', a);
     return ok(`${d.note}\n${(d.rows || []).map(r => `• ${r.entityId} — ${r.conversions ?? 0} conversion(s), ${r.viewThroughConversions ?? 0} view-through`).join('\n')}`, d);
@@ -7923,7 +8059,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Render a real preview of an existing ChatGPT Ads ad, so a human can LOOK at what will run instead of reading a list of ids back. Returns a hosted preview URL. THE LINK EXPIRES 24 HOURS AFTER IT IS CREATED — state that whenever you hand it to anyone, and generate a fresh one rather than re-sending an old one, because a dead link given to a client is worse than no link. Changes nothing about the ad; free.',
     inputSchema: { adId: z.string().describe('the ad to preview — list_openai_ads_campaigns with an adGroupId lists them') },
     outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), count: z.number().optional(), previews: z.array(z.any()).optional(), expiresInHours: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/preview', a); return ok(d.note, d); }));
   server.registerTool('send_openai_ads_conversions', {
     title: 'Send server-side conversion events to ChatGPT Ads',
@@ -7973,7 +8109,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('REQUIRED true to activate (real spend), to archive (irreversible), or for EITHER direction at level "account"'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), object: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // destructive: the enum carries 'archived', which is terminal
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/status', a);
     // d.note is written from the READ-BACK — print it rather than re-asserting a.status, which is a claim about the
@@ -8025,7 +8161,7 @@ export function registerTools(rawServer, opts = {}) {
       statuses: z.array(z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DRAFT'])).optional(),
     },
     outputSchema: { accounts: z.array(z.any()).optional(), adAccountId: z.string().optional(), currency: z.string().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional(), adGroups: z.array(z.any()).optional(), ads: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.adAccountId) {
       const d = await apiGet('/api/pinterest/shared-ad-accounts', {});
@@ -8058,7 +8194,7 @@ export function registerTools(rawServer, opts = {}) {
       columns: z.array(z.string()).optional().describe('Pinterest metric column names — omit for the standard set for that level'),
     },
     outputSchema: { adAccountId: z.string().optional(), currency: z.string().optional(), level: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/pinterest/ads-report', a);
     return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d);
@@ -8240,7 +8376,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the brand’s connected Reddit AD account(s). Call with NO adAccountId to list the ad accounts shared with this brand — do this first to pick a target. Call WITH adAccountId to read that account’s whole tree at once: campaigns, ad groups and ads, each with its configured status and Reddit’s own effective status (the effective one is what says whether it could actually serve — PENDING_APPROVAL, CAMPAIGN_PAUSED, REJECTED and so on). Read-only, free. Needs Reddit Ads connected (Settings ▸ Connectors ▸ Reddit Ads) and the ad account ticked under Manage accounts.',
     inputSchema: { adAccountId: z.string().optional().describe('Reddit ad account id (a2_…) — omit to list the ad accounts shared with this brand') },
     outputSchema: { accounts: z.array(z.any()).optional(), adAccountId: z.string().optional(), name: z.string().optional(), campaigns: z.array(z.any()).optional(), adGroups: z.array(z.any()).optional(), ads: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.adAccountId) {
       const d = await apiGet('/api/reddit-ads/shared-accounts', {});
@@ -8267,7 +8403,7 @@ export function registerTools(rawServer, opts = {}) {
       timeZoneId: z.string().optional().describe('IANA zone, e.g. America/New_York'),
     },
     outputSchema: { ok: z.boolean().optional(), adAccountId: z.string().optional(), since: z.string().optional(), until: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/report', a);
     return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d);
@@ -8277,7 +8413,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the Reddit PROFILES attached to an ad account. A Reddit ad promotes a POST, and every post is published AS one of these profiles — so this is the first call in any Reddit creative build, and its id is what create_reddit_ads_post needs. If it comes back empty, the ad account has no profile attached and nothing can be advertised from it yet. Read-only, free.',
     inputSchema: { adAccountId: z.string().optional() },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), profiles: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/profiles', a);
     return ok(`${d.note}\n${(d.profiles || []).map(p => `• ${p.name} (${p.id})`).join('\n')}`, d);
@@ -8294,7 +8430,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max results, default 15'),
     },
     outputSchema: { kind: z.string().optional(), count: z.number().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/targeting', a);
     return ok(`${d.note}\n${JSON.stringify((d.results || []).slice(0, 30))}`, d);
@@ -8315,7 +8451,7 @@ export function registerTools(rawServer, opts = {}) {
       targeting: z.record(z.any()).optional().describe('same shape as create_reddit_ads_ad_group targeting'),
     },
     outputSchema: { totalAudienceSize: z.number().optional(), targetAudienceRange: z.any().optional(), deliveryEstimates: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/forecast', a);
     return ok(d.note, d);
@@ -8336,7 +8472,7 @@ export function registerTools(rawServer, opts = {}) {
       targeting: z.record(z.any()).optional(),
     },
     outputSchema: { minBid: z.number().optional(), suggestedBid: z.number().optional(), suggestedRange: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/bid-suggestion', a);
     return ok(d.note, d);
@@ -8351,7 +8487,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { count: z.number().optional(), posts: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/posts', a);
     return ok(`${d.note}\n${(d.posts || []).map(p => `• ${p.type} "${p.headline}" (${p.id})`).join('\n')}`, d);
@@ -8377,7 +8513,7 @@ export function registerTools(rawServer, opts = {}) {
       allowComments: z.boolean().optional().describe('Reddit ads can carry a public comment thread — decide deliberately'),
     },
     outputSchema: { id: z.string().optional(), type: z.string().optional(), headline: z.string().optional(), postUrl: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/posts', a);
     return ok(`${d.note} Pass postId:"${d.id}" to create_reddit_ads_ad.`, d);
@@ -8391,7 +8527,7 @@ export function registerTools(rawServer, opts = {}) {
       allowComments: z.boolean().describe('REQUIRED — Reddit demands allow_comments on every post update, and it is the only field it permits'),
     },
     outputSchema: { id: z.string().optional(), headline: z.string().optional(), allowComments: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/posts/update', a);
     return ok(d.note, d);
@@ -8406,7 +8542,7 @@ export function registerTools(rawServer, opts = {}) {
       spendCapCents: z.number().optional().describe('lifetime spend ceiling for the whole campaign, in minor units of the ad account\u2019s currency'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), adAccountId: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/campaigns', a);
     return ok(`Created Reddit campaign "${d.name}" (${d.id}) with objective ${d.objective}, status ${d.status} \u2014 PAUSED and spending nothing. Next: create_reddit_ads_post for the creative, then create_reddit_ads_ad_group under this campaign, then create_reddit_ads_ad.`, d);
@@ -8457,7 +8593,7 @@ export function registerTools(rawServer, opts = {}) {
       })).optional().describe('weekly dayparting windows — omit to run all week'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), budget: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ad-groups', a);
     return ok(`${d.note} To make it spend, use set_reddit_ads_status(confirm:true) after the user approves.`, d);
@@ -8481,7 +8617,7 @@ export function registerTools(rawServer, opts = {}) {
       schedule: z.array(z.any()).optional(),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), budget: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ad-groups/update', a);
     return ok(d.note, d);
@@ -8499,7 +8635,7 @@ export function registerTools(rawServer, opts = {}) {
       eventTrackers: z.array(z.object({ type: z.enum(['CLICK', 'VIEW']), url: z.string() })).optional().describe('third-party measurement URLs; only Reddit-approved providers are accepted'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), postId: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ads', a);
     return ok(`${d.note} To make it spend, use set_reddit_ads_status(confirm:true) after the user approves.`, d);
@@ -8515,7 +8651,7 @@ export function registerTools(rawServer, opts = {}) {
       clickUrl: z.string().optional().describe('pass an empty string to clear it'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ads/update', a);
     return ok(d.note, d);
@@ -8534,7 +8670,7 @@ export function registerTools(rawServer, opts = {}) {
       endTime: z.string().optional(),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/campaign/update', a);
     return ok(d.note, d);
@@ -8584,7 +8720,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the conversion pixels on a Reddit ad account, each with the LAST TIME IT FIRED — which is the difference between "a pixel exists" and "conversion tracking works". Call this before building anything: since 13 July 2026 Reddit REQUIRES a pixel on every ad group and every CBO campaign, so an account with none cannot run ads at all. IMPORTANT: the Reddit API has no operation that creates a pixel — if the account has none, the only fix is for the user to add it in Reddit’s Events Manager (ads.reddit.com ▸ Events Manager); never claim you can create one. Read-only, free.',
     inputSchema: { adAccountId: z.string().optional().describe('Reddit ad account id (a2_…) — omit when only one is shared') },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), pixels: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/pixels', a);
     return ok(d.note, d);
@@ -8626,7 +8762,7 @@ export function registerTools(rawServer, opts = {}) {
       })).describe('up to 1,000 events per call'),
     },
     outputSchema: { ok: z.boolean().optional(), pixelId: z.string().optional(), sent: z.number().optional(), withMatchKeys: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/conversions', a);
     return ok(d.note, d);
@@ -8640,7 +8776,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('default 50, max 100'),
     },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), audiences: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/audiences', a);
     return ok(d.note, d);
@@ -8653,7 +8789,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().describe('what this list is, e.g. "Purchasers – last 180 days"'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), type: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/audiences', a);
     return ok(`${d.note} Its id is ${d.id}.`, d);
@@ -8671,7 +8807,7 @@ export function registerTools(rawServer, opts = {}) {
       })).describe('up to 2,500 rows; every row must carry the same fields'),
     },
     outputSchema: { ok: z.boolean().optional(), customAudienceId: z.string().optional(), action: z.string().optional(), rows: z.number().optional(), sizeUpper: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/audiences/users', a);
     return ok(d.note, d);
@@ -8695,7 +8831,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the SAVED AUDIENCES on a Reddit ad account — named, reusable targeting definitions (communities, interests, geos, devices and so on) that an ad group can point at instead of repeating the whole block. The reply says how many live ad groups each one is attached to, which is what makes editing one a decision rather than a formality. Read-only, free.',
     inputSchema: { adAccountId: z.string().optional(), limit: z.number().optional().describe('default 50, max 100') },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), savedAudiences: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/saved-audiences', a);
     return ok(d.note, d);
@@ -8709,7 +8845,7 @@ export function registerTools(rawServer, opts = {}) {
       targeting: z.record(z.any()).describe('same shape as create_reddit_ads_ad_group targeting — an empty block is refused, because a saved audience IS its targeting'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/saved-audiences', a);
     return ok(d.note, d);
@@ -8724,7 +8860,7 @@ export function registerTools(rawServer, opts = {}) {
       targeting: z.record(z.any()).optional().describe('REPLACES the existing targeting'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), activeAdGroups: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/saved-audiences/update', a);
     return ok(d.note, d);
@@ -8750,7 +8886,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Listing and reading forms KEEPS WORKING past the 2026-09-21 sunset — Reddit deliberately leaves GET/LIST up so advertisers can retain their records — so use this to EXPORT what exists before the deadline. Reddit exposes no API for the LEADS a form collected; those are downloaded from Ads Manager, and existing onsite-form ads are paused on 2026-09-30. List the lead generation forms on a Reddit ad account, with the fields each one asks for. Reddit publishes NO endpoint for reading the leads a form has collected — the user downloads those from Reddit’s Ads Manager. Say that plainly if asked for the leads themselves; do not imply they can be fetched. Read-only, free.',
     inputSchema: { adAccountId: z.string().optional(), limit: z.number().optional().describe('default 50, max 100') },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), forms: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/reddit-ads/lead-forms', a);
     return ok(d.note, d);
@@ -8769,7 +8905,7 @@ export function registerTools(rawServer, opts = {}) {
       })).describe('at least one'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), questions: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/lead-forms', a);
     return ok(d.note, d);
@@ -8789,7 +8925,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('default 50, max 200'),
     },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), changes: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/history', a);
     return ok(`${d.note}\n${JSON.stringify((d.changes || []).slice(0, 30))}`, d);
@@ -8840,7 +8976,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the TikTok ADVERTISER accounts this brand can act on — id, name, currency, timezone and status. Every other TikTok Ads tool needs an advertiserId, and this is where it comes from: call this first and let the USER pick when there is more than one. Read-only, free, spends nothing. Needs TikTok ADS connected (Settings ▸ Connectors ▸ TikTok Ads) — that is a DIFFERENT connection from the TikTok posting connector behind post_to_tiktok, so a brand that publishes to TikTok every day may still have nothing here.',
     inputSchema: {},
     outputSchema: { advertisers: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     // THE SHARED SET, never the roster route: one TikTok Business Center login commonly administers several
     // clients' advertisers, and /api/tiktok-ads/accounts is owner-gated for exactly that reason.
@@ -8854,7 +8990,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read a TikTok advertiser account’s whole tree in one call — campaigns, ad groups and ads, each with the operation status that says whether it is enabled at all. Omit advertiserId when the brand reaches exactly one account; with several, the call names the choices rather than picking for you. THE THREE TIERS ARE READ SEPARATELY AND A TIER THAT FAILED IS REPORTED AS FAILED, never as empty — if the result carries a `partial` note, say which tier could not be read instead of telling the user they have no ads. Read-only, free. TikTok’s QPS is 1, so a big account reads back slowly: that is the throttle working, not a fault.',
     inputSchema: { advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts — omit only when exactly one is reachable') },
     outputSchema: { advertiserId: z.string().optional(), name: z.string().optional(), campaigns: z.array(z.any()).optional(), adGroups: z.array(z.any()).optional(), ads: z.array(z.any()).optional(), partial: z.record(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/campaigns', a);
     const c = (d.campaigns || []).map(x => `• campaign ${x.campaign_name} (${x.campaign_id}) — ${x.operation_status}${x.objective_type ? `, ${x.objective_type}` : ''}`);
@@ -8876,7 +9012,7 @@ export function registerTools(rawServer, opts = {}) {
       pageSize: z.number().optional().describe('1-1000, default 10'),
     },
     outputSchema: { advertiserId: z.string().optional(), identities: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/identities', a);
     const list = d.identities || [];
@@ -8900,7 +9036,7 @@ export function registerTools(rawServer, opts = {}) {
       count: z.number().optional().describe('1-20; TikTok ignores anything larger and returns 20'),
     },
     outputSchema: { advertiserId: z.string().optional(), identityId: z.string().optional(), identityType: z.string().optional(), posts: z.array(z.any()).optional(), cursor: z.string().nullable().optional(), hasMore: z.boolean().optional(), note: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/identity-posts', a);
     const list = d.posts || [];
@@ -8918,7 +9054,7 @@ export function registerTools(rawServer, opts = {}) {
       pageSize: z.number().optional().describe('1-50, default 20'),
     },
     outputSchema: { advertiserId: z.string().optional(), posts: z.array(z.any()).optional(), page: z.number().nullable().optional(), pageSize: z.number().nullable().optional(), totalNumber: z.number().nullable().optional(), totalPage: z.number().nullable().optional(), note: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/spark-posts', a);
     const list = d.posts || [];
@@ -8934,7 +9070,7 @@ export function registerTools(rawServer, opts = {}) {
       originalPostAuthCode: z.string().optional().describe('REQUIRED when the post is a duet/stitch of, or mentions, another post — the ORIGINAL post owner’s code'),
     },
     outputSchema: { advertiserId: z.string().optional(), applied: z.boolean().optional(), posts: z.array(z.any()).optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/spark-authorize', a);
     return ok(`${d.note}${(d.posts || []).length ? `\n${d.posts.map(p => `• ${p.itemId} — ${(p.text || '(no caption)').slice(0, 70)}`).join('\n')}` : ''}`, d);
@@ -8973,7 +9109,7 @@ export function registerTools(rawServer, opts = {}) {
 
     },
     outputSchema: { state: z.string().optional(), connectUrl: z.string().nullable().optional(), businessId: z.string().nullable().optional(), scopes: z.array(z.string()).optional(), missingScopes: z.array(z.string()).optional(), expiresAt: z.number().nullable().optional(), refreshExpiresAt: z.number().nullable().optional(), readFailed: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/status', a);
     return ok(`TikTok account authorization: ${d.state}${d.businessId ? ` (business id ${d.businessId})` : ''}.${(d.missingScopes || []).length ? ` Missing scopes: ${d.missingScopes.join(', ')} — the grant must be re-authorized to pick them up.` : ''}${d.connectUrl ? `\nSend the user here to authorize it: ${d.connectUrl}` : ''}\n${d.note || ''}`, d);
@@ -8992,7 +9128,7 @@ export function registerTools(rawServer, opts = {}) {
       maxCount: z.number().optional(),
     },
     outputSchema: { videoId: z.string().optional(), comments: z.array(z.any()).optional(), cursor: z.any().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/comments', a);
     const list = d.comments || [];
@@ -9012,7 +9148,7 @@ export function registerTools(rawServer, opts = {}) {
       maxCount: z.number().optional(),
     },
     outputSchema: { videoId: z.string().optional(), commentId: z.string().optional(), replies: z.array(z.any()).optional(), cursor: z.any().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/comment-replies', a);
     const list = d.replies || [];
@@ -9030,7 +9166,7 @@ export function registerTools(rawServer, opts = {}) {
       imageHeight: z.number().optional().describe('required with imageUri'),
     },
     outputSchema: { videoId: z.string().optional(), commentId: z.string().nullable().optional(), comment: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/comment', a);
     return ok(`Commented on TikTok post ${d.videoId}${d.commentId ? ` \u2014 comment id ${d.commentId}` : ''}. ${d.note || ''}`, d);
@@ -9048,7 +9184,7 @@ export function registerTools(rawServer, opts = {}) {
       imageHeight: z.number().optional(),
     },
     outputSchema: { videoId: z.string().optional(), parentCommentId: z.string().optional(), commentId: z.string().nullable().optional(), comment: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/comment-reply', a);
     return ok(`Replied to comment ${d.parentCommentId} on TikTok post ${d.videoId}${d.commentId ? ` \u2014 reply id ${d.commentId}` : ''}. ${d.note || ''}`, d);
@@ -9075,7 +9211,7 @@ export function registerTools(rawServer, opts = {}) {
       imageUrl: z.string().describe('a public URL to the image \u2014 upload_file turns a local file into one'),
     },
     outputSchema: { imageUri: z.string().nullable().optional(), imageWidth: z.number().nullable().optional(), imageHeight: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/comment-image', a);
     return ok(`Uploaded. imageUri ${d.imageUri} (${d.imageWidth}\u00d7${d.imageHeight}). ${d.note || ''}`, d);
@@ -9090,7 +9226,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('REQUIRED true when enabling \u2014 it makes the post publicly promotable and accepts TikTok\u2019s advertising terms on the owner\u2019s behalf'),
     },
     outputSchema: { itemId: z.string().optional(), adPromotable: z.boolean().optional(), authorizationDays: z.number().nullable().optional(), status: z.any().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/post-authorization', a);
     return ok(`${d.note}${d.status?.authCode ? `\nAuthorization code: ${d.status.authCode}` : ''}`, d);
@@ -9102,7 +9238,7 @@ export function registerTools(rawServer, opts = {}) {
       itemId: z.string().describe('the TikTok post id'),
     },
     outputSchema: { itemId: z.string().optional(), adPromotable: z.any().optional(), authCode: z.any().optional(), authorizedStartTime: z.any().optional(), authorizedEndTime: z.any().optional(), raw: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/post-authorization', a);
     return ok(`Post ${d.itemId}: ad authorization ${d.adPromotable ? 'ON' : 'OFF'}${d.authCode ? `, code ${d.authCode}` : ''}${d.authorizedEndTime ? `, authorised until ${d.authorizedEndTime}` : ''}. ${d.note || ''}`, d);
@@ -9115,7 +9251,7 @@ export function registerTools(rawServer, opts = {}) {
       authorizationDays: z.number().optional().describe('7 | 30 | 60 | 180 | 365 \u2014 ADDED to whatever is left, not set as an absolute. Default 30.'),
     },
     outputSchema: { itemId: z.string().optional(), addedDays: z.any().optional(), status: z.any().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/post-authorization-extend', a);
     return ok(d.note, d);
@@ -9150,7 +9286,7 @@ export function registerTools(rawServer, opts = {}) {
       maxCount: z.number().optional().describe('1 to 100'),
     },
     outputSchema: { posts: z.array(z.any()).optional(), cursor: z.number().nullable().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/mentions', a);
     const list = d.posts || [];
@@ -9167,7 +9303,7 @@ export function registerTools(rawServer, opts = {}) {
       fields: z.array(z.string()).optional().describe('defaults to every field TikTok publishes for that kind'),
     },
     outputSchema: { kind: z.string().optional(), itemId: z.string().optional(), commentId: z.string().nullable().optional(), mention: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/mention', a);
     const m = d.mention || {};
@@ -9186,7 +9322,7 @@ export function registerTools(rawServer, opts = {}) {
       maxCount: z.number().optional().describe('1 to 100; TikTok defaults this one to 10'),
     },
     outputSchema: { comments: z.array(z.any()).optional(), cursor: z.number().nullable().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/mention-comments', a);
     const list = d.comments || [];
@@ -9202,7 +9338,7 @@ export function registerTools(rawServer, opts = {}) {
       regions: z.array(z.string()).optional().describe('two-letter codes to narrow which mentioning posts are counted'),
     },
     outputSchema: { keywords: z.array(z.any()).nullable().optional(), hashtags: z.array(z.any()).nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/mention-terms', a);
     const kw = (d.keywords || []).map(x => `${x.word} (${x.count})`).join(', ');
@@ -9217,7 +9353,7 @@ export function registerTools(rawServer, opts = {}) {
       username: z.string().optional().describe("normally resolved from the authorization itself. Pass the @handle (without the @) only if that read is refused"),
     },
     outputSchema: { kind: z.string().optional(), username: z.string().optional(), hashtags: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/brand-hashtags', a);
     const list = d.hashtags || [];
@@ -9235,7 +9371,7 @@ export function registerTools(rawServer, opts = {}) {
       username: z.string().optional().describe('normally resolved from the authorization itself'),
     },
     outputSchema: { action: z.string().optional(), username: z.string().optional(), requested: z.array(z.string()).optional(), enabled: z.array(z.any()).optional(), hashtag: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/brand-hashtags', a);
     return ok(d.note || `${d.action} applied for @${d.username}.`, d);
@@ -9254,7 +9390,7 @@ export function registerTools(rawServer, opts = {}) {
       maxCount: z.number().optional().describe('1 to 100; TikTok defaults this one to 10'),
     },
     outputSchema: { hashtag: z.string().nullable().optional(), posts: z.array(z.any()).optional(), cursor: z.number().nullable().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/brand-hashtag-posts', a);
     const list = d.posts || [];
@@ -9275,7 +9411,7 @@ export function registerTools(rawServer, opts = {}) {
       fields: z.array(z.string()).optional().describe('defaults to everything this authorization can read. Demographics are audience_ages, audience_genders, audience_countries, audience_cities'),
     },
     outputSchema: { displayName: z.string().nullable().optional(), username: z.string().nullable().optional(), isBusinessAccount: z.boolean().nullable().optional(), followers: z.number().nullable().optional(), following: z.number().nullable().optional(), totalLikes: z.number().nullable().optional(), videos: z.number().nullable().optional(), metrics: z.array(z.any()).optional(), audience: z.any().optional(), days: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/insights', a);
     const au = d.audience || {};
@@ -9297,7 +9433,7 @@ export function registerTools(rawServer, opts = {}) {
       businessCategory: z.enum(['ART_AND_CRAFTS', 'AUTOMOTIVE_AND_TRANSPORTATION', 'BABY', 'BEAUTY', 'CLOTHING_AND_ACCESSORIES', 'EDUCATION_AND_TRAINING', 'ELECTRONICS', 'FINANCE_AND_INVESTING', 'FOOD_AND_BEVERAGE', 'GAMING', 'HEALTH_AND_WELLNESS', 'HOME_FURNITURE_AND_APPLIANCES', 'MACHINERY_AND_EQUIPMENT', 'MEDIA_AND_ENTERTAINMENT', 'PERSONAL_BLOG', 'PETS', 'PROFESSIONAL_SERVICES', 'PUBLIC_ADMINISTRATION', 'REAL_ESTATE', 'RESTAURANTS_AND_BARS', 'SHOPPING_AND_RETAIL', 'SOFTWARE_AND_APPS', 'SPORTS_FITNESS_AND_OUTDOORS', 'TRAVEL_AND_TOURISM', 'OTHERS']),
     },
     outputSchema: { category: z.string().nullable().optional(), averageLikes: z.number().nullable().optional(), averageComments: z.number().nullable().optional(), averageShares: z.number().nullable().optional(), averageVideoCount: z.number().nullable().optional(), averageFollowerCount: z.number().nullable().optional(), averageFollowerGrowth30d: z.number().nullable().optional(), averageEngagementRate: z.number().nullable().optional(), averageVideoViews: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/benchmark', a);
     return ok(`${d.category || d.requestedCategory} benchmarks: ${Math.round(d.averageFollowerCount || 0)} followers, ${Math.round(d.averageVideoCount || 0)} videos, ${Math.round(d.averageVideoViews || 0)} views, ${Math.round(d.averageLikes || 0)} likes, ${((d.averageEngagementRate || 0) * 100).toFixed(2)}% engagement, ${Math.round(d.averageFollowerGrowth30d || 0)} follower growth in 30 days on average. ${d.note || ''}`, d);
@@ -9312,7 +9448,7 @@ export function registerTools(rawServer, opts = {}) {
       keyword: z.string().optional().describe('narrows the lookup, e.g. "Canada", "Beauty", "skincare"'),
     },
     outputSchema: { advertiserId: z.string().optional(), kind: z.string().optional(), results: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/targeting', a);
     return ok(`${(d.results || []).length} TikTok ${d.kind || a.kind || 'location'} result(s) on advertiser ${d.advertiserId}:\n${JSON.stringify((d.results || []).slice(0, 30))}`, d);
@@ -9333,7 +9469,7 @@ export function registerTools(rawServer, opts = {}) {
       filtering: z.array(z.record(z.any())).optional().describe('TikTok’s own filter array, e.g. [{"field_name":"campaign_ids","filter_type":"IN","filter_value":"[\'123\']"}]. Narrows the report AT TIKTOK rather than after truncation.'),
     },
     outputSchema: { advertiserId: z.string().optional(), level: z.string().optional(), reportType: z.string().optional(), rows: z.array(z.any()).optional(), metrics: z.array(z.string()).optional(), dimensions: z.array(z.string()).optional(), page: z.number().optional(), pageSize: z.number().optional(), totalRows: z.number().nullable().optional(), totalPages: z.number().nullable().optional(), hasMore: z.boolean().optional(), truncationNote: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     // The route takes metrics/dimensions as CSV on the query string; arrays are what an agent naturally holds, so
     // join here rather than making every caller remember the wire shape.
@@ -9358,7 +9494,7 @@ export function registerTools(rawServer, opts = {}) {
       budget: z.number().optional().describe('campaign budget in the advertiser’s own currency — not needed with BUDGET_MODE_INFINITE'),
     },
     outputSchema: { id: z.string().optional(), advertiserId: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/campaign', a);
     return ok(`Created TikTok campaign "${d.name}" (${d.id}) — objective ${d.objective}, status ${d.status}. ${d.note} Next: create_tiktok_ads_ad_group under it, then list_tiktok_ads_identities and create_tiktok_ads_ad.`, d);
@@ -9396,7 +9532,7 @@ export function registerTools(rawServer, opts = {}) {
       conversionBid: z.number().optional().describe('target cost per conversion for oCPM — required by TikTok when bidType is BID_TYPE_CUSTOM and billingEvent is OCPM'),
     },
     outputSchema: { id: z.string().optional(), advertiserId: z.string().optional(), campaignId: z.string().optional(), name: z.string().optional(), status: z.string().optional(), optimizationGoal: z.string().optional(), pixelId: z.string().nullable().optional(), optimizationEvent: z.string().nullable().optional(), billingEvent: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/adgroup', a);
     const conv = d.pixelId ? ` toward ${d.optimizationEvent || 'a conversion'} on pixel ${d.pixelId}` : '';
@@ -9416,7 +9552,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().optional().describe('fuzzy name filter'),
     },
     outputSchema: { advertiserId: z.string().optional(), pixels: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/pixels', a);
     const rows = d.pixels || [];
@@ -9432,7 +9568,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().describe('\u226440 characters, no emojis, and it must not duplicate an existing pixel name on the account. TikTok recommends the website or domain it measures.'),
     },
     outputSchema: { pixelId: z.string().optional(), pixelCode: z.string().optional(), name: z.string().optional(), advertiserId: z.string().optional(), pixelScript: z.string().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/pixel', a);
     return ok(`Created TikTok pixel "${d.name}" \u2014 id ${d.pixelId}, code ${d.pixelCode}. ${d.note}`, d);
@@ -9447,7 +9583,7 @@ export function registerTools(rawServer, opts = {}) {
       endDate: z.string().optional().describe('YYYY-MM-DD'),
     },
     outputSchema: { advertiserId: z.string().optional(), pixelCode: z.string().optional(), stats: z.any().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/pixel-stats', a);
     return ok(`Pixel ${d.pixelCode} event stats.`, d);
@@ -9457,7 +9593,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the Custom Conversions defined on a TikTok EVENT SOURCE — narrower, rule-based conversions built on top of a pixel event (for example "Purchase, but only on /checkout/premium"). A Custom Conversion belongs to an event source, NOT to an advertiser, so TikTok requires eventSourceType and eventSourceId; with none given this resolves the single pixel on the advertiser when there is exactly one and otherwise asks which. Pass a Custom Conversion to create_tiktok_ads_ad_group as customConversionId to optimise toward the narrow rule instead of the broad standard event. TikTok accepts it ONLY alongside a pixel and only when optimizationGoal is CONVERT or IN_APP_EVENT, and only when its own optimizationEvent matches the one on the ad group; usableForAds reports whether its activity status allows it. Read-only, free.',
     inputSchema: { advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts') },
     outputSchema: { advertiserId: z.string().optional(), eventSourceType: z.string().optional(), eventSourceId: z.string().optional(), customConversions: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/custom-conversions', a);
     const rows = d.customConversions || [];
@@ -9494,7 +9630,7 @@ export function registerTools(rawServer, opts = {}) {
       interestCategoryIds: z.array(z.string()).optional().describe('ids from search_tiktok_ads_targeting(kind:"interest")'),
     },
     outputSchema: { advertiserId: z.string().optional(), days: z.number().optional(), rfPurchasedType: z.string().nullable().optional(), chosen: z.any().optional(), options: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/rf-inventory', { ...a, locationIds: (a.locationIds || []).join(','), ageGroups: a.ageGroups?.join(','), languages: a.languages?.join(','), operatingSystems: a.operatingSystems?.join(','), interestCategoryIds: a.interestCategoryIds?.join(',') });
     const c = d.chosen;
@@ -9552,7 +9688,7 @@ export function registerTools(rawServer, opts = {}) {
       title: z.string().optional().describe('exact-match name filter'),
     },
     outputSchema: { advertiserId: z.string().optional(), forms: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/lead-forms', a);
     const rows = d.forms || [];
@@ -9569,7 +9705,7 @@ export function registerTools(rawServer, opts = {}) {
       leadSource: z.string().optional().describe('INSTANT_FORM (default) or DIRECT_MESSAGE'),
     },
     outputSchema: { advertiserId: z.string().optional(), leadSource: z.string().optional(), fields: z.array(z.string()).optional(), pageId: z.string().nullable().optional(), pageName: z.string().nullable().optional(), pageUrl: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/lead-fields', a);
     return ok(`${d.leadSource === 'DIRECT_MESSAGE' ? 'Direct-message leads' : `Instant Form "${d.pageName || d.pageId}"`} collect ${(d.fields || []).length} field(s): ${(d.fields || []).join(', ') || '(none reported)'}. ${d.note}`, d);
@@ -9585,7 +9721,7 @@ export function registerTools(rawServer, opts = {}) {
       max: z.number().optional().describe('rows to return, default 200, cap 500. The `total` field always reports how many the file actually held.'),
     },
     outputSchema: { advertiserId: z.string().optional(), region: z.string().optional(), taskId: z.string().optional(), status: z.string().optional(), fileType: z.string().optional(), read: z.boolean().optional(), columns: z.array(z.string()).optional(), leads: z.array(z.any()).optional(), total: z.number().optional(), truncated: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/leads', a);
     if (!d.read) return ok(d.note, d);
@@ -9657,7 +9793,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('up to 100'),
     },
     outputSchema: { advertiserId: z.string().optional(), audiences: z.array(z.any()).optional(), total: z.number().optional(), page: z.number().optional(), detail: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/audiences', a);
     const rows = d.audiences || [];
@@ -9759,7 +9895,7 @@ export function registerTools(rawServer, opts = {}) {
       comparisonAudienceIds: z.array(z.string()).optional().describe('up to 4'),
     },
     outputSchema: { advertiserId: z.string().optional(), benchmark: z.any().optional(), comparisons: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/audience-overlap', a);
     const b = d.benchmark;
@@ -9773,7 +9909,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The TikTok Business Centers reachable on this connection. THIS IS THE ONE PIECE OF STRUCTURE THAT MAKES THE CATALOG TOOLS DIFFERENT FROM EVERY OTHER TIKTOK TOOL: a product catalog belongs to a Business Center, not to an ad account, so the catalog tools take a bcId from here and an advertiserId will not work. With exactly one Business Center reachable the catalog tools resolve it themselves; with several they refuse and name them rather than guessing, because a catalog created under the wrong Business Center is invisible to the ad account that needed it and nothing in the reply would say so. Read-only, free.',
     inputSchema: { bcId: z.string().optional().describe('filter to one'), page: z.number().optional(), pageSize: z.number().optional().describe('up to 50') },
     outputSchema: { businessCenters: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/business-centers', a);
     const rows = d.businessCenters || [];
@@ -9792,7 +9928,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional(),
     },
     outputSchema: { bcId: z.string().optional(), catalogs: z.array(z.any()).optional(), availableRegions: z.any().optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/catalogs', a);
     const rows = d.catalogs || [];
@@ -9857,7 +9993,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('up to 500'),
     },
     outputSchema: { bcId: z.string().optional(), catalogId: z.string().optional(), products: z.array(z.any()).optional(), total: z.number().optional(), usableInAds: z.number().optional(), page: z.number().optional(), pageSize: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/catalog-products', a);
     const rows = d.products || [];
@@ -9875,7 +10011,7 @@ export function registerTools(rawServer, opts = {}) {
       productCount: z.boolean().optional().describe('default true; pass false on a very large set to avoid a TikTok timeout'),
     },
     outputSchema: { bcId: z.string().optional(), catalogId: z.string().optional(), productSets: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/catalog-sets', a);
     const rows = d.productSets || [];
@@ -9895,7 +10031,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('up to 20'),
     },
     outputSchema: { bcId: z.string().optional(), catalogId: z.string().optional(), feedId: z.string().optional(), diagnosticDate: z.string().nullable().optional(), issues: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/catalog-diagnostics', a);
     const rows = d.issues || [];
@@ -9909,7 +10045,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The mobile apps registered on a TikTok ad account. An APP_INSTALL campaign cannot be built without one, and an APP-activity audience uses these ids as its event sources — so this is the missing lookup that made APP_INSTALL offerable and undeliverable in the same product, exactly as conversion campaigns were before pixels. Registering a NEW app is deliberately not offered here: it needs the store listing and the attribution provider, and it belongs in TikTok Ads Manager rather than being set on a user’s behalf. Read-only, free.',
     inputSchema: { advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts') },
     outputSchema: { advertiserId: z.string().optional(), apps: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/apps', a);
     const rows = d.apps || [];
@@ -9930,7 +10066,7 @@ export function registerTools(rawServer, opts = {}) {
       availableOnly: z.boolean().optional().describe('default true at TikTok — false also returns events that are not yet usable'),
     },
     outputSchema: { advertiserId: z.string().optional(), appId: z.string().optional(), events: z.array(z.any()).optional(), usableNow: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/app-events', a);
     const rows = d.events || [];
@@ -9962,7 +10098,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('up to 100'),
     },
     outputSchema: { advertiserId: z.string().optional(), adgroupId: z.string().optional(), comments: z.array(z.any()).optional(), total: z.number().optional(), page: z.number().optional(), totalPages: z.number().optional(), hidden: z.number().optional(), hitBlockedWord: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/comments', a);
     const rows = d.comments || [];
@@ -9981,7 +10117,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('up to 1000'),
     },
     outputSchema: { advertiserId: z.string().optional(), commentId: z.string().optional(), commentType: z.string().optional(), comments: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/comment-thread', a);
     const rows = d.comments || [];
@@ -10050,7 +10186,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('up to 500, which is the whole account limit — one page holds every word an account can have'),
     },
     outputSchema: { advertiserId: z.string().optional(), blockedWords: z.array(z.string()).optional(), total: z.number().optional(), remaining: z.number().optional(), checked: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/blocked-words', a);
     const w = d.blockedWords || [];
@@ -10082,7 +10218,7 @@ export function registerTools(rawServer, opts = {}) {
       issueCategories: z.array(z.enum(['CREATIVE', 'BID_AND_BUDGET', 'EVENT_TRACK'])).optional().describe('omit for all three. An unknown category is refused rather than dropped, so you never get an answer about something other than what you asked for.'),
     },
     outputSchema: { advertiserId: z.string().optional(), adgroups: z.array(z.any()).optional(), issueCount: z.number().optional(), meanings: z.record(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/diagnosis', a);
     const rows = d.adgroups || [];
@@ -10099,7 +10235,7 @@ export function registerTools(rawServer, opts = {}) {
       objectiveType: z.enum(['REACH', 'VIDEO_VIEWS', 'ENGAGEMENT']).optional().describe('which objective to look the catalogue up under — default REACH. TikTok supports only these three on the catalogue endpoint.'),
     },
     outputSchema: { advertiserId: z.string().optional(), current: z.any().optional(), tiersYouCanSet: z.array(z.string()).optional(), tiersTikTokReports: z.array(z.string()).optional(), availableCategoryExclusions: z.array(z.any()).nullable().optional(), availableVerticalSensitivity: z.array(z.any()).nullable().optional(), categoryLookupObjective: z.string().optional(), categoryLookupError: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/brand-safety', a);
     const cats = d.availableCategoryExclusions;
@@ -10164,7 +10300,7 @@ export function registerTools(rawServer, opts = {}) {
       landingPageUrl: z.string().optional().describe('where the ad sends people'),
     },
     outputSchema: { id: z.string().optional(), advertiserId: z.string().optional(), adgroupId: z.string().optional(), name: z.string().optional(), status: z.string().nullable().optional(), identityId: z.string().optional(), videoId: z.string().nullable().optional(), tiktokItemId: z.string().nullable().optional(), spark: z.boolean().optional(), imageIds: z.array(z.string()).optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/ad', a);
     return ok(`Created TikTok ${d.spark ? 'SPARK ad promoting organic post ' + d.tiktokItemId : 'ad'} "${d.name}" (${d.id}) in ad group ${d.adgroupId}, posting as identity ${d.identityId} — TikTok stored it as ${d.status || 'an unreported status'}. ${d.note} TikTok still has to review it before it can show.`, d);
@@ -10250,7 +10386,7 @@ export function registerTools(rawServer, opts = {}) {
       pageSize: z.number().optional(),
     },
     outputSchema: { advertiserId: z.string().optional(), rules: z.array(z.any()).optional(), total: z.number().optional(), armedSpenders: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/rules', a);
     const lines = (d.rules || []).map(r => `· ${r.name} (${r.ruleId}) — ${r.status}${r.canSpend ? ` ⚠ CAN SPEND: ${(r.armingActions || []).join(', ')}` : ' — cannot start or raise spend'}${r.unbounded ? ' — unbounded reach' : ''} — scopeToken ${r.scopeToken}`);
@@ -10272,7 +10408,7 @@ export function registerTools(rawServer, opts = {}) {
       pageSize: z.number().optional(),
     },
     outputSchema: { advertiserId: z.string().optional(), results: z.array(z.any()).optional(), total: z.number().optional(), ruleId: z.string().optional(), execId: z.string().optional(), detail: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/rule-results', a);
     const lines = (d.results || []).map(r => `· ${r.ruleName || r.ruleId} — ${r.execTime || '(no time)'} — ${r.action || '(no action)'}${r.affected != null ? ` on ${r.affected} object(s)` : ''}${r.status ? ` — ${r.status}` : ''}`);
@@ -10326,7 +10462,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().optional().describe('filter by exact name'),
     },
     outputSchema: { advertiserId: z.string().optional(), eventSets: z.array(z.any()).optional(), autoTrackingCount: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/offline-event-sets', a);
     const lines = (d.eventSets || []).map(s => `· ${s.name} (${s.eventSetId})${s.autoTracking ? ' — AUTO-TRACKING' : ''}${s.description ? ` — ${s.description}` : ''}`);
@@ -10379,7 +10515,7 @@ export function registerTools(rawServer, opts = {}) {
       name: z.string().optional().describe('filter by exact name'),
     },
     outputSchema: { advertiserId: z.string().optional(), eventSets: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/crm-event-sets', a);
     const lines = (d.eventSets || []).map(s => `· ${s.name} (${s.eventSetId})${s.createTime ? ` — created ${s.createTime}` : ''}`);
@@ -10467,7 +10603,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'The TikTok One accounts this TikTok connection can act on. TikTok One is TikTok’s influencer marketplace: find creators, invite them to a campaign, get their videos tagged to it, read organic-versus-paid performance on those videos, and ask them for Spark Ads authorization so the brand can put money behind their post. THIS IS THE ONE PIECE OF STRUCTURE THAT MAKES THE CREATOR TOOLS DIFFERENT: a TikTok One account id is a THIRD id space beside an advertiser id and a Business Center id, and every creator-marketplace tool needs one from here. With exactly one reachable the other tools resolve it themselves; with several they refuse and name them. It rides the SAME connection and the SAME OAuth flow as TikTok Ads and there is nothing extra to apply for; but a connection authorized before 2026-08-19 does not carry the TikTok One permission and its owner has to reconnect. Read-only, free.',
     inputSchema: {},
     outputSchema: { accounts: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-accounts', a);
     const rows = d.accounts || [];
@@ -10483,7 +10619,7 @@ export function registerTools(rawServer, opts = {}) {
       labelType: z.enum(['SEARCH', 'RANKING']).optional().describe('default SEARCH'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), labelType: z.string().optional(), industryLabels: z.array(z.any()).optional(), contentLabels: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-labels', a);
     const fmt = (t, rows) => (rows || []).length ? `${t} (${rows.length}):\n` + rows.map(l => `• ${l.labelName}: ${l.labelId}`).join('\n') : '';
@@ -10513,7 +10649,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-200, default 24'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), region: z.string().optional(), countryCodes: z.array(z.string()).optional(), creators: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-creators', a);
     const rows = d.creators || [];
@@ -10534,7 +10670,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-100, default 20'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), rankingType: z.string().optional(), labelSource: z.string().nullable().optional(), creators: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-leaderboard', a);
     const rows = d.creators || [];
@@ -10550,7 +10686,7 @@ export function registerTools(rawServer, opts = {}) {
       handles: z.array(z.string()).describe('TikTok usernames WITHOUT the @, max 20'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), creators: z.array(z.any()).optional(), invitable: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-creator-status', a);
     return ok(`${(d.creators || []).length} handle(s):\n` + (d.creators || []).map(c => `• ${c.handle}: ${c.status} (${c.means})`).join('\n') + `\n${d.note || ''}`, d);
@@ -10564,7 +10700,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional(),
     },
     outputSchema: { ttoAccountId: z.string().optional(), brandProfiles: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-brand-profiles', a);
     const rows = d.brandProfiles || [];
@@ -10599,7 +10735,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-5'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), campaigns: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-campaigns', a);
     const rows = d.campaigns || [];
@@ -10673,7 +10809,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-50, default 10'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), requests: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-link-requests', a);
     const rows = d.requests || [];
@@ -10694,7 +10830,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-100, default 25'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), campaignId: z.string().optional(), countryCode: z.string().optional(), daily: z.boolean().optional(), videos: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-report', a);
     const rows = d.videos || [];
@@ -10725,7 +10861,7 @@ export function registerTools(rawServer, opts = {}) {
       videoId: z.string(),
     },
     outputSchema: { ttoAccountId: z.string().optional(), videoId: z.string().optional(), authStatus: z.string().nullable().optional(), authCode: z.string().nullable().optional(), validFrom: z.string().nullable().optional(), validUntil: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/tto-spark-status', a);
     return ok(`Video ${d.videoId}: ${d.authStatus || 'no status reported'}${d.authCode ? `: code ${d.authCode}` : ''}${d.validUntil ? `, valid to ${d.validUntil}` : ''}\n${d.note || ''}`, d);
@@ -10766,7 +10902,7 @@ export function registerTools(rawServer, opts = {}) {
       storeType: z.enum(['TIKTOK_SHOP']).optional(),
     },
     outputSchema: { advertiserId: z.string().optional(), stores: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/stores', a);
     const rows = d.stores || [];
@@ -10789,7 +10925,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-100, default 10'),
     },
     outputSchema: { bcId: z.string().optional(), storeId: z.string().optional(), products: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/store-products', a);
     const rows = d.products || [];
@@ -10809,7 +10945,7 @@ export function registerTools(rawServer, opts = {}) {
       bcId: z.string().optional().describe('a Business Center: pass this OR advertiserId, not both'),
     },
     outputSchema: { target: z.string().optional(), verificationStatus: z.string().nullable().optional(), statusMeans: z.string().nullable().optional(), verified: z.boolean().optional(), qualificationId: z.string().nullable().optional(), rejectionReason: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/verification-status', a);
     return ok(d.note, d);
@@ -10822,7 +10958,7 @@ export function registerTools(rawServer, opts = {}) {
       regionIsoCode: z.string().describe('the ISO country of the ACCOUNT being verified, e.g. US: tiktok_ads_verification_status reports it'),
     },
     outputSchema: { verificationType: z.string().optional(), regionIsoCode: z.string().optional(), documentTypes: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/verification-documents', a);
     const rows = d.documentTypes || [];
@@ -10868,7 +11004,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-50'),
     },
     outputSchema: { bcId: z.string().optional(), paymentPortfolios: z.array(z.any()).optional(), total: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/payment-portfolios', a);
     const rows = d.paymentPortfolios || [];
@@ -10885,7 +11021,7 @@ export function registerTools(rawServer, opts = {}) {
       page: z.number().optional(), pageSize: z.number().optional().describe('1-50'),
     },
     outputSchema: { paymentPortfolioId: z.string().optional(), adAccounts: z.array(z.any()).nullable().optional(), users: z.array(z.any()).nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/payment-portfolio-links', a);
     const parts = [];
@@ -10914,7 +11050,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the Snapchat AD ACCOUNTS SHARED WITH THIS BRAND — the ones it may actually build on and spend from, which is NOT everything the Snapchat login can reach — id, name, currency, timezone and status. Every other Snapchat Ads tool needs an adAccountId and this is where it comes from. One call returns both tiers, because Snap nests ad accounts inside their organization. An account flagged as a TEST account is marked as such — those cannot serve real ads. Read-only, free.',
     inputSchema: {},
     outputSchema: { organizations: z.array(z.any()).optional(), adAccounts: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     // THE SHARED set, not the owner's picker. /accounts is requirePickerOwner-gated on purpose — it lists every
     // account the login can reach, including other clients' — so no agent surface may read it.
@@ -10928,7 +11064,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read the whole Snapchat ad tree for an ad account — campaigns, ad squads and ads with their statuses. The three tiers are fetched separately so one failure cannot take the tree down, and a tier that FAILED to read is reported in `partial` rather than as an empty list: an empty list here means an empty account, never a failed read. Read-only, free.',
     inputSchema: { adAccountId: z.string().optional().describe('from list_snapchat_ads_accounts — omit only when exactly one is reachable') },
     outputSchema: { adAccountId: z.string().optional(), name: z.string().optional(), currency: z.string().optional(), campaigns: z.array(z.any()).optional(), adSquads: z.array(z.any()).optional(), ads: z.array(z.any()).optional(), partial: z.record(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/snapchat-ads/campaigns', a);
     const part = d.partial ? `\n⚠ Some tiers could not be READ: ${Object.entries(d.partial).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('; ')} — that is "could not tell", not "nothing there".` : '';
@@ -10950,7 +11086,7 @@ export function registerTools(rawServer, opts = {}) {
       viewAttributionWindow: z.enum(['none', '1_HOUR', '3_HOUR', '6_HOUR', '1_DAY', '7_DAY']).optional().describe("how long after a VIEW (no swipe) a conversion still counts; 'none' attributes no view-throughs at all. Omit to use the ad account default."),
     },
     outputSchema: { adAccountId: z.string().optional(), level: z.string().optional(), id: z.string().optional(), granularity: z.string().optional(), rows: z.array(z.any()).optional(), read: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/snapchat-ads/report', a);
     if (d.read === false) return ok(`Could not READ Snapchat stats for ${d.level} ${d.id} — ${d.note} That is "could not tell", not "no performance".`, d);
@@ -10969,7 +11105,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional(),
     },
     outputSchema: { kind: z.string().optional(), results: z.array(z.any()).optional(), total: z.number().optional(), read: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/snapchat-ads/targeting', a);
     if (d.read === false) return ok(d.note, d);
@@ -10983,7 +11119,7 @@ export function registerTools(rawServer, opts = {}) {
       resourceType: z.string().optional().describe('override the shared_resource_types token if Snapchat documents a different one — by default several are tried and the one that works is reported'),
     },
     outputSchema: { adAccountId: z.string().optional(), profiles: z.array(z.any()).optional(), read: z.boolean().optional(), resourceType: z.string().optional(), tried: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/snapchat-ads/profiles', a);
     if (!d.read) return ok(d.note, d);
@@ -11009,7 +11145,7 @@ export function registerTools(rawServer, opts = {}) {
       creative: z.boolean().optional().describe('set false to upload the MEDIA ONLY and build the creative yourself — the default true is what an ad actually needs'),
     },
     outputSchema: { adAccountId: z.string().optional(), mediaId: z.string().optional(), creativeId: z.string().optional(), kind: z.string().optional(), name: z.string().optional(), bytes: z.number().optional(), reusedMedia: z.boolean().optional(), creativeType: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/upload', a);
     return ok(`Uploaded to Snapchat ad account ${d.adAccountId} — mediaId ${d.mediaId}${d.creativeId ? `, creativeId ${d.creativeId}` : ''} (${d.reusedMedia ? 'reused existing media' : `${Math.round((d.bytes || 0) / 1024)}KB ${d.kind}`}). ${d.note}`, d);
@@ -11026,7 +11162,7 @@ export function registerTools(rawServer, opts = {}) {
       endTime: z.string().optional().describe('ISO 8601'),
     },
     outputSchema: { id: z.string().optional(), adAccountId: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/campaign', a);
     return ok(`Created Snapchat campaign "${d.name}" (${d.id})${d.objective ? ` — objective ${d.objective}` : ''}. Snapchat stored it as ${d.status || 'an unreported status'}. ${d.note} Next: create_snapchat_ads_ad_squad under it, then upload_snapchat_ads_creative and create_snapchat_ads_ad.`, d);
@@ -11064,7 +11200,7 @@ export function registerTools(rawServer, opts = {}) {
       endTime: z.string().optional().describe('ISO 8601'),
     },
     outputSchema: { id: z.string().optional(), adAccountId: z.string().optional(), campaignId: z.string().optional(), name: z.string().optional(), status: z.string().optional(), optimizationGoal: z.string().optional(), dailyBudget: z.number().nullable().optional(), dailyBudgetMicro: z.number().nullable().optional(), currency: z.string().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/adsquad', a);
     const money = d.dailyBudget != null ? ` Daily budget ${d.dailyBudget} ${d.currency || ''} (${d.dailyBudgetMicro} micro).` : '';
@@ -11081,7 +11217,7 @@ export function registerTools(rawServer, opts = {}) {
       type: z.string().optional().describe('default SNAP_AD. Others include REMOTE_WEBPAGE, APP_INSTALL, STORY, COLLECTION, LEAD_GENERATION.'),
     },
     outputSchema: { id: z.string().optional(), adAccountId: z.string().optional(), adSquadId: z.string().optional(), creativeId: z.string().optional(), name: z.string().optional(), status: z.string().optional(), type: z.string().optional(), reviewStatus: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/ad', a);
     return ok(`Created Snapchat ad "${d.name}" (${d.id}) in ad squad ${d.adSquadId} from creative ${d.creativeId} — stored as ${d.status || 'an unreported status'}. ${d.note}`, d);
@@ -11100,7 +11236,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('REQUIRED true — without it nothing changes and you get the sentence to show the user'),
     },
     outputSchema: { adAccountId: z.string().optional(), level: z.string().optional(), id: z.string().optional(), requestedMicro: z.number().optional(), readMicro: z.number().nullable().optional(), read: z.number().nullable().optional(), currency: z.string().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/budget', a);
     return ok(`Snapchat ad squad ${d.id} — requested ${d.requestedMicro} micro, READ BACK from Snapchat as ${d.readMicro ?? '(not returned)'} micro${d.read != null ? ` (${d.read} ${d.currency || ''})` : ''}.${d.note ? ' ' + d.note : ''}`, d);
@@ -11116,7 +11252,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('REQUIRED true — without it nothing changes and you get the sentence to show the user'),
     },
     outputSchema: { adAccountId: z.string().optional(), level: z.string().optional(), requested: z.string().optional(), results: z.array(z.any()).optional(), read: z.array(z.any()).optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/status', a);
     const read = (d.read || []).map(r => `${r.id} → ${r.status ?? '(unreadable)'}`).join(', ') || '(Snapchat returned no rows on the read-back)';
@@ -11151,7 +11287,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the LinkedIn COMPANY PAGES the connected account administers — id, name and the role held on each. ALWAYS call this before post_to_linkedin_page when there is more than one Page: publishing to the wrong company Page is a public mistake and Hermoso never chooses for the user. If it comes back empty, the account holds no Page admin role, or LinkedIn has not granted this app the organization scopes — say that plainly rather than guessing an id. Read-only, free.',
     inputSchema: {},
     outputSchema: { organizations: z.array(z.any()).optional(), count: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/linkedin/organizations', {});
     const list = d.organizations || [];
@@ -11231,7 +11367,7 @@ export function registerTools(rawServer, opts = {}) {
       posts: z.any().nullable().optional(), perPost: z.array(z.any()).nullable().optional(),
       noActivity: z.array(z.string()).optional(), unavailable: z.array(z.any()).optional(), note: z.string().optional(),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/linkedin/page-analytics', { organizationId: a.organizationId, startDate: a.startDate, endDate: a.endDate, postUrns: (a.postUrns || []).join(',') });
     const per = (d.perPost || []).map(p => `• ${p.urn}: ${p.impressions} impressions, ${p.clicks} clicks, ${p.likes} likes, ${p.comments} comments, ${p.shares} shares${p.engagementRate != null ? `, ${(p.engagementRate * 100).toFixed(2)}% engagement` : ''}`);
@@ -11249,7 +11385,7 @@ export function registerTools(rawServer, opts = {}) {
       statuses: z.array(z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DRAFT'])).optional(),
     },
     outputSchema: { accounts: z.array(z.any()).optional(), adAccountId: z.string().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional(), campaignGroups: z.array(z.any()).optional(), creatives: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.adAccountId) {
       const d = await apiGet('/api/linkedin/ads-shared', {});
@@ -11274,7 +11410,7 @@ export function registerTools(rawServer, opts = {}) {
       fields: z.array(z.string()).optional().describe('metric names — omit for the standard set (LinkedIn returns ONLY impressions and clicks if none are named)'),
     },
     outputSchema: { adAccountId: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/ads-report', a);
     return ok(`${d.note}\n${JSON.stringify((d.rows || []).slice(0, 40))}`, d);
@@ -11290,7 +11426,7 @@ export function registerTools(rawServer, opts = {}) {
       targetingCriteria: z.record(z.any()).optional().describe('LinkedIn\u2019s raw targeting object \u2014 overrides locations/include'),
     },
     outputSchema: { ok: z.boolean().optional(), total: z.number().optional(), active: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/audience-count', a);
     return ok(d.note, d);
@@ -11308,7 +11444,7 @@ export function registerTools(rawServer, opts = {}) {
       currency: z.string().optional(), dailyBudget: z.number().optional(), countryCode: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), adAccountId: z.string().optional(), suggestedBid: z.any().optional(), bidLimits: z.any().optional(), dailyBudgetLimits: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/bid-pricing', a);
     return ok(d.note, d);
@@ -11397,7 +11533,7 @@ export function registerTools(rawServer, opts = {}) {
       confirm: z.boolean().optional().describe('REQUIRED true to set ACTIVE (real spend)'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), status: z.string().optional(), verifiedStatus: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // destructive: the enum carries ARCHIVED, which is terminal
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/ads-status', a);
     return ok(d.note || `${d.level || 'campaign'} → ${d.verifiedStatus || a.status}.`, d);
@@ -11413,7 +11549,7 @@ export function registerTools(rawServer, opts = {}) {
       country: z.string().optional().describe('default US'),
     },
     outputSchema: { ok: z.boolean().optional(), facet: z.string().optional(), count: z.number().optional(), entities: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/linkedin/ads-targeting', a); return ok(d.note, d); }));
   server.registerTool('create_linkedin_ads_creative', {
     title: 'Create a LinkedIn ad (creative, draft)',
@@ -11604,7 +11740,7 @@ export function registerTools(rawServer, opts = {}) {
       includeTrashed: z.boolean().optional().describe('include trashed files (default false)'),
     },
     outputSchema: { files: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/drive/files', a);
     const lines = (d.files || []).map(f => `• ${f.name} (${f.id})${f.mimeType && f.mimeType.includes('folder') ? ' [folder]' : ''}${f.webViewLink ? ` — ${f.webViewLink}` : ''}`);
@@ -11615,7 +11751,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Fetch one Drive file’s metadata — name, type, size, modified time, a webViewLink to open it and a webContentLink to download it. Pass fileId (from list_drive_files). Read-only.',
     inputSchema: { fileId: z.string().describe('the Drive file id (from list_drive_files)') },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), webViewLink: z.string().optional(), webContentLink: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/drive/file', a);
     return ok(`${d.name} — ${d.mimeType}${d.size ? `, ${d.size} bytes` : ''}${d.webViewLink ? `\nOpen: ${d.webViewLink}` : ''}${d.webContentLink ? `\nDownload: ${d.webContentLink}` : ''}`, d);
@@ -11702,7 +11838,7 @@ export function registerTools(rawServer, opts = {}) {
       range: z.string().optional().describe('A1 range, e.g. "A1:D50" (default A1:Z1000)'),
     },
     outputSchema: { ok: z.boolean().optional(), spreadsheetId: z.string().optional(), range: z.string().optional(), values: z.array(z.array(z.any())).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const id = (String(a.sheetUrl || '').match(/\/spreadsheets\/d\/([\w-]+)/) || [])[1] || a.spreadsheetId;
     if (!id) return { content: [{ type: 'text', text: 'Pass a spreadsheetId or a Google Sheets URL (sheetUrl).' }], isError: true };
@@ -11763,7 +11899,7 @@ export function registerTools(rawServer, opts = {}) {
       docUrl: z.string().optional().describe('a Google Docs URL to read — the document id is extracted from it'),
     },
     outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), title: z.string().optional(), text: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const id = (String(a.docUrl || '').match(/\/document\/d\/([\w-]+)/) || [])[1] || a.documentId;
     if (!id) return { content: [{ type: 'text', text: 'Pass a documentId or a Google Docs URL (docUrl).' }], isError: true };
@@ -11787,7 +11923,7 @@ export function registerTools(rawServer, opts = {}) {
     },
     outputSchema: { ok: z.boolean().optional(), spreadsheetId: z.string().optional(), title: z.string().optional(), url: z.string().optional(), count: z.number().optional(),
       tabs: z.array(z.object({ sheetId: z.number().optional(), title: z.string().optional(), index: z.number().optional(), rows: z.number().optional(), columns: z.number().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/sheets/tabs', { spreadsheetId: a.spreadsheetId, sheetUrl: a.sheetUrl });
     return ok(`“${d.title}” has ${d.count} tab${d.count === 1 ? '' : 's'}: ${(d.tabs || []).map(t => `“${t.title}” (sheetId ${t.sheetId}, ${t.rows}×${t.columns})`).join(', ')}.`, d);
@@ -11900,7 +12036,7 @@ export function registerTools(rawServer, opts = {}) {
       pageToken: z.string().optional().describe('cursor from a previous call'),
     },
     outputSchema: { files: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/onedrive/files', a);
     const lines = (d.files || []).map(f => `• ${f.name} (${f.id})${f.isFolder ? ' [folder]' : ''}${f.webViewLink ? ` — ${f.webViewLink}` : ''}`);
@@ -11911,7 +12047,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Fetch one OneDrive item’s metadata — name, type, size, modified time, a webViewLink to open it and a webContentLink to download it. Pass fileId (from list_onedrive_files). Read-only.',
     inputSchema: { fileId: z.string().describe('the OneDrive item id (from list_onedrive_files)') },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), webViewLink: z.string().optional(), webContentLink: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/onedrive/file', a);
     return ok(`${d.name} — ${d.mimeType || (d.isFolder ? 'folder' : 'file')}${d.size ? `, ${d.size} bytes` : ''}${d.webViewLink ? `\nOpen: ${d.webViewLink}` : ''}${d.webContentLink ? `\nDownload: ${d.webContentLink}` : ''}`, d);
@@ -11955,7 +12091,7 @@ export function registerTools(rawServer, opts = {}) {
       height: z.number().optional().describe('REQUIRED for jpg — output height in pixels'),
     },
     outputSchema: { ok: z.boolean().optional(), fileId: z.string().optional(), sourceName: z.string().optional(), format: z.string().optional(), url: z.string().optional(), bytes: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/onedrive/convert', a);
     return ok(d.note, d);
@@ -12547,7 +12683,16 @@ export function registerTools(rawServer, opts = {}) {
       type: z.string().optional().describe('the job type (video / stitch / avatar / …)'),
       result: z.any().optional().describe('the raw job result payload'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    // THIS IS THE TOOL THAT ACTUALLY DELIVERS A VIDEO, AND IT DECLARED NO WIDGET (fixed 2026-08-23). On the hosted
+    // transport renderJob stops polling at 45s, so EVERY video render is answered by generate_video/render_ad with
+    // {stillRendering:true} and the finished file arrives only here — the tool the comment two blocks below already
+    // calls "THE ORDINARY delivery path for a long render". With no openai/outputTemplate, ChatGPT rendered the ad
+    // card once, on the result that structurally cannot contain the video, and never again: the user asked for a
+    // video and got a card that said so and then never changed. Same template as the render tools, so the finished
+    // file lands in the same card. openai/widgetAccessible lets the card call THIS tool over the host bridge to
+    // finish the job itself (it is free and readOnly, so polling it costs nothing and can spend nothing).
+    _meta: { ...openaiMeta(AD_RESULT_URI, 'Checking your render…', 'Render ready'), 'openai/widgetAccessible': true },
   }, wrap(async ({ id }) => {
     const j = await getJob(id);
     const res = jobResult(j);
@@ -12574,7 +12719,7 @@ export function registerTools(rawServer, opts = {}) {
       inApp: z.array(z.any()).optional().describe('in-app strategy skills + creative recipes ({id, kind/group})'),
       custom: z.array(z.any()).optional().describe('the workspace’s own custom skills ({id, name, directive}) saved via save_skill'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const { readdir, readFile } = await import('node:fs/promises');
     const dir = new URL('../skills/', import.meta.url);
@@ -12604,7 +12749,7 @@ export function registerTools(rawServer, opts = {}) {
     outputSchema: {
       name: z.string().optional().describe('the loaded skill bundle name'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async ({ name }) => {
     const safe = String(name).replace(/[^a-z0-9-]/gi, '');
     const { readFile } = await import('node:fs/promises');
@@ -12655,7 +12800,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max items (default 50, max 200)'),
     },
     outputSchema: { memory: z.array(z.object({ id: z.string().optional(), text: z.string().optional(), category: z.string().optional(), source: z.string().optional() })).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     let list = await readStore('heist.memory.v1'); if (!Array.isArray(list)) list = [];
     const cat = a.category ? String(a.category).toLowerCase() : null;
@@ -12726,7 +12871,7 @@ export function registerTools(rawServer, opts = {}) {
       ads: z.array(z.any()).optional().describe('the saved ads ({key, collection, advertiser, title, body, image, video, link, platform, savedAt, tags})'),
       total: z.number().optional().describe('how many ads the board holds in total, before any collection filter or limit'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const s = await readSwipe();
     const lim = Math.min(500, Math.max(1, +a.limit || 50));
@@ -12796,7 +12941,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the PLAYBOOKS saved in this workspace — the reusable strategy cards (winning hooks, angles, formats and the concrete plays to run) kept from teardowns, angle mining and creatives worth repeating. The same Playbooks the web app\'s Playbooks tab lists. Read one before planning an ad so you re-run what already worked instead of starting cold. Read-only, free.',
     inputSchema: { limit: z.number().optional().describe('max playbooks to return (default 25, max 100)'), full: z.boolean().optional().describe('true to return every hook/angle/play in the text, not just the headline counts') },
     outputSchema: { playbooks: z.array(z.any()).optional(), total: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const list = await readPlaybooks();
     const lim = Math.min(100, Math.max(1, +a.limit || 25));
@@ -12869,7 +13014,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List this workspace’s SAVED CREATORS — the reusable on-camera cast (AI creators made here, a person pulled from a social profile, a consented photo upload). Read-only, FREE. Each entry gives the name, the PORTRAIT URL, where the portrait came from and whether a real person’s likeness consent is on file, how many extra pose plates exist, and any chosen or cloned voice. TO PUT ONE IN A FINISHED AD, pass their id or name as render_ad’s `creator` — that casts them for the whole spot (and skips the character-portrait render, so it costs less than not casting anyone). THE PORTRAIT URL IS THE REUSE HANDLE for the raw lanes — pass it as generate_avatar’s `image` (a talking clip of them), generate_video’s `refImage` (they star in the scene), recast_motion’s `image` (they perform a reference clip’s motion), or generate_image’s `refImages`. CALL THIS BEFORE OFFERING TO GENERATE A NEW PERSON: re-casting somebody the workspace already has keeps the SAME face across every ad, while a fresh person costs credits and breaks that continuity. An empty answer means the workspace genuinely has no cast yet — say so and offer generate_avatar / save_creator, never invent a roster.',
     inputSchema: { limit: z.number().optional().describe('max creators to return (default 24)') },
     outputSchema: { creators: z.array(z.any()).optional().describe('the saved cast — {id, name, image, source, consented, poses, voice, voiceClone, look}'), count: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/creators', a.limit ? { limit: Math.max(1, Math.min(200, Math.round(+a.limit) || 24)) } : {});
     const creators = (d.creators || []).map(c => ({ ...c, image: abs(c.image) })); // portraits ride abs() like every other asset url here
@@ -12959,7 +13104,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max array items to return (default 50)'),
     },
     outputSchema: { key: z.string().optional(), value: z.any().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const key = String(a.key || '').trim();
     if (!STORE_GET_ALLOW.includes(key)) return { content: [{ type: 'text', text: `store_get only reads: ${STORE_GET_ALLOW.join(', ')}.` }], isError: true };
@@ -12976,7 +13121,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'Read this account\'s app settings — the LANGUAGE Hermoso writes ads, copy and answers in, the app appearance (theme), and whether the weekly competitor-watch email is on. Same settings as the web app\'s Settings pane. Read-only, free.',
     inputSchema: {},
     outputSchema: { language: z.string().optional(), theme: z.string().optional(), notifications: z.any().optional(), privacy: z.any().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/settings');
     return ok(`Language: ${d.language}\nAppearance: ${d.theme}\nWeekly competitor-watch email: ${d.notifications?.watchEmail === false ? 'off' : 'on'}\n${d.privacy?.note || ''}`, d);
@@ -13005,7 +13150,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the third-party accounts connected to this workspace (Meta, Google Ads, Google Drive/Sheets/Docs, YouTube, LinkedIn, OneDrive, Slack, …) — provider, status and the connected account label — PLUS which providers are available to connect. Read-only, free.',
     inputSchema: {},
     outputSchema: { connectors: z.array(z.any()).optional(), providers: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/connectors');
     const on = (d.connectors || []).filter(c => c && c.status !== 'revoked');
@@ -13190,7 +13335,7 @@ export function registerTools(rawServer, opts = {}) {
     // enum is precisely how a roster goes stale and the agent is told a real capability does not exist.
     inputSchema: { provider: z.enum(CONN_PICKER_IDS).describe('which connector’s accounts to list') },
     outputSchema: { provider: z.string().optional(), identities: z.array(z.any()).optional(), selectedIds: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const p = CONN_ACCOUNT_PICKERS[a.provider];
     if (!p) return { content: [{ type: 'text', text: `list_connector_accounts covers: ${CONN_PICKER_IDS.join(', ')}.` }], isError: true };
@@ -13279,7 +13424,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'List the members of the current brand workspace — email, role (admin/member) and status. Read-only, free.',
     inputSchema: {},
     outputSchema: { members: z.array(z.any()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/team/members');
     const lines = (d.members || []).map(m => `  • ${m.email} — ${m.role || 'member'}${m.status ? ` (${m.status})` : ''}${m.isYou ? ' (you)' : ''}`);
@@ -13347,7 +13492,7 @@ export function registerTools(rawServer, opts = {}) {
       running: z.number().optional().describe('how many jobs are currently running'),
       jobs: z.array(z.any()).optional().describe('recent jobs ({id, type, status, …}), newest first'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/jobs');
     const lines = (d.jobs || []).slice(0, 12).map(j => `${j.id} ${j.type} ${j.status}`).join('\n');
@@ -13374,7 +13519,7 @@ export function registerTools(rawServer, opts = {}) {
       totals: z.any().optional().describe('headline counts — admin scope only'),
       retention: z.any().optional().describe('how long groups are kept and how many are retained'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/errors', { kind: a?.kind, surface: a?.surface, since: a?.since, limit: a?.limit });
     const gs = d.groups || [];
@@ -13388,7 +13533,7 @@ export function registerTools(rawServer, opts = {}) {
     description: 'One error group in full by fingerprint (from list_errors): every field, plus the most recent redacted occurrences — status, connector, job id, workspace, and a shape-only echo of the inputs. This is what makes a bug reproducible. Read-only, 0 credits.',
     inputSchema: { fingerprint: z.string().describe('the `fp` value from list_errors') },
     outputSchema: { fp: z.string().optional(), kind: z.string().optional(), count: z.number().optional(), samples: z.array(z.any()).optional().describe('most recent occurrences, redacted') },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const g = await apiGet(`/api/errors/${encodeURIComponent(String(a?.fingerprint || '').trim())}`);
     const samples = (g.samples || []).map(s => `  ${s.at} status=${s.status || '—'}${s.jobId ? ` job=${s.jobId}` : ''}${s.connector ? ` connector=${s.connector}` : ''}${s.model ? ` model=${s.model}` : ''}\n  inputs: ${s.inputs ? JSON.stringify(s.inputs).slice(0, 400) : '(none recorded)'}`).join('\n');
@@ -13408,7 +13553,7 @@ export function registerTools(rawServer, opts = {}) {
       candidates: z.array(z.any()).optional().describe('discovered brands ({name, domain, kind, reason})'),
       diagnostics: z.any().optional().describe('discovery diagnostics (LLM tokens, web grounding)'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ domain, mode = 'competitors' }) => {
     const d = await apiPost('/api/inspire/competitors', { domain, mode });
     const list = (d.candidates || []).map(c => `${c.name} (${c.domain || '—'}, ${c.kind})`).join('; ');
@@ -13431,7 +13576,7 @@ export function registerTools(rawServer, opts = {}) {
       google: z.any().optional().describe('Google results ({ads[], cursor} or {error}; null when not requested)'),
       linkedin: z.any().optional().describe('LinkedIn results ({ads[], cursor} or {error}; null when not requested)'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/inspire/fanout', { platforms: ['facebook'], country: 'US', limit: Math.min(12, a.limit || 8), sort: 'longest_running', ...a });
     // SURFACE THE ACTUAL ADS (Dave 2026-07-21: ChatGPT got only "Pulled ads for X" — the structured data never
@@ -13525,7 +13670,7 @@ export function registerTools(rawServer, opts = {}) {
       findings: z.array(z.any()).optional().describe('the found ads ({competitor, platform, foundAt, seed, advertiser, body, media, ad})'),
       total: z.number().optional().describe('how many findings the board holds before the filter/limit'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/watch/latest');
     // ABSENT IS NOT EMPTY ([[failed-read-is-not-empty]]): the route answers null when this workspace has never had a
@@ -13571,7 +13716,7 @@ export function registerTools(rawServer, opts = {}) {
       results: z.array(z.any()).optional().describe('the found ads/videos (normalized card objects with served URLs)'),
       actions: z.any().optional().describe('follow-up actions the research loop suggested'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, brand }) => {
     const brandObj = typeof brand === 'string' ? { name: brand } : brand || null;
     const d = await apiSSE('/api/explore/chat', { messages: [{ role: 'user', content: query }], brand: brandObj });
@@ -13623,7 +13768,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({page_name, body, cta, link, dates, media})'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.query && !a.companyName && !a.pageId) throw new Error('Pass query (keyword) OR companyName/pageId (one advertiser).');
     const common = qp({ country: a.country, status: a.status, media_type: a.mediaType });
@@ -13666,7 +13811,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({advertiser, format, adUrl, image, firstShown, lastShown})'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.domain && !a.advertiserId) throw new Error('Pass domain or advertiserId.');
     const d = await apiGet('/api/google/company-ads', qp({ domain: a.domain, advertiser_id: a.advertiserId, region: a.region, get_ad_details: 'false' }));
@@ -13689,7 +13834,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({advertiser, headline, description, cta, link, media, dates, impressions})'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (!a.company && !a.keyword && !a.companyId) throw new Error('Pass company, keyword, or companyId.');
     const d = await apiGet('/api/linkedin/search', qp({ company: a.company, keyword: a.keyword, companyId: a.companyId, countries: a.countries }));
@@ -13712,7 +13857,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total videos found'),
       videos: z.array(z.any()).optional().describe('the compact video objects ({desc, author, handle, plays, likes, link, cover}), ranked by plays'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/tiktok/search/keyword', query });
     const all = (d.search_item_list || []).map((x) => x.aweme_info).filter(Boolean).map((v) => {
@@ -13737,7 +13882,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total reels found'),
       reels: z.array(z.any()).optional().describe('the compact reel objects ({desc, author, handle, plays, likes, link, cover}), ranked by plays'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v2/instagram/reels/search', query });
     const all = (d.reels || d.items || []).map((r) => {
@@ -13764,7 +13909,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total videos found'),
       videos: z.array(z.any()).optional().describe('the compact video objects ({desc, author, handle, plays, link, cover}), ranked by views'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/youtube/search', query });
     const all = (d.videos || []).filter((v) => (v.type || 'video') === 'video').map((v) => {
@@ -13785,7 +13930,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total posts found'),
       posts: z.array(z.any()).optional().describe('the compact post objects ({desc, subreddit, upvotes, comments, link})'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/reddit/search', query, sort: 'top' });
     const all = (d.posts || d.results || []).map((p) => qp({
@@ -13807,7 +13952,7 @@ export function registerTools(rawServer, opts = {}) {
       found: z.number().optional().describe('total posts found'),
       posts: z.array(z.any()).optional().describe('the compact post objects ({desc, author, handle, likes, link, cover})'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/threads/search', query });
     const all = (d.posts || d.results || []).map((p) => {
@@ -13830,7 +13975,7 @@ export function registerTools(rawServer, opts = {}) {
       params: z.object({}).passthrough().optional().describe("endpoint query params, e.g. {handle:'nike'}"),
     },
     outputSchema: {}, // deliberately empty — the raw provider payload (any shape, can be huge) stays in the text
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ path, params }) => {
     const d = await apiGet('/api/sc/run', { __path: path, ...qp(params || {}) });
     const raw = JSON.stringify(d);
@@ -13955,7 +14100,7 @@ export function registerTools(rawServer, opts = {}) {
       url: z.string().optional().describe('the clickable absolute asset URL'),
       downloadUrl: z.string().optional().describe('a direct download URL for the asset'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async ({ url, name }) => {
     const absolute = abs(url);
     const dl = `${API_BASE}/api/download?url=${encodeURIComponent(url)}${name ? `&name=${encodeURIComponent(name)}` : ''}`;
@@ -13973,7 +14118,7 @@ export function registerTools(rawServer, opts = {}) {
       frameTimes: z.array(z.number()).optional().describe('timestamps (seconds) of the sampled frames'),
       transcript: z.string().nullable().optional().describe('verbatim voiceover + on-screen text with a beat list (null when silent/unreachable)'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ url }) => {
     const [fr, tr] = await Promise.all([
       apiGet(`/api/video/frames?n=auto&url=${encodeURIComponent(url)}`).catch(() => null),
@@ -13999,7 +14144,7 @@ export function registerTools(rawServer, opts = {}) {
       top_fix: z.string().optional().describe('the single biggest improvement lever'),
       strengths: z.any().optional().describe('what the ad already does well'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ url, kind = 'image', intent = '' }) => {
     const d = await apiPost('/api/score/ad', { url, kind, intent, format: kind });
     if (!d) return ok('Could not score that ad.');
@@ -14153,7 +14298,7 @@ export function registerTools(rawServer, opts = {}) {
       teardown: z.any().optional().describe('the playbook — hook_taxonomy, campaigns, white_space, counter_plays, not_saying'),
       adCount: z.number().optional().describe('how many ads were analyzed'),
     },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ competitor, ads, language }) => {
     const name = String(competitor?.name || '').trim();
     if (!name) throw new Error('competitor.name is required.');
@@ -14350,7 +14495,7 @@ export function registerTools(rawServer, opts = {}) {
       includeUnpublished: z.boolean().optional().describe('Facebook only — also return unpublished drafts (hidden by default)'),
     },
     outputSchema: { target: z.string().optional(), account: z.string().nullable().optional(), pageId: z.string().optional(), posts: z.array(z.any()).optional(), cursor: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/posts', { ...(a.target ? { target: a.target } : {}), ...(a.pageId ? { pageId: a.pageId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}), ...(a.includeUnpublished ? { includeUnpublished: 'true' } : {}) });
     const rows = (d.posts || []).map(p => `• ${String(p.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 80)} — ${p.id}${p.publishedAt ? ` · ${String(p.publishedAt).slice(0, 10)}` : ''} · ${p.mediaKind}${p.url ? `  ${p.url}` : ''}`);
@@ -14366,7 +14511,7 @@ export function registerTools(rawServer, opts = {}) {
       limit: z.number().optional().describe('max posts (default 50, max 200), newest first'),
     },
     outputSchema: { posts: z.array(z.any()).optional(), total: z.number().optional(), windows: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posts', { ...(a.channel ? { channel: a.channel } : {}), ...(a.limit ? { limit: a.limit } : {}) });
     const posts = d.posts || [];
@@ -14389,7 +14534,7 @@ export function registerTools(rawServer, opts = {}) {
       tier: z.enum(['luxury', 'premium', 'drugstore']).optional().describe('product tier, used with category — changes the FINISH of the room, never the room. Default premium.'),
     },
     outputSchema: { hooks: z.array(z.any()).optional(), settings: z.array(z.any()).optional(), patterns: z.array(z.any()).optional(), patternRule: z.string().optional(), suggestedSetting: z.any().optional(), evidence: z.any().optional(), ranked: z.any().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/hooks/library', { ...(a.channel ? { channel: a.channel } : {}), ...(a.authentic ? { authentic: '1' } : {}), ...(a.category ? { category: a.category } : {}), ...(a.tier ? { tier: a.tier } : {}) });
     const usable = (d.hooks || []).filter(h => h.usable);
@@ -14422,7 +14567,7 @@ export function registerTools(rawServer, opts = {}) {
       channel: z.string().optional().describe('restrict to one channel'),
     },
     outputSchema: { axis: z.string().optional(), groups: z.array(z.any()).optional(), finding: z.any().optional(), excludedUnattributed: z.number().optional(), minN: z.number().optional(), totalPosts: z.number().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posts/performance', { ...(a.axis ? { axis: a.axis } : {}), ...(a.channel ? { channel: a.channel } : {}) });
     const gs = d.groups || [];
@@ -14441,7 +14586,7 @@ export function registerTools(rawServer, opts = {}) {
       converting: z.boolean().optional().describe('pass false ONLY when the user has told you these posts are getting seen and are not converting — it re-reads the ones that are earning their reach as an offer problem instead of a win. Omit when you do not know; we cannot measure it.'),
     },
     outputSchema: { summary: z.string().optional(), posts: z.array(z.any()).optional(), counts: z.any().optional(), baselines: z.array(z.any()).optional(), finding: z.any().optional(), source: z.any().optional(), conversionNote: z.string().nullable().optional() },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posts/diagnose', { ...(a.channel ? { channel: a.channel } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.converting === undefined ? {} : { converting: String(a.converting) }) });
     // `summary` is rendered SERVER-SIDE by the same pure function the in-app agent calls. Formatting it again

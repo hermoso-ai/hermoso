@@ -32,12 +32,37 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
   // RFC 9728 protected-resource metadata — tells Claude.ai where to get a token. (Authorization-server metadata
   // is served by the auth provider itself, e.g. Firebase/your IdP.) Scopes match the AS metadata + minted token
   // (mcp/oauth.mjs): hermoso.research / hermoso.generate.
-  app.get('/.well-known/oauth-protected-resource', (req, res) => res.json({
-    resource: `${BASE}/mcp`,
+  // ── SERVED AT BOTH URL FORMS, FROM ONE HANDLER (2026-08-20) ──────────────────────────────────────────────────
+  // The resource identifier is `${BASE}/mcp`, which HAS a path component — so RFC 9728 §3.1 derives its metadata
+  // URL by INSERTING the well-known suffix before that path ("any terminating slash (/) following the host
+  // component MUST be removed before inserting /.well-known/ and the well-known URI path suffix between the host
+  // component and the path"), i.e. /.well-known/oauth-protected-resource/mcp. We served only the ROOT form, and
+  // that was not a cosmetic gap — it was a DEAD END for any client that does not use our WWW-Authenticate hint,
+  // because RFC 9728 §3.3 applies a DIFFERENT validation rule depending on how the client arrived:
+  //   • via the `resource_metadata` hint → `resource` MUST equal the URL used to reach the resource server
+  //     (`${BASE}/mcp`). Our document satisfies this, which is why Claude connects today.
+  //   • by CONSTRUCTING the well-known URL → `resource` MUST equal the identifier the suffix was inserted into.
+  //     From the ROOT form that identifier is `${BASE}` (no /mcp) while our document says `${BASE}/mcp`, and the
+  //     rule is "the data contained in the response MUST NOT be used". So a hint-less client had nowhere to land:
+  //     the suffixed URL 404'd, and the root URL it fell back to failed validation.
+  // Serving BOTH is explicitly sanctioned — the MCP spec's fallback order is suffixed-then-root ("Serve metadata
+  // at a well-known URI … either: At the path of the server's MCP endpoint … or At the root"). ONE handler, never
+  // a second copy of the document: two copies drift, and a stale one is worse than a 404.
+  //
+  // DELIBERATELY ASYMMETRIC with /.well-known/oauth-authorization-server (mcp/oauth.mjs), which is NOT aliased:
+  // its `issuer` is BASE with NO path component, so RFC 8414 §3.1 puts its metadata at the root URL, and §3.3
+  // would force a client to REJECT the identical document served under a /mcp suffix (it would have constructed
+  // that URL from issuer identifier `${BASE}/mcp`, which is not what the document says). The 404 there is
+  // CORRECT and is what lets a probing client fall through cleanly. Alias it only if `issuer` ever grows a path.
+  const MCP_PATH = '/mcp';                            // the resource's path component — app.all(MCP_PATH) below
+  const protectedResourceMetadata = (req, res) => res.json({
+    resource: `${BASE}${MCP_PATH}`,
     authorization_servers: [process.env.HEIST_OAUTH_ISSUER].filter(Boolean),
     scopes_supported: ['hermoso.research', 'hermoso.generate'],
     bearer_methods_supported: ['header'],
-  }));
+  });
+  app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
+  app.get(`/.well-known/oauth-protected-resource${MCP_PATH}`, protectedResourceMetadata);
 
   // Per-session Streamable-HTTP transports. Each authenticated session gets its own McpServer with the same tools.
   //
@@ -131,7 +156,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     await transport.handleRequest(req, res, req.body);
   }
 
-  app.all('/mcp', async (req, res) => {
+  app.all(MCP_PATH, async (req, res) => {
     const auth = req.headers.authorization || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     const user = token ? await verifyBearer(token).catch(() => null) : null;
