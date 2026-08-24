@@ -130,6 +130,18 @@ export async function apiPut(p, body = {}) {
 // file reads on the hosted connector (it runs on the SERVER host, not the user's machine — an LFI/exfil vector).
 export const isRemote = () => !!mcpCtx.getStore();
 
+// DOES THIS HOST RENDER OUR WIDGETS ITSELF?
+// ChatGPT (the Apps SDK) draws every finished render in `ui://widget/ad-result.html`, hydrated from
+// `structuredContent`. For that host the inline base64 image block in `content` is not just redundant, it is
+// actively harmful: a finished 1:1 render is ~1 MB of base64, and a result that size arrived in ChatGPT with an
+// EMPTY toolOutput — the card drew its "No media in this result yet" empty state while the model narrated success
+// from the text block. Measured 2026-08-23: structuredContent, outputSchema, the tools/list binding and the widget
+// itself were each verified correct in isolation, and the oversized `content` was the only thing left.
+// Claude has no widget, so it KEEPS the inline block — that is the only reason it renders an image in chat at all.
+// Advisory and fail-open: an unrecognised or absent client behaves exactly as before.
+const WIDGET_HOSTS = /openai|chatgpt/i;
+export const hostRendersWidgets = () => WIDGET_HOSTS.test(mcpCtx.getStore()?.client || '');
+
 // ── WHICH WORKSPACE'S STORE KEYS THIS CALL WRITES ──────────────────────────────────────────────────────────────
 // The suffix synced store keys carry (`` = the bare/anchor keys, `<clientSlug>` = a sub-brand). It comes from the
 // SERVER (`GET /api/workspace` → resolveWs), never from this process's environment, because on the hosted twin the

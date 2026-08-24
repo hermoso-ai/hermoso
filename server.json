@@ -3,7 +3,7 @@
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
   "description": "681 tools, all usable alone: ad research, video ads, publishing, campaigns. Meta, Google, TikTok.",
-  "version": "0.1.140",
+  "version": "0.1.141",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.140",
+      "version": "0.1.141",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

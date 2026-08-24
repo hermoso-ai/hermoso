@@ -4,7 +4,7 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, hostRendersWidgets } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
@@ -139,6 +139,7 @@ export const MCP_INSTRUCTIONS = [
 // Claude can't play video inline — attach the FIRST FRAME as an image block next to the link so the spot is
 // visible in chat (0 credits; ffmpeg still via /api/video/frames).
 async function videoPosterBlock(videoUrl) {
+  if (hostRendersWidgets()) return null; // the host draws the clip itself — see hostRendersWidgets()
   try {
     const d = await apiGet('/api/video/frames', { url: videoUrl, n: 1 });
     const f = (d.frames || [])[0]; if (!f || !/^data:image\//.test(f)) return null;
@@ -147,6 +148,10 @@ async function videoPosterBlock(videoUrl) {
   } catch (e) { console.error('[mcp] video poster failed:', String(e?.message || e).slice(0, 160)); return null; } // silent-null keeps the link usable; log so a missing poster is diagnosable (Dave hit this on Claude.ai)
 }
 async function imageBlock(url) {
+  // A HOST WITH A WIDGET DOES NOT NEED A MEGABYTE OF BASE64, AND IS HARMED BY IT (2026-08-23).
+  // Skipped here, at the one place both builders live, rather than at the 11 call sites — a new tool that shows a
+  // render inherits the behaviour instead of having to remember it. Fails OPEN: an unknown client keeps the block.
+  if (hostRendersWidgets()) return null;
   try {
     const r = await fetch(url); if (!r.ok) return null;
     const ct = (r.headers.get('content-type') || 'image/jpeg').split(';')[0];
@@ -892,6 +897,10 @@ export function parseToolScope(raw) {
   return { groups: asked };
 }
 
+// Tools an Apps-SDK host (ChatGPT) must not be offered. See the seam in registerTools for why, and note this is
+// a HOST rule, not a capability we removed: every other surface still offers both.
+const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan']);
+
 export function registerTools(rawServer, opts = {}) {
   // SCOPING (2026-08-05). The full roster is 301 tools ≈ 602 KB / ~154k tokens of JSON Schema. Clients that defer
   // tool schemas (Claude Code, claude.ai) never pay that, but one that loads every definition eagerly spends most
@@ -953,6 +962,16 @@ export function registerTools(rawServer, opts = {}) {
         handleOf[name] = h;
         // DISABLED, NOT SKIPPED — see (1) above. `disable()` is the SDK's own call and removes it from tools/list.
         if (h && !enabledGroups.has(group)) { try { h.disable(); } catch {} }
+        // WITHHELD FROM ONE HOST, for that host's rules rather than ours (2026-08-23).
+        // OpenAI's plugin policy permits commerce only in PHYSICAL goods: "selling digital products or services,
+        // including subscriptions, digital content, tokens, or credits, is not allowed." buy_credits hands back a
+        // one-click charge on the saved card or a Stripe link, and upgrade_plan changes a paid plan — both are
+        // exactly that. The same policy explicitly ALLOWS a user to "sign in to an existing paid account and access
+        // features already included in their subscription", which is why nothing else here is affected.
+        // Deliberately NOT a group: both live in `core`, which every roster force-adds, and moving them would take
+        // them away from Claude, Cursor and the CLI too. Dave's position is that a customer controls their own
+        // billing wherever they use Hermoso; this is OpenAI's constraint on OpenAI's surface, nothing wider.
+        if (h && WITHHELD_FROM_WIDGET_HOSTS.has(name) && opts.widgetHost) { try { h.disable(); } catch {} }
         return h;
       };
       const v = Reflect.get(t, p);
@@ -3917,10 +3936,14 @@ export function registerTools(rawServer, opts = {}) {
     return ok(d.summary, d); // print the READ-BACK sentence verbatim — never narrate an object we did not read back
   }));
   // ── META LEAD ADS (2026-08-10) — instant forms + on-demand lead retrieval ──────────────────────────────────
-  // Needs pages_manage_ads + leads_retrieval, both at Meta STANDARD access on this app: they work for people
-  // holding a role on it and 403 for everyone else until App Review grants Advanced Access. A connection made
-  // before those permissions were requested cannot gain them by retrying — the server's 403 says so and names
-  // the reconnect, so it is printed verbatim rather than summarised.
+  // Needs pages_manage_ads + leads_retrieval, both of which Hermoso's Meta consent screen asks for. A connection
+  // made before those permissions were added cannot gain them by retrying — the server's 403 says so and names the
+  // reconnect, so it is printed verbatim rather than summarised.
+  // NO ACCESS-TIER SENTENCE HERE, DELIBERATELY (2026-08-23). Meta's tier is a moving state — it moved once already
+  // this year, when Meta renamed Standard -> LIMITED and Advanced -> FULL on 2026-05-05 — and a moving state
+  // written into a tool description goes stale the day it changes, at which point an agent reads it and REFUSES a
+  // capability we ship ([[prompt-rosters-go-stale]]). The tier belongs in the runtime refusal, which is computed;
+  // see lib/meta-access.mjs. Dave 2026-08-23: "advertise itself as having access to those meta scopes".
   server.registerTool('list_meta_pixels', {
     title: 'List Meta Pixels on an ad account',
     description: 'List the META PIXELS on one of the brand’s ad accounts — id, name, when it was created, and WHEN IT LAST FIRED. This is where the pixelId every conversion tool needs comes from: create_meta_ad takes it (with conversionEvent) to optimise an ad set for OFFSITE_CONVERSIONS instead of link clicks, and create_meta_audience needs it to build a website retargeting audience. Without this tool that id could only be read off a screen in Events Manager. READ lastFiredAt BEFORE YOU TRUST A PIXEL: one that has NEVER FIRED is not installed on the site, so an ad optimising against it will spend and never learn. Pass includeCode:true to get the <script> snippet for installation (it is long, so it is off by default). Read-only, free.',
@@ -3949,7 +3972,7 @@ export function registerTools(rawServer, opts = {}) {
   }));
   server.registerTool('list_meta_lead_forms', {
     title: 'List Meta instant (lead) forms',
-    description: 'List the INSTANT LEAD FORMS on a connected Facebook Page — id, name, status, how many leads each has collected and what each one asks. This is where the formId every other lead tool needs comes from, and calling it before create_meta_lead_form is how you avoid building a duplicate. Read-only, free. NEEDS the pages_manage_ads permission, which is at Standard Access on the Hermoso app: it works for people who hold a role on the app and Meta refuses it for everyone else until App Review grants Advanced Access. If Meta answers "Requires pages_manage_ads", the user must RECONNECT Meta — a connection made before that permission was requested cannot gain it by retrying.',
+    description: 'List the INSTANT LEAD FORMS on a connected Facebook Page — id, name, status, how many leads each has collected and what each one asks. This is where the formId every other lead tool needs comes from, and calling it before create_meta_lead_form is how you avoid building a duplicate. Read-only, free. NEEDS the pages_manage_ads permission, which Hermoso’s Meta consent screen asks for. If Meta answers "Requires pages_manage_ads", the user must RECONNECT Meta under Settings ▸ Connectors ▸ Meta — a connection made before that permission was added cannot gain it by retrying. Call the tool rather than pre-refusing: any refusal comes from Meta and names the one thing that fixes it.',
     inputSchema: {
       pageId: z.string().optional().describe('which connected Page (from list_meta_pages) — required only if the brand has more than one'),
       limit: z.number().optional().describe('max rows (1–100, default 25)'),
@@ -3964,7 +3987,7 @@ export function registerTools(rawServer, opts = {}) {
   }));
   server.registerTool('create_meta_lead_form', {
     title: 'Create a Meta instant (lead) form',
-    description: 'Create an INSTANT LEAD FORM on a connected Facebook Page — the in-app form a Meta lead ad opens instead of sending someone to a website, which is why lead ads convert far better than a landing page on mobile. `questions` takes Meta’s own type names, e.g. ["FULL_NAME","EMAIL","PHONE"]; for anything bespoke pass {type:"CUSTOM", label:"What size fleet do you run?"} and add options:[…] to make it a dropdown. Ask FEWER questions than you think — every extra field costs completions. privacyPolicyUrl is REQUIRED: the form collects real people’s contact details and has to say where their data goes. Optional: headline, contextCard {title, bullets[], buttonText} for the why-should-I screen, thankYou {title, body, buttonType, buttonText, websiteUrl}, locale, followUpActionUrl. CREATING A FORM SPENDS NOTHING and publishes nothing — it is invisible to the public until an ad points at it (create_meta_ad with objective:"OUTCOME_LEADS" + leadFormId), and that ad is created PAUSED. Read the submissions with read_meta_leads. NEEDS pages_manage_ads (Standard Access — see list_meta_lead_forms).',
+    description: 'Create an INSTANT LEAD FORM on a connected Facebook Page — the in-app form a Meta lead ad opens instead of sending someone to a website, which is why lead ads convert far better than a landing page on mobile. `questions` takes Meta’s own type names, e.g. ["FULL_NAME","EMAIL","PHONE"]; for anything bespoke pass {type:"CUSTOM", label:"What size fleet do you run?"} and add options:[…] to make it a dropdown. Ask FEWER questions than you think — every extra field costs completions. privacyPolicyUrl is REQUIRED: the form collects real people’s contact details and has to say where their data goes. Optional: headline, contextCard {title, bullets[], buttonText} for the why-should-I screen, thankYou {title, body, buttonType, buttonText, websiteUrl}, locale, followUpActionUrl. CREATING A FORM SPENDS NOTHING and publishes nothing — it is invisible to the public until an ad points at it (create_meta_ad with objective:"OUTCOME_LEADS" + leadFormId), and that ad is created PAUSED. Read the submissions with read_meta_leads. NEEDS pages_manage_ads — see list_meta_lead_forms for what to do if Meta refuses it.',
     inputSchema: {
       name: z.string().describe('internal name for the form — not shown to the person filling it in'),
       questions: z.array(z.any()).describe('Meta question types as strings ("FULL_NAME","EMAIL","PHONE","COMPANY_NAME","JOB_TITLE","CITY","ZIP","WORK_EMAIL","DATE_TIME"…) or objects {type,label,key,options[]} for CUSTOM'),
@@ -4003,7 +4026,7 @@ export function registerTools(rawServer, opts = {}) {
   }));
   server.registerTool('read_meta_leads', {
     title: 'Read Meta lead-ad submissions',
-    description: 'Read the LEADS a form (formId) or a single ad (adId) has collected — the real answers people submitted, fetched live from Meta. THIS RETURNS REAL PEOPLE’S CONTACT DETAILS (names, emails, phone numbers). Treat it as the user’s own customer data: show only what they asked for, never post a lead list anywhere public, and do not copy it into an unrelated document. Hermoso PULLS these on demand and keeps no copy — nothing here watches, polls or files leads anywhere, so if the user wants this batch kept, put it somewhere THEY own in the same turn (a Google Sheet with create_sheet / append_to_sheet, a doc, or their own CRM). Meta makes each lead available for 90 days after it is submitted; anything older is handled in Meta’s own Leads Center and CRM integrations. Narrow with since/until (ISO dates), page with cursor, or pass redact:true to see counts, timestamps and which ad produced each lead WITHOUT the personal details. NEEDS leads_retrieval (Standard Access — see list_meta_lead_forms).',
+    description: 'Read the LEADS a form (formId) or a single ad (adId) has collected — the real answers people submitted, fetched live from Meta. THIS RETURNS REAL PEOPLE’S CONTACT DETAILS (names, emails, phone numbers). Treat it as the user’s own customer data: show only what they asked for, never post a lead list anywhere public, and do not copy it into an unrelated document. Hermoso PULLS these on demand and keeps no copy — nothing here watches, polls or files leads anywhere, so if the user wants this batch kept, put it somewhere THEY own in the same turn (a Google Sheet with create_sheet / append_to_sheet, a doc, or their own CRM). Meta makes each lead available for 90 days after it is submitted; anything older is handled in Meta’s own Leads Center and CRM integrations. Narrow with since/until (ISO dates), page with cursor, or pass redact:true to see counts, timestamps and which ad produced each lead WITHOUT the personal details. NEEDS leads_retrieval — see list_meta_lead_forms for what to do if Meta refuses it.',
     inputSchema: {
       formId: z.string().optional().describe('every lead this form has ever collected (from list_meta_lead_forms)'),
       adId: z.string().optional().describe('just the leads this ONE ad produced (from list_meta_ads) — pass this OR formId, never both'),
@@ -11690,7 +11713,7 @@ export function registerTools(rawServer, opts = {}) {
   server.group('channels');
   server.registerTool('manage_meta_post', {
     title: 'Edit or delete a published post',
-    description: 'Edit the text of, or delete, a published post. target:"facebook" → edit the message (action:"edit", message:…) OR delete (action:"delete"); target:"threads" → delete only (Threads has no edit API); target:"instagram" → DELETE ONLY — Meta lets you change nothing on a published Instagram post except whether comments are enabled, so a caption cannot be fixed; deleting covers ordinary posts, Stories, Reels and ENTIRE carousel albums (Instagram cannot remove one card out of an album — pass the album’s own media id, from list_instagram_media). Deleting is permanent. FOR INSTAGRAM, CALL IT WITHOUT confirm FIRST: nothing is deleted and you get back the post’s real caption, its likes and comments and how many carousel cards go with it — show the user exactly that, then call again with confirm:true plus confirmName (and confirmChildren for an album) if the refusal asks for them. A post nobody has liked or commented on yet stays a one-call delete. INSTAGRAM DELETE NEEDS A RECONNECT AND IS PENDING APP REVIEW: the `instagram_manage_contents` permission joined Hermoso’s Meta grant on 2026-08-05, so any Meta connection made before then must be reconnected (Settings ▸ Connectors ▸ Meta) — and until Meta App Review clears, Meta grants that permission only to admins, developers and testers of the app. Tell the user that rather than retrying.',
+    description: 'Edit the text of, or delete, a published post. target:"facebook" → edit the message (action:"edit", message:…) OR delete (action:"delete"); target:"threads" → delete only (Threads has no edit API); target:"instagram" → DELETE ONLY — Meta lets you change nothing on a published Instagram post except whether comments are enabled, so a caption cannot be fixed; deleting covers ordinary posts, Stories, Reels and ENTIRE carousel albums (Instagram cannot remove one card out of an album — pass the album’s own media id, from list_instagram_media). Deleting is permanent. FOR INSTAGRAM, CALL IT WITHOUT confirm FIRST: nothing is deleted and you get back the post’s real caption, its likes and comments and how many carousel cards go with it — show the user exactly that, then call again with confirm:true plus confirmName (and confirmChildren for an album) if the refusal asks for them. A post nobody has liked or commented on yet stays a one-call delete. INSTAGRAM DELETE NEEDS A RECONNECT ON AN OLD CONNECTION: the `instagram_manage_contents` permission joined Hermoso’s Meta grant on 2026-08-05, so any Meta connection made before then must be reconnected (Settings ▸ Connectors ▸ Meta) before Instagram will accept a delete. Call the tool rather than pre-refusing — every refusal it can raise names the one thing that fixes it.',
     inputSchema: {
       postId: z.string().describe('the post id returned by post_to_meta — for Instagram, the media id from list_instagram_media'),
       action: z.enum(['edit', 'delete']).describe('edit the text (FB only) or delete the post'),

@@ -113,6 +113,16 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
   // anything: building a 36 MB McpServer purely to have it reject the request is what turned a retry storm into
   // an OOM. Status and message are byte-identical to the SDK's, so no client sees a behaviour change.
   const needSession = (res) => res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: Mcp-Session-Id header is required' }, id: null });
+  // The one place the host name is turned into a decision, so the anon and session paths cannot diverge.
+  const isWidgetHost = (name) => /openai|chatgpt/i.test(String(name || ''));
+  // The client's own name, off the initialize params. Never trusted for anything but presentation.
+  const clientInfoOf = (body) => {
+    try {
+      const msgs = Array.isArray(body) ? body : [body];
+      for (const m of msgs) if (m && m.method === 'initialize') return String(m.params?.clientInfo?.name || '').slice(0, 64);
+    } catch {}
+    return '';
+  };
   const hasInitialize = (body) => (Array.isArray(body) ? body : [body]).some((m) => m && m.method === 'initialize');
 
   // ── PRE-AUTH DISCOVERY (registry crawlers + evaluating agents) ────────────────────────────────────────────────
@@ -149,7 +159,10 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
 
   async function serveAnonDiscovery(req, res, scope) {
     const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-    registerTools(server, { only: scope?.groups }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
+    // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
+    // only the authenticated path would leave both tools listed in the submission.
+    registerTools(server, { only: scope?.groups, widgetHost: isWidgetHost(clientInfoOf(req.body)) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
     await server.connect(transport);
@@ -188,14 +201,21 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       if (scope === false) return; // unknown group — already answered 400, and nothing was allocated
       sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body)) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
         onsessioninitialized: (id) => { entry.lastSeen = Date.now(); sessions.set(id, entry); sweepSessions(); },
       });
       transport.onclose = () => { if (transport.sessionId) dropSession(transport.sessionId, 'transport closed'); };
-      entry = { transport, server, user, lastSeen: Date.now() };
+      // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
+      // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
+      // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
+      entry = { transport, server, user, lastSeen: Date.now(), client: clientInfoOf(req.body) };
+      // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
+      // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
+      // the predicate can be corrected from evidence instead of from a hunch.
+      if (entry.client) console.error(`[mcp-remote] client: ${entry.client}`);
       await server.connect(transport);
       // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
       // objects are otherwise reachable only from this request's still-open response — close them explicitly
@@ -217,7 +237,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     // forgeable value is exactly the hole resolveWs exists to close. The workspace a hosted connector acts in is
     // pinned SERVER-SIDE on the agent key (use_brand → /api/keys/brand, membership-checked) and re-authorized by
     // resolveWs on every request, so it resolves identically here and over stdio without this transport naming it.
-    await mcpCtx.run({ token, remote: true }, () => entry.transport.handleRequest(req, res, req.body));
+    await mcpCtx.run({ token, remote: true, client: entry.client || '' }, () => entry.transport.handleRequest(req, res, req.body));
   });
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HEIST_PUBLIC_URL)'}/mcp`);

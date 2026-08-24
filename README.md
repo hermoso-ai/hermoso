@@ -27,16 +27,31 @@ just download it. Use the one piece you need, or all of it together.
 Paste **`https://app.hermoso.ai/mcp`** into Claude → Settings → Connectors → *Add custom connector*, approve with
 your Hermoso account, done — the full toolset with your saved brand context, billed to your plan.
 
-## Quickstart for Claude Code / Cursor / scripts (2 minutes)
+## Quickstart for Claude Code (one line)
 
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai) — free tier included; plans & credits are the
    same ones the web Studio uses.
-2. **Create an agent key**: app.hermoso.ai → **Settings → Agents & API** → Create API key (`hmk_…`).
-3. **Connect** — no clone needed, `npx` runs the published `hermoso` package (Claude Code shown; any MCP client works):
+2. **Run one line.** Your browser opens once to sign in. Nothing to paste, and no key lands in `.claude.json`:
+
+```bash
+npm install -g hermoso && hermoso auth login && claude mcp add hermoso -- npx -y hermoso mcp
+```
+
+3. **Ask for what you want**, in your normal prompts. Claude Code reaches for a tool, or runs the `hermoso`
+   command in your terminal, whichever the job needs. You type neither.
+
+Ad campaign and analytics tools stay out of the tool list until you switch them on with `enable_tools`, which
+keeps it small. On a machine with no browser, sign in with `hermoso auth login --token hmk_…` using a key from
+**Settings → Agents & API**, or skip the sign-in and pass the key to the client instead:
 
 ```bash
 claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso mcp
 ```
+
+The hosted URL works in Claude Code too, but it is the worse path there and it is worth knowing why:
+`claude mcp add --transport http hermoso https://app.hermoso.ai/mcp` is accepted, and then `claude mcp list`
+reports `! Needs authentication` because the client will not start the OAuth flow by itself — you have to open a
+session, run `/mcp`, find the server and press Authenticate. Measured against Claude Code 2.1.241 on 2026-08-23.
 
 Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
@@ -45,13 +60,15 @@ learned memory you set up in the web app apply automatically (`get_brand` shows 
 ## 1. MCP server (stdio) — Claude Code / Cursor / Codex
 
 `hermoso mcp` runs a stdio MCP server exposing the full toolset. The published `hermoso` package means no clone —
-`npx -y hermoso mcp` fetches and runs it:
+`npx -y hermoso mcp` fetches and runs it. Sign in once with the CLI and no key goes into any client config,
+because `hermoso mcp` reads the bearer `hermoso auth login` stored:
 
 ```bash
-claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso mcp
+npm install -g hermoso && hermoso auth login && claude mcp add hermoso -- npx -y hermoso mcp
 ```
 
-Cursor / Codex — add to `mcp.json` (Codex uses the TOML equivalent):
+Cursor / Codex — sign in the same way, then add to `mcp.json` (Codex uses the TOML equivalent). Drop the `env`
+block entirely if you signed in above; it is there for CI, where the process cannot read your home directory:
 
 ```json
 { "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso", "mcp"],
