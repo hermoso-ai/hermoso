@@ -469,6 +469,28 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
   var POLL_MS = 5000, FIRST_MS = 1500, MAX_POLLS = 72, MAX_MISSES = 3;   // 72 x 5s = 6 min, past any render this card carries
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
   function looksVideo(u) { return /\.(mp4|webm|mov|m4v)([?#]|$)/i.test(String(u || '')); }
+  function urlOf(x) { return typeof x === 'string' ? x : ((x && (x.image || x.url || x.src)) || ''); }
+  function picks(out, raw) {
+    var lists = [raw.images, out.images, out.thumbnails, raw.thumbnails];
+    for (var i = 0; i < lists.length; i++) {
+      if (!Array.isArray(lists[i])) continue;
+      var u = lists[i].map(urlOf).filter(Boolean);
+      if (u.length) return u;
+    }
+    return null;
+  }
+  // NOTHING TO SHOW IS NOT A CARD (2026-08-23). Driving Hermoso inside ChatGPT, Dave's conversation filled up with
+  // empty Hermoso cards reading "No media in this result yet." — a full-height bordered box with a wordmark and no
+  // content, sometimes three or four in a row. Every widget-bound tool draws this card on EVERY call, and several
+  // of their results legitimately carry no media at all: render_ad's dryRun and its needsProductPhoto ask,
+  // generate_video's over-length refusal, make_thumbnail's two ask-first gates, a get_job on a job whose type has
+  // no media, and ANY tool throw (wrap() answers {content,isError} with no structuredContent at all, so the widget
+  // is handed {}). In every one of those the model's own text already says what happened, so the card adds a box
+  // and no information. The three states that MUST stay visible are unchanged — media, a pending render, and a
+  // failure — and only the fourth, "nothing", collapses to literally nothing.
+  function collapse() {
+    try { var api = window.openai; if (api && typeof api.notifyIntrinsicHeight === 'function') api.notifyIntrinsicHeight(0); } catch (e) {}
+  }
   // THREE RESULT SHAPES REACH THIS ONE WIDGET and only one of them is flat. Reading just the flat one is why a
   // finished job rendered as "No media": renderJob nests under .raw, but get_job returns the JOB, whose payload is
   // at .result.data. One resolver, so a field added to either reader is found by both.
@@ -486,9 +508,14 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
     // creditsUsed sits BESIDE data on a job envelope ({result:{data:{…}, creditsUsed}}), not inside it — read off a real job row.
     var c = out.creditsUsed != null ? out.creditsUsed : (out.credits != null ? out.credits : (raw.creditsUsed != null ? raw.creditsUsed : (out.result ? out.result.creditsUsed : null)));
     v.credits = c;
-    v.slides = (Array.isArray(raw.images) && raw.images.length) ? raw.images : ((Array.isArray(out.images) && out.images.length) ? out.images : null);
+    // A PICTURE SET ARRIVES UNDER THREE NAMES AND IN TWO SHAPES, and reading only images[] is why every
+    // SUCCESSFUL make_thumbnail call painted "No media in this result yet." (2026-08-23): that tool answers
+    // {thumbnails:[{image,label,…}]} — a real, delivered, PAID render this card threw away. So resolve the first
+    // non-empty list out of all four spellings and map each entry to its url, string or object alike.
+    v.slides = picks(out, raw);
+    if (v.slides && v.slides.length === 1) { v.image = v.slides[0]; v.slides = null; } // one picture is a picture, not a one-tile grid
     v.video = out.video || raw.video || null;
-    v.image = out.image || raw.image || null;
+    v.image = v.image || out.image || raw.image || null;
     v.poster = out.poster || raw.poster || null;
     var any = out.url || raw.url || null;
     if (!v.video && !v.image && any) { if (looksVideo(any)) { v.video = any; } else { v.image = any; } }
@@ -524,7 +551,7 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
     if (v.credits != null) pills += '<span class="pill">' + esc(v.credits) + ' credits</span>';
     var footer = '<div class="meta">' + pills + '<span class="spacer"></span><span class="wordmark">Hermoso</span></div>';
     var body;
-    if (v.slides) body = '<div class="grid">' + v.slides.map(function (u) { return '<img src="' + esc(u) + '" alt="carousel slide" loading="lazy">'; }).join('') + '</div>';
+    if (v.slides) body = '<div class="grid">' + v.slides.map(function (u) { return '<img src="' + esc(u) + '" alt="rendered image" loading="lazy">'; }).join('') + '</div>';
     else if (v.video) body = '<div class="media"><video controls muted autoplay loop playsinline preload="metadata"' + (v.poster ? ' poster="' + esc(v.poster) + '"' : '') + ' src="' + esc(v.video) + '"></video></div>';
     else if (v.image) body = '<div class="media"><img src="' + esc(v.image) + '" alt="generated ad"></div>';
     else if (v.error) body = '<div class="empty bad">This render did not finish: ' + esc(v.error) + '</div>';
@@ -536,7 +563,8 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
       else note = 'Checking every few seconds; this card updates itself the moment it is ready.';
       body = '<div class="pending"><span class="spin"></span><span>Rendering' + (v.jobId ? ' — job ' + esc(v.jobId) : '') + '. Video renders take 1–3 minutes.<span class="sub">' + note + '</span></span></div>';
     }
-    else body = '<div class="empty">No media in this result yet.</div>';
+    // …and with no media, no pending render and no failure there is nothing to draw: paint NOTHING (see collapse()).
+    if (!body) { root.innerHTML = ''; stop(); collapse(); return; }
     root.innerHTML = '<div class="card">' + body + footer + '</div>';
     if (v.pending) { schedule(); } else { stop(); }
   }
