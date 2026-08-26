@@ -66,22 +66,38 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
 
   // Per-session Streamable-HTTP transports. Each authenticated session gets its own McpServer with the same tools.
   //
-  // ── A SESSION IS EXPENSIVE, AND THIS MAP IS WHY PROD OOM'd (2026-08-01) ───────────────────────────────────────
-  // registerTools() builds 248 tool definitions with their zod schemas: **~36 MB of RETAINED heap per McpServer**
-  // (measured, node --expose-gc, 25 instances). This map used to be unbounded and never expired — the only removal
-  // was transport.onclose, which never fires for a client that simply goes away. Prod took 238 `initialize`
-  // handshakes in 49 minutes (238 × 36 MB = ~8.6 GB) on a 4 GiB, maxScale=1 instance and died of
+  // ── A SESSION WAS EXPENSIVE, AND THIS MAP IS WHY PROD OOM'd (2026-08-01, again 2026-08-24) ───────────────────
+  // registerTools() used to rebuild all 681 tool definitions with their zod schemas on EVERY `initialize`:
+  // **114.36 MB of RETAINED heap per McpServer** (measured, node --expose-gc, 25 instances; 114.48 MB measured
+  // again end-to-end through this very transport). The older note here said ~36 MB — true at the 248-tool roster
+  // it was written against, and 3.2x stale by August. This map used to be unbounded and never expired — the only
+  // removal was transport.onclose, which never fires for a client that simply goes away. Prod took 238
+  // `initialize` handshakes in 49 minutes on a 4 GiB, maxScale=1 instance and died of
   // `FATAL ERROR: Reached heap limit` six times in that hour, every crash a full outage.
+  //
+  // THE CAP AND THE TTL WERE NEVER THE FIX, AND 2026-08-24 PROVED IT: they worked exactly as designed (peak
+  // concurrent sessions measured at exactly SESSION_MAX) and prod still crashed four times in twelve hours,
+  // because the cost is CHURN, not retention — one client opened ~175 sessions in 65 minutes. Worse, the cap was
+  // FEEDING the churn: 157 of 258 session closures in a 3-day window were 'over cap', each one answering that
+  // client's next call with a 404, which obliges it to re-initialize, which allocates another full roster and
+  // evicts somebody else. A self-sustaining spiral. The durable fix is in mcp/tools.mjs: the tool definitions are
+  // static per process, so they are built ONCE and replayed. A session now costs **3.06-3.19 MB** — 36x less —
+  // and it is the per-`initialize` figure, not the per-live-session one, that decides whether this survives a
+  // retry storm. See tools/mcp-tool-canon-check.mjs.
   //
   // The 400-on-a-session-miss below was the ACCELERANT: a client that cannot re-initialize opens a NEW session
   // instead of reusing its own, so the leak fed itself. Both are fixed here — bound + expire the map, and answer
   // the one status code that obliges a client to re-initialize.
-  const SESSION_MAX = Math.max(2, Number(process.env.MCP_SESSION_MAX || 16));            // ~580 MB ceiling for MCP
+  // 16 was sized against the old 114 MB session (~1.8 GB). At 3.1 MB it buys ~50 MB, so the cap is now far more
+  // conservative than the heap requires — deliberately left alone here so the memory fix lands as ONE measurable
+  // change; it is env-tunable with no deploy (`--update-env-vars MCP_SESSION_MAX=64` ≈ 200 MB) and raising it is
+  // what finally stops the over-cap eviction churn described above.
+  const SESSION_MAX = Math.max(2, Number(process.env.MCP_SESSION_MAX || 16));
   const SESSION_IDLE_MS = Math.max(1000, Number(process.env.MCP_SESSION_IDLE_MS || 30 * 60e3)); // 1s floor so the expiry is TESTABLE; a short TTL is merely wasteful now that eviction is recoverable
   const sessions = new Map(); // mcp-session-id -> { transport, server, user, lastSeen }  (insertion-ordered = LRU)
   const challenge = (res) => res.status(401).set('WWW-Authenticate', `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource"`).json({ error: 'Authentication required' });
 
-  // Tear a session down for real — dropping the map entry alone would leave the 36 MB McpServer reachable from
+  // Tear a session down for real — dropping the map entry alone would leave the McpServer reachable from
   // the transport's own callbacks. Deleting FIRST makes this re-entrant-safe: transport.close() fires onclose,
   // which calls back in here, and the second pass is a no-op.
   function dropSession(id, why) {
@@ -114,7 +130,22 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
   // an OOM. Status and message are byte-identical to the SDK's, so no client sees a behaviour change.
   const needSession = (res) => res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: Mcp-Session-Id header is required' }, id: null });
   // The one place the host name is turned into a decision, so the anon and session paths cannot diverge.
-  const isWidgetHost = (name) => /openai|chatgpt/i.test(String(name || ''));
+  //
+  // IT READS THE USER-AGENT TOO, AND THAT IS THE HALF THAT MAKES IT WORK (2026-08-24). `clientInfo` rides the
+  // `initialize` params and NOTHING ELSE, so a body-only test can only see the host on that one request. The
+  // anon discovery path is deliberately stateless (`sessionIdGenerator: undefined`, a fresh server per request),
+  // so a `tools/list` arriving as its own POST carried no name and every widget-host decision there was FALSE —
+  // and it silently stayed false, because the answer it produces is a full roster, which looks exactly like
+  // success. Measured on prod: `hermoso_capabilities` still shipped its widget and `buy_credits` was still
+  // offered to ChatGPT, i.e. the commerce withholding added in 2ba8e3a63 had never once applied.
+  //
+  // The UA is durable where clientInfo is not: Cloud Run's own request log shows ChatGPT sending
+  // `openai-mcp/1.0.0` on EVERY /mcp request (38 of 38 over the sampled window), initialize and tools/list
+  // alike. Read from the request rather than remembered, so a stateless path is covered by construction.
+  // Still advisory and still presentation-only: it may not change auth, scope or spend. Same regex for both
+  // fields so a host recognised one way is recognised the other.
+  const WIDGET_HOST_RE = /openai|chatgpt/i;
+  const isWidgetHost = (name, req) => WIDGET_HOST_RE.test(String(name || '')) || WIDGET_HOST_RE.test(String(req?.headers?.['user-agent'] || ''));
   // The client's own name, off the initialize params. Never trusted for anything but presentation.
   const clientInfoOf = (body) => {
     try {
@@ -122,6 +153,22 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       for (const m of msgs) if (m && m.method === 'initialize') return String(m.params?.clientInfo?.name || '').slice(0, 64);
     } catch {}
     return '';
+  };
+  // WHAT GETS REMEMBERED ON THE SESSION, and it is NOT simply "the name, or the UA if there isn't one". Written
+  // that way first and a check caught it: `clientInfoOf(req.body) || ua` never falls through, because a host
+  // ALWAYS names itself — the SDK refuses an initialize with no clientInfo at all ("Server not initialized"). So
+  // ChatGPT calling itself anything unremarkable would be remembered under that name, and `hostRendersWidgets()`
+  // matches this string at CALL time to decide whether a render is handed over as a URL or inlined as base64. A
+  // false negative there is how a 1.03MB inline block once made ChatGPT drop structuredContent entirely.
+  //
+  // So it prefers whichever field IDENTIFIES the host, exactly as isWidgetHost does, and falls back to the name
+  // when neither does — a host that is not a widget host is still remembered by its own name, for the log.
+  const rememberedClient = (req) => {
+    const named = clientInfoOf(req.body);
+    const ua = String(req.headers['user-agent'] || '').slice(0, 64);
+    if (named && WIDGET_HOST_RE.test(named)) return named;
+    if (WIDGET_HOST_RE.test(ua)) return ua;
+    return named || ua;
   };
   const hasInitialize = (body) => (Array.isArray(body) ? body : [body]).some((m) => m && m.method === 'initialize');
 
@@ -162,7 +209,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
     // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
     // only the authenticated path would leave both tools listed in the submission.
-    registerTools(server, { only: scope?.groups, widgetHost: isWidgetHost(clientInfoOf(req.body)) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups, widgetHost: isWidgetHost(clientInfoOf(req.body), req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
     await server.connect(transport);
@@ -195,13 +242,13 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       // liberal in what we accept, because the entire point of this fix is that nothing here bricks a client.
       if (sid && !init) return sessionGone(res);
       // Only an `initialize` may mint a session. Anything else naming no session at all is the SDK's own 400 —
-      // answered here so we never pay 36 MB to build a server whose only job would be to reject the request.
+      // answered here so we never build a server whose only job would be to reject the request.
       if (!init) return needSession(res);
       const scope = scopeFor(req, res);
       if (scope === false) return; // unknown group — already answered 400, and nothing was allocated
       sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body)) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
@@ -211,7 +258,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
       // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
-      entry = { transport, server, user, lastSeen: Date.now(), client: clientInfoOf(req.body) };
+      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req) };
       // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
       // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
       // the predicate can be corrected from evidence instead of from a hunch.
@@ -219,7 +266,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       await server.connect(transport);
       // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
       // objects are otherwise reachable only from this request's still-open response — close them explicitly
-      // rather than leaving 36 MB pinned by a dead socket.
+      // rather than leaving a session pinned by a dead socket.
       res.on('close', () => { if (!transport.sessionId || !sessions.has(transport.sessionId)) { try { transport.close(); } catch {} try { server.close(); } catch {} } });
     } else {
       // Touch = LRU. Re-inserting moves the key to the end of the Map's insertion order, so the cap evicts the

@@ -240,11 +240,71 @@ export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 100
   }
 }
 
-// Read a local image path → data URI (so --ref local files force Nano-Banana compositing); pass http(s) URLs through.
+// ── A REFERENCE THAT IS NOT A URL IS A LOCAL PATH, AND ON THE HOSTED CONNECTOR THERE IS NO SUCH THING ──────────
+// ChatGPT renders an image in its OWN sandbox and hands that path straight to generate_video. We opened it and
+// leaked `ENOENT: no such file or directory, open 'sandbox:/mnt/data/…'`, a Node filesystem error sitting where an
+// instruction belongs (reproduced on the live hosted connector 2026-08-24). `upload_file` has answered this
+// correctly since it was written; this says the same thing at the ONE seam every render tool with a file-ish input
+// already passes through (generate_image refImages, make_thumbnail faceImages + logo, generate_video refImage,
+// generate_avatar image), so a render tool added tomorrow inherits the refusal instead of having to remember it.
+// TWO DISTINCT REASONS, deliberately not collapsed into one:
+//   • A NON-FILE URI SCHEME (sandbox:, file:, blob:, gs:, s3:) is never a readable path on ANY surface, so it is
+//     refused on stdio too. `sandbox:/mnt/data/x.png` does not fail because we are hosted; it fails because that
+//     string was never a path.
+//   • A BARE PATH while hosted names the caller's disk, which we cannot see. Refusing is not merely the politer
+//     answer: hosted MCP tool code runs INSIDE our own container, so readFile() there reads OUR filesystem, and a
+//     path that happened to exist would be base64'd into a data: URI and shipped to a video model.
+// A Windows drive letter (`C:\\shots\\hero.png`) looks exactly like a one-character scheme, so a scheme needs two or
+// more characters to count. That path must still open on stdio.
+const REF_SCHEME_NOTE = {
+  sandbox: 'That is a path inside your own sandbox, which only your process can read.',
+  file: 'A file:// URL is not something I can open.',
+  blob: 'A blob: URL only exists inside the browser tab that created it.',
+};
+// VERIFIED ON THE LIVE HOSTED CONNECTOR 2026-08-24 rather than assumed: upload_file with `dataUri` returned a real
+// assets.hermoso.ai URL, and upload_file with `path` refused with its own message. So "call upload_file first" on
+// its own would walk the caller into the same wall. The SOURCE is the part that has to be named.
+const REF_WAYS_OUT = 'Send the bytes instead of a path. Pass the image as a `data:` URI (data:image/png;base64,…), or put it at a public https URL and pass that. Both work here. If you want a reusable Hermoso URL first, call upload_file with `dataUri` or `url` (its `path` source is refused on the hosted connector for this same reason).';
+
+// PURE, so tools/local-ref-refusal-check.mjs runs the real decision instead of reading it.
+export function localRefVerdict(src, { remote = false } = {}) {
+  const s = String(src ?? '').trim();
+  if (!s) return { action: 'skip' };
+  if (/^(https?:|data:)/i.test(s)) return { action: 'pass', value: s };
+  const m = /^([a-z][a-z0-9+.-]+):/i.exec(s);
+  if (m) return { action: 'refuse', reason: 'scheme', scheme: m[1].toLowerCase() };
+  if (remote) return { action: 'refuse', reason: 'hosted' };
+  return { action: 'read' };
+}
+
+export function localRefMessage(src, verdict, { remote = false } = {}) {
+  const s = String(src ?? '').trim().slice(0, 120);
+  const head = verdict.reason === 'scheme'
+    ? `\`${s}\` is a ${verdict.scheme}: URI, not a file I can open.${REF_SCHEME_NOTE[verdict.scheme] ? ` ${REF_SCHEME_NOTE[verdict.scheme]}` : ''}`
+    : `\`${s}\` is a local file path, and on the hosted connector I cannot see your disk.`;
+  const tail = verdict.reason === 'scheme' && !remote ? ' If you meant a file on this machine, pass its real filesystem path.' : '';
+  return `${head} Nothing was rendered and nothing was charged.\n\n${REF_WAYS_OUT}${tail}`;
+}
+
+// `status: 400` is what files this as `user` on the error board. /api/errors/report rebuilds the error from
+// ALLOWLISTED fields and deliberately will not read a `_userInput` marker off an untrusted reporter (a caller could
+// otherwise file its own crash under "the user's fault"), so the status is the honest channel: 400 is in the
+// ledger's AUTHORED_USER_STATUSES. `_userInput` is set too, for the in-process classifier, and it is the accurate
+// marker of the two here since this is a bad ARGUMENT rather than a capability we decline to offer.
+const refRefusal = (msg) => Object.assign(new Error(msg), { status: 400, _userInput: true });
+
+// Read a local image path → data URI (so --ref local files force Nano-Banana compositing); pass http(s) and data
+// URLs through; refuse anything we cannot open, with the way out named.
 export async function toRef(srcOrPath) {
-  if (!srcOrPath) return null;
-  if (/^(https?:|data:)/.test(srcOrPath)) return srcOrPath;
-  const buf = await readFile(srcOrPath);
+  const remote = isRemote();
+  const v = localRefVerdict(srcOrPath, { remote });
+  if (v.action === 'skip') return null;
+  if (v.action === 'pass') return v.value;
+  if (v.action === 'refuse') throw refRefusal(localRefMessage(srcOrPath, v, { remote }));
+  let buf;
+  // Even on stdio a raw ENOENT is a filesystem error where an instruction belongs.
+  try { buf = await readFile(srcOrPath); }
+  catch (e) { throw refRefusal(`I couldn't open \`${String(srcOrPath).trim().slice(0, 120)}\` (${e?.code || 'the read failed'}). Nothing was rendered and nothing was charged.\n\nCheck the path is right, or send the bytes instead: ${REF_WAYS_OUT}`); }
   const ext = path.extname(srcOrPath).toLowerCase().replace('.', '');
   const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
   return `data:${mime};base64,${buf.toString('base64')}`;

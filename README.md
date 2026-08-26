@@ -5,13 +5,14 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**681 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**716 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
 Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in
-Google Merchant Center. Publishing and scheduling: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn,
-Pinterest, Bluesky and Telegram. Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
+Google Merchant Center. Publishing and scheduling — **ten** channels: Facebook, Instagram, Threads, TikTok,
+YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. Messaging: WhatsApp (you message a person, so it is not an
+eleventh publishing channel). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
 Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
 connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
 
@@ -21,6 +22,47 @@ generate nothing here (`upload_file` turns any local or external file into a URL
 ad-build tool accepts); build and read campaigns on your own ad accounts with your own creative; research
 competitors with no brand drafted and no channel connected; or generate a file with nothing connected at all and
 just download it. Use the one piece you need, or all of it together.
+
+## Which surface should your agent use?
+
+Two shapes, and the right one is decided by **what your client can do**, not by which we prefer.
+
+| Your client | Use | Why |
+| --- | --- | --- |
+| **Runs in a browser** — Claude.ai, ChatGPT, Claude Desktop | the hosted connector `https://app.hermoso.ai/mcp` | It cannot spawn a local process, so a URL is the only shape it has. Nothing to install, no key to paste, and the full toolset arrives with your saved brand context. This is the right answer for these clients, not a lesser one. |
+| **Can run a shell** — Claude Code, Cursor, Codex, Cline, OpenClaw, Hermes, your own scripts | the CLI, `npm install -g hermoso` | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
+
+**The measured difference** (2026-08-24, counted as real tool definitions rather than estimated from bytes):
+
+| | tools in range | loaded per session |
+| --- | --- | --- |
+| Hosted connector, default roster | 291 | **166,043 tokens** |
+| Hosted connector, `?tools=all` | 706 | **456,392 tokens** |
+| stdio server (`npx -y hermoso mcp`) | 269 | **153,257 tokens** |
+| **CLI** | **all 681** | **0** |
+
+The CLI answers the same questions on demand instead, and only when asked:
+
+```bash
+npx -y hermoso tools --search reddit   # every matching tool, name + one line   2,459 tokens
+npx -y hermoso tools plan_ad           # one tool's full argument schema           633 tokens
+npx -y hermoso call plan_ad --json '{"product":"…"}'   # run it
+```
+
+So a terminal agent reaches its first call in roughly **3.4K tokens with the whole roster in range**, against
+**153K for a fraction of it**. `tools` and `tools <name>` read a registry bundled in the package — no key, no
+network, no sign-in — so an agent can browse the entire product before anyone signs in. Only `call` spends, and
+only that needs `hermoso auth login` once.
+
+**Both at once is fine, and is what we suggest for Claude Code.** One `hermoso auth login` covers the CLI *and*
+lets `claude mcp add hermoso -- npx -y hermoso mcp` pick the key up with no `env` block, so the agent can reach for
+a native tool when it wants structured results and shell out when it wants breadth. If you only want one, take the
+CLI: it covers strictly more.
+
+**When the connector is still the better trade on a shell-capable client:** a session that is going to make many
+calls into one area. `enable_tools({groups:['ads']})` turns campaign management on in a single free call and the
+tools are then native — no shell quoting, structured results. One shell round trip beats loading a 221K-token
+group for a single tool; the reverse is true once a session settles into that area.
 
 ## Instant: the hosted Claude.ai connector
 
@@ -77,7 +119,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 681 tools cover
+### What the 716 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -104,14 +146,28 @@ routed by a narrower auto-pool.
 per-render credit cost) with no ad framing: `generate_image` / `generate_video` with `useBrand:false`,
 `generate_voice`, `generate_text`.
 
-**Publish to your own channels** — Facebook, Instagram and Threads (`post_to_meta`), TikTok (`post_to_tiktok`),
-YouTube (`post_to_youtube` + `update_youtube_video`, `youtube_video_insights`, comments read/reply), X
-(`post_to_x`, `x_post_metrics`, `x_post_insights`, `x_mentions`), LinkedIn profile **and** company Pages
-(`post_to_linkedin`, `post_to_linkedin_page`), Pinterest (`post_to_pinterest` + boards), and Google Business
-Profile (`post_to_google_business` — Google grants this API per project, so access must be approved before Posts
-publish). `schedule_post` / `list_scheduled` / `cancel_scheduled` give you one content calendar across channels.
-`upload_file` brings in any external or local media, not just Hermoso renders.
+**Publish to your own channels** — **ten** of them: Facebook, Instagram and Threads (`post_to_meta`), TikTok
+(`post_to_tiktok`), YouTube (`post_to_youtube` + `update_youtube_video`, `youtube_video_insights`, comments
+read/reply), X (`post_to_x`, `x_post_metrics`, `x_post_insights`, `x_mentions`, `list_x_dms`, `send_x_dm`),
+LinkedIn profile **and** company Pages (`post_to_linkedin`, `post_to_linkedin_page`), Pinterest
+(`post_to_pinterest` + boards), Bluesky (`post_to_bluesky`, `delete_bluesky_post`, `bluesky_post_metrics`, plus
+`list_bluesky_convos` / `read_bluesky_dm` / `send_bluesky_dm`) and Telegram (`post_to_telegram`,
+`delete_telegram_message`, `list_telegram_chats`). `schedule_post` / `list_scheduled` / `cancel_scheduled` give
+you one content calendar over exactly that set. `upload_file` brings in any external or local media, not just
+Hermoso renders.
 *X posting bills credits per API call (X charges per request); a post containing a link costs 13× one without.*
+*Held back, and named rather than hidden:* **Google Business Profile** is built (`post_to_google_business`,
+reviews, Q&A, insights) and is not offered — Google allowlists that API per project and ours reads 0 QPM, so
+every call would 403 for every user. It is in `schedule_post`'s channel enum and refused at enqueue.
+
+**Message customers on WhatsApp** — messaging, not an eleventh publishing channel: you message a person, and
+nothing here posts to a feed. `list_whatsapp_accounts` finds the Business Account and its
+numbers, `list_whatsapp_templates` / `create_whatsapp_template` / `delete_whatsapp_template` manage the templates
+Meta reviews, and `send_whatsapp_message` sends one — confirm-gated, because it reaches a real phone and Meta
+bills the business for the conversation. Two limits that are permanent facts about Meta's API rather than
+anything pending: **Hermoso does not receive WhatsApp webhooks, so there is no message history to read** — it is
+not an inbox surface and `list_inbox` does not cover it — and **outside the 24-hour window that opens when the
+customer messages first, WhatsApp accepts an APPROVED template and nothing else.**
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
 change confirm-gated, on **eleven** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
@@ -180,6 +236,21 @@ hermoso research "Liquid Death’s longest-running ads"
 
 Add `--json` to any command for machine output.
 
+**Those shortcuts are the common path, not the limit.** Every tool the MCP server has is reachable here too,
+including the ad-campaign and analytics groups a connector leaves out of its default roster:
+
+```bash
+hermoso tools                          # every tool, grouped, name + one line
+hermoso tools --group ads --search reddit   # narrow it
+hermoso tools create_meta_campaign     # that tool's full argument schema
+hermoso call create_meta_campaign --json '{"name":"…"}'   # run it
+hermoso create_meta_campaign --name "…"                   # same thing, shorter
+```
+
+`call` goes through the same handler, the same argument validation and the same confirm/spend gates the MCP
+server uses — there is no second implementation to drift. `tools` and `tools <name>` read a registry bundled in
+the package, so they need no key, no network and no sign-in.
+
 ## 3. Claude skills — slash commands that wrap the CLI
 
 `skills/` holds four installable skills: `hermoso-generate`, `hermoso-ad-from-brand`,
@@ -198,7 +269,7 @@ Then invoke `/hermoso-ad-from-brand an ad for yourbrand.com — our hero product
 | `HERMOSO_API_BASE` | The Hermoso API origin (default `https://app.hermoso.ai` — set `http://localhost:3000` if you run the app yourself) |
 | `HERMOSO_TOKEN` | Bearer agent key (`hmk_…`) — required against the hosted app |
 | `HERMOSO_PROFILE` | Brand-workspace id, for accounts with multiple brand profiles |
-| `HERMOSO_OWNER` | Only for a brand **another account shared with you** (a team workspace): the owning account id. Set it together with `HERMOSO_PROFILE`, and set `HERMOSO_PROFILE` to that workspace's **profileUuid** — a brand's short slug is refused. Run `list_brands` (or `hermoso brands`) to print both values for every workspace you can enter. The server re-authorizes the pair on every request, so a wrong value is refused, never trusted. |
+| `HERMOSO_OWNER` | Only for a brand **another account shared with you** (a team workspace): the owning account id. Set it together with `HERMOSO_PROFILE`, and set `HERMOSO_PROFILE` to that workspace's **profileUuid** — a brand's short slug is refused. Run `list_brands` (or `hermoso list_brands` from the CLI) to print both values for every workspace you can enter. The server re-authorizes the pair on every request, so a wrong value is refused, never trusted. |
 
 `mcp/http.mjs` is the hosted remote-connector transport (paste-a-URL into Claude.ai → Connectors). It ships in
 this repo for transparency and refuses to mount without authenticated identity — no anonymous spend, ever.

@@ -22,6 +22,11 @@
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+// READ THE REAL VERSION. This line printed a hard-coded "1.0.0" while package.json shipped 0.1.151 — so the
+// one command a user runs to find out what they have installed reported a version that has never existed.
+// Read from package.json so it cannot drift again; a bump is already a release step, and this now follows it.
+const CLI_VERSION = (() => { try { return createRequire(import.meta.url)('../package.json').version; } catch { return '0.0.0'; } })();
 
 const CONFIG_DIR = path.join(os.homedir(), '.hermoso');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -78,7 +83,7 @@ async function main() {
     return console.log(`✓ Saved. API: ${apiBase}${cfg.token ? ' · token stored' : ''}`);
   }
   if (group === 'version' || flags.version) {
-    console.log(`hermoso-cli 1.0.0 · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai'} · ${cfg.token ? 'authed' : 'no token — run: hermoso auth login --token <key>'}`);
+    console.log(`hermoso-cli ${CLI_VERSION} · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai'} · ${cfg.token ? 'authed' : 'no token — run: hermoso auth login --token <key>'}`);
     return;
   }
 

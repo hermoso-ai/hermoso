@@ -14,7 +14,7 @@ allowed-tools: Bash
 Drive the **Hermoso CLI** to go from a brand to a finished ad in three steps. Report the final media URL.
 
 ## Setup
-- `hermoso version` to confirm the CLI; `hermoso auth login --url https://app.hermoso.ai --token <your key>` (create one under MCP & CLI).
+- `hermoso version` to confirm the CLI; `hermoso auth login` (opens your browser once; nothing to paste). On a machine with no browser: `hermoso auth login --token <your key>`, using a key from the app under **MCP & CLI**..
 
 ## Procedure
 1. **Onboard the brand** (skip if the user already gave full brand details):
