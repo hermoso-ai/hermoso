@@ -284,7 +284,9 @@ jobs:
             # measure: with no derived count, the line is ABSENT rather than guessed.
             NOTES="$RUNNER_TEMP/notes-$TAG.md"
             {
-              echo "The Hermoso MCP server, CLI and Claude skills — drive an AI ad studio from Claude Code, Claude.ai, Cursor, Codex or your own scripts."
+              # NO EM DASHES. Release notes are outbound marketing copy and the house rule covers
+              # every outbound word (site, emails, vendor tickets); an em dash is the #1 AI tell.
+              echo "The Hermoso MCP server, CLI and Claude skills. Drive an AI ad studio from Claude Code, Claude.ai, Cursor, Codex or your own scripts."
               echo
               if [ -n "$COUNT" ]; then
                 echo "**$COUNT tools** in this release, counted by running \`registerTools()\` at this tag."
