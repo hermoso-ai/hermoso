@@ -32,14 +32,14 @@ Two shapes, and the right one is decided by **what your client can do**, not by 
 | **Runs in a browser** — Claude.ai, ChatGPT, Claude Desktop | the hosted connector `https://app.hermoso.ai/mcp` | It cannot spawn a local process, so a URL is the only shape it has. Nothing to install, no key to paste, and the full toolset arrives with your saved brand context. This is the right answer for these clients, not a lesser one. |
 | **Can run a shell** — Claude Code, Cursor, Codex, Cline, OpenClaw, Hermes, your own scripts | the CLI, `npm install -g hermoso` | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
 
-**The measured difference** (2026-08-24, counted as real tool definitions rather than estimated from bytes):
+**The measured difference** (2026-08-27, counted as real tool definitions rather than estimated from bytes):
 
 | | tools in range | loaded per session |
 | --- | --- | --- |
-| Hosted connector, default roster | 291 | **166,043 tokens** |
-| Hosted connector, `?tools=all` | 706 | **456,392 tokens** |
-| stdio server (`npx -y hermoso mcp`) | 269 | **153,257 tokens** |
-| **CLI** | **all 681** | **0** |
+| Hosted connector, default roster | 306 | **181,713 tokens** |
+| Hosted connector, `?tools=all` | 718 | **472,062 tokens** |
+| stdio server (`npx -y hermoso mcp`) | 306 | **181,713 tokens** |
+| **CLI** | **all 718** | **0** |
 
 The CLI answers the same questions on demand instead, and only when asked:
 
@@ -50,7 +50,7 @@ npx -y hermoso call plan_ad --json '{"product":"…"}'   # run it
 ```
 
 So a terminal agent reaches its first call in roughly **3.4K tokens with the whole roster in range**, against
-**153K for a fraction of it**. `tools` and `tools <name>` read a registry bundled in the package — no key, no
+**182K for a fraction of it**. `tools` and `tools <name>` read a registry bundled in the package — no key, no
 network, no sign-in — so an agent can browse the entire product before anyone signs in. Only `call` spends, and
 only that needs `hermoso auth login` once.
 
