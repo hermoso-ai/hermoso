@@ -1,7 +1,6 @@
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────
 // REMOTE MCP CONNECTOR — DEFERRED. This is the Claude.ai "custom connector" surface (https://<host>/mcp):
-// a Streamable-HTTP MCP transport + OAuth so any Claude.ai / Cursor user can connect Hermoso by URL and sign in,
-// exactly like Higgsfield's mcp.higgsfield.ai/mcp.
+// a Streamable-HTTP MCP transport + OAuth so any Claude.ai / Cursor user can connect Hermoso by URL and sign in.
 //
 // It is written so the cloud step is a CONFIG FLIP, not a rewrite — but it is intentionally OFF and will REFUSE
 // to mount until BOTH are true:

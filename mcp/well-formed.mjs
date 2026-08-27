@@ -126,7 +126,7 @@ export function wellFormedValue(v) {
  * the thing that manufactures lone surrogates in the first place.
  *
  * `.slice(0, n)` counts code units, so it cuts an astral character in half whenever the boundary lands mid-pair.
- * Measured on live vendor text: 14,579 ScrapeCreators strings held 570 real PAIRS and ZERO lone surrogates — the
+ * Measured on live vendor text: 14,579 upstream strings held 570 real PAIRS and ZERO lone surrogates — the
  * vendor is not emitting broken text, our own truncation is creating it, at 1 caption length in every 21.
  *
  * THE LENGTH CONTRACT IS PRESERVED: the result is never LONGER than `.slice(0, n)` would be — at worst one code

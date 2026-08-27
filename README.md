@@ -168,7 +168,7 @@ Then ask your agent: *“Generate an image ad with Hermoso.”*
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
 social (`search_tiktok`, `search_instagram`, `search_youtube`, `search_reddit`, `search_threads`);
-`scrapecreators_fetch`, `mine_angles`, `analyze_video`, `check_ad_policy`, `list_skills` / `get_skill`.
+`fetch_social_data`, `mine_angles`, `analyze_video`, `check_ad_policy`, `list_skills` / `get_skill`.
 
 **Create** — `draft_brand` → `plan_ad` → `render_ad` (the Studio quality pipeline: composited text, clean speech,
 music, brand end card), or `generate_image` / `generate_video` / `generate_avatar` (UGC creators + lip-sync).
@@ -265,7 +265,7 @@ Render jobs queue server-side and poll to completion, returning a served URL.
 
 ## 2. CLI — the token-cheap path for terminal agents
 
-`bin/hermoso.mjs` mirrors the core tools as subprocess commands, so an agent can shell out instead of carrying a
+`bin/hermoso.mjs` exposes the full MCP toolset as subprocess commands, so an agent can shell out instead of carrying a
 fat tool manifest.
 
 ```bash

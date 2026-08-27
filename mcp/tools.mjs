@@ -151,7 +151,7 @@ export const CAPABILITY_MAP = [
   'What Hermoso can do — the full agent surface (every tool below runs over this MCP):',
   // SECOND LINE, deliberately: the map below is a menu, and a menu read as a sequence is the whole defect.
   INDEPENDENCE,
-  'A) AD SPY / RESEARCH — spy on the ads already winning in any market, then mine them. find_competitors · competitor_teardown · pull_competitor_ads · research_ads (open brief) · ad libraries search_meta_ads / search_google_ads / search_linkedin_ads · organic social search_tiktok / search_instagram / search_youtube / search_reddit / search_threads · search_instagram_hashtag (LISTENING on the brand’s OWN Meta credentials rather than a scraper: the real public posts carrying a hashtag, with their captions — feed them into mine_angles or write the next post from the language you found. “recent” is the LAST 24 HOURS only, so a huge tag legitimately returns zero on a quiet day; ask again with edge “top” before saying anything about how busy it is) · instagram_profile (any Instagram @handle → the account’s NUMERIC Instagram id from Meta itself, plus its real name, bio, follower and post counts — Meta’s own numbers, not a scraper’s. It is also the ONLY way to get the id manage_meta_partnership_creator’s allowTagging list requires; professional accounts only) · scrapecreators_fetch (any allowlisted endpoint) · mine_angles · analyze_video · check_ad_policy · list_skills / get_skill (teardowns + creative playbooks).',
+  'A) AD SPY / RESEARCH — spy on the ads already winning in any market, then mine them. find_competitors · competitor_teardown · pull_competitor_ads · research_ads (open brief) · ad libraries search_meta_ads / search_google_ads / search_linkedin_ads · organic social search_tiktok / search_instagram / search_youtube / search_reddit / search_threads · search_instagram_hashtag (LISTENING on the brand’s OWN Meta credentials rather than a scraper: the real public posts carrying a hashtag, with their captions — feed them into mine_angles or write the next post from the language you found. “recent” is the LAST 24 HOURS only, so a huge tag legitimately returns zero on a quiet day; ask again with edge “top” before saying anything about how busy it is) · instagram_profile (any Instagram @handle → the account’s NUMERIC Instagram id from Meta itself, plus its real name, bio, follower and post counts — Meta’s own numbers, not a scraper’s. It is also the ONLY way to get the id manage_meta_partnership_creator’s allowTagging list requires; professional accounts only) · fetch_social_data (any allowlisted endpoint) · mine_angles · analyze_video · check_ad_policy · list_skills / get_skill (teardowns + creative playbooks).',
   'B) CREATE — finished, on-brand image & video ads (real product composited in, copy + CTA baked). draft_brand / get_brand / update_brand (patch single fields without re-onboarding) / use_brand · list_brands / create_brand / delete_brand (one account holds MANY brand workspaces — an agency runs every client through here; each has its own brand, memory, swipefile, Library and connectors, and create_brand → draft_brand onboards a new one end to end) · plan_ad (concept + copy) → render_ad (the Studio quality pipeline) or generate_image / generate_video / generate_avatar (UGC creators + lip-sync) · list_creators / save_creator / delete_creator (the workspace’s REUSABLE CAST — saved creators with their portrait urls, so the SAME person stars in every ad; list them before ever generating a new one, then cast one into the ad with render_ad’s `creator`, which also skips the character-portrait render and so costs LESS than casting a stranger) · make_template_ad (native HTML ad formats) · remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video · plan_variations + score_ad (fan out + rank).',
   'C) RAW MODEL PLAYGROUND — direct access to the full catalog (30+ image / video / voice / writing models, each with the exact per-render credit cost shown above), no ad framing: generate_image / generate_video (useBrand:false) for plain prompt-only renders, generate_voice for raw text-to-speech against any voice engine, and generate_text for the writing models (Claude / Gemini / GPT / Llama / DeepSeek…) — all against ANY catalog id.',
   'D) ACCOUNT — hermoso_credits (balance) · billing_status (plan + your billing role) · buy_credits (one-click top-up on the saved card, or a first-purchase checkout link) · upgrade_plan / set_auto_reload (admin) · list_jobs / get_job (track async renders) · get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it, over MCP as well as in the app — plus app appearance and the weekly competitor-watch email) · list_team / invite_member / remove_member / set_role (who else can work in this brand).',
@@ -225,7 +225,7 @@ export const MCP_INSTRUCTIONS = [
   // discoverable is the other half of the fix, so the reasons to call it are spelled out rather than merely permitted.
   'ACT ON THE REQUEST, DO NOT SURVEY IT: when the user asks for something to be made, make it. generate_image, generate_video and render_ad all run with `model` omitted, and an unnamed render goes to the server’s own default model, which is a sound general-purpose pick, so there is nothing you have to look up before rendering. Call hermoso_capabilities (free) when you actually need what it holds: a specific model id, an exact credit cost, a model’s live durations / aspect ratios / resolutions, or whether a capability is enabled on this account. Reporting the model catalog back is never the answer to a request to create something.',
   'Capability map:',
-  '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; scrapecreators_fetch; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
+  '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; fetch_social_data; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
   '• CREATE (finished ads): render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar render on their own; plan_ad authors a board first when the ad wants one and render_ad takes it; get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) manage the saved brand, which the create tools hydrate by themselves; list_creators / save_creator / delete_creator (the reusable saved CAST — re-cast the same face instead of generating a new person every time; render_ad’s `creator` stars one of them in the ad); make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); remix_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / stitch_video; plan_variations + score_ad.',
   '• RAW MODEL PLAYGROUND: generate_image / generate_video (useBrand:false) for prompt-only renders, generate_voice for text-to-speech, generate_text for the writing models — against any of 30+ image / video / voice / writing model ids (exact costs in hermoso_capabilities), no ad framing.',
   '• ACCOUNT & WORKSPACES: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job; list_brands / create_brand / use_brand / delete_brand (one account holds MANY brand workspaces — an agency runs every client through here, each with its own brand, memory, Library and connectors; create_brand → draft_brand onboards a new one, delete_brand is confirm-gated); get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it — plus app appearance and the weekly competitor-watch email); list_team / invite_member / remove_member / set_role.',
@@ -487,7 +487,7 @@ const HOOK_ATTR = {
   hook: z.string().optional().describe('WHAT ANGLE THIS POST IS BUILT ON — the single most valuable field here, and the only moment it can ever be recorded. post_performance groups on it to answer "which hooks work", and it needs 5 posts sharing ONE hook before it will call anything a winner, so REUSE THE SAME WORDING across a campaign instead of rephrasing it every time. Best of all, pass a hook id from list_hooks (e.g. "direct_callout", "mid_problem", "before_after") — those fold onto a stable key however they are spelled, so a whole brand accumulates evidence on one row. Your own wording is fine too; it just only groups when you repeat it exactly. Omitting it means this post can never vote on which hook works.'),
   subject: z.string().optional().describe('WHAT THIS POST IS ABOUT — the product, feature, offer or theme (e.g. "winter coat", "free trial", "founder story"). The second grouping axis in post_performance. Same rule as hook: reuse the exact wording so posts about one subject land in one group.'),
 };
-// Higgsfield's "Duration to boards" table in one line — fill every act to the model max, remainder LAST, and pull the
+// The "Duration to boards" table in one line — fill every act to the model max, remainder LAST, and pull the
 // deficit off the previous act when the remainder would fall under the provider floor (their own 18 -> 14+4). Mirrors
 // hfClipDurations in acts-packing.mjs, which is what actually packs the render; here it only makes the refusal concrete.
 const hfSplitHint = (total, max = VIDEO_SINGLE_CLIP_CEILING, min = 4) => {
@@ -2029,7 +2029,7 @@ function replayTools(rawServer, opts, canon) {
 // THEIR key — with no recourse on their side and, because it never touches our error ledger, no visibility on ours.
 // The same tool answers the same way on every retry, so it is a deterministic loop wearing a transient's clothes.
 //
-// AND WE ARE THE PRODUCER, NOT THE VENDOR. 14,579 live ScrapeCreators strings held 570 real surrogate PAIRS and
+// AND WE ARE THE PRODUCER, NOT THE VENDOR. 14,579 live upstream strings held 570 real surrogate PAIRS and
 // ZERO lone ones; `clip()` manufactures them by truncating at a CHARACTER COUNT (server.js now truncates on a code
 // POINT boundary, which removes the source — this stays as the boundary that catches everything else, including
 // the 1,166 other numeric `.slice(0, N)` sites and any vendor that hands us pre-broken text).
@@ -5106,7 +5106,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_bluesky_convos', {
     title: 'List Bluesky direct-message conversations',
-    description: 'Read the connected Bluesky account\u2019s DM conversations \u2014 who each one is with, how many messages are unread, and whether it is a REQUEST (someone the account does not follow, which Bluesky holds separately, the same idea as a message request). Free, no ScrapeCreators credits, no vendor approval: AT Protocol app passwords are not scoped. It DOES need a PRIVILEGED app password \u2014 one created with direct-message access ticked \u2014 and says so precisely if the saved one cannot chat, which is a property of the password and NOT a broken connection. Filters: readState "unread", status "request" or "accepted", kind "direct" or "group". An unknown filter value is refused by name, never silently dropped.',
+    description: 'Read the connected Bluesky account\u2019s DM conversations \u2014 who each one is with, how many messages are unread, and whether it is a REQUEST (someone the account does not follow, which Bluesky holds separately, the same idea as a message request). Free, no credits, no vendor approval: AT Protocol app passwords are not scoped. It DOES need a PRIVILEGED app password \u2014 one created with direct-message access ticked \u2014 and says so precisely if the saved one cannot chat, which is a property of the password and NOT a broken connection. Filters: readState "unread", status "request" or "accepted", kind "direct" or "group". An unknown filter value is refused by name, never silently dropped.',
     inputSchema: {
       limit: z.number().optional().describe('how many conversations, 1\u2013100 (default 25)'),
       cursor: z.string().optional().describe('walk further back \u2014 pass the cursor from a previous call'),
@@ -14137,7 +14137,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('plan_ad', {
     title: 'Plan an ad concept',
-    description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. Spends LLM tokens, 0 ScrapeCreators credits.',
+    description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. Spends credits.',
     inputSchema: {
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name, or a brand profile object {name,domain,category,palette,products,…}. OMIT to use the workspace’s SAVED brand + memory automatically (see get_brand); use draft_brand to onboard a new one'),
       product: z.string().describe('what to advertise + any angle/offer the user specified'),
@@ -14540,11 +14540,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('make_explainer', {
     title: 'Make an explainer video',
-    description: "Turn a TOPIC into a finished narrated explainer video. Writes a sectioned script, paints a BURST of pictures per section (about one every 1.5s — most of them one-detail edits of the frame before, so it reads as movement rather than a slideshow), narrates each section with TTS, holds each picture PERFECTLY STILL for its own slice of the narration (the motion is the CUT RATE, exactly as Higgsfield's stills pipeline does it — a slow move on a still shimmers), then composites the end card (and any on-screen text you asked for) with the Chrome+ffmpeg engine the ads use (text is never model-painted, so it never garbles). BURNED ON-SCREEN TEXT IS OFF BY DEFAULT — the narration carries the point and the pictures carry the story, so the film ships clean unless the user asks otherwise; `captions:true` adds held key points and `subtitles:true` adds narration-timed CAPS (see both). It is an image film WITH motion, not N video-model renders — that's what keeps it affordable. `style` picks the visual family: the default 'cinematic' is photoreal editorial; every other id is a STYLED, strictly non-photoreal look (illustrated / collage / clay / pixel …) that first renders ONE style-key image and then locks every scene to it, so the whole film holds one look. Cost at the default frame density: a ~130-credit hold for a 60s explainer on the default style, ~100 styled; `frameDensity:'lean'` roughly halves it and `'minimal'` (one picture per section) is ~30. All settle to the exact per-frame image + narration spend (a longer target = more sections = more). Takes SEVERAL minutes — one image render per frame; independent frames are painted concurrently, so it is far faster than the frame count suggests. Needs the writing model and a narration voice engine connected. NOT the tool for a short product ad — use render_ad or generate_video for those, and make_template_ad for the deterministic native formats.",
+    description: "Turn a TOPIC into a finished narrated explainer video. Writes a sectioned script, paints a BURST of pictures per section (about one every 1.5s — most of them one-detail edits of the frame before, so it reads as movement rather than a slideshow), narrates each section with TTS, holds each picture PERFECTLY STILL for its own slice of the narration (the motion is the CUT RATE — a slow move on a still shimmers), then composites the end card (and any on-screen text you asked for) with the Chrome+ffmpeg engine the ads use (text is never model-painted, so it never garbles). BURNED ON-SCREEN TEXT IS OFF BY DEFAULT — the narration carries the point and the pictures carry the story, so the film ships clean unless the user asks otherwise; `captions:true` adds held key points and `subtitles:true` adds narration-timed CAPS (see both). It is an image film WITH motion, not N video-model renders — that's what keeps it affordable. `style` picks the visual family: the default 'cinematic' is photoreal editorial; every other id is a STYLED, strictly non-photoreal look (illustrated / collage / clay / pixel …) that first renders ONE style-key image and then locks every scene to it, so the whole film holds one look. Cost at the default frame density: a ~130-credit hold for a 60s explainer on the default style, ~100 styled; `frameDensity:'lean'` roughly halves it and `'minimal'` (one picture per section) is ~30. All settle to the exact per-frame image + narration spend (a longer target = more sections = more). Takes SEVERAL minutes — one image render per frame; independent frames are painted concurrently, so it is far faster than the frame count suggests. Needs the writing model and a narration voice engine connected. NOT the tool for a short product ad — use render_ad or generate_video for those, and make_template_ad for the deterministic native formats.",
     inputSchema: {
       topic: z.string().describe('what the explainer should teach or explain — a topic or a short brief'),
       durationSeconds: z.number().optional().describe('target length 20-120s (default 60); drives the section count — ~10s of narration each, 3-8 sections'),
-      frameDensity: z.enum(['standard', 'lean', 'minimal']).optional().describe("how many pictures per second of narration, and therefore what it costs. 'standard' (default) is a frame about every 1.5s — the density Higgsfield's own stills pipeline enforces; 'lean' is one about every 2.5s (the longest hold that still reads as a film, ~40% of the frames and ~40% of the cost); 'minimal' is ONE picture per narration section, which is cheapest and is frankly a slideshow. Only drop below the default if the user asked for something cheaper."),
+      frameDensity: z.enum(['standard', 'lean', 'minimal']).optional().describe("how many pictures per second of narration, and therefore what it costs. 'standard' (default) is a frame about every 1.5s — the density a stills film needs to read as a film rather than a slideshow; 'lean' is one about every 2.5s (the longest hold that still reads as a film, ~40% of the frames and ~40% of the cost); 'minimal' is ONE picture per narration section, which is cheapest and is frankly a slideshow. Only drop below the default if the user asked for something cheaper."),
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:5', '3:4']).optional().describe("'9:16' default"),
       style: z.enum(['cinematic', 'editorial_collage', 'flat_vector', 'stickman', 'whiteboard', 'ink_marker', 'silhouette', 'storybook', 'paper_diorama', 'isometric', 'claymation', 'pixel_art', 'watercolor', 'fluffy_toy', 'low_poly', 'stylized_3d', 'studio_3d', 'mannequin']).optional().describe("visual style. 'cinematic' (default) is photoreal; the rest are non-photoreal styled looks — editorial_collage (halftone cutouts + marker accents), flat_vector, stickman, whiteboard, ink_marker, silhouette, storybook (gouache), paper_diorama, isometric, claymation, pixel_art, watercolor, fluffy_toy (felted plush), low_poly, stylized_3d (matte clay render), studio_3d (preschool toy 3D on a white sweep — the Kids default), mannequin (clay-render reenactment figures — a History alternate). Ask the user which they want rather than picking silently; a styled pick costs more (see the cost note)."),
       channel: z.enum(['explainer', 'history', 'kids', 'fairytale']).optional().describe("the CHANNEL TYPE — it sets the pacing, the narration register and the default look, and is orthogonal to `style` (a named style always wins): explainer (casual second-person, fast cuts), history (witty chronological retelling / documentary), kids (fastest, question-first, warm teacher), fairytale (slow, atmospheric myth or folklore). Default 'explainer'."),
@@ -14781,7 +14781,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(wireText, { ...j, url });
   }));
 
-  // ---------- skills (Higgsfield get_workflow_instructions parity: workflows ship as SKILL.md bundles) ----------
+  // ---------- skills (workflows ship as SKILL.md bundles) ----------
   server.group('create');
   // The bundle dirs/content may still carry the pre-rename brand — always serve them under the product name.
   const brandSkillText = (s) => String(s).replace(/HEIST_/g, 'HERMOSO_').replace(/heist-/g, 'hermoso-').replace(/Heist/g, 'Hermoso').replace(/\bheist\b/g, 'hermoso');
@@ -15655,7 +15655,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('research');
   server.registerTool('find_competitors', {
     title: 'Find competitors',
-    description: "Discover a brand's competitor / similar / adjacent brands from its domain (Claude grounded by web search). mode=competitors (default, excludes the searched company), inspiration (best relevant ads incl. it), or company. 0 ScrapeCreators credits.",
+    description: "Discover a brand's competitor / similar / adjacent brands from its domain (Claude grounded by web search). mode=competitors (default, excludes the searched company), inspiration (best relevant ads incl. it), or company. 0 credits.",
     inputSchema: {
       domain: z.string().describe('the brand domain, e.g. flourish.com'),
       mode: z.enum(['competitors', 'inspiration', 'company']).optional().describe("'competitors' (default, excludes the searched company), 'inspiration' (best relevant ads incl. it), or 'company'"),
@@ -15674,7 +15674,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('pull_competitor_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Pulling their live ads…', 'Competitor ads pulled'),
     title: 'Pull competitor ads',
-    description: 'THE FAST PATH for "show me the ads <brand> is running" \u2014 one named brand\u2019s real live ads from the META (Facebook/Instagram) ad library, deduped, sorted, with the right page resolved. A single call, back in a few seconds. Prefer this over research_ads whenever the brand is named. Meta only, deliberately: it has by far the richest creative and is what people mean by "their ads". For Google or LinkedIn specifically, use search_google_ads or search_linkedin_ads. Spends ScrapeCreators credits.',
+    description: 'THE FAST PATH for "show me the ads <brand> is running" \u2014 one named brand\u2019s real live ads from the META (Facebook/Instagram) ad library, deduped, sorted, with the right page resolved. A single call, back in a few seconds. Prefer this over research_ads whenever the brand is named. Meta only, deliberately: it has by far the richest creative and is what people mean by "their ads". For Google or LinkedIn specifically, use search_google_ads or search_linkedin_ads. Spends credits.',
     inputSchema: {
       companyName: z.string().optional().describe('the advertiser name'),
       domain: z.string().optional().describe('the advertiser domain'),
@@ -15750,7 +15750,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const cards = adSpyCards(rows);
     const modelRows = widget ? stripAdMedia(rows) : rows;
     // ON A WIDGET HOST, THE ANSWER IS THE CARD — SO STOP ASKING THE MODEL TO RE-TYPE IT (2026-08-24). Measured on
-    // this exact path: our fan-out (server + ScrapeCreators) is ~5s, and the user waits ~30. The rest is the model
+    // this exact path: our fan-out is ~5s, and the user waits ~30. The rest is the model
     // reading sixteen ad rows and then WRITING a bullet for every one of them, next to a card that is already
     // showing all sixteen with their creative. That enumeration is the latency, it is duplicated effort, and we
     // invite it by handing over the rows at all.
@@ -15782,7 +15782,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Set (or STOP) this workspace\'s standing COMPETITOR WATCH — the weekly job that re-checks each named brand\'s ad libraries and reports what is NEW since last time. The same watch the web app\'s Ad Spy ▸ Watching tab manages, and the same one the weekly digest email is sent from (turn that email on/off with update_settings({watchEmail})). '
       + 'This REPLACES the whole watched list, it does not add to it — pass every brand you want watched, every time. Max 5 brands (the server trims past that). Pass an EMPTY list to stop the watch entirely, which also clears the findings. '
       + 'Give a `domain` wherever you know one: Google Ads Transparency is looked up BY DOMAIN and is skipped for a brand without one, and the domain is what resolves the right Meta page for a brand with an ambiguous name. '
-      + 'The run itself spends ScrapeCreators credits against the ad libraries (roughly 3 per brand on Meta, 1 each on Google and LinkedIn) and is hard-capped per run server-side, so an oversized watch is trimmed rather than allowed to run away. Setting the list is free; only a run spends. '
+      + 'The run itself spends credits against the ad libraries (roughly 3 per brand on Meta, 1 each on Google and LinkedIn) and is hard-capped per run server-side, so an oversized watch is trimmed rather than allowed to run away. Setting the list is free; only a run spends. '
       + 'runNow:true runs it once IMMEDIATELY (a background job — it spends now) and then keeps the weekly cadence; leave it off and the first check is a week out. '
       + 'The country and the platform mix are NOT settable here — a re-set inherits whatever the pending run already carried (US / Meta for a watch that has never been configured otherwise). Read the findings back with list_watch_findings.',
     inputSchema: {
@@ -15883,7 +15883,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('research_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Researching ads…', 'Ad research ready'),
     title: 'Research ads',
-    description: 'Open-ended ad research that needs JUDGMENT across platforms — comparisons, "what angle is working", "who else is doing this", anything where the right sources are not known up front. It is an agentic loop (several rounds of library pulls plus a written synthesis) and typically takes 30-60 seconds, so it is the WRONG tool for a question that names its own answer. For one named brand\u2019s live ads use pull_competitor_ads; for one keyword or one advertiser on Meta use search_meta_ads \u2014 both are a single call and return in a few seconds. Spends LLM tokens + ScrapeCreators credits.',
+    description: 'Open-ended ad research that needs JUDGMENT across platforms — comparisons, "what angle is working", "who else is doing this", anything where the right sources are not known up front. It is an agentic loop (several rounds of library pulls plus a written synthesis) and typically takes 30-60 seconds, so it is the WRONG tool for a question that names its own answer. For one named brand\u2019s live ads use pull_competitor_ads; for one keyword or one advertiser on Meta use search_meta_ads \u2014 both are a single call and return in a few seconds. Spends credits — an agentic loop, so a handful rather than the one-call cost of a targeted search.',
     inputSchema: {
       query: z.string().describe('what to research, e.g. "the longest-running protein-pancake ads on Meta"'),
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object to tailor the research to; omit to use the workspace’s saved brand'),
@@ -15970,7 +15970,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('search_meta_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching Meta ads…', 'Found Meta ads'),
     title: 'Search Meta ads',
-    description: "Structured Meta (Facebook/Instagram) Ad Library pull — use when you know exactly WHAT to fetch: a keyword (query) OR one advertiser (companyName / pageId). Returns compact JSON {page_name, body, cta, link, dates, media} per ad. For open-ended research that needs judgment across platforms, use research_ads instead. Spends ScrapeCreators credits (~1–2).",
+    description: "Structured Meta (Facebook/Instagram) Ad Library pull — use when you know exactly WHAT to fetch: a keyword (query) OR one advertiser (companyName / pageId). Returns compact JSON {page_name, body, cta, link, dates, media} per ad. For open-ended research that needs judgment across platforms, use research_ads instead. Spends a credit or two.",
     inputSchema: {
       query: z.string().optional().describe('keyword search across ALL advertisers (use INSTEAD of companyName/pageId)'),
       companyName: z.string().optional().describe('one advertiser’s ads by brand name'),
@@ -16040,7 +16040,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('search_linkedin_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching LinkedIn ads…', 'Found LinkedIn ads'),
     title: 'Search LinkedIn ads',
-    description: "Structured LinkedIn Ad Library search by company name, keyword, or companyId — use for a targeted B2B pull; use research_ads for open-ended research. Returns compact JSON {advertiser, headline, description, cta, link, media, dates, impressions} per ad — LinkedIn is the one library exposing real impression counts. Spends ScrapeCreators credits (~1).",
+    description: "Structured LinkedIn Ad Library search by company name, keyword, or companyId — use for a targeted B2B pull; use research_ads for open-ended research. Returns compact JSON {advertiser, headline, description, cta, link, media, dates, impressions} per ad — LinkedIn is the one library exposing real impression counts. Spends about a credit.",
     inputSchema: {
       company: z.string().optional().describe('advertiser company name'),
       keyword: z.string().optional().describe('keyword across all advertisers'),
@@ -16075,7 +16075,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('search_tiktok', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching TikTok videos…', 'Found TikTok videos'),
     title: 'Search TikTok',
-    description: "Organic TikTok keyword search (there is NO TikTok ad library) — top-performing videos to mine for hooks/trends/remixable creative. Returns compact JSON {desc, author, handle, plays, likes, link, cover} per video, ranked by plays. Use research_ads for open-ended research. Spends ScrapeCreators credits (~1).",
+    description: "Organic TikTok keyword search (there is NO TikTok ad library) — top-performing videos to mine for hooks/trends/remixable creative. Returns compact JSON {desc, author, handle, plays, likes, link, cover} per video, ranked by plays. Use research_ads for open-ended research. Spends about a credit.",
     inputSchema: {
       query: z.string().describe('keyword or hashtag (no # needed)'),
       limit: z.number().int().optional().describe('max videos returned (1–25, default 8)'),
@@ -16101,7 +16101,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('search_instagram', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching Instagram reels…', 'Found Instagram reels'),
     title: 'Search Instagram',
-    description: "Organic Instagram REELS keyword search (/v2/instagram/reels/search — ScrapeCreators' only IG keyword surface; profile/hashtag pulls go through scrapecreators_fetch with a handle). Returns compact JSON {desc, author, handle, plays, likes, link, cover} per reel, ranked by plays. Spends ScrapeCreators credits (~1).",
+    description: "Organic Instagram REELS keyword search (/v2/instagram/reels/search — our only IG keyword surface; profile/hashtag pulls go through fetch_social_data with a handle). Returns compact JSON {desc, author, handle, plays, likes, link, cover} per reel, ranked by plays. Spends about a credit.",
     inputSchema: {
       query: z.string().describe('keyword to search reels for'),
       limit: z.number().int().optional().describe('max reels returned (1–25, default 8)'),
@@ -16129,7 +16129,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('search_youtube', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching YouTube videos…', 'Found YouTube videos'),
     title: 'Search YouTube',
-    description: "Organic YouTube keyword search (/v1/youtube/search) — videos to mine for hooks/angles/long-form structure. Returns compact JSON {desc (title), author, handle, plays, link, cover} per video, ranked by views. Spends ScrapeCreators credits (~1).",
+    description: "Organic YouTube keyword search (/v1/youtube/search) — videos to mine for hooks/angles/long-form structure. Returns compact JSON {desc (title), author, handle, plays, link, cover} per video, ranked by views. Spends about a credit.",
     inputSchema: {
       query: z.string().describe('keyword to search videos for'),
       limit: z.number().int().optional().describe('max videos returned (1–25, default 8)'),
@@ -16150,7 +16150,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('search_reddit', {
     title: 'Search Reddit',
-    description: "Reddit keyword search (/v1/reddit/search, top-ranked) — a goldmine for the customer's OWN words (pain points, objections, language) to mine into ad hooks and copy. Returns compact JSON {desc (title+selftext), subreddit, upvotes, comments, link} per post. Spends ScrapeCreators credits (~1).",
+    description: "Reddit keyword search (/v1/reddit/search, top-ranked) — a goldmine for the customer's OWN words (pain points, objections, language) to mine into ad hooks and copy. Returns compact JSON {desc (title+selftext), subreddit, upvotes, comments, link} per post. Spends about a credit.",
     inputSchema: {
       query: z.string().describe('what to search Reddit for'),
       limit: z.number().int().optional().describe('max posts returned (1–25, default 8)'),
@@ -16173,7 +16173,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('search_threads', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching Threads posts…', 'Found Threads posts'),
     title: 'Search Threads',
-    description: "Organic Threads keyword search (/v1/threads/search) — short-form text/social posts for trend + voice research. Returns compact JSON {desc, author, handle, likes, link, cover} per post. Spends ScrapeCreators credits (~1).",
+    description: "Organic Threads keyword search (/v1/threads/search) — short-form text/social posts for trend + voice research. Returns compact JSON {desc, author, handle, likes, link, cover} per post. Spends about a credit.",
     inputSchema: {
       query: z.string().describe('keyword to search Threads for'),
       limit: z.number().int().optional().describe('max posts returned (1–25, default 8)'),
@@ -16197,11 +16197,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return adsOut('posts', all.length, all.slice(0, nAds(limit)), '', 'threads');
   }));
 
-  server.registerTool('scrapecreators_fetch', {
-    title: 'Fetch ScrapeCreators endpoint',
-    description: "Generic ScrapeCreators escape hatch for any ALLOWLISTED long-tail endpoint the dedicated search_* tools don't cover — e.g. {path:'/v1/instagram/profile', params:{handle:'nike'}}. Allowlisted platform families: TikTok (+ TikTok Shop), Instagram, YouTube, Facebook (organic profiles/posts/events/marketplace), LinkedIn (organic posts/companies), Twitter/X, Reddit, Threads, Snapchat, Pinterest, Twitch, Bluesky, Truth Social, Rumble, Spotify, SoundCloud, GitHub, Google search, link-in-bio pages (Linktree etc.). Param names vary per endpoint (profiles use `handle`, keyword searches use `query`, Reddit uses `subreddit`). WARNING: returns RAW provider JSON — large and messy; prefer the dedicated search_* tools. Spends ScrapeCreators credits.",
+  server.registerTool('fetch_social_data', {
+    title: 'Fetch social data',
+    description: "Generic escape hatch for any ALLOWLISTED long-tail social/web endpoint the dedicated search_* tools don't cover — e.g. {path:'/v1/instagram/profile', params:{handle:'nike'}}. Allowlisted platform families: TikTok (+ TikTok Shop), Instagram, YouTube, Facebook (organic profiles/posts/events/marketplace), LinkedIn (organic posts/companies), Twitter/X, Reddit, Threads, Snapchat, Pinterest, Twitch, Bluesky, Truth Social, Rumble, Spotify, SoundCloud, GitHub, Google search, link-in-bio pages (Linktree etc.). Param names vary per endpoint (profiles use `handle`, keyword searches use `query`, Reddit uses `subreddit`). WARNING: returns RAW provider JSON — large and messy; prefer the dedicated search_* tools. Spends credits.",
     inputSchema: {
-      path: z.string().describe("exact SC endpoint path, e.g. '/v1/tiktok/profile' — non-allowlisted paths are rejected"),
+      path: z.string().describe("exact endpoint path, e.g. '/v1/tiktok/profile' — non-allowlisted paths are rejected"),
       params: z.object({}).passthrough().optional().describe("endpoint query params, e.g. {handle:'nike'}"),
     },
     outputSchema: {}, // deliberately empty — the raw provider payload (any shape, can be huge) stays in the text
@@ -16234,7 +16234,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('draft_brand', {
     title: 'Draft brand profile',
-    description: 'Onboard a brand profile — from a website domain, a free-text description, or a social handle — into a {name, products, logo, …} object you can pass to plan_ad / generate. 0 ScrapeCreators credits. IMPORTANT: a domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com). Before spending any credits on research or renders, VERIFY the returned `name` (and `summary`) match the brand the user meant; if it looks wrong, re-draft with the correct domain or a description (pass save:false until confirmed) — this tool cannot ask the user, so the caller owns that check.',
+    description: 'Onboard a brand profile — from a website domain, a free-text description, or a social handle — into a {name, products, logo, …} object you can pass to plan_ad / generate. 0 credits. IMPORTANT: a domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com). Before spending any credits on research or renders, VERIFY the returned `name` (and `summary`) match the brand the user meant; if it looks wrong, re-draft with the correct domain or a description (pass save:false until confirmed) — this tool cannot ask the user, so the caller owns that check.',
     inputSchema: {
       domain: z.string().optional().describe('a website to scrape'),
       description: z.string().optional().describe('a free-text brand description (no website)'),
@@ -16337,11 +16337,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Asset: ${absolute}\nDownload: ${dl}`, { url: absolute, downloadUrl: dl });
   }));
 
-  // ---------- post-production & analysis (Higgsfield-parity wave: each wraps an EXISTING worker/route) ----------
+  // ---------- post-production & analysis (each wraps an EXISTING worker/route) ----------
   server.group('create');
   server.registerTool('analyze_video', {
     title: 'Analyze video',
-    description: "Break a video ad down into its structure: the verbatim transcript (voiceover + on-screen text) with a beat list, plus duration and sampled frame timestamps. Use to study a reference/competitor ad before remixing its structure. Costs ~a transcription call; no ScrapeCreators credits.",
+    description: "Break a video ad down into its structure: the verbatim transcript (voiceover + on-screen text) with a beat list, plus duration and sampled frame timestamps. Use to study a reference/competitor ad before remixing its structure. Costs ~a transcription call.",
     inputSchema: { url: z.string().describe('the video URL (a served /generated/ path or a public http(s) video)') },
     outputSchema: {
       durationSeconds: z.number().optional().describe('the video length in seconds'),
@@ -16518,7 +16518,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('competitor_teardown', {
     title: 'Competitor teardown',
-    description: "Tear a competitor's ad strategy down into an actionable playbook: their opening-hook MIX, longest-running campaign THEMES, the WHITE SPACE nobody in their set runs, 2-3 render-ready COUNTER-PLAYS, and the territories they own that you should avoid. Pass `competitor` {name, domain?}. CONTRACT: supply `ads` (raw ad objects from a prior pull_competitor_ads / search_meta_ads call) to tear exactly those down, OR omit `ads` and this pulls the competitor's real Meta ads first (spends ~1-2 ScrapeCreators credits, longest-running = proven winners). Auto-tailors the white space + counter-plays to YOUR saved brand. Spends LLM tokens (0 SC credits when you pass ads).",
+    description: "Tear a competitor's ad strategy down into an actionable playbook: their opening-hook MIX, longest-running campaign THEMES, the WHITE SPACE nobody in their set runs, 2-3 render-ready COUNTER-PLAYS, and the territories they own that you should avoid. Pass `competitor` {name, domain?}. CONTRACT: supply `ads` (raw ad objects from a prior pull_competitor_ads / search_meta_ads call) to tear exactly those down, OR omit `ads` and this pulls the competitor's real Meta ads first (spends a credit or two, longest-running = proven winners). Auto-tailors the white space + counter-plays to YOUR saved brand. Spends credits (free when you pass ads).",
     inputSchema: {
       competitor: z.object({ name: z.string().describe('the competitor brand name'), domain: z.string().optional().describe('their domain — sharpens the auto-pull page match') }).describe('the competitor to tear down'),
       ads: z.array(z.object({}).passthrough()).optional().describe('ad objects to tear down (from pull_competitor_ads / search_meta_ads). Omit to auto-pull their Meta ads first.'),
@@ -16600,7 +16600,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('mine_angles', {
     title: 'Mine customer angles',
-    description: "Mine ad ANGLES from real customer language: gathers the customer's own words (Reddit, TikTok, the brand's review page + review-site results) and returns a RANKED angle bank — each angle tagged (pain / outcome / identity / fear / competitive-displacement / social-proof / contrast), 2-5 VERBATIM proof quotes, a 0-100 score with breakdown, and a ready-to-run hook in the customer's own voice. Reads YOUR saved brand (pass brandId to target a specific brand — that switches this key's active brand like use_brand). To tear down a COMPETITOR use competitor_teardown instead. Spends a few ScrapeCreators credits + LLM tokens.",
+    description: "Mine ad ANGLES from real customer language: gathers the customer's own words (Reddit, TikTok, the brand's review page + review-site results) and returns a RANKED angle bank — each angle tagged (pain / outcome / identity / fear / competitive-displacement / social-proof / contrast), 2-5 VERBATIM proof quotes, a 0-100 score with breakdown, and a ready-to-run hook in the customer's own voice. Reads YOUR saved brand (pass brandId to target a specific brand — that switches this key's active brand like use_brand). To tear down a COMPETITOR use competitor_teardown instead. Spends a few credits.",
     inputSchema: {
       brandId: z.string().optional().describe('a brand id/name from list_brands to mine for; omit to use the active brand'),
     },
@@ -16760,7 +16760,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       channel: z.string().optional().describe('restrict the performance half to one channel (facebook, instagram, threads, x, linkedin, youtube, tiktok, reddit, pinterest)'),
       authentic: z.boolean().optional().describe('true if the planned ad is an authentic/UGC/creator-register render — on-screen-text hooks are then reported unusable, with the reason'),
-      category: z.string().optional().describe("the product category (e.g. 'skincare serum', 'protein powder', 'sunglasses') — returns the setting Higgsfield's Location x Tier matrix puts that category in, with the reason"),
+      category: z.string().optional().describe("the product category (e.g. 'skincare serum', 'protein powder', 'sunglasses') — returns the setting our Location x Tier matrix puts that category in, with the reason"),
       tier: z.enum(['luxury', 'premium', 'drugstore']).optional().describe('product tier, used with category — changes the FINISH of the room, never the room. Default premium.'),
     },
     outputSchema: { hooks: z.array(z.any()).optional(), settings: z.array(z.any()).optional(), patterns: z.array(z.any()).optional(), patternRule: z.string().optional(), suggestedSetting: z.any().optional(), evidence: z.any().optional(), ranked: z.any().optional() },

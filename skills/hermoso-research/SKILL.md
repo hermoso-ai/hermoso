@@ -27,5 +27,5 @@ Pick the tool that fits the ask:
 4. **Synthesize**: report the strongest hooks, angles, formats, and what's worth copying — be specific (quote the actual headlines/angles). If the user then wants to build one, hand off to `hermoso-ad-from-brand` / `hermoso-generate`.
 
 ## Notes
-- Research spends ScrapeCreators credits (ad-library calls) + LLM tokens; keep platform scope to what's asked.
+- Research spends credits (ad-library calls); keep platform scope to what's asked.
 - Add `--json` for the raw ad objects (URLs, copy, run dates) when the user wants the data, not a summary.

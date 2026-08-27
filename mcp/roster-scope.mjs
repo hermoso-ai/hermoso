@@ -34,16 +34,16 @@
 // rsync'd into a published package that has no lib/ and no repo around it.
 // RESEARCH IS NEVER GATED, AND THIS LIST IS THE REASON THE WHOLE CHANGE IS SAFE.
 //
-// The ad libraries and organic social search run on OUR ScrapeCreators key, not on the user's connection — a brand
+// The ad libraries and organic social search run on OUR OWN research key, not on the user's connection — a brand
 // with nothing connected can and must still spy on its competitors' Meta ads. But their NAMES look exactly like
 // connector tools: `search_meta_ads` contains `_meta_`, `search_youtube` contains `youtube`. Six of the nine would
 // have been silently gated by the rules below, which would have broken the product's single most-used feature for
 // every new account — the exact users this change exists to protect.
 //
 // DERIVED, NOT HAND-LISTED. `tools/studio-roster-check.mjs` asserts this set is a SUPERSET of server.js's own
-// `SC_WINDOW_TOOLS` — the set the route already uses to decide which tools take a ScrapeCreators balance window.
-// So a tenth SC-backed tool added there fails the suite rather than quietly losing research for zero-connector
-// accounts. Anything ScrapeCreators pays for, the user reaches without connecting anything.
+// `SC_WINDOW_TOOLS` — the set the route already uses to decide which tools take a research-balance window.
+// So a tenth research-backed tool added there fails the suite rather than quietly losing research for zero-connector
+// accounts. Anything our own research key pays for, the user reaches without connecting anything.
 //
 // NOTE what is deliberately NOT here: `search_instagram_hashtag`, `instagram_profile`, `search_threads_keyword`,
 // `discover_tiktok_creators`, `tiktok_creator_info`. Those read the PLATFORM's data through the USER'S token
@@ -51,7 +51,7 @@
 // connection, so gating them is correct.
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
-  'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'scrapecreators_fetch',
+  'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
 ]);
 
 // Tool-name → connector provider. ORDERED: the first match wins, so the more specific pattern must come first.
