@@ -355,7 +355,16 @@ const wrap = (fn) => {
     // connector not connected → hand the human a ONE-CLICK connect link (OAuth needs a browser, so it can't happen
     // in-agent) — Dave 2026-07-23. Detected from the STRUCTURED signal, never from the prose (see notConnectedHint).
     else msg += notConnectedHint(e, msg);
-      return { content: [{ type: 'text', text: msg }], isError: true };
+      // ── THE STRUCTURED ERROR MARKER (2026-08-26) ──────────────────────────────────────────────────────────
+      // `msg` above is a SENTENCE, built for a model to read. `/v1/tools` — the REST passthrough — has to answer
+      // the same failure with an HTTP status and the v1 error envelope, and deriving one from prose is exactly
+      // the over-match that made every Meta not-found read as a permission problem, four separate times. So the
+      // two facts this codebase already treats as structured truth ride out beside the sentence: `err.status`
+      // and `err.connector`, the ONE not-connected shape. Nothing is parsed anywhere.
+      // `_meta` is MCP's own sanctioned extension point (spec: any result MAY carry it), so every MCP client
+      // sees an ordinary error result and ignores a key it does not recognise. `publishWrap` spreads the result,
+      // so its ambiguous-publish advice keeps the marker rather than dropping it.
+      return { content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, connector: e?.connector ? String(e.connector) : '' } } };
     }
   };
   return outer;
@@ -454,7 +463,7 @@ const geoLine = (r) => {
 //     always measured against the live catalog, never against this number. It deliberately stays at the length the
 //     ORDINARY models render (15s) even though the catalog now carries a 30s single-take model: raising it to 30
 //     would mean a 20s ask skips the probe entirely, and on an account where that model is not configured (no
-//     FAL_KEY) the ask would sail through to a model that cannot render it. Low = one extra free round trip on a
+//     a render-provider key) the ask would sail through to a model that cannot render it. Low = one extra free round trip on a
 //     long ask. High = a silently-truncated render. So it stays low, and the live catalog stays the authority.
 //   AD_LENGTH_MAX — the longest STITCHED spot the planner can build: 12 acts (KEYFRAME_CAP) × 15s.
 const VIDEO_SINGLE_CLIP_CEILING = 15;
@@ -15662,7 +15671,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     outputSchema: {
       candidates: z.array(z.any()).optional().describe('discovered brands ({name, domain, kind, reason})'),
-      diagnostics: z.any().optional().describe('discovery diagnostics (LLM tokens, web grounding)'),
+      diagnostics: z.any().optional().describe('discovery diagnostics (model usage, web grounding)'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ domain, mode = 'competitors' }) => {
