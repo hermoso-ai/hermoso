@@ -177,6 +177,31 @@ export function forgetWorkspaceScope() {
   const ctx = mcpCtx.getStore();
   if (ctx) delete ctx._storeSuffix;
 }
+// ── WHICH PROVIDERS THIS WORKSPACE HAS ACTUALLY CONNECTED (2026-08-26) ───────────────────────────────────────────
+// Read ONCE per session, at `initialize`, and handed to registerTools so the roster it advertises carries only
+// tools the caller can actually use — see mcp/roster-scope.mjs for the law and applyToolGates for the seam.
+//
+// `/api/connectors/providers` and NOT `/api/connectors`: the full route does a live-token label backfill and a
+// per-provider scope-drift read, i.e. outbound provider calls, and this sits on the handshake every client makes.
+// The lean route answers from the store alone and resolves the workspace exactly the way the Studio's own
+// connector read does (brand-shared from the owner's scope + personal from the caller's).
+//
+// NEVER THROWS, AND THAT IS THE WHOLE CONTRACT. A read that fails for any reason — an older server with no such
+// route, a store blip, no bearer at all — returns `readOk:false`, which makes toolHeldBackByConnectors answer
+// false for every tool and ships the FULL roster. A failed read must never be able to remove a paying customer's
+// tools ([[failed-read-is-not-empty]]); the cost of being wrong in this direction is a slightly larger roster.
+//
+// DELIBERATELY NOT MEMOIZED. It is one call per session; caching it would be the one way a user who connects an
+// account and reconnects their client still does not see the tools, and on the hosted twin a module-level cache
+// would be a cross-tenant leak besides.
+export async function connectedProviders() {
+  try {
+    const r = await apiGet('/api/connectors/providers');
+    const list = Array.isArray(r?.providers) ? r.providers : null;
+    if (!list) return { connected: new Set(), readOk: false }; // a shape we do not recognise is a failed read
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true };
+  } catch { return { connected: new Set(), readOk: false }; }
+}
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so
 // the server reads the raw body. Lets an agent post ARBITRARY user files (not just Hermoso renders).
 export async function apiUpload(p, buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {

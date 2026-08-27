@@ -9,7 +9,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTools, MCP_INSTRUCTIONS, parseToolScope } from './tools.mjs';
-import { API_BASE } from './client.mjs';
+import { API_BASE, connectedProviders } from './client.mjs';
 
 // instructions = the full capability map (ad spy · create · raw model playground · account) — one source of truth
 // in tools.mjs, shared with the hosted connector (http.mjs), so every surface tells agents the same breadth.
@@ -27,7 +27,14 @@ const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' }, {
 // people's configs today. Renaming a variable someone already set is how a working setup goes quiet.
 const _scope = parseToolScope(process.env.HERMOSO_TOOLS || process.env.HEIST_TOOLS);
 if (_scope.error) { console.error(`[hermoso-mcp] ${_scope.error}`); process.exit(1); }
-registerTools(server, { only: _scope.groups });
+// AND SCOPED TO WHAT THIS WORKSPACE HAS CONNECTED, not only to the groups asked for (2026-08-26). A tool bound to
+// a provider nobody has connected can only answer `401 {connector:'<p>'}`, so listing it costs the caller context
+// on every turn and buys them nothing — and a roster far past the 30-50 tool accuracy cliff is what makes a model
+// pick the wrong tool. ONE read, here at startup; it NEVER throws and a failed read ships the FULL roster
+// ([[failed-read-is-not-empty]]). Awaited before registerTools because the gate reads it at registration time —
+// wiring it after would leave `readOk:false`, the gate would fail open, and the change would be silently inert.
+const _conn = await connectedProviders();
+registerTools(server, { only: _scope.groups, connectors: _conn });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

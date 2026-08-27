@@ -11,6 +11,10 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 // The UTF-16 well-formedness law — see wellFormedServer() below for why it is applied here, and
 // ./well-formed.mjs for why that specifier is the only one that can work in a byte-identical twin.
 import { wellFormedValue, wellFormedString } from './well-formed.mjs';
+// WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
+// re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
+// twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
+import { toolHeldBackByConnectors } from './roster-scope.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
@@ -189,6 +193,19 @@ export const MCP_INSTRUCTIONS = [
   '• RAW MODELS, prompt only: generate_image / generate_video with useBrand:false, generate_voice, generate_text, upload_file (any local or external file becomes a URL every publish, schedule and ad tool accepts).',
   '• PUBLISH & SCHEDULE to the user\'s OWN accounts: post_to_meta (+Threads), post_to_x, post_to_linkedin, post_to_tiktok, post_to_youtube, post_to_pinterest, post_to_reddit, post_to_bluesky, post_to_telegram, post_to_google_business; schedule_post, list_scheduled, reschedule_post, cancel_scheduled; list_connectors, list_connector_accounts, set_connector_accounts.',
   '• ADS on eleven platforms, their accounts and their money: create_meta_campaign / _adset / _ad, create_google_ads_campaign / _ad_group / _ad and the TikTok, LinkedIn, Pinterest, Reddit, Microsoft and OpenAI equivalents; meta_insights, google_ads_report and the per-platform reports. Everything is created PAUSED and read back before it is described.',
+  // ── YOUR ROSTER IS NOT THE PRODUCT (2026-08-26) ──────────────────────────────────────────────────────────────
+  // The roster is scoped to the accounts this workspace has connected, because a tool for an unconnected provider
+  // can only answer 401. That is a saving, and it has ONE failure mode, which this line exists to prevent: an
+  // agent reads its roster as the boundary of what exists and tells the user we do not support their platform
+  // ([[prompt-rosters-go-stale]] — our own prose has already refused shipped capability on five surfaces).
+  //
+  // TWO CONSTRAINTS DECIDE ITS POSITION AND ITS LENGTH, and both are real budgets someone else is paying.
+  // POSITION: immediately AFTER the ADS bullet, because some hosts truncate this string to ~2KB and all five areas
+  // plus "ADS on eleven platforms" must stay inside that window — put it above and it evicts the ads bullet, which
+  // causes the exact failure it exists to stop. LENGTH: §2d of agent-surface-guidance-check caps the whole string,
+  // so it says only what is NEW and points at nothing already named below — `list_connectors`, `Workspace ▸
+  // Connectors`, `?connect=<provider>` and the CLI escape hatch are all already in here, further down.
+  'A tool NOT in your roster is filtered out — that account is not connected here. Never say Hermoso lacks a platform.',
   // SECOND LINE, before the capability map: those four jobs read as four STAGES, and by the time an agent has
   // scrolled the map it has already decided Hermoso is a funnel it must enter at the top. See INDEPENDENCE above.
   // NOT REPEATED HERE ANY MORE: the head above states independence in its own first sentence, and every byte
@@ -1894,13 +1911,21 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
   if (unknown.length) return { content: [{ type: 'text', text: `Unknown tool group${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}. Valid: ${TOOL_GROUP_NAMES.join(', ')} — or 'all'.` }], isError: true };
   const active = ctx.enabledGroups, groupOf = ctx.groupOf, handles = ctx.handleOf;
   const added = expand.filter((g) => !active.has(g));
-  let n = 0;
+  let n = 0, heldBack = 0;
   for (const g of added) {
     active.add(g);
     for (const [name, grp] of Object.entries(groupOf)) {
       if (grp !== g) continue;
       const h = handles[name];
-      if (h) { try { h.enable(); n++; } catch {} }
+      if (!h) continue;
+      // THE GROUP FLIP MUST NOT UNDO THE CONNECTOR GATE (2026-08-26). Enabling a group is a statement about SIZE —
+      // "I am willing to carry these schemas" — not a claim that the workspace has connected eleven ad platforms.
+      // A blind `h.enable()` here would have re-listed every tool applyToolGates had just held back, so the saving
+      // would survive exactly until the first `enable_tools(['ads'])`. Counted, not silently skipped: the reply
+      // says how many and why, because a group that turns on "8 tools" when the agent expected 240 with no
+      // explanation is the [[prompt-rosters-go-stale]] failure — the agent concludes the capability is missing.
+      if (toolHeldBackByConnectors(name, ctx.conn)) { heldBack++; continue; }
+      try { h.enable(); n++; } catch {}
     }
   }
   const enabled = TOOL_GROUP_NAMES.filter((g) => active.has(g));
@@ -1922,14 +1947,28 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
   // NOT DELETED, deliberately. It still works on stdio and in the CLI, where the client re-lists, and deleting it
   // there would remove the only in-session route to the two opt-in groups. Made honest, not removed.
   const fixedRoster = hostRendersWidgets();
+  // NEVER "that platform is not supported". The tools exist, are built and are live; they are simply not listed for
+  // an account that has not connected the platform yet, because they could only answer 401. Say that, and say where
+  // the one-click fix is — the failure this sentence prevents is an agent telling a user we cannot run their ads.
+  const held = heldBack
+    ? ` ${heldBack} more tool${heldBack === 1 ? ' is' : 's are'} built and ready but not listed because their account is not connected in this workspace yet — Hermoso supports them all; connect the account under Workspace ▸ Connectors (https://app.hermoso.ai/?connect=<provider>, or list_connectors to see what is linked) and they appear.`
+    : '';
   const route = 'reconnect with `?tools=all` on the server URL, or run the `hermoso` CLI, which reaches every'
     + ' tool with no roster at all.';
-  const note = added.length
-    ? (fixedRoster
-      ? `Switched on ${added.join(', ')} server-side — but THIS host fixed its tool list when the connection was made and will not pick up the ${n} new tool${n === 1 ? '' : 's'} until it reconnects, so do not expect to see them in this conversation. To use them, ${route} Active groups: ${enabled.join(', ')}.`
-      : `Switched on ${added.join(', ')} — ${n} more tool${n === 1 ? '' : 's'} are callable now. If they do not appear your client has cached its tool list, in which case ${route} Active groups: ${enabled.join(', ')}.`)
-    : `Already on: ${expand.join(', ')}. Nothing changed. Active groups: ${enabled.join(', ')}.`;
-  return ok(note, { enabled, added, toolsAdded: n, note, rosterFixedForThisConnection: fixedRoster });
+  // A CACHED CLIENT AND AN UNCONNECTED ACCOUNT ARE DIFFERENT DIAGNOSES, AND ONLY ONE OF THEM IS EVER TRUE HERE
+  // (2026-08-26). The two branches below tell an agent that if the tools do not appear, its client cached the
+  // roster — correct when we really did enable something. When nothing was enabled BECAUSE nothing is connected,
+  // that sentence sends the agent to reconnect its client, which provably cannot help, and the reconnect it is
+  // told to try will produce the identical roster. So the zero-added case answers with the real cause and the
+  // real fix instead, and says the platforms exist. Same law as the read-back rule: report the measurement.
+  const note = !added.length
+    ? `Already on: ${expand.join(', ')}. Nothing changed. Active groups: ${enabled.join(', ')}.`
+    : (n === 0 && heldBack
+      ? `Switched on ${added.join(', ')} server-side, but nothing new is listed:${held} Active groups: ${enabled.join(', ')}.`
+      : fixedRoster
+        ? `Switched on ${added.join(', ')} server-side — but THIS host fixed its tool list when the connection was made and will not pick up the ${n} new tool${n === 1 ? '' : 's'} until it reconnects, so do not expect to see them in this conversation. To use them, ${route}${held} Active groups: ${enabled.join(', ')}.`
+        : `Switched on ${added.join(', ')} — ${n} more tool${n === 1 ? '' : 's'} are callable now. If they do not appear your client has cached its tool list, in which case ${route}${held} Active groups: ${enabled.join(', ')}.`);
+  return ok(note, { enabled, added, toolsAdded: n, toolsAwaitingConnection: heldBack, note, rosterFixedForThisConnection: fixedRoster });
 };
 
 // The per-session scope every roster needs, whether it was built or replayed. ONE builder so the two paths cannot
@@ -1937,13 +1976,33 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
 function newToolScope(opts) {
   const asked = opts.only ? new Set(opts.only) : new Set(DEFAULT_TOOL_GROUPS);
   asked.add('core'); // discovery/credits/billing/jobs must exist in EVERY roster or the connection is unusable
-  return { enabledGroups: asked, groupOf: Object.create(null), handleOf: Object.create(null) };
+  // `connectors` is `{connected:Set<provider>, readOk:boolean}` from the transport's own free read, or absent.
+  // ABSENT AND `readOk:false` BEHAVE IDENTICALLY, and that is the fail-open law rather than a convenience:
+  // toolHeldBackByConnectors answers false for both, so an unreadable store, an anonymous discovery handshake and
+  // a transport that has not been taught to read yet all advertise the FULL roster ([[failed-read-is-not-empty]]).
+  return {
+    enabledGroups: asked, groupOf: Object.create(null), handleOf: Object.create(null),
+    conn: opts.connectors || null,
+    widgetHost: !!opts.widgetHost,
+  };
 }
-// The two reasons a registered tool is held back. Applied identically on both paths, for the same reason.
+// THE THREE REASONS A REGISTERED TOOL IS HELD BACK. Applied identically on the build path, the replay path and
+// `enable_tools`, from ONE function, because a gate applied at two of the three is a gate a group flip undoes.
+//
+// (3) IS THE CONNECTOR GATE (2026-08-26). A connector-bound tool for a provider this workspace has not connected
+// can only ever answer `401 {connector:'<p>'}`, so carrying it buys the caller nothing and costs them context on
+// every turn — and a roster many times past the 30–50 tool accuracy cliff is what makes a model pick the wrong
+// tool. The MCP spec (rev 2026-07-28, Tools ▸ Capabilities) permits exactly this and nothing looser: the set
+// "MUST NOT vary per-connection or as a side effect of other requests on the connection. The set MAY vary by the
+// authorization presented on the request … since credentials are per-request input, not connection state."
+// DISABLED, NEVER SKIPPED, like the other two — the handler still exists, so connecting the account and
+// reconnecting reveals it with no code path of its own, and `tools/call` on it still answers its real 401
+// rather than the SDK's "unknown tool".
 function applyToolGates(h, name, group, ctx, opts) {
   if (!h) return;
   if (!ctx.enabledGroups.has(group)) { try { h.disable(); } catch {} }
   if (WITHHELD_FROM_WIDGET_HOSTS.has(name) && opts.widgetHost) { try { h.disable(); } catch {} }
+  if (toolHeldBackByConnectors(name, ctx.conn)) { try { h.disable(); } catch {} }
 }
 
 // Replay the cached canon onto a fresh server. This is the whole hot path for every session after the first.
@@ -2122,7 +2181,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
         const h = t.registerTool(name, defForHost(name, finalDef, opts.widgetHost), handler);
         handleOf[name] = h;
         // DISABLED, NOT SKIPPED — see (1) above. `disable()` is the SDK's own call and removes it from tools/list.
-        if (h && !enabledGroups.has(group)) { try { h.disable(); } catch {} }
+        //
+        // ONE GATE FUNCTION, NOT A SECOND COPY OF THE RULES (2026-08-26). This branch and the widget branch below
+        // used to be spelled out here AND inside applyToolGates, which replayTools calls — two implementations of
+        // the same law, on the two paths a session can take. That is how the build path and the replay path come to
+        // disagree, and it is invisible when they do: the first session in a process takes one, every session after
+        // it takes the other. The third (connector) gate would have had to be written twice for the same reason.
+        applyToolGates(h, name, group, ctx, opts);
         // WITHHELD FROM ONE HOST, for that host's rules rather than ours (2026-08-23).
         // OpenAI's plugin policy permits commerce only in PHYSICAL goods: "selling digital products or services,
         // including subscriptions, digital content, tokens, or credits, is not allowed." buy_credits hands back a
@@ -2141,7 +2206,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // rather than only its `enabled:true` branch, because a tool whose declared schema can arm a charge is what a
         // commerce reviewer reads, not the branch it happens to take; turning auto-reload OFF stays available in the
         // app and on every other surface.
-        if (h && WITHHELD_FROM_WIDGET_HOSTS.has(name) && opts.widgetHost) { try { h.disable(); } catch {} }
+        // (The disable itself now lives in applyToolGates above, with the other two gates. This comment stays HERE
+        // because it explains WHICH tools are in WITHHELD_FROM_WIDGET_HOSTS and why, which is the part that has to
+        // be read next to the roster rather than next to the mechanism.)
         return h;
       };
       const v = Reflect.get(t, p);
@@ -3597,6 +3664,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       poll: z.object({ options: z.array(z.string()), durationMinutes: z.number().optional() }).optional().describe('X — attach a poll: {options:["…","…"], durationMinutes}. 2–4 options of at most 25 characters each; voting runs 5–10080 minutes (7 days), default 1440. X makes a poll MUTUALLY EXCLUSIVE with media, so an item carrying an image or video is refused — schedule the poll as its own X-only post.'),
       replySettings: z.enum(['following', 'mentionedUsers', 'subscribers', 'verified']).optional().describe('X — who may reply. Omit for everyone, which is the right default for a brand post.'),
       madeWithAi: z.boolean().optional().describe('X — X’s AI-media label on this post. Opt-in: X treats it as the poster’s own claim about their media, so it is never set on the user’s behalf.'),
+      // THE THREE X FIELDS `xPost` HAS ACCEPTED SINCE THE DAY THEY LANDED AND NOTHING COULD SCHEDULE (2026-08-26).
+      // Same publisher-can/scheduler-cannot shape as SCHED_ID_FIELDS and the five Threads options one channel over:
+      // reachable when you publish NOW, unreachable when you schedule, and invisible until the parity sweep named it.
+      xQuotePostId: z.string().optional().describe('X — the numeric id of an X post this one QUOTES: the last part of its URL. X renders that post inside yours and it stands alone on your own timeline, which is what makes a quote different from a reply. NAMED xQuotePostId, NOT quotePostId, because `quotePostId` on this same schedule belongs to THREADS — a schedule going to both channels would otherwise be silently ambiguous. Billed at X’s higher LINK rate, because X appends the quoted post’s t.co URL to yours.'),
+      communityId: z.string().optional().describe('X — publish into an X COMMUNITY instead of the main timeline: the number in the community’s own URL (x.com/i/communities/<id>). The connected account must be a MEMBER of it; X answers a non-member and a non-existent id with the same refusal and does not separate them.'),
+      paidPartnership: z.boolean().optional().describe('X — label the post a PAID PARTNERSHIP, the same disclosure Hermoso already ships for TikTok. OPT-IN ONLY: set it when the post is sponsored, gifted or otherwise paid for, and never assume it on the user’s behalf.'),
       collaborators: z.array(z.string()).optional().describe('INSTAGRAM \u2014 a COLLAB post: up to 3 Instagram usernames invited to CO-AUTHOR it, so it appears on their profile too once they accept, with both handles in the header and the engagement shared. Handles only ("hermosoai"); a leading @ is fine. Instagram must be one of the `channels` \u2014 asking for collaborators on a schedule Instagram is not on is REFUSED now rather than discovered when it fires, and the other channels in a mixed schedule simply publish without co-authors. THE INVITE IS SENT WHEN THE POST FIRES, not when you schedule it, and it is PENDING until the other account accepts in their notifications; check with instagram_collaborators afterwards rather than telling the user it is live on both profiles.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE']).optional().describe('INSTAGRAM TRIAL REEL \u2014 publish this Reel to NON-FOLLOWERS ONLY at first, so a hook can be tested on a cold audience without spending it on the people who already follow the brand; Instagram shows it to followers only if it graduates. MANUAL = the creator graduates it by hand in the Instagram app; SS_PERFORMANCE = Instagram graduates it automatically if it performs. REELS ONLY and INSTAGRAM ONLY: an image, a carousel, or a Facebook/Threads channel is REFUSED BY NAME rather than quietly published as an ordinary post \u2014 a trial that silently goes to every follower is the exact opposite of what was asked for, so Instagram must be one of the `channels` and the item must carry a video. Omit it for a normal Reel.'),
       // ── WHICH ACCOUNT (server-side SCHED_ID_FIELDS). Every one of these is an answer the publish helper REFUSES
@@ -3687,6 +3760,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       poll: z.object({ options: z.array(z.string()), durationMinutes: z.number().optional() }).optional().describe('X — replaces the poll; an empty options list removes it.'),
       replySettings: z.enum(['following', 'mentionedUsers', 'subscribers', 'verified']).optional().describe('X — who may reply; "" goes back to everyone.'),
       madeWithAi: z.boolean().optional().describe('X — the AI-media label; false turns it off.'),
+      xQuotePostId: z.string().optional().describe('X — the post this one QUOTES; an empty string removes the quote. Named apart from the Threads `quotePostId` on this same schedule.'),
+      communityId: z.string().optional().describe('X — the community to publish into; an empty string goes back to the main timeline.'),
+      paidPartnership: z.boolean().optional().describe('X — the paid-partnership label; false turns it off.'),
       collaborators: z.array(z.string()).optional().describe('INSTAGRAM \u2014 replaces the WHOLE collab list (up to 3 usernames); an explicit [] removes the co-authors and the post goes out as an ordinary single-author post. Only takes effect if the post has not fired yet \u2014 an invite already sent cannot be withdrawn from here.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE', '']).optional().describe('INSTAGRAM \u2014 replaces the trial-reel setting on a queued Reel (MANUAL or SS_PERFORMANCE); an explicit "" turns the trial off and it goes out as an ordinary Reel. Only takes effect while the post is still queued \u2014 a Reel already published cannot be converted into a trial.'),
       boardId: z.string().optional().describe('PINTEREST — move the Pin to a different board (list_pinterest_boards)'),
@@ -4042,14 +4118,18 @@ function buildTools(rawServer, opts = {}, sink = null) {
       paginationToken: z.string().optional().describe('nextToken from a previous call, to page further back. There is no since/until filter at X — this is the only way to walk history.'),
       eventTypes: z.array(z.string()).optional().describe('MessageCreate (default), ParticipantsJoin, ParticipantsLeave. The join/leave events carry no message and are billed like any other, so the default is messages only.'),
     },
-    outputSchema: { account: z.string().optional(), count: z.number().optional(), nextToken: z.string().nullable().optional(), costCredits: z.number().optional(), historyNote: z.string().optional(), events: z.array(z.any()).optional(), conversations: z.array(z.any()).optional() },
+    outputSchema: { account: z.string().optional(), count: z.number().optional(), nextToken: z.string().nullable().optional(), costCredits: z.number().optional(), historyNote: z.string().optional(), events: z.array(z.any()).optional(), conversations: z.array(z.any()).optional(), emptyReason: z.string().optional(), emptyNote: z.string().optional(), xLooked: z.boolean().nullable().optional(), xErrors: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/x/dms', { maxResults: a.maxResults, conversationId: a.conversationId, participantId: a.participantId, paginationToken: a.paginationToken, eventTypes: (a.eventTypes || []).join(',') });
     const cost = `Cost ${d.costCredits ?? '?'} credits.`;
     // AN EMPTY READ IS REPORTED WITH THE WINDOW, NOT AS SILENCE. "No DMs" and "no DMs in the 30 days X will serve"
     // are different facts, and only one of them is something we actually know.
-    if (!d.count) return ok(`No direct messages for ${d.account || 'that account'} in what X returned. ${d.historyNote || ''} ${cost}`.trim(), d);
+    // AN EMPTY READ NOW SAYS WHICH KIND OF EMPTY IT WAS. X can answer 200 with a top-level errors[] and no data
+    // \u2014 a resource this token may not see, an app whose X permission level excludes Direct Messages \u2014 and for a
+    // day that was reported as an empty inbox on an account with a DM in it. `emptyNote` names the three cases
+    // apart; it is absent when events came back, so a normal answer is unchanged.
+    if (!d.count) return ok(`No direct messages came back for ${d.account || 'that account'}. ${d.emptyNote || ''} ${d.historyNote || ''} ${cost}`.replace(/\s+/g, ' ').trim(), d);
     const rows = (d.conversations || []).map((c) => `${c.needsReply ? '•' : '✓'} ${c.with || 'someone'} (${c.conversationId}) — ${String(c.lastMessage || '').replace(/\s+/g, ' ').slice(0, 160)}${c.needsReply ? '  ← waiting on a reply' : '  (you replied last)'}`);
     return ok(`${d.count} message${d.count === 1 ? '' : 's'} across ${rows.length} conversation${rows.length === 1 ? '' : 's'} for ${d.account}. ${cost}\n${rows.join('\n')}\n\n${d.historyNote || ''}`.trim(), d);
   }));
@@ -5064,25 +5144,64 @@ function buildTools(rawServer, opts = {}, sink = null) {
       to: z.string().optional().describe('the recipient\u2019s Bluesky handle, e.g. alice.bsky.social. Ignored when convoId is given.'),
       text: z.string().describe('the message, up to 1000 characters'),
       replyToMessageId: z.string().optional().describe('reply to a specific message in the conversation'),
+      dryRun: z.boolean().optional().describe('CHECK FIRST, SEND NOTHING. Asks Bluesky whether a DM to `to` would be delivered at all and returns canChat plus the reason when it would not \u2014 that account has DMs off, only accepts them from people it follows, has blocked this one, is suspended, or does not exist. Free, and the message is NOT sent. Use it before writing a long DM to someone who has never been messaged, so a refusal costs nothing instead of arriving after the words were written. `text` is still validated for length so a dry run cannot pass on a message the real send would refuse.'),
     },
-    outputSchema: { convoId: z.string().optional(), messageId: z.string().optional(), sentAt: z.string().optional(), text: z.string().optional(), to: z.string().optional(), delivered: z.boolean().optional() },
+    outputSchema: { convoId: z.string().optional(), messageId: z.string().optional(), sentAt: z.string().optional(), text: z.string().optional(), to: z.string().optional(), delivered: z.boolean().optional(), dryRun: z.boolean().optional(), sent: z.boolean().optional(), canChat: z.boolean().optional(), reason: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bluesky/dm', a);
+    // A DRY RUN MUST NEVER RENDER AS A SEND. The send sentence below reads "Sent the DM ..." and would be a
+    // plain falsehood about a call that deliberately delivered nothing.
+    if (d.dryRun) return ok(d.note || `Pre-flight only \u2014 nothing was sent. canChat: ${d.canChat === true}.`, d);
     return ok(`${d.delivered ? 'Sent' : 'Bluesky accepted but returned no message id for'} the DM${d.to ? ` to ${d.to}` : ''} \u2014 conversation ${d.convoId}${d.sentAt ? `, recorded at ${d.sentAt}` : ''}.\n\u201c${d.text}\u201d`, d);
   }));
   server.registerTool('mark_bluesky_convo_read', {
-    title: 'Mark a Bluesky conversation as read',
-    description: 'Clear the unread count on one Bluesky DM conversation, optionally only up to a specific message. Useful after triaging an inbox so the next list_bluesky_convos does not surface the same thread again. Reports the unread count Bluesky reads back, not the one requested.',
+    title: 'Mark Bluesky conversations as read',
+    description: 'Clear the unread count on Bluesky DMs \u2014 ONE conversation, or the WHOLE ACCOUNT when convoId is omitted (Bluesky\u2019s own mark-all, narrowable with status to just the message requests or just the accepted threads). Useful after triaging an inbox so the next list_bluesky_convos does not surface the same threads again. Reports the unread count \u2014 or the number of conversations \u2014 Bluesky reads back, not the one requested. Free.',
     inputSchema: {
-      convoId: z.string().describe('from list_bluesky_convos'),
+      convoId: z.string().optional().describe('from list_bluesky_convos. OMIT to mark EVERY conversation on the account read.'),
       messageId: z.string().optional().describe('mark read only up to this message; omit to clear the whole conversation'),
+      status: z.enum(['request', 'accepted']).optional().describe('mark-all only: narrow it to just the message requests, or just the accepted conversations. Omit to clear both. An unknown value is refused rather than dropped \u2014 a dropped one would clear everything when you asked to clear only the requests.'),
     },
-    outputSchema: { convoId: z.string().optional(), unread: z.number().optional(), with: z.string().optional() },
+    outputSchema: { convoId: z.string().optional(), unread: z.number().optional(), with: z.string().optional(), all: z.boolean().optional(), status: z.string().optional(), updatedCount: z.number().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bluesky/mark-read', a);
-    return ok(`Conversation with ${d.with || d.convoId} now reads ${d.unread} unread.`, d);
+    return ok(d.all ? (d.note || 'Marked read.') : `Conversation with ${d.with || d.convoId} now reads ${d.unread} unread.`, d);
+  }));
+  // \u2500\u2500 THE CONVERSATION ACTIONS (2026-08-26) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // We LISTED a conversation as a message REQUEST and offered no way to accept it, and reported it as MUTED with
+  // no way to mute or unmute it \u2014 a state drawn on the screen with no handle behind it. Seven lexicons behind
+  // ONE tool rather than seven tools: this roster is past 700 and 30-50 is where instruction-following starts to
+  // degrade, and the repo already spells this pattern manage_meta_post / manage_linkedin_post.
+  server.registerTool('manage_bluesky_convo', {
+    title: 'Accept, mute, lock, leave or prune a Bluesky DM conversation',
+    description: 'Act on one Bluesky DM conversation. ACCEPT a message request \u2014 Bluesky holds DMs from people the account does not follow in a separate requests folder, and until one is accepted it stays there. MUTE / UNMUTE it. LOCK / UNLOCK it (no new messages). LEAVE it. Or DELETE one message from THIS account\u2019s view. TWO THINGS TO SAY OUT LOUD BEFORE USING THEM: deleting is FOR SELF ONLY \u2014 the other person still sees the message, because Bluesky offers no delete-for-everyone in chat \u2014 and leaving a conversation cannot be undone from here. Accepting a request that was already accepted is reported as such rather than as a change, because Bluesky says so by returning no revision. Free, and it needs the same PRIVILEGED app password as every other Bluesky DM tool. Get a convoId from list_bluesky_convos.',
+    inputSchema: {
+      action: z.enum(['accept', 'mute', 'unmute', 'lock', 'unlock', 'leave', 'deleteMessage']).describe('what to do to the conversation'),
+      convoId: z.string().describe('from list_bluesky_convos'),
+      messageId: z.string().optional().describe('required for deleteMessage \u2014 from read_bluesky_dm'),
+    },
+    outputSchema: { action: z.string().optional(), convoId: z.string().optional(), messageId: z.string().optional(), accepted: z.boolean().optional(), alreadyAccepted: z.boolean().optional(), left: z.boolean().optional(), deletedForSelf: z.boolean().optional(), muted: z.boolean().optional(), unread: z.number().optional(), with: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/bluesky/convo-action', a);
+    return ok(d.note || `${a.action} done on ${a.convoId}.`, d);
+  }));
+  server.registerTool('react_to_bluesky_dm', {
+    title: 'React to a Bluesky direct message',
+    description: 'Add or remove an emoji reaction on one message in a Bluesky DM \u2014 the light acknowledgement that does not need a written reply, and the thing to reach for when someone says \u201cthanks\u201d and a paragraph back would be worse than a thumbs-up. A REACTION IS EXACTLY ONE EMOJI: that is Bluesky\u2019s own rule, so a word or a phrase is refused here rather than by the service (where it comes back as an opaque ReactionInvalidValue). Reports the reactions Bluesky reads the message back carrying, not the one requested. Free.',
+    inputSchema: {
+      convoId: z.string().describe('from list_bluesky_convos'),
+      messageId: z.string().describe('from read_bluesky_dm'),
+      value: z.string().describe('exactly one emoji, e.g. \uD83D\uDC4D'),
+      remove: z.boolean().optional().describe('true to take the reaction off instead of putting it on'),
+    },
+    outputSchema: { convoId: z.string().optional(), messageId: z.string().optional(), value: z.string().optional(), removed: z.boolean().optional(), reactions: z.array(z.string()).optional(), text: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/bluesky/react', a);
+    return ok(d.note || `Reaction ${a.value} ${a.remove ? 'removed' : 'added'}.`, d);
   }));
   server.registerTool('tiktok_creator_info', {
     title: 'Read the connected TikTok creator’s posting options',

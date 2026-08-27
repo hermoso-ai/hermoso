@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools, MCP_INSTRUCTIONS, parseToolScope } from './tools.mjs';
-import { mcpCtx } from './client.mjs';
+import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
@@ -209,6 +209,10 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
     // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
     // only the authenticated path would leave both tools listed in the submission.
+    // NO `connectors` HERE, DELIBERATELY. There is no authorization on this request, so there is no workspace to
+    // scope to and nothing honest to read — and a registry crawler or an agent deciding whether to connect MUST
+    // see the real catalog, not a zero-connector one. registerTools treats an absent `connectors` exactly like a
+    // failed read: full roster. Do not "fix" this by reading the workspace off the request; it is forgeable.
     registerTools(server, { only: scope?.groups, widgetHost: isWidgetHost(clientInfoOf(req.body), req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
@@ -247,8 +251,22 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       const scope = scopeFor(req, res);
       if (scope === false) return; // unknown group — already answered 400, and nothing was allocated
       sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
+      // ── WHAT THIS CALLER CAN ACTUALLY USE (2026-08-26) ────────────────────────────────────────────────────────
+      // One free store read, on the ONE request per session that mints the roster, so the tools we advertise are
+      // the tools their workspace can call. A connector-bound tool for an unconnected provider can only answer
+      // `401 {connector:'<p>'}`; carrying it costs the caller context every turn and pushes the roster further
+      // past the 30-50 tool accuracy cliff. The MCP spec permits exactly this and nothing looser — the tool set
+      // "MAY vary by the authorization presented on the request … since credentials are per-request input, not
+      // connection state" (rev 2026-07-28, Tools ▸ Capabilities) — which is why it is keyed to the BEARER and not
+      // to the connection or to a query parameter.
+      //
+      // INSIDE `mcpCtx.run`, because that store is what puts this caller's token on the outbound /api call. Read
+      // it outside and it would go out unauthenticated, answer 401, and — correctly, by its own contract — fail
+      // OPEN with the full roster, so the whole change would be silently inert. Never throws; see
+      // connectedProviders() ([[failed-read-is-not-empty]]).
+      const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
