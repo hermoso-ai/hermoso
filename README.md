@@ -64,6 +64,49 @@ calls into one area. `enable_tools({groups:['ads']})` turns campaign management 
 tools are then native — no shell quoting, structured results. One shell round trip beats loading a 221K-token
 group for a single tool; the reverse is true once a session settles into that area.
 
+## Your agent can sign itself up
+
+An agent with no Hermoso account can provision one, get its own key, and be rendering ads in the same session.
+No human at a browser, no ticket, no waiting.
+
+```bash
+# 1. Start a signup. This call takes no credential, because the credential is what it creates.
+curl -sX POST https://app.hermoso.ai/v1/signup \
+  -H 'content-type: application/json' \
+  -d '{"plan":"pro","period":"mo"}'
+# -> { "id": "cs_...", "checkout_url": "https://checkout.stripe.com/...", "claim_token": "hsc_..." }
+
+# 2. Pay at checkout_url. Store claim_token first: it is returned only in that response.
+
+# 3. Claim it. Poll until status is "ready".
+curl -sX POST https://app.hermoso.ai/v1/signup/cs_.../claim \
+  -H 'content-type: application/json' \
+  -d '{"claim_token":"hsc_..."}'
+# -> { "status": "ready", "api_key": "hmk_...", "credits": 3000 }
+```
+
+That `hmk_` key is the same credential everything else on this page takes: `/v1`, the MCP server, the CLI. Point
+your client at it and the full surface is open.
+
+**Paying is something a browser-capable agent can already do itself.** Checkout is Stripe's own hosted page, so
+Claude in Chrome and clients like it complete it unattended today. Everything else is a one-click handoff: send
+`checkout_url` to whoever holds the card. The same shape covers you later, once you are running: `buy_credits`
+and `upgrade_plan` mint a ready-to-pay link for more credits or a bigger plan, and `billing_status` reads the
+balance any time.
+
+**The agentic path takes a paid plan.** Any of them. The free plan is there for a person signing up at
+[app.hermoso.ai](https://app.hermoso.ai), and asking for it here returns a refusal that says so. Nothing is
+created until the payment completes, so an unpaid signup leaves no account behind and charges nothing.
+
+**One thing still wants a person, and it is worth knowing up front.** Connecting a social or ad account means an
+OAuth consent screen, and a consent screen cannot be completed headlessly on any platform. `list_connectors`
+shows what is already connected and what is not. Everything else runs with no browser at all: research,
+generation, publishing to a channel that is already connected, campaign builds, reporting.
+
+Full request and response shapes, plus every other endpoint, are in the OpenAPI document at
+[app.hermoso.ai/openapi.json](https://app.hermoso.ai/openapi.json), served live from the same table that mounts
+the routes.
+
 ## Instant: the hosted Claude.ai connector
 
 Paste **`https://app.hermoso.ai/mcp`** into Claude → Settings → Connectors → *Add custom connector*, approve with
@@ -72,7 +115,8 @@ your Hermoso account, done — the full toolset with your saved brand context, b
 ## Quickstart for Claude Code (one line)
 
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai) — free tier included; plans & credits are the
-   same ones the web Studio uses.
+   same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid plan
+   with `POST /v1/signup` (above).
 2. **Run one line.** Your browser opens once to sign in. Nothing to paste, and no key lands in `.claude.json`:
 
 ```bash
