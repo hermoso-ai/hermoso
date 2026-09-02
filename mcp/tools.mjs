@@ -460,7 +460,9 @@ const geoLine = (r) => {
   const dims = d.deliveredWidth && d.deliveredHeight ? `${d.deliveredWidth}x${d.deliveredHeight}` : '';
   const bits = [dims, d.deliveredAspect, d.deliveredResolution].filter(Boolean);
   if (!bits.length && !d.deliveryNote) return '';
-  return (bits.length ? `\nDelivered: ${bits.join(' · ')} (measured off the file)` : '') + (d.deliveryNote ? `\n⚠ ${d.deliveryNote}` : '');
+  // A worker's own disclosure rides the read-back (2026-09-01): the Multiplier reports `mechanism` (motion-transfer vs the
+  // video-edit fallback) and a `note` saying why — a caller who never sees them reads an edited take as a driven one.
+  return (bits.length ? `\nDelivered: ${bits.join(' · ')} (measured off the file)` : '') + (d.deliveryNote ? `\n⚠ ${d.deliveryNote}` : '') + (d.mechanism ? `\nMechanism: ${d.mechanism}` : '') + (d.note && d.note !== d.deliveryNote ? `\nℹ ${d.note}` : '');
 };
 
 // Shared outputSchema fields for the job-based render tools (the renderJob result that becomes structuredContent).
