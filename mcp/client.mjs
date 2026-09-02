@@ -1,7 +1,7 @@
-// Tiny fetch wrapper around the Hermoso HTTP API, shared by the MCP server (mcp/tools.mjs) and the CLI (bin/hermoso.mjs).
+// Tiny fetch wrapper around the Hermoso HTTP API, shared by the MCP server (mcp/tools.mjs) and the CLI (bin/heist.mjs).
 // LOCAL today: no auth needed — the server's local auth adapter resolves the fixed dev account, so requireAuth/
-// gateSpend pass. When real auth lands, set HERMOSO_TOKEN (a Bearer) and the SAME calls become authoritative — no
-// changes here. We attach the x-hermoso-plan / x-hermoso-user fallbacks the browser also sends, purely for parity;
+// gateSpend pass. When real auth lands, set HEIST_TOKEN (a Bearer) and the SAME calls become authoritative — no
+// changes here. We attach the x-heist-plan / x-heist-user fallbacks the browser also sends, purely for parity;
 // the server treats them as non-authoritative (identity comes from the verified token / local dev user).
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,12 +11,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // makes carries THAT caller's bearer (bills their account). stdio keeps using the env token — ctx is simply unset.
 export const mcpCtx = new AsyncLocalStorage();
 
-export const API_BASE = (process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai').replace(/\/+$/, '');
-const TOKEN = process.env.HERMOSO_TOKEN || '';
-// PINNED profile, or '' when unpinned. MUST stay unset by default: the server resolves an API key's profile as
-// header > key.keyProfileId > 'default' (adapters/auth/middleware.js), so always sending the header permanently
-// masks the brand `use_brand` saved against the key — connectors on any non-default brand then look disconnected.
-export const PROFILE = process.env.HERMOSO_PROFILE || '';
+export const API_BASE = (process.env.HEIST_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
+const TOKEN = process.env.HEIST_TOKEN || '';
+// PINNED profile, or '' when the caller hasn't pinned one. This MUST stay unset by default: the server resolves
+// an API key's profile as  header  >  key.keyProfileId  >  'default'  (adapters/auth/middleware.js), so a client
+// that ALWAYS sends the header permanently masks the brand `use_brand` saved against the key. Live 2026-07-27:
+// use_brand reported "Now acting on Hermoso", and every connector tool still answered for the default brand —
+// so Meta/Google Ads/YouTube/OneDrive all looked disconnected over MCP while being connected in the web app.
+export const PROFILE = process.env.HEIST_PROFILE || '';
 // SHARED TEAM WORKSPACE: the OWNING account. The web client sends this as x-hermoso-owner from PROFILE_OWNER
 // (public/app.js ctxHeaders) whenever the active brand belongs to someone else's account; the MCP twins never did,
 // so a member driving Hermoso headlessly resolved every brand-scoped read against their OWN empty account —
@@ -27,10 +29,10 @@ export const PROFILE = process.env.HERMOSO_PROFILE || '';
 // default — sending an owner for your own account would make resolveWs take the shared branch against yourself.
 // PAIR IT WITH THE PROFILE UUID, not the slug: profile_members keys on profiles.id, so a client_slug is the one
 // thing isMember() cannot match and it 403s. list_brands names both values for every workspace you can enter.
-export const OWNER = process.env.HERMOSO_OWNER || '';
+export const OWNER = process.env.HEIST_OWNER || '';
 // The env-var prefix THIS build reads. tools.mjs is byte-identical across the two twins, so it cannot
 // hardcode either name when it tells a user which variables to set — it asks its own client.
-export const ENV_PREFIX = 'HERMOSO';
+export const ENV_PREFIX = 'HEIST';
 
 // WHICH TOOL IS RUNNING. The error ledger groups on the OP, and a path alone cannot name the tool: `plan_ad`,
 // `render_ad` and `make_template_ad` all fail through POST /api/create, so without this every MCP defect would be
@@ -42,14 +44,15 @@ export const toolCtx = new AsyncLocalStorage();
 function headers(extra = {}) {
   const ctx = mcpCtx.getStore();
   // A HOSTED-CONNECTOR request (mcp/http.mjs) is a DIFFERENT TENANT from the process serving it, so its ctx is the
-  // ONLY scope it may carry: falling through to this process's HERMOSO_PROFILE / HERMOSO_OWNER would scope one
+  // ONLY scope it may carry: falling through to this process's HEIST_PROFILE / HEIST_OWNER would scope one
   // customer's tool call to whatever workspace the SERVER's environment happens to name — a cross-tenant leak that
   // is invisible because it succeeds. stdio/CLI keeps the env fallback: there the process and the caller are the
   // same person. Presence of the ctx store IS "remote" (see isRemote below).
-  const prof = ctx ? (ctx.profile || '') : PROFILE; // omitted when unpinned so the key's saved brand wins server-side
+  const prof = ctx ? (ctx.profile || '') : PROFILE; // omit entirely when unpinned so the key's saved brand wins server-side
   const own = ctx ? (ctx.owner || '') : OWNER; // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
   const tool = toolCtx.getStore()?.tool || '';
-  const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-hermoso-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...(tool ? { 'x-hermoso-tool': tool } : {}), ...extra };
+  const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-heist-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...(tool ? { 'x-hermoso-tool': tool } : {}), ...extra };
+  if (process.env.EDGE_SECRET) h['x-edge-auth'] = process.env.EDGE_SECRET; // belt: in-process self-calls satisfy the edge shield even if the loopback exemption ever changes
   const tok = ctx?.token || TOKEN;
   if (tok) h.Authorization = `Bearer ${tok}`;
   return h;
@@ -99,12 +102,53 @@ export async function apiGet(p, query) {
   // digit-strip reduced them to '' → GAQL "segments.date BETWEEN '' and ''". Drop empties before building the qs.
   const clean = query && Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''));
   const qs = clean && Object.keys(clean).length ? '?' + new URLSearchParams(clean).toString() : '';
-  const res = await fetch(`${API_BASE}${p}${qs}`, { headers: headers() });
+  const res = await fetchRead(`${API_BASE}${p}${qs}`, { headers: headers() });
   return unwrap(res);
 }
 
+// ── A TRANSPORT FAILURE IS NOT A DEFECT, AND IT MUST NOT READ LIKE ONE (2026-08-31) ────────────────────────────
+// Every tool here reaches the app over HTTP, so a network blip between this process and the app surfaces as node's
+// bare `TypeError: fetch failed` — no status, no message anyone can act on. Two of those paged us in one afternoon
+// (`list_connectors` 2m after a deploy, `list_meta_posts` 1.6h into a settled revision), and the error ledger is
+// right to classify a raw TypeError as ours: it cannot tell a genuine bug from a dropped connection.
+//
+// RETRYING A READ IS SAFE. RETRYING A WRITE IS NOT, and that asymmetry is the whole design: when a POST dies at the
+// transport layer we do not know whether the server processed it, so a retry is how one scheduled post becomes two.
+// That is the same rule publishOnce already enforces one layer up — a timeout is neither success nor failure — so
+// GET (and only GET) gets one more attempt, and a write says plainly that it may or may not have landed.
+// THE THREE UPLOAD/PUT PATHS BYPASSED ALL OF THIS UNTIL 2026-09-01, and a real user found it: `upload_file` over
+// the hosted connector answered a bare `TypeError: fetch failed` (fp 3d7f69f6-1fc), which the ledger correctly
+// files as OURS because a raw runtime error is indistinguishable from a genuine bug. They are WRITES, so they take
+// `fetchWrite` — no retry (a repeated upload is a duplicate file) and the honest "it may or may not have landed"
+// sentence instead of a stack-trace word the caller cannot act on.
+const TRANSPORT_RE = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|network|terminated/i;
+const isTransport = (e) => !!e && e.name === 'TypeError' && TRANSPORT_RE.test(String(e.message || '') + ' ' + String(e.cause?.code || e.cause?.message || ''));
+
+async function fetchRead(url, init) {
+  try { return await fetch(url, init); }
+  catch (e) {
+    if (!isTransport(e)) throw e;
+    await new Promise((r) => setTimeout(r, 400));
+    try { return await fetch(url, init); }
+    catch (e2) {
+      if (!isTransport(e2)) throw e2;
+      throw Object.assign(new Error('Could not reach Hermoso just now — the request never got a response, so nothing was read. This is a connection problem, not a rejected request; try again.'), { _transport: true, _viaApi: true });
+    }
+  }
+}
+
+async function fetchWrite(url, init) {
+  try { return await fetch(url, init); }
+  catch (e) {
+    if (!isTransport(e)) throw e;
+    // NOT RETRIED, DELIBERATELY. The request may already have been processed; sending it again is how a duplicate
+    // is made. The caller is told the honest thing — that the outcome is unknown — so it can CHECK rather than repeat.
+    throw Object.assign(new Error(`Could not reach Hermoso while sending that ${init?.method || 'request'} — the connection dropped before any answer came back, so it MAY OR MAY NOT have been applied. Check whether it took effect before sending it again; retrying blindly can duplicate it.`), { _transport: true, _viaApi: true });
+  }
+}
+
 export async function apiPost(p, body = {}) {
-  const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
@@ -112,17 +156,17 @@ export async function apiPost(p, body = {}) {
 // "leave that field exactly as it was", so sending a whole object where a patch was meant would blank the fields
 // the caller never mentioned. Only ever send the keys that are actually changing.
 export async function apiPatch(p, body = {}) {
-  const res = await fetch(`${API_BASE}${p}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
 export async function apiDelete(p) {
-  const res = await fetch(`${API_BASE}${p}`, { method: 'DELETE', headers: headers() });
+  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'DELETE', headers: headers() });
   return unwrap(res);
 }
 
 export async function apiPut(p, body = {}) {
-  const res = await fetch(`${API_BASE}${p}`, { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
@@ -145,7 +189,7 @@ export const hostRendersWidgets = () => WIDGET_HOSTS.test(mcpCtx.getStore()?.cli
 // ── WHICH WORKSPACE'S STORE KEYS THIS CALL WRITES ──────────────────────────────────────────────────────────────
 // The suffix synced store keys carry (`` = the bare/anchor keys, `<clientSlug>` = a sub-brand). It comes from the
 // SERVER (`GET /api/workspace` → resolveWs), never from this process's environment, because on the hosted twin the
-// caller and the process are different tenants: HERMOSO_PROFILE names whatever workspace the SERVER's env happens to
+// caller and the process are different tenants: HEIST_PROFILE names whatever workspace the SERVER's env happens to
 // mention, which for a hosted connector is nothing at all. That is how `use_brand "Client X"` kept reading and
 // WRITING the anchor brand (live 2026-08-01), and how draft_brand's save overwrote the default brand's profile.
 let _suffixMemo = null; // stdio/CLI only: one process = one caller, so a module-level memo is honest here
@@ -207,7 +251,7 @@ export async function connectedProviders() {
 export async function apiUpload(p, buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {
   const h = headers({ 'Content-Type': contentType });
   if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
-  const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: h, body: buf });
+  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: h, body: buf });
   return unwrap(res);
 }
 // Ingest by URL: the SERVER fetches the bytes (SSRF-guarded on every redirect hop) so nothing has to cross this
@@ -216,13 +260,13 @@ export async function apiUploadUrl(p, url, { fileName = '' } = {}) {
   const h = headers({});
   delete h['Content-Type']; // a body-less POST must not claim one; the server sniffs the FETCHED bytes
   if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
-  const res = await fetch(`${API_BASE}${p}?url=${encodeURIComponent(url)}`, { method: 'POST', headers: h });
+  const res = await fetchWrite(`${API_BASE}${p}?url=${encodeURIComponent(url)}`, { method: 'POST', headers: h });
   return unwrap(res);
 }
 
 // /api/explore/chat streams Server-Sent-Events; collect to the terminal `done` payload {reply, results, actions}.
 export async function apiSSE(p, body = {}) {
-  const res = await fetch(`${API_BASE}${p}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
   if (!res.ok) { let e; try { e = (await res.json()).error; } catch {} throw Object.assign(new Error(e || `HTTP ${res.status}`), { status: res.status }); }
   const reader = res.body.getReader(); const dec = new TextDecoder();
   let buf = '', done = null, error = null; const progress = [];
@@ -260,7 +304,7 @@ export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 100
     onTick?.(job);
     if (job.status === 'done') return { job, result: jobResult(job) };
     if (job.status === 'error') throw new Error(job.error || 'Render failed');
-    if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `hermoso jobs get ' + id + '`'), { jobId: id });
+    if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `heist jobs get ' + id + '`'), { jobId: id });
     await new Promise(r => setTimeout(r, intervalMs));
   }
 }

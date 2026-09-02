@@ -14,7 +14,7 @@ allowed-tools: Bash
 This is Hermoso's discovery half (which most generators don't have). Drive the **Hermoso CLI**.
 
 ## Setup
-- `hermoso auth login` (opens your browser once; nothing to paste). On a machine with no browser: `hermoso auth login --token <your key>`, using a key from the app under **MCP & CLI**.. No account at all? An agent can sign itself up on a paid plan with `POST /v1/signup` at app.hermoso.ai, no browser needed; see the Hermoso README.
+- `hermoso auth login` (opens your browser once; nothing to paste). On a machine with no browser: `hermoso auth login --token <your key>`, using a key from the app under **MCP & CLI**..
 
 ## Procedure
 Pick the tool that fits the ask:
