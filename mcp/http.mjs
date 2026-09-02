@@ -4,11 +4,11 @@
 //
 // It is written so the cloud step is a CONFIG FLIP, not a rewrite — but it is intentionally OFF and will REFUSE
 // to mount until BOTH are true:
-//   (1) HEIST_MCP_REMOTE=1, and
+//   (1) HERMOSO_MCP_REMOTE=1 (or the legacy HEIST_MCP_REMOTE), and
 //   (2) a real token verifier is wired (verifyBearer) — i.e. Firebase Auth (or equivalent) is configured.
 // Why it must stay off locally: a public money-spending endpoint cannot exist without authenticated identity
 // (the no-anon-spend rule), there is no hosted origin yet, and per the rollout plan cloud is provisioned
-// COLLABORATIVELY, never solo. Until then, use the local stdio server (mcp/heist-mcp.mjs) + the CLI + skills.
+// COLLABORATIVELY, never solo. Until then, use the local stdio server (mcp/hermoso-mcp.mjs) + the CLI + skills.
 //
 // When the cloud step happens, the remaining work is small and explicit (see ENABLE CHECKLIST at the bottom).
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -21,12 +21,12 @@ import { mcpCtx, connectedProviders } from './client.mjs';
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
 export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
-  if (process.env.HEIST_MCP_REMOTE !== '1') return false;             // gate 1: off by default
+  if ((process.env.HERMOSO_MCP_REMOTE ?? process.env.HEIST_MCP_REMOTE) !== '1') return false;             // gate 1: off by default
   if (typeof verifyBearer !== 'function') {                           // gate 2: refuse without real auth
     console.error('[mcp-remote] REFUSING to mount: no token verifier wired. A remote, money-spending MCP must authenticate every caller (no-anon-spend). Wire Firebase Auth → verifyBearer first.');
     return false;
   }
-  const BASE = (publicBaseUrl || process.env.HEIST_PUBLIC_URL || '').replace(/\/+$/, '');
+  const BASE = (publicBaseUrl || process.env.HERMOSO_PUBLIC_URL || process.env.HEIST_PUBLIC_URL || '').replace(/\/+$/, '');
 
   // RFC 9728 protected-resource metadata — tells Claude.ai where to get a token. (Authorization-server metadata
   // is served by the auth provider itself, e.g. Firebase/your IdP.) Scopes match the AS metadata + minted token
@@ -56,7 +56,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
   const MCP_PATH = '/mcp';                            // the resource's path component — app.all(MCP_PATH) below
   const protectedResourceMetadata = (req, res) => res.json({
     resource: `${BASE}${MCP_PATH}`,
-    authorization_servers: [process.env.HEIST_OAUTH_ISSUER].filter(Boolean),
+    authorization_servers: [process.env.HERMOSO_OAUTH_ISSUER || process.env.HEIST_OAUTH_ISSUER].filter(Boolean),
     scopes_supported: ['hermoso.research', 'hermoso.generate'],
     bearer_methods_supported: ['header'],
   });
@@ -293,7 +293,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     }
     // The caller's bearer rides into every /api call the tools make — spend bills THEIR account. `remote: true`
     // says what this store IS: a per-request tenant scope on a shared, multi-tenant process. client.mjs treats the
-    // presence of this store as the signal to STOP falling back to the process's own HEIST_PROFILE / HEIST_OWNER,
+    // presence of this store as the signal to STOP falling back to the process's own HERMOSO_PROFILE / HERMOSO_OWNER,
     // which belong to whoever runs the box, not to whoever is calling.
     //
     // NOTE WHAT IS DELIBERATELY *NOT* HERE: a profile or an owner read off the request. There is nowhere honest to
@@ -304,14 +304,14 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     await mcpCtx.run({ token, remote: true, client: entry.client || '' }, () => entry.transport.handleRequest(req, res, req.body));
   });
 
-  console.error(`[mcp-remote] mounted at ${BASE || '(set HEIST_PUBLIC_URL)'}/mcp`);
+  console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);
   return true;
 }
 
 // ── ENABLE CHECKLIST (cloud step, collaborative) ──────────────────────────────────────────────────────────
-//  1. Provision a hosted origin (Cloud Run) + Firebase Auth; set HEIST_PUBLIC_URL + HEIST_OAUTH_ISSUER.
+//  1. Provision a hosted origin (Cloud Run) + Firebase Auth; set HERMOSO_PUBLIC_URL + HERMOSO_OAUTH_ISSUER.
 //  2. Implement verifyBearer(token) via the Firebase auth adapter (adapters/auth/firebase.js) and pass it here.
 //  3. Thread the authenticated user into mcp/client.mjs's outbound /api calls (AsyncLocalStorage) so reserve()/
 //     gateSpend bill the right account — the server-side enforcement is already authoritative once req.user is real.
-//  4. Set HEIST_MCP_REMOTE=1. Then in server.js: `import { mountRemoteMcp } from './mcp/http.mjs'; mountRemoteMcp(app, { verifyBearer, publicBaseUrl })`.
-//  5. The published connector URL becomes `${HEIST_PUBLIC_URL}/mcp` — paste into Claude.ai → Settings → Connectors.
+//  4. Set HERMOSO_MCP_REMOTE=1. Then in server.js: `import { mountRemoteMcp } from './mcp/http.mjs'; mountRemoteMcp(app, { verifyBearer, publicBaseUrl })`.
+//  5. The published connector URL becomes `${HERMOSO_PUBLIC_URL}/mcp` — paste into Claude.ai → Settings → Connectors.

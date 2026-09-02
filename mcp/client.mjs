@@ -1,7 +1,7 @@
-// Tiny fetch wrapper around the Hermoso HTTP API, shared by the MCP server (mcp/tools.mjs) and the CLI (bin/heist.mjs).
+// Tiny fetch wrapper around the Hermoso HTTP API, shared by the MCP server (mcp/tools.mjs) and the CLI (bin/hermoso.mjs).
 // LOCAL today: no auth needed — the server's local auth adapter resolves the fixed dev account, so requireAuth/
-// gateSpend pass. When real auth lands, set HEIST_TOKEN (a Bearer) and the SAME calls become authoritative — no
-// changes here. We attach the x-heist-plan / x-heist-user fallbacks the browser also sends, purely for parity;
+// gateSpend pass. Set HERMOSO_TOKEN (a Bearer) and the SAME calls become authoritative — no
+// changes here. We attach the x-heist-plan / x-heist-user headers (legacy wire names the server still reads) the browser also sends, purely for parity;
 // the server treats them as non-authoritative (identity comes from the verified token / local dev user).
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,14 +11,18 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // makes carries THAT caller's bearer (bills their account). stdio keeps using the env token — ctx is simply unset.
 export const mcpCtx = new AsyncLocalStorage();
 
-export const API_BASE = (process.env.HEIST_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
-const TOKEN = process.env.HEIST_TOKEN || '';
+// ENV NAMES (2026-09-01): HERMOSO_* is the documented prefix (README, `claude mcp add … -e HERMOSO_TOKEN=…`); HEIST_* is the
+// pre-rebrand name still honoured as a fallback. Measured before this fix: a stdio server started with ONLY HERMOSO_TOKEN and
+// HERMOSO_API_BASE fell back to localhost:3000 and could not reach Hermoso — the documented setup did not authenticate.
+// The published package defaults to the hosted API; a self-hoster sets HERMOSO_API_BASE.
+export const API_BASE = ((process.env.HERMOSO_API_BASE ?? process.env.HEIST_API_BASE) || 'https://app.hermoso.ai').replace(/\/+$/, '');
+const TOKEN = (process.env.HERMOSO_TOKEN ?? process.env.HEIST_TOKEN) || '';
 // PINNED profile, or '' when the caller hasn't pinned one. This MUST stay unset by default: the server resolves
 // an API key's profile as  header  >  key.keyProfileId  >  'default'  (adapters/auth/middleware.js), so a client
 // that ALWAYS sends the header permanently masks the brand `use_brand` saved against the key. Live 2026-07-27:
 // use_brand reported "Now acting on Hermoso", and every connector tool still answered for the default brand —
 // so Meta/Google Ads/YouTube/OneDrive all looked disconnected over MCP while being connected in the web app.
-export const PROFILE = process.env.HEIST_PROFILE || '';
+export const PROFILE = (process.env.HERMOSO_PROFILE ?? process.env.HEIST_PROFILE) || '';
 // SHARED TEAM WORKSPACE: the OWNING account. The web client sends this as x-hermoso-owner from PROFILE_OWNER
 // (public/app.js ctxHeaders) whenever the active brand belongs to someone else's account; the MCP twins never did,
 // so a member driving Hermoso headlessly resolved every brand-scoped read against their OWN empty account —
@@ -29,10 +33,10 @@ export const PROFILE = process.env.HEIST_PROFILE || '';
 // default — sending an owner for your own account would make resolveWs take the shared branch against yourself.
 // PAIR IT WITH THE PROFILE UUID, not the slug: profile_members keys on profiles.id, so a client_slug is the one
 // thing isMember() cannot match and it 403s. list_brands names both values for every workspace you can enter.
-export const OWNER = process.env.HEIST_OWNER || '';
+export const OWNER = (process.env.HERMOSO_OWNER ?? process.env.HEIST_OWNER) || '';
 // The env-var prefix THIS build reads. tools.mjs is byte-identical across the two twins, so it cannot
 // hardcode either name when it tells a user which variables to set — it asks its own client.
-export const ENV_PREFIX = 'HEIST';
+export const ENV_PREFIX = 'HERMOSO';
 
 // WHICH TOOL IS RUNNING. The error ledger groups on the OP, and a path alone cannot name the tool: `plan_ad`,
 // `render_ad` and `make_template_ad` all fail through POST /api/create, so without this every MCP defect would be
@@ -44,7 +48,7 @@ export const toolCtx = new AsyncLocalStorage();
 function headers(extra = {}) {
   const ctx = mcpCtx.getStore();
   // A HOSTED-CONNECTOR request (mcp/http.mjs) is a DIFFERENT TENANT from the process serving it, so its ctx is the
-  // ONLY scope it may carry: falling through to this process's HEIST_PROFILE / HEIST_OWNER would scope one
+  // ONLY scope it may carry: falling through to this process's HERMOSO_PROFILE / HERMOSO_OWNER would scope one
   // customer's tool call to whatever workspace the SERVER's environment happens to name — a cross-tenant leak that
   // is invisible because it succeeds. stdio/CLI keeps the env fallback: there the process and the caller are the
   // same person. Presence of the ctx store IS "remote" (see isRemote below).
@@ -304,7 +308,7 @@ export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 100
     onTick?.(job);
     if (job.status === 'done') return { job, result: jobResult(job) };
     if (job.status === 'error') throw new Error(job.error || 'Render failed');
-    if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `heist jobs get ' + id + '`'), { jobId: id });
+    if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `hermoso jobs get ' + id + '`'), { jobId: id });
     await new Promise(r => setTimeout(r, intervalMs));
   }
 }

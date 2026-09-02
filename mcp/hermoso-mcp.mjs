@@ -2,8 +2,8 @@
 // Hermoso MCP server (stdio transport) — lets Claude Code / Cursor / Codex (and any stdio MCP client) drive Hermoso:
 // research competitors, plan ads, and generate images/videos/avatars, all against the running Hermoso server.
 //
-//   Local (today):   node mcp/hermoso-mcp.mjs            # talks to http://localhost:3000 (HEIST_API_BASE to override)
-//   Auth (today):    none — the local server resolves the dev account. Set HEIST_TOKEN once real auth lands.
+//   Local (today):   node mcp/hermoso-mcp.mjs            # talks to https://app.hermoso.ai (HERMOSO_API_BASE to override)
+//   Auth (today):    none — the local server resolves the dev account. Set HERMOSO_TOKEN (an agent key from the app).
 //
 // stdout is the JSON-RPC channel — NEVER print to it. All logging goes to stderr (console.error).
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -23,7 +23,7 @@ const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' }, {
 // no reconnect. HERMOSO_TOOLS=all restores the full roster; HERMOSO_TOOLS=create,channels narrows it further.
 // An unknown group EXITS rather than silently serving all of them — a scoped connection you did not get is
 // worse than one you were told you could not have.
-// Both env names are read: HERMOSO_TOOLS is the current prefix, HEIST_TOOLS the pre-rebrand one that is live in
+// Both env names are read: HERMOSO_TOOLS is the current prefix, HEIST_TOOLS the pre-rebrand name that is live in
 // people's configs today. Renaming a variable someone already set is how a working setup goes quiet.
 const _scope = parseToolScope(process.env.HERMOSO_TOOLS || process.env.HEIST_TOOLS);
 if (_scope.error) { console.error(`[hermoso-mcp] ${_scope.error}`); process.exit(1); }
