@@ -16868,10 +16868,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
 
   // AD MULTIPLIER (2026-09-01): ONE winning ad → N variants (new character / outfit / location / objects) with the edit, the
-  // motion and the ORIGINAL AUDIO untouched. The plan is one server call; every variant is an ordinary videoedit job.
+  // motion and the ORIGINAL AUDIO untouched. The plan is one server call; every variant is a `multiply` job (opening-frame keyframe edit → motion transfer driven by the source, so length, cut, motion and audio are the original's).
   server.registerTool('multiply_ad', {
     title: 'Multiply an ad',
-    description: "MULTIPLY a winning video ad into N variants: each gets a NEW character, outfit, location and/or objects while the cut, the camera motion, the pacing and the ORIGINAL AUDIO stay exactly as they were (that is what made the ad work), and any burned-in captions are removed. Pass the source video URL (a previous render, a job result, list_library, or the top performer from post_performance / meta_insights). Sources up to 15 seconds are edited as they are (a 15s spot works); longer ones are refused for free with the way out (trim it first: post_edit with ops [{op:'trim', start:0, end:15}] — clip_video is the AI highlight clipper, not a trim). Returns the plan and ONE JOB PER VARIANT — call get_job on each until it reports done; do not describe a variant before its URL arrives. Cost is quoted per variant in the reply (use dryRun:true to see the plan and the quote without rendering). Regions: pass regions:['Berlin','Tokyo'] to restyle variants per market; translation is a separate, explicit step — dub_video on a finished variant.",
+    description: "MULTIPLY a winning video ad into N variants: each gets a NEW character, outfit, location and/or objects while the cut, the camera motion, the pacing and the ORIGINAL AUDIO stay exactly as they were (that is what made the ad work), and any burned-in captions are removed. Pass the source video URL (a previous render, a job result, list_library, or the top performer from post_performance / meta_insights). HOW: the source video itself DRIVES each variant (motion transfer from one image-edited opening frame), so every variant comes back the SAME LENGTH as the source with the same cut, the same performance and the original audio — only the person, outfit, set and props change. Sources up to 30 seconds work as they are; longer ones are refused for free with the way out (trim it first: post_edit with ops [{op:'trim', start:0, end:30}] — clip_video is the AI highlight clipper, not a trim). Returns the plan and ONE JOB PER VARIANT — call get_job on each until it reports done; do not describe a variant before its URL arrives. Cost is quoted per variant in the reply (use dryRun:true to see the plan and the quote without rendering). Regions: pass regions:['Berlin','Tokyo'] to restyle variants per market; translation is a separate, explicit step — dub_video on a finished variant.",
     inputSchema: {
       video: z.string().describe('the source video URL'),
       count: z.number().optional().describe('how many variants, 1-12 (default 6)'),
@@ -16893,10 +16893,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (dryRun) return { content: [{ type: 'text', text: `Plan (nothing rendered). Source: ${Object.entries(p.source || {}).map(([k, v]) => k + ': ' + v).join('; ')}\n${lines.join('\n')}\n${quote}. Run again without dryRun to render.` }], structuredContent: { plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.totalCredits, dryRun: true } };
     const jobs = [];
     for (const v of (p.variants || [])) {
-      const job = await submitJob('videoedit', { video: src, prompt: v.instruction, keepAudio: true }, { label: `Multiply · ${v.label}` });
+      const job = await submitJob('multiply', { video: src, instruction: v.instruction, label: v.label }, { label: `Multiply · ${v.label}` });
       jobs.push({ id: job.id, label: v.label });
     }
-    return { content: [{ type: 'text', text: `Multiplying — ${jobs.length} variant(s) queued, original audio kept on all of them. ${quote}.\n${jobs.map((j, i) => `${i + 1}. ${j.label} → job ${j.id}`).join('\n')}\nEach is a normal video edit (1-4 minutes). Call get_job with each id until it reports done; a variant has NO file until then.` }], structuredContent: { jobs, plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.totalCredits } };
+    return { content: [{ type: 'text', text: `Multiplying — ${jobs.length} variant(s) queued, original audio kept on all of them. ${quote}.\n${jobs.map((j, i) => `${i + 1}. ${j.label} → job ${j.id}`).join('\n')}\nEach variant is one keyframe edit plus a motion transfer of the whole source (2-6 minutes) and comes back the SAME length as the source. Call get_job with each id until it reports done; a variant has NO file until then.` }], structuredContent: { jobs, plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.totalCredits } };
   }));
 
   server.registerTool('dub_video', {

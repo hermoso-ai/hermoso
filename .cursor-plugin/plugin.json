@@ -1,30 +1,27 @@
 {
   "name": "hermoso",
-  "version": "0.1.180",
-  "description": "Run your whole marketing function from the agent: research the ads already winning in any market, generate finished image and video ads, publish or schedule them to ten social channels, and build and read campaigns on eleven ad platforms. 745 tools over one MCP server.",
-  "author": {
-    "name": "Hermoso",
-    "email": "hello@hermoso.ai"
-  },
+  "displayName": "Hermoso",
+  "version": "1.0.0",
+  "description": "Research the ads already running in any market, generate finished image and video ads, publish them to your own channels, and build the campaigns behind them.",
+  "author": { "name": "Hermoso AI", "email": "hello@hermoso.ai" },
   "homepage": "https://hermoso.ai",
   "repository": "https://github.com/hermoso-ai/hermoso",
   "license": "MIT",
-  "logo": "assets/logo.png",
   "keywords": [
-    "marketing",
+    "hermoso",
     "ads",
     "advertising",
-    "ad-spy",
-    "competitor-analysis",
-    "image-generation",
-    "video-generation",
-    "social-media-publishing",
-    "social-media-scheduling",
-    "campaign-management",
-    "meta-ads",
-    "google-ads",
-    "tiktok-ads",
-    "analytics"
+    "ad-library",
+    "marketing",
+    "ai-video",
+    "ai-image",
+    "social-media",
+    "mcp"
   ],
-  "mcpServers": ".cursor-plugin/mcp.json"
+  "logo": "assets/logo.png",
+  "mcpServers": {
+    "hermoso": {
+      "url": "https://app.hermoso.ai/mcp"
+    }
+  }
 }
