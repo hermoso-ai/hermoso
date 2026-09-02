@@ -2338,6 +2338,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Post to Bluesky',
     description: "Publish a post to Bluesky as the connected account. Text up to 300 characters — Bluesky ALSO caps a post at 3000 UTF-8 bytes, so an emoji-heavy post can be under 300 characters and still be refused; Hermoso checks both before spending the round trip and says which limit and by how much. MEDIA: either up to 4 images (imageUrls + altText) OR one MP4 video (videoUrl + videoAlt), never both — a Bluesky post record carries a single embed and images and video are two different embed types. Video is MP4 only, up to 300MB at Bluesky's end (Hermoso can fetch up to 150MB from a URL), with optional WebVTT caption tracks; the aspect ratio is measured from the file. Bluesky requires a CONFIRMED EMAIL on the account before it will process any video — if it is unconfirmed you get a refusal saying so, and reconnecting will not help. Links in the text are made clickable automatically. LINK CARDS: Bluesky does NOT scrape links, so a URL posted bare renders as plain blue text — the client composing the post has to build the card. Hermoso builds one AUTOMATICALLY when the post has a URL and NO media: it fetches the page, uses its title/description and uploads its image as the card thumbnail. Pass linkCard:false to suppress it, or linkCard:{uri,title,description,thumbUrl} to control it (give both title and description and the page is not fetched at all). A POST CARRIES ONE EMBED, so a card and images/video cannot both ride: if you pass linkCard explicitly ALONGSIDE media the call is REFUSED by name rather than silently dropping one, and if the URL was merely in the text the MEDIA WINS and the reply says the card was skipped (the link stays clickable either way). Returns the post's public bsky.app URL. Connect at Settings ▸ Connectors ▸ Bluesky with a handle and an APP PASSWORD.",
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one bluesky account connected (several and none named is refused by name, never guessed); omit when there is one."),
       text: z.string().describe('The post, up to 300 characters / 3000 UTF-8 bytes.'),
       imageUrls: z.array(z.string()).optional().describe('Up to 4 public image URLs to attach. Cannot be combined with videoUrl.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('Alt text \u2014 an ARRAY, one per image in the same order, or a single STRING to describe every image with it. WRITE ONE: Bluesky\u2019s own lexicon makes `alt` a REQUIRED property of every image, so a post without it is undescribed by design rather than by omission, and Bluesky users expect it. No maximum length is published, so nothing is truncated.'),
@@ -2394,6 +2395,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Post to Telegram',
     description: "Publish to a Telegram channel, group or chat as the brand's own bot. WHICH CHAT IS ALWAYS REQUIRED AND IS NEVER GUESSED: pass chatId as the public channel's @username (e.g. @hermosoai) or its numeric id (a group is negative; a supergroup or channel starts with -100). There is no default and there cannot be one — the Telegram Bot API publishes no method that lists the chats a bot belongs to, so Hermoso genuinely cannot know them. list_telegram_chats reports the chats that have MESSAGED the bot in the last 24 hours, which is a shortcut for finding an id and is NOT a roster: a chat missing from it can still be posted to. TEXT: up to 4096 characters on a text-only message, but only 1024 the moment ANY photo or video is attached — a caption is not a message, and Hermoso refuses the over-long one before spending the round trip and says which budget applied. MEDIA: one image (imageUrl), one video (videoUrl), or an ALBUM of 2–10 (imageUrls, in order) in which photos and videos may be MIXED — pass a videoUrl alongside imageUrls and it joins the album as one more item. Hermoso uploads the bytes rather than handing Telegram a link, which is what buys the larger ceilings: 10MB per photo and 50MB per video, where a link would be 5MB and 20MB. THE BOT MUST BE IN THE CHAT — an administrator with Post Messages for a channel, an unrestricted member for a group; if it is not, Telegram refuses and the error says to add it rather than to reconnect. Returns the message id and, for a PUBLIC chat, its t.me link — a private group has no public web link, so `url` comes back null rather than as a link that would 404 for whoever you hand it to. 0 credits. Connect at Settings ▸ Connectors ▸ Telegram by pasting a bot token from @BotFather.",
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one telegram account connected (several and none named is refused by name, never guessed); omit when there is one."),
       chatId: z.string().describe("REQUIRED — the destination: a public channel's @username, or the numeric chat id. Never guessed; ask the user, or use list_telegram_chats."),
       text: z.string().optional().describe('the message. ≤4096 characters on its own; ≤1024 once any image or video is attached.'),
       imageUrl: z.string().optional().describe('one image (≤10MB after upload)'),
@@ -3705,6 +3707,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       timezone: z.string().optional().describe('IANA zone for the queue, e.g. "America/New_York" — only meaningful with useQueue, and it overrides the brand’s saved zone for this one post. A saved slot of "09:00" is a WALL-CLOCK time, so the zone is what turns it into an instant; without either the brand’s saved zone or this, the queue resolves in UTC.'),
       message: z.string().optional().describe('the caption/text used for every channel unless overridden in captions'),
       captions: z.record(z.string()).optional().describe('per-channel caption overrides, e.g. { "instagram": "…", "threads": "…" } — platforms want different lengths and hashtag conventions'),
+      accounts: z.record(z.union([z.array(z.string()), z.literal('all')])).optional().describe('WHICH accounts of a multi-account channel to post to, e.g. { "tiktok": ["@a", "@b"] } or { "tiktok": "all" } — one row per account at fire time, each with its own result. Omit for channels with one account (several and none named is refused by name).'),
       // MEDIA ORIGIN IS NOT UNIFORM ACROSS CHANNELS, and saying "public https URL" here was a promise six of the
       // nine cannot keep (found 2026-08-04). Facebook / Instagram / Threads hand the URL to Meta, which fetches it
       // — anything public works. X, TikTok, YouTube, LinkedIn, Pinterest and Google Business all re-host the BYTES
@@ -4041,6 +4044,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Publish a post to X (Twitter)',
     description: 'Publish to the user’s connected X (Twitter) account — a single post, a post with an image or video render attached, a reply to an existing post, or a whole THREAD (pass `thread` as an array and each part is posted as a reply to the one before). This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Can also run a POLL (2-4 options) instead of media, and restrict who may reply. LENGTH IS THE POSTING ACCOUNT’S, NOT A FLAT 280: 280 characters on an ordinary account, but UP TO 25,000 if that account has X Premium. Hermoso reads the account’s own subscription from X and sends the post rather than refusing something it may be entitled to; if X declines it on length, the reply says so and names the subscription X reported. Over 25,000 is refused for free — that is X’s own ceiling on every account. Text is NEVER truncated. AND A LONG POST IS CHEAPER THAN A THREAD: it is ONE billed X call where the same words split across five posts are five, so prefer one long post over threading when the account has Premium. Only the first ~280 characters show in the timeline; the rest sits behind \u201cShow more\u201d. Write altText whenever you attach a render. COSTS CREDITS: X charges per API request, so every post in a thread is billed, and a post containing a LINK costs roughly 13× one without — mention the cost before publishing a long thread. Each brand also has a rolling 24-hour ceiling on what it can spend at X, and a request that would cross it is refused WHOLE before anything publishes, so a batch of posts is bounded rather than open-ended. THIS TOOL POSTS ORGANICALLY — it does not create an ad campaign. X ads are built with create_x_ads_campaign → create_x_ads_line_item → create_x_ads_promoted_tweet, and a promoted post needs a post id, so publish here first and promote that post. Needs X connected (Settings ▸ Connectors ▸ X).',
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one x account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
       text: z.string().optional().describe('the post text. 280 characters without X Premium, up to 25,000 with it \u2014 write the full thing, it is never truncated. Use this OR thread, not both.'),
       thread: z.array(z.string()).optional().describe('a thread: each string is one post, published in order, each replying to the previous. Max 25. Each part follows the same length rule as `text`, and on an X Premium account ONE long post is usually both better reading and cheaper than a thread.'),
@@ -4263,6 +4267,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Post to a subreddit',
     description: 'Submit a post to ONE named subreddit as the user’s connected Reddit account — a text post, a link post, or a native image post (pass a Hermoso render URL as imageUrl). This PUBLISHES immediately and PUBLICLY under their username, so show the user the exact subreddit, title and body and get an explicit yes BEFORE calling. REDDIT IS NOT A BROADCAST CHANNEL: it punishes undisclosed self-promotion harder than any other platform, and posting the same or near-identical content to several subreddits breaks Reddit’s own developer policy and gets accounts banned. Post to ONE subreddit, written for that specific community — if the user asks to blast several, tell them this instead of doing it. Subreddits that require post flair are detected before anything is posted and the error lists the valid flairs to pass as flairId. Needs Reddit connected (Settings ▸ Connectors ▸ Reddit).',
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one reddit account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
       subreddit: z.string().describe('the ONE subreddit to post to, e.g. "SideProject" (an r/ prefix is fine)'),
       title: z.string().describe('post title, max 300 characters'),
@@ -4432,6 +4437,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Create a Pin',
     description: 'Create a Pin on one of the user’s Pinterest boards from any finished visual they have — image, video, or a 2–5 slide CAROUSEL (pass the slides in order as imageUrls[] and Pinterest publishes one swipeable Pin). Title, description and destination link ride along. The link is what makes a Pin drive traffic, so ask for it rather than omitting it, and the description is the text Pinterest search actually reads. boardId is REQUIRED: call list_pinterest_boards first and let the user choose. This PUBLISHES to their public profile — confirm the board, title and link before calling. Video Pins take a minute or two while Pinterest ingests the file. Needs Pinterest connected (Settings ▸ Connectors ▸ Pinterest).',
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one pinterest account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
       boardId: z.string().describe('numeric board id from list_pinterest_boards — the user picks it, never guess'),
       imageUrl: z.string().optional().describe('a Hermoso render image URL (or an upload_file url)'),
@@ -4819,6 +4825,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Post a video to YouTube',
     description: 'Publish a finished video to the brand’s connected YouTube channel. Pass a Hermoso render URL (or an upload_file url for a local/external file). DEFAULTS TO UNLISTED (link-only — not on the channel, not searchable, but shareable by link AND usable as a YouTube/Google ad). Pass privacy:"public" to put it ON the channel (a public publish — confirm with the user first) or privacy:"private" for eyes-only. Do NOT use "private" for anything meant to run as an ad — private videos CANNOT be used as ads; unlisted is the ad-ready setting. SCHEDULE it with publishAt, FILE it under the right categoryId (the default 22 "People & Blogs" is wrong for most ads), SUBSCRIBER NOTIFICATIONS FOLLOW PRIVACY — a public publish announces the video to the channel’s subscribers (YouTube’s own default), while unlisted/private uploads stay quiet; pass notifySubscribers explicitly to override either way. Needs a connected YouTube channel (Settings ▸ Connectors ▸ YouTube).',
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one youtube account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
       videoUrl: z.string().describe('the video to post — a Hermoso render URL or an upload_file url'),
       title: z.string().optional().describe('video title (≤100 chars)'),
@@ -5572,6 +5579,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Post a video or photo post to TikTok',
     description: 'Publish to the user’s connected TikTok account — a finished VIDEO, or a PHOTO POST (TikTok’s photo/slideshow format). A photo post carries 1 to 35 images and ONE image is simply a one-slide photo post, so there is nothing special to do for a single picture: pass imageUrls, in the order the slides should appear, and optionally coverIndex. Pass videoUrl for a video. Never pass both — TikTok has no mixed post. TWO destinations either way: destination:"post" puts it LIVE on their profile now — that requires `privacy`, and you must call tiktok_creator_info first, show the creator’s real privacy options and get an explicit yes before calling. destination:"draft" (the default, and the safer one) sends it to TikTok for the user to finish and post themselves from the app. Pass Hermoso render URLs (or upload_file urls for local/external files). Needs TikTok connected (Settings ▸ Connectors ▸ TikTok).',
     inputSchema: {
+      account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one tiktok account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
       videoUrl: z.string().optional().describe('the video to post — a Hermoso render URL or an upload_file url. Omit for a photo post.'),
       imageUrls: z.array(z.string()).optional().describe('a PHOTO POST: 1–35 image URLs in slide order. One url = a single-image photo post. Do not combine with videoUrl.'),
@@ -15730,6 +15738,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // every id against the caller's own token and keeps the ones that match, so one flat id list covers Pages and ad
   // accounts without the agent having to know which is which.
   const CONN_ACCOUNT_PICKERS = {
+    // MANY ACCOUNTS UNDER ONE CHANNEL (2026-09-02): these rows LIST the accounts a brand connected on a single-identity
+    // channel (each was its own OAuth run). There is nothing to "share" or tick — every connected account is usable —
+    // so `write` is null and set_connector_accounts refuses by name; add one by connecting again in the app, remove one
+    // with disconnect_connector({provider, account}). The listing is what post_to_* and schedule_post's `account(s)` take.
+    ...Object.fromEntries(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'reddit', 'pinterest'].map((p) => [p, {
+      label: p === 'x' ? 'X' : p === 'youtube' ? 'YouTube' : p === 'tiktok' ? 'TikTok' : p.charAt(0).toUpperCase() + p.slice(1), read: `/api/connectors/${p}/accounts`, multiAccount: true,
+      identities: (d) => (d.accounts || []).map(a => ({ id: String(a.id), name: a.handle ? '@' + a.handle : (a.label || a.id), type: 'account', selected: true, detail: [a.label && a.handle && a.label !== a.handle ? a.label : '', a.live === false ? 'RECONNECT NEEDED' : '', d.primaryAccount === a.id ? 'primary' : ''].filter(Boolean).join(' · ') })),
+      write: null,
+    }])),
     meta: {
       label: 'Meta', read: '/api/meta/assets',
       // Meta answers an UNCONNECTED workspace with 200 {needsConnect:true} (the web uses it to kick off OAuth), not
@@ -15915,6 +15932,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     const p = CONN_ACCOUNT_PICKERS[a.provider];
     if (!p) return { content: [{ type: 'text', text: `set_connector_accounts covers: ${CONN_PICKER_IDS.join(', ')}.` }], isError: true };
+    if (!p.write) return { content: [{ type: 'text', text: `${p.label} accounts are not shared by ticking — every account connected to this brand is usable as it is. Add another by connecting again in the app; remove one with disconnect_connector({provider:'${a.provider}', account:'@handle', confirm:true}).` }], isError: true };
     const ids = (a.accountIds || []).map(x => String(x).trim()).filter(Boolean);
     const before = await apiGet(p.read); // also the source LinkedIn needs to tell its personal profile from a Page
     if (p.needsConnect?.(before)) return { content: [{ type: 'text', text: `${p.label} isn’t connected to this workspace yet — there is nothing to scope. The user has to link it in a browser first: Workspace ▸ Connectors ▸ ${p.label}.` }], isError: true };
@@ -15932,6 +15950,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       provider: z.string().describe('provider id exactly as list_connectors reports it, e.g. "meta", "google_ads", "youtube", "linkedin"'),
       confirm: z.boolean().optional().describe('REQUIRED true — reconnecting needs the user\'s browser'),
+      account: z.string().optional().describe('on a channel with several connected accounts (TikTok, X, YouTube, Threads, Bluesky, Telegram, Reddit, Pinterest): remove ONLY this account (@handle or id from list_connector_accounts) and keep the others'),
     },
     outputSchema: { ok: z.boolean().optional(), provider: z.string().optional(), disconnected: z.boolean().optional(), revokesAtProvider: z.string().nullable().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
@@ -15953,7 +15972,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // Straight through the app's own disconnect route → Connectors.remove(). The shared-grant guard that used to
     // matter here (all seven google_* connectors ride ONE OAuth client id, so a naive revoke killed the siblings)
     // is moot now that nothing revokes — the hazard is closed rather than guarded.
-    await apiPost(`/api/connectors/${encodeURIComponent(provider)}/disconnect`, {});
+    const _one = await apiPost(`/api/connectors/${encodeURIComponent(provider)}/disconnect`, a.account ? { account: String(a.account) } : {});
+    if (_one?.data?.removedAccount) return ok(`Removed ${provider} account ${_one.data.removedAccount} from this brand — ${_one.data.remaining} account(s) remain connected.`, { ok: true, provider, disconnected: false, removedAccount: _one.data.removedAccount, remaining: _one.data.remaining });
     return ok(`Disconnected ${provider}${hit.agentLabel ? ` (${hit.agentLabel})` : ''} from this brand.${hit.removalNote ? ` ${hit.removalNote}` : ''} Reconnect from the app: Workspace ▸ Connectors ▸ ${provider}.`, { ok: true, provider, disconnected: true, revokesAtProvider: hit.revokesAtProvider || null });
   }));
   // ── REMOVE ONLY WHAT I CONTRIBUTED (2026-08-11) ────────────────────────────────────────────────────────────────
