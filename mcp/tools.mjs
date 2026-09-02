@@ -2901,17 +2901,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Brands on this account:\n${lines}\n\nSwitch with use_brand.${sharedTxt}`, { ...d, sharedWorkspaces: shared });
   }));
 
-  server.registerTool('use_brand', {
-    title: 'Switch brand',
-    description: "Pin which brand this connection acts on (multi-brand accounts). Pass the brand id or exact name from list_brands. Works for a brand on your own account AND for a workspace another account SHARED with you — for a shared one pass its name or the profile id list_brands prints, and access is verified against your real membership before it is pinned. Persists for this API key until changed, on every surface (hosted connector included — no environment variables, no restart).",
-    inputSchema: { brand: z.string().describe('brand id (e.g. default / p_xxx), its exact name from list_brands, or the profile id of a workspace shared with you') },
-    outputSchema: {
-      ok: z.boolean().optional().describe('true when the brand switch persisted'),
-      brand: z.any().optional().describe('the now-active brand ({id, name})'),
-      shared: z.boolean().optional().describe('true when the pinned workspace is owned by another account'),
-    },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, wrap(async ({ brand }) => {
+  const makeUseBrandHandler = (ctx) => wrap(async ({ brand }) => {
     const d = await apiGet('/api/brands');
     const want = String(brand || '').trim().toLowerCase();
     const hit = (d.brands || []).find(b => b.id.toLowerCase() === want || String(b.name || '').toLowerCase() === want);
@@ -2947,7 +2937,23 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const own = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})`).join('\n');
     const shr = shared.map(w => `• ${w.name || 'Shared workspace'}${w.ownerName ? ` — ${w.ownerName}` : ''} (id: ${w.profileUuid}, shared with you)`).join('\n');
     return { content: [{ type: 'text', text: `No brand matching "${brand}". Available:\n${own}${shr ? `\n${shr}` : ''}` }], isError: true };
-  }));
+  });
+  server.registerTool('use_brand', {
+    title: 'Switch brand',
+    description: "Pin which brand this connection acts on (multi-brand accounts). Pass the brand id or exact name from list_brands. Works for a brand on your own account AND for a workspace another account SHARED with you — for a shared one pass its name or the profile id list_brands prints, and access is verified against your real membership before it is pinned. Persists for this API key until changed, on every surface (hosted connector included — no environment variables, no restart).",
+    inputSchema: { brand: z.string().describe('brand id (e.g. default / p_xxx), its exact name from list_brands, or the profile id of a workspace shared with you') },
+    outputSchema: {
+      ok: z.boolean().optional().describe('true when the brand switch persisted'),
+      brand: z.any().optional().describe('the now-active brand ({id, name})'),
+      shared: z.boolean().optional().describe('true when the pinned workspace is owned by another account'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  // PER-SESSION, LIKE enable_tools (2026-09-01): this handler re-gates `ctx.handleOf` — the roster of THE SESSION THAT
+  // CALLED IT. A plain closure captured the ctx of the session that BUILT the canon (the first in the process), so every
+  // later session got the right sentence ("re-scoped to 28 connectors") and the wrong roster: measured on prod, a
+  // session pinned to a 0-connector brand switched to one with 28 and still listed 113 tools; `enable_tools` in the
+  // same session said "3 more". It "worked" the morning it shipped because that measurement WAS the first session.
+  }, sessionBound(makeUseBrandHandler, ctx));
 
   // ── BRAND WORKSPACE LIFECYCLE. draft_brand OVERWRITES the active workspace's brand; it does not mint one — so
   // without these an agency running Hermoso purely through an agent could never take on a second client.
