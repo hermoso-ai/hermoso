@@ -15918,7 +15918,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (p.needsConnect?.(d)) return { content: [{ type: 'text', text: `${p.label} isn’t connected to this workspace yet. Linking it is an OAuth consent screen, so the user has to do it in a browser: Workspace ▸ Connectors ▸ ${p.label}. Then call this again.` }], isError: true };
     const rows = p.identities(d);
     const sel = rows.filter(r => r.selected).map(r => r.id);
-    return ok(`${p.label} — ${rows.length} account(s) this connection can reach, ${sel.length} shared with this brand:\n${connIdentityLines(rows) || '  (none)'}\n\nChange the shared set with set_connector_accounts (it REPLACES the selection).`, { provider: a.provider, identities: rows, selectedIds: sel });
+    return ok(`${p.label} — ${rows.length} account(s) this connection can reach, ${sel.length} shared with this brand:\n${connIdentityLines(rows) || '  (none)'}\n\n${p.write ? 'Change the shared set with set_connector_accounts (it REPLACES the selection).' : `Every account here is usable — name one with \`account\` on post_to_${a.provider} (or \`accounts\` on schedule_post). Add another by connecting again in the app; remove one with disconnect_connector({provider:'${a.provider}', account:'@handle', confirm:true}).`}`, { provider: a.provider, identities: rows, selectedIds: sel });
   }));
   server.registerTool('set_connector_accounts', {
     title: 'Choose which accounts a brand may use',
