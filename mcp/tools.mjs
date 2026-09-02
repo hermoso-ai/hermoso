@@ -201,6 +201,8 @@ export const MCP_INSTRUCTIONS = [
   '• CREATE finished on-brand ads: render_ad, generate_image, generate_video, generate_avatar, make_template_ad, make_thumbnail, make_explainer, plan_ad, plan_variations; get_brand / draft_brand / update_brand; list_creators / save_creator; edit_video, dub_video, clip_video, reframe_video, upscale_video, stitch_video.',
   '• RAW MODELS, prompt only: generate_image / generate_video with useBrand:false, generate_voice, generate_text, upload_file (any local or external file becomes a URL every publish, schedule and ad tool accepts).',
   '• PUBLISH & SCHEDULE to the user\'s OWN accounts: post_to_meta (+Threads), post_to_x, post_to_linkedin, post_to_tiktok, post_to_youtube, post_to_pinterest, post_to_reddit, post_to_bluesky, post_to_telegram, post_to_google_business; schedule_post, list_scheduled, reschedule_post, cancel_scheduled; list_connectors, list_connector_accounts, set_connector_accounts.',
+  // INSTAGRAM_PATHS_NOTE — an inline copy of lib/instagram-paths.mjs (the twins ship without lib/); tools/instagram-paths-check.mjs asserts they are byte-equal.
+  '• INSTAGRAM, two connectors, one channel: TWO WAYS AN INSTAGRAM ACCOUNT CONNECTS, SAME FEATURES: through Meta (the account is linked to a Facebook Page and comes with that Page — this is also the only path with ads) or directly through the Instagram connector (the account signs in on instagram.com by itself, no Facebook Page or Meta login — right for people who run several Instagram accounts under different logins). Either way it is one `instagram` channel with publishing, media, post and account insights, comments and Instagram Direct DMs; a Page-linked account is chosen with pageId, a direct account (or one of several) with account = an @handle or id from list_connector_accounts("instagram"). "Not connected to Meta" never means "no Instagram" — check the Instagram connector too.',
   '• ADS on eleven platforms, their accounts and their money: create_meta_campaign / _adset / _ad, create_google_ads_campaign / _ad_group / _ad and the TikTok, LinkedIn, Pinterest, Reddit, Microsoft and OpenAI equivalents; meta_insights, google_ads_report and the per-platform reports. Everything is created PAUSED and read back before it is described.',
   // ── YOUR ROSTER IS NOT THE PRODUCT (2026-08-26) ──────────────────────────────────────────────────────────────
   // The roster is scoped to the accounts this workspace has connected, because a tool for an unconnected provider
@@ -1549,6 +1551,7 @@ export const INBOX_SOURCES = [
   // /conversation route already computes it as `replyTo`) and Bluesky wants the conversation (`convoId`). Both
   // routes already return exactly that field at the top level, so nothing new is computed here.
   { source: 'meta_dm',         provider: 'meta',            read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Meta direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' } },
+  { source: 'instagram_dm',    provider: 'instagram',       read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Instagram direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' } }, // a DIRECT (Instagram Login) account's inbox — same routes, resolved through igDmCtx by `account` (2026-09-02)
   { source: 'meta_webhook',    provider: 'meta',            read: '/api/meta/webhooks/events',     reply: null,                               kind: 'pushed',  label: 'Pushed Meta event' },
   { source: 'threads_mention', provider: 'threads',         read: '/api/threads/mentions',         reply: '/api/threads/reply',               kind: 'mention', label: 'Threads mention' },
   { source: 'youtube',         provider: 'youtube',         read: '/api/youtube/comments',         reply: '/api/youtube/reply-comment',       kind: 'comment', label: 'YouTube comment',    needs: { arg: 'videoId', param: 'videoId', from: 'list_youtube_videos' } },
@@ -2475,7 +2478,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "EVERYTHING PEOPLE SAID TO THIS BRAND, across every connected channel, in one list: Facebook and "
       + "Instagram comments, Threads replies and mentions, YouTube and Reddit comments, Google Business reviews, "
       + "Bluesky replies and mentions, and X mentions — plus DIRECT MESSAGES on Meta (Messenger and Instagram "
-      + "Direct), Bluesky, X and Telegram. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
+      + "Direct), Instagram, Bluesky, X and Telegram. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
       + "skipped silently; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
       + "never mistaken for a quiet week. DMs are read one conversation at a time and fold to ONE item — the newest "
@@ -2585,7 +2588,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // EACH VENDOR ANSWERS TO A DIFFERENT KIND OF THING and that is not a detail we can smooth over: Meta's Send
     // API addresses a PERSON by page-scoped id, Bluesky's addresses a CONVERSATION. `dmReplyId` is what picked
     // the right one out of each read route's own answer, so the id in hand is already the correct shape.
-    else if (t.source === 'meta_dm') payload.recipientId = t.nativeId;
+    else if (t.source === 'meta_dm' || t.source === 'instagram_dm') payload.recipientId = t.nativeId;
     else if (t.source === 'bluesky_dm') payload.convoId = t.nativeId;
     else if (t.source === 'x_dm') payload.conversationId = t.nativeId;
     else if (t.source === 'telegram_dm') payload.chatId = t.nativeId;
@@ -3057,12 +3060,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       postId: z.string().describe('post/media id returned by post_to_meta'),
       target: z.enum(['facebook', 'instagram']).optional().describe('which metric set to ask for (default facebook)'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
     },
     outputSchema: { postId: z.string().optional(), metrics: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/meta/post-insights', { postId: a.postId, target: a.target, pageId: a.pageId });
+    const d = await apiGet('/api/meta/post-insights', { postId: a.postId, target: a.target, account: a.account, pageId: a.pageId });
     return ok(`${d.target} post ${d.postId}:\n${(d.metrics || []).map(m => `• ${m.name}: ${m.value ?? '— (no value returned — MISSING, not zero)'}`).join('\n') || '(no metrics)'}${d.note ? `\n${d.note}` : ''}`, d);
   }));
 
@@ -3070,7 +3074,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // read exactly ONE of Instagram's fourteen account metrics. No new scope, no reconnect — it was simply never built.
   server.registerTool('instagram_insights', {
     title: 'Instagram account insights + audience demographics',
-    description: 'ACCOUNT-level performance for the brand’s connected Instagram Business account — views, reach, accounts engaged, total interactions, likes, comments, shares, saves, profile link taps, replies, reposts and follows/unfollows — plus the AUDIENCE DEMOGRAPHICS (follower_demographics and engaged_audience_demographics, broken down by age, city, country or gender), which is the read that says WHO the content reached rather than how many. Use meta_post_insights for one post and meta_page_insights for the Facebook Page. THERE IS NO "impressions": Meta deprecated it for every API version on 2025-04-21 and replaced it with "views" — an unknown metric is refused by name rather than quietly dropped. Instagram returns NO demographics for an account under 100 followers (or under 100 engagements in the window), and an absent block means exactly that, never an empty audience. Read-only, 0 credits. Needs Meta connected with an Instagram Business account linked to the Page.',
+    description: 'ACCOUNT-level performance for the brand’s connected Instagram Business account — views, reach, accounts engaged, total interactions, likes, comments, shares, saves, profile link taps, replies, reposts and follows/unfollows — plus the AUDIENCE DEMOGRAPHICS (follower_demographics and engaged_audience_demographics, broken down by age, city, country or gender), which is the read that says WHO the content reached rather than how many. Use meta_post_insights for one post and meta_page_insights for the Facebook Page. THERE IS NO "impressions": Meta deprecated it for every API version on 2025-04-21 and replaced it with "views" — an unknown metric is refused by name rather than quietly dropped. Instagram returns NO demographics for an account under 100 followers (or under 100 engagements in the window), and an absent block means exactly that, never an empty audience. Read-only, 0 credits. Needs the Instagram account connected, either through Meta (an Instagram account linked to a Facebook Page) or on its own through the Instagram connector; when several are connected, name the one you mean with account.',
     inputSchema: {
       metrics: z.array(z.string()).optional().describe('account metrics (default: views, reach, accounts_engaged, total_interactions, likes, comments, shares, saves, profile_links_taps). Add follower_demographics or engaged_audience_demographics for the audience, which also needs a breakdown.'),
       breakdown: z.array(z.string()).optional().describe('contact_button_type / follow_type / media_product_type for account metrics; age / city / country / gender for the demographic metrics (exactly one)'),
@@ -3078,12 +3082,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       period: z.enum(['day', 'week', 'days_28']).optional().describe('aggregation for reach, the one time-series metric (default day)'),
       since: z.string().optional().describe('YYYY-MM-DD window start'),
       until: z.string().optional().describe('YYYY-MM-DD window end'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Facebook Page id the Instagram account is linked to — omit when only one Page is connected'),
     },
     outputSchema: { instagramId: z.string().optional(), profile: z.any().optional(), metrics: z.array(z.any()).optional(), demographics: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/instagram/insights', { metrics: (a.metrics || []).join(','), breakdown: (a.breakdown || []).join(','), timeframe: a.timeframe, period: a.period, since: a.since, until: a.until, pageId: a.pageId });
+    const d = await apiGet('/api/instagram/insights', { metrics: (a.metrics || []).join(','), breakdown: (a.breakdown || []).join(','), timeframe: a.timeframe, period: a.period, since: a.since, until: a.until, account: a.account, pageId: a.pageId });
     const lines = (d.metrics || []).map(m => `• ${m.name}: ${m.value ?? '— (no value returned — MISSING, not zero)'}`);
     const demo = (d.demographics || []).map(x => `${x.metric} by ${(x.breakdown || []).join('/')} (${x.timeframe}):\n${(x.rows || []).map(r => `  ${r.name}: ${r.breakdowns ? JSON.stringify(r.breakdowns).slice(0, 900) : (r.value ?? '—')}`).join('\n')}`);
     return ok(`Instagram ${d.profile?.username ? '@' + d.profile.username : d.instagramId}${d.profile?.followers != null ? ` · ${d.profile.followers} followers` : ''}\n${lines.join('\n') || '(no account metrics)'}${demo.length ? `\n\n${demo.join('\n\n')}` : ''}\n${d.note || ''}`, d);
@@ -3094,12 +3099,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'The connected Instagram Business account’s own recent media — id, caption, media type (feed / reel / story-era), permalink, timestamp, like and comment counts. This is where the media id every other Instagram tool needs comes from: resolve “my latest reel” yourself instead of asking the user for a link, then pass the id to meta_post_insights. Read-only, 0 credits.',
     inputSchema: {
       limit: z.number().optional().describe('how many (1–50, default 15)'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { instagramId: z.string().optional(), count: z.number().optional(), media: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/instagram/media', { limit: a.limit, pageId: a.pageId });
+    const d = await apiGet('/api/instagram/media', { limit: a.limit, account: a.account, pageId: a.pageId });
     return ok(`${d.count} Instagram post(s):\n${(d.media || []).map(m => `• [${m.media_product_type || m.media_type}] ${String(m.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 90)} — ${m.like_count ?? '—'} likes, ${m.comments_count ?? '—'} comments · ${m.timestamp || ''}\n  id ${m.id}${m.permalink ? ` · ${m.permalink}` : ''}`).join('\n') || '  (none)'}`, d);
   }));
 
@@ -3127,6 +3133,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Read the comments under a Facebook Page post or Instagram media object — customer questions, objections and the exact language real people use about the product. Good raw material for ad copy, and the first step before replying or moderating. REPLIES: a reply is a comment ON a comment, and its id exists only under its PARENT — it is never returned by the post. Each row says how many replies it has; to read them (and to get the id reply_to_meta_comment / moderate_meta_comment need), call this tool again with postId set to that COMMENT id.',
     inputSchema: {
       postId: z.string().describe('post/media id — or a COMMENT id, which returns that comment\u2019s replies'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
       limit: z.number().optional().describe('how many comments (1–50, default 25)'),
       cursor: z.string().optional().describe('the cursor from a previous call. A post with more comments than one page comes back with hasMore + a truncationNote — counts or sentiment drawn from ONE page describe a sample, not the conversation.'),
@@ -3134,7 +3141,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { count: z.number().optional(), comments: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/meta/comments', { postId: a.postId, pageId: a.pageId, limit: a.limit, cursor: a.cursor });
+    const d = await apiGet('/api/meta/comments', { postId: a.postId, account: a.account, pageId: a.pageId, limit: a.limit, cursor: a.cursor });
     // `hidden` is TRI-STATE: true / false / null = "could not tell" (the server returns null when NEITHER
     // Facebook's `is_hidden` nor Instagram's `hidden` came back). Rendering null as blank would put the same
     // silent "not hidden" back one layer up, which is exactly the defect the server-side table closed.
@@ -3175,12 +3182,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       commentId: z.string().describe('comment id from list_meta_comments'),
       message: z.string().describe('reply text'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/meta/comment/reply', { commentId: a.commentId, message: a.message, pageId: a.pageId });
+    const d = await apiPost('/api/meta/comment/reply', { commentId: a.commentId, message: a.message, account: a.account, pageId: a.pageId });
     return ok(`Replied to comment ${a.commentId} (${d.id}).`, d);
   }));
 
@@ -3191,12 +3199,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       commentId: z.string().describe('comment id from list_meta_comments'),
       action: z.enum(['hide', 'unhide', 'delete']).optional().describe('default hide'),
       confirm: z.boolean().optional().describe('required (true) only for delete'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
     },
     outputSchema: { ok: z.boolean().optional(), action: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/meta/comment/moderate', { commentId: a.commentId, action: a.action, confirm: a.confirm, pageId: a.pageId });
+    const d = await apiPost('/api/meta/comment/moderate', { commentId: a.commentId, action: a.action, confirm: a.confirm, account: a.account, pageId: a.pageId });
     return ok(`Comment ${d.commentId}: ${d.action}d.`, d);
   }));
 
@@ -5828,6 +5837,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional().describe('omit to read both — Messenger and Instagram Direct are separate inboxes'),
       folder: z.enum(['inbox', 'other', 'page_done', 'spam', 'pending', 'archived']).optional().describe('narrow to ONE folder. Omit to read inbox + other, which is almost always what you want. "other" IS the message-requests folder. A folder Meta does not recognise is REFUSED rather than forwarded, because Meta answers an unknown folder with the DEFAULT inbox — so a plausible-looking spelling like "requests" would hand back the ordinary inbox and be reported as "no message requests".'),
       limit: z.number().optional().describe('threads per surface (1–100, default 25)'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). The way a DIRECT (Instagram Login) account is reached; omit for the Page-linked one.'),
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { count: z.number().optional(), requests: z.number().optional(), folders: z.array(z.string()).optional(), conversations: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), note: z.string().optional(), window: z.string().optional() },
@@ -5848,6 +5858,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       conversationId: z.string().describe('from list_meta_conversations'),
       platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional().describe('so the Instagram 20-message ceiling can be stated when it applies'),
       limit: z.number().optional().describe('messages (1–100, default 25)'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). The way a DIRECT (Instagram Login) account is reached; omit for the Page-linked one.'),
       pageId: z.string().optional(),
     },
     outputSchema: { conversationId: z.string().optional(), count: z.number().optional(), messages: z.array(z.any()).optional(), replyTo: z.string().optional(), windowState: z.string().optional(), hoursLeft: z.number().nullable().optional(), window: z.string().optional(), historyNote: z.string().optional() },
@@ -5866,6 +5877,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().describe('the reply'),
       conversationId: z.string().optional().describe('strongly recommended: it is what lets the 24-hour window be checked BEFORE sending rather than discovered by a refusal'),
       platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional(),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). The way a DIRECT (Instagram Login) account is reached; omit for the Page-linked one.'),
       pageId: z.string().optional(),
     },
     outputSchema: { messageId: z.string().optional(), recipientId: z.string().optional(), windowState: z.string().optional(), summary: z.string().optional() },
@@ -17219,6 +17231,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "List the connected Facebook Page's or Instagram account's OWN existing posts — id, caption, permalink, publish date and format. THIS IS THE TOOL THAT GETS YOU THE postId every other Meta read needs: meta_post_insights, list_meta_comments and manage_meta_post all require one, and until now the only way to have a postId was to have just published it yourself with post_to_meta. Use it for \"how did our last few posts do\", to find a post the user describes loosely, or before backfill_posts. Pass target:'instagram' for the linked IG account (Stories are excluded — Meta's media edge does not return them); Facebook hides unpublished drafts unless you ask for them. Only ever reads a Page the brand has connected. Read-only, 0 credits.",
     inputSchema: {
       target: z.enum(['facebook', 'instagram']).optional().describe("default facebook; 'instagram' reads the Page's linked IG business account"),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('which connected Page — omit when the brand has only one'),
       limit: z.number().optional().describe('how many posts (default 25, max 100)'),
       cursor: z.string().optional().describe('paging cursor returned by a previous call'),
@@ -17227,7 +17240,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { target: z.string().optional(), account: z.string().nullable().optional(), pageId: z.string().optional(), posts: z.array(z.any()).optional(), cursor: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/meta/posts', { ...(a.target ? { target: a.target } : {}), ...(a.pageId ? { pageId: a.pageId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}), ...(a.includeUnpublished ? { includeUnpublished: 'true' } : {}) });
+    const d = await apiGet('/api/meta/posts', { ...(a.target ? { target: a.target } : {}), ...(a.account ? { account: a.account } : {}), ...(a.pageId ? { pageId: a.pageId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}), ...(a.includeUnpublished ? { includeUnpublished: 'true' } : {}) });
     const rows = (d.posts || []).map(p => `• ${String(p.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 80)} — ${p.id}${p.publishedAt ? ` · ${String(p.publishedAt).slice(0, 10)}` : ''} · ${p.mediaKind}${p.url ? `  ${p.url}` : ''}`);
     if (!rows.length) return ok(`No posts on ${d.account || d.target}${d.note ? ` (${d.note})` : ''}.`, d);
     return ok(`${rows.length} post(s) on ${d.account || d.target}:\n${rows.join('\n')}${d.note ? `\n${d.note}` : ''}${d.cursor ? `\nMore available — pass cursor:"${d.cursor}".` : ''}`, d);
