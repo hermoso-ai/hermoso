@@ -1812,6 +1812,8 @@ export function parseToolScope(raw) {
   // everything on 2026-08-16, so a caller who genuinely wants all 436 tools needs a way to say so that is not
   // "list every group by name and hope none was added since".
   if (asked.includes('all')) return { groups: [...TOOL_GROUP_NAMES] };
+  if (asked.includes('directory-full')) return { groups: [...DEFAULT_TOOL_GROUPS], directory: 'full' }; // the submitted listing: everything but the billing tools — see DIRECTORY_BILLING_TOOLS
+  if (asked.includes('directory')) return { groups: [...DIRECTORY_GROUPS], directory: 'scoped' }; // the fully scoped fallback — see DIRECTORY_GROUPS
   const unknown = asked.filter((v) => !TOOL_GROUP_NAMES.includes(v));
   if (unknown.length) {
     // No tool COUNT in this message: a committed count goes stale (four different wrong numbers shipped at once
@@ -1824,6 +1826,39 @@ export function parseToolScope(raw) {
 // Tools an Apps-SDK host (ChatGPT) must not be offered. See the seam in registerTools for why, and note this is
 // a HOST rule, not a capability we removed: every other surface still offers both.
 export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload']);
+
+// ── THE DIRECTORY ROSTER (2026-09-02) — `?tools=directory` ─────────────────────────────────────────────────────
+// Anthropic's Software Directory Policy prohibits "software that uses AI models to generate images, video, or
+// audio content" (design aids excepted) and software that "executes financial transactions on behalf of users".
+// Hermoso as a whole does both, so the Claude Connectors Directory listing is a SCOPED server: the `create` group
+// is out, every tool that calls a generative image/video/audio model is out wherever it lives, and the three tools
+// that move money are out (the same three ChatGPT is denied). Dave, 2026-09-02: "We're way more than ad generation,
+// we can focus on all the other huge benefits like our organic posting, ads management, analytics, dms, etc."
+// It is a CAGE, deliberately, unlike every other scope: enable_tools may not widen it into `create` or `all`,
+// because the listing's compliance acknowledgments are only honest if no path on the connection reaches a
+// generative model. Pinned by tools/directory-roster-check.mjs.
+export const DIRECTORY_GROUPS = ['research', 'channels', 'channel_admin', 'ads', 'analytics', 'files', 'workspace'];
+export const DIRECTORY_BANNED_GROUPS = ['create'];
+// Generative-media tools that live OUTSIDE `create` (post-production and variation lanes) plus the money movers.
+// Kept as an explicit set rather than a regex so a new generative tool has to be named here — a regex that
+// happened to miss it would list it in the directory.
+export const WITHHELD_FROM_DIRECTORY = new Set([
+  'buy_credits', 'upgrade_plan', 'set_auto_reload',
+  'generate_image', 'generate_video', 'generate_avatar', 'generate_voice', 'render_ad', 'plan_ad', 'plan_variations',
+  'make_thumbnail', 'make_explainer', 'product_sizzle', 'dub_video', 'change_voice', 'edit_video', 'recast_motion',
+  'upscale_video', 'reframe_video', 'multiply_ad', 'remix_static', 'stitch_video', 'fix_beat',
+]);
+// TWO DIRECTORY MODES (Dave, 2026-09-02, after the directory turned out to list Tofu Ads — an AI ad-image generator
+// — under the policy's design-asset carve-out): `directory` is the fully scoped cage above; `directory-full` keeps
+// generation (an ad-creation workflow with the brand's own product and copy, the carve-out's shape) and withholds
+// ONLY the three tools that move money, which is the listing that was actually submitted. Both are cages for what
+// they withhold: enable_tools never re-lists a billing tool on either.
+export const DIRECTORY_BILLING_TOOLS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload']);
+export const toolHeldBackByDirectory = (name, group, ctx) => {
+  if (!ctx?.directory) return false;
+  if (ctx.directory === 'full') return DIRECTORY_BILLING_TOOLS.has(name);
+  return WITHHELD_FROM_DIRECTORY.has(name) || DIRECTORY_BANNED_GROUPS.includes(group);
+};
 
 // ── A REFERENCE LOOKUP MUST NOT BE AN APP SURFACE (2026-08-24) ─────────────────────────────────────────────────
 // MEASURED IN CHATGPT, not theorised: "make a 4 second vertical video ad for a coffee roaster" produced a
@@ -1969,6 +2004,10 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
   const want = (Array.isArray(groups) ? groups : []).map((g) => String(g || '').trim().toLowerCase()).filter(Boolean);
   if (!want.length) return { content: [{ type: 'text', text: "Name at least one group to turn on, e.g. groups:['ads']." }], isError: true };
   const expand = want.includes('all') ? [...TOOL_GROUP_NAMES] : want;
+  // THE DIRECTORY CAGE (2026-09-02): a connection scoped for the Claude directory may not be widened into the
+  // generative group, by name or through 'all' — see DIRECTORY_GROUPS. The way to those tools is the app or the
+  // unscoped server URL, and the refusal says so instead of silently trimming the ask.
+  if (ctx.directory === 'scoped' && (want.includes('all') || expand.some((g) => DIRECTORY_BANNED_GROUPS.includes(g)))) return { content: [{ type: 'text', text: `This connection is the Claude directory listing, which deliberately carries no image, video or audio generation tools and no billing tools. Those live in the Hermoso app (https://app.hermoso.ai) and on the unscoped server URL https://app.hermoso.ai/mcp — not on this connection. Groups you can turn on here: ${DIRECTORY_GROUPS.join(', ')}.` }], isError: true };
   const unknown = expand.filter((g) => !TOOL_GROUP_NAMES.includes(g));
   // REFUSED BY NAME, never dropped: silently ignoring a typo would report success and leave the agent looking
   // for a tool that is still disabled — the failure this whole mechanism exists to avoid.
@@ -1989,6 +2028,7 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
       // says how many and why, because a group that turns on "8 tools" when the agent expected 240 with no
       // explanation is the [[prompt-rosters-go-stale]] failure — the agent concludes the capability is missing.
       if (toolHeldBackByConnectors(name, ctx.conn)) { heldBack++; continue; }
+      if (toolHeldBackByDirectory(name, grp, ctx)) continue; // the cage holds across a group flip too
       try { h.enable(); n++; } catch {}
     }
   }
@@ -2048,6 +2088,7 @@ function newToolScope(opts) {
     enabledGroups: asked, groupOf: Object.create(null), handleOf: Object.create(null),
     conn: opts.connectors || null,
     widgetHost: !!opts.widgetHost,
+    directory: opts.directory === 'full' ? 'full' : (opts.directory ? 'scoped' : false),
   };
 }
 // THE THREE REASONS A REGISTERED TOOL IS HELD BACK. Applied identically on the build path, the replay path and
@@ -2067,6 +2108,7 @@ function applyToolGates(h, name, group, ctx, opts) {
   if (!ctx.enabledGroups.has(group)) { try { h.disable(); } catch {} }
   if (WITHHELD_FROM_WIDGET_HOSTS.has(name) && opts.widgetHost) { try { h.disable(); } catch {} }
   if (toolHeldBackByConnectors(name, ctx.conn)) { try { h.disable(); } catch {} }
+  if (toolHeldBackByDirectory(name, group, ctx)) { try { h.disable(); } catch {} } // (4) the directory cage — see DIRECTORY_GROUPS
 }
 
 // Replay the cached canon onto a fresh server. This is the whole hot path for every session after the first.
