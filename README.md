@@ -94,6 +94,11 @@ Claude in Chrome and clients like it complete it unattended today. Everything el
 and `upgrade_plan` mint a ready-to-pay link for more credits or a bigger plan, and `billing_status` reads the
 balance any time.
 
+**An agent with its own payment credential can pay with no human at all.** `POST /api/billing/machine-payment`
+with `{"packId": "pack-1k"}` answers HTTP 402 carrying a `WWW-Authenticate: Payment` challenge (Stripe, through the
+Machine Payments Protocol); pay the challenge and retry, and the same credit pack lands on the same balance.
+`GET /api/billing/config` lists the packs under `machinePayments`. Same packs, same prices, no per-call billing.
+
 **The agentic path takes a paid plan.** Any of them. The free plan is there for a person signing up at
 [app.hermoso.ai](https://app.hermoso.ai), and asking for it here returns a refusal that says so. Nothing is
 created until the payment completes, so an unpaid signup leaves no account behind and charges nothing.
