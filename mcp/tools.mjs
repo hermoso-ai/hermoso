@@ -15352,9 +15352,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (!memory.length) return ok('Memory is empty for this workspace.', { memory: [] });
     return ok(`${memory.length} memory item(s):\n` + memory.map(m => `  • [${m.category}] ${m.text}${m.id ? `  (${m.id})` : ''}`).join('\n'), { memory });
   }));
+// MEMORY HYGIENE (2026-09-02) — byte-identical copies of lib/memory-hygiene.mjs's two regexes (this file ships without
+// lib/). tools/memory-hygiene-check.mjs pins the parity. Memory holds brand facts, never product/API mechanics or PII.
+const MEMORY_MECHANICS_RE = /\b(endpoint|API\b|APIs\b|webhook|rate[ -]?limit|access token|OAuth|graph\.[a-z]+|sandbox|dev(?:elopment)? mode|HTTP \d{3}|\b4\d\d\b(?: error)?|error (?:message|text|code)|'reduce the amount of data'|not (?:yet )?supported|deprecated|verified \d{4}-\d{2}-\d{2}|on this connection|Hermoso'?s? (?:own|publish record|tool|MCP|CLI)|(?:no|missing|lacks?) '?[\w ]{0,30}'? ?endpoint|tool (?:returns?|output|call)|(?:returns?|come back|comes back) (?:null|empty|zeros?|truncated|full bodies|counts only)|omit(?:s|ted)? zero rows|permission (?:edge|rows?|list|request)|subscribed_fields|paging cursor|pagination)\b/i;
+const MEMORY_PII_RE = /(\+\d[\d\s().-]{7,}\d)|(\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b)|([\w.+-]+@[\w-]+\.[\w.-]+)/;
+function memoryNoteVerdict(text) {
+  const t = String(text || '').trim();
+  if (!t) return { ok: false, reason: 'empty' };
+  if (MEMORY_PII_RE.test(t)) return { ok: false, reason: 'pii', message: 'Not saved: Memory never holds a phone number or an email address.' };
+  if (MEMORY_MECHANICS_RE.test(t)) return { ok: false, reason: 'mechanics', message: 'Not saved: that is about how Hermoso or a platform API behaves, not about the brand. Memory holds brand, audience, offer, taste and working preferences only — product behaviour lives in the tools themselves.' };
+  return { ok: true };
+}
   server.registerTool('remember', {
     title: 'Remember a fact',
-    description: 'Save a durable fact or PREFERENCE about the brand, audience, or the user’s creative TASTE (e.g. “audience is first-time homebuyers”, “prefers bold lime accents”, “always captions off”) into the workspace Memory so it shapes FUTURE ads. For lasting things, not one-off requests. Merges into the existing Memory (never overwrites); de-dupes on identical text.',
+    description: 'Save a durable fact or PREFERENCE about the brand, audience, or the user’s creative TASTE (e.g. “audience is first-time homebuyers”, “prefers bold lime accents”, “always captions off”) into the workspace Memory so it shapes FUTURE ads. For lasting things, not one-off requests. Merges into the existing Memory (never overwrites); de-dupes on identical text. NEVER how Hermoso, a tool, a connector or a platform API behaves (what a call returns, errors, permissions, limits, ids) and never a phone number or email — those are refused.',
     inputSchema: {
       text: z.string().describe('the fact/preference, concise'),
       category: z.string().optional().describe('short bucket: Brand, Audience, Taste, Do, Don’t, or Preference (default General)'),
@@ -15363,6 +15374,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const text = String(a.text || '').trim(); if (!text) return { content: [{ type: 'text', text: 'Nothing to remember — pass text.' }], isError: true };
+    { const v = memoryNoteVerdict(text); if (!v.ok) return { content: [{ type: 'text', text: v.message }], isError: true }; }
     let list = await readStore('heist.memory.v1'); if (!Array.isArray(list)) list = [];
     if (list.some(m => m && String(m.text || '').toLowerCase() === text.toLowerCase())) return ok(`Already in memory: “${text}”.`, { ok: true });
     const item = { id: newId('m'), text, category: String(a.category || 'General').trim() || 'General', source: 'mcp', createdAt: Date.now() };
@@ -15392,6 +15404,30 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // died inside one conversation, while the web user's own board sat untouched beside them.
   // These are typed writers on purpose (see the store_set note above): they mint ids, de-dupe on the ad `key`, respect
   // the per-store caps and write the two-level tombstone a genuine delete needs.
+  server.registerTool('tidy_memory', {
+    title: 'Tidy the Memory list',
+    description: 'Clean up and consolidate the workspace Memory: drops entries that are about how Hermoso, a tool, a connector or a platform API behaves (product behaviour, not the brand), drops phone numbers and emails, and merges near-duplicate facts into one sentence each. Call with no argument to get the PROPOSAL (what would be removed and merged, with reasons) — nothing changes. Call again with confirm:true to apply it through the same typed writers the app uses (deletes carry tombstones so they stay deleted on every device). One small model call; a few credits.',
+    inputSchema: { confirm: z.boolean().optional().describe('true to APPLY the proposal; omit to only see it') },
+    outputSchema: { scanned: z.number().optional(), remove: z.array(z.any()).optional(), merge: z.array(z.any()).optional(), applied: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    let list = await readStore('heist.memory.v1'); if (!Array.isArray(list)) list = [];
+    if (!list.length) return ok('Memory is empty — nothing to tidy.', { scanned: 0, remove: [], merge: [], applied: false });
+    const r = await apiPost('/api/memory/tidy', { items: list.map(m => ({ id: m.id, text: m.text, category: m.category })) });
+    const d = r?.data || { remove: [], merge: [] };
+    const byId = new Map(list.map(m => [String(m.id), m]));
+    const lines = [];
+    for (const x of d.remove || []) lines.push(`- remove [${x.reason}]: ${String(byId.get(x.id)?.text || x.id).slice(0, 140)}`);
+    for (const m of d.merge || []) lines.push(`- merge ${m.ids.length} → “${m.text.slice(0, 140)}”`);
+    if (!lines.length) return ok(`Scanned ${list.length} memories — nothing to remove or merge.`, { scanned: list.length, remove: [], merge: [], applied: false });
+    if (!a.confirm) return ok(`Proposal over ${list.length} memories (nothing changed — call again with confirm:true to apply):\n${lines.join('\n')}`, { scanned: list.length, remove: d.remove, merge: d.merge, applied: false });
+    const gone = new Set([...(d.remove || []).map(x => String(x.id)), ...(d.merge || []).flatMap(m => m.ids.map(String))]);
+    for (const id of gone) await tombstone('heist.memory.v1', id);
+    const merged = (d.merge || []).map(m => ({ id: newId('m'), text: m.text, category: m.category || 'General', source: 'tidy', createdAt: Date.now() }));
+    await writeStore('heist.memory.v1', [...merged, ...list.filter(m => m && !gone.has(String(m.id)))].slice(0, 200));
+    return ok(`Tidied: removed ${gone.size - (d.merge || []).flatMap(m => m.ids).length}, merged ${(d.merge || []).length} group(s). ${list.length} → ${list.length - gone.size + merged.length} memories.\n${lines.join('\n')}`, { scanned: list.length, remove: d.remove, merge: d.merge, applied: true });
+  }));
+
   const SWIPE_KEY = 'adInspo.swipefile.v1';
   const swipeEmpty = () => ({ collections: [{ id: 'default', name: 'My Swipefile' }], activeId: 'default', ads: [] });
   // Mirror the webapp's Swipe.read(): anything that isn't the {collections[], ads[]} shape is treated as an empty
