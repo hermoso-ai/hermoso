@@ -1,0 +1,333 @@
+# Publishes this repo's server.json to the official MCP Registry using GitHub Actions OIDC.
+#
+# Shape follows the registry's own guide, read 2026-08-03:
+#   https://modelcontextprotocol.io/registry/github-actions  (OIDC workflow: permissions block,
+#     actions/checkout@v5, the mcp-publisher install one-liner, `login github-oidc`, `publish`)
+#   https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/cli/commands.md
+#     ("mcp-publisher login github-oidc … Requires `id-token: write` permission in workflow")
+#
+# WHY OIDC: it proves ownership of the io.github.hermoso-ai/* namespace structurally, from the fact
+# that this job runs in the hermoso-ai org. No stored PAT, nothing to rotate, nothing that expires.
+#
+# WHY THIS DOES NOT PUBLISH TO npm: the npm package `hermoso` is published from the private source
+# repo (its cli/ directory), NOT from this mirror. This workflow only registers metadata that points
+# at an ALREADY-published npm version — which is why the guard below exists.
+#
+# TRIGGER IS DELIBERATE — tag or manual, never every push. The registry rejects a version that npm
+# does not have ("NPM package 'hermoso' exists, but version X was not found"), so a publish that
+# fired on every commit would spam the registry with 400s.
+
+name: Publish to MCP Registry
+
+on:
+  push:
+    tags: ['v*'] # e.g. v0.1.34
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must already be live on npm). Blank = use server.json as committed.'
+        required: false
+        type: string
+      dry_run:
+        description: 'Verify everything — npm version, mcpName, OIDC login — but do NOT publish. Leaves the registry untouched.'
+        required: false
+        type: boolean
+        default: false
+      backfill:
+        description: 'Cut a GitHub Release for every v* tag that has none, and publish NOTHING to the registry. See the github-release job.'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    # A backfill run exists only to cut GitHub Releases for tags that already shipped. Their registry
+    # entries were published long ago, and `mcp-publisher publish` refuses a version it already holds —
+    # so letting this job run would turn every backfill into a red X for a reason unrelated to the work.
+    if: ${{ !inputs.backfill }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC authentication
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve the version to publish
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Tag push → version $VERSION"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "Manual run → version $VERSION"
+          else
+            VERSION="$(jq -r '.version' server.json)"
+            echo "Manual run → using server.json version $VERSION"
+          fi
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::'$VERSION' is not a semver version"; exit 1 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Pin server.json to that version
+        run: |
+          set -euo pipefail
+          V='${{ steps.ver.outputs.version }}'
+          # Both the server version AND every npm package version must move together, or the
+          # registry validates the metadata against a version of the package nobody published.
+          jq --arg v "$V" '.version = $v | .packages |= map(.version = $v)' server.json > server.tmp
+          mv server.tmp server.json
+          jq '{name, version, packages: [.packages[] | {identifier, version}]}' server.json
+
+      - name: Verify the npm package version is live
+        # THE GUARD. The MCP registry verifies package ownership by reading the published npm
+        # tarball's package.json `mcpName`, so publishing metadata for a version npm does not
+        # have fails with a 400. Fail here, loudly and for free, instead of there.
+        run: |
+          set -euo pipefail
+          V='${{ steps.ver.outputs.version }}'
+          PKG="$(jq -r '.packages[0].identifier' server.json)"
+          echo "Checking https://registry.npmjs.org/$PKG/$V"
+          if ! curl -sfL "https://registry.npmjs.org/$PKG/$V" -o npm-version.json; then
+            echo "::error::npm has no $PKG@$V yet. Publish the npm package first, then re-run this workflow."
+            exit 1
+          fi
+          MCP_NAME="$(jq -r '.mcpName // empty' npm-version.json)"
+          WANT="$(jq -r '.name' server.json)"
+          if [ "$MCP_NAME" != "$WANT" ]; then
+            echo "::error::$PKG@$V declares mcpName='$MCP_NAME' but server.json is '$WANT' — the registry will reject this."
+            exit 1
+          fi
+          echo "npm has $PKG@$V and it declares mcpName=$MCP_NAME"
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      # `!inputs.dry_run` is true for a tag push (where `inputs` is empty) and for an explicit
+      # dry_run:false — so the ONLY thing that stops a publish is asking for a dry run.
+      - name: Dry run — everything verified, stopping before publish
+        if: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          PKG="$(jq -r '.packages[0].identifier' server.json)"
+          echo "DRY RUN — all checks passed:"
+          echo "  npm has $PKG@${{ steps.ver.outputs.version }} and its mcpName matches server.json"
+          echo "  OIDC login to the MCP registry succeeded"
+          echo "Nothing was published. The registry entry is untouched."
+
+      - name: Publish server to MCP Registry
+        if: ${{ !inputs.dry_run }}
+        run: ./mcp-publisher publish
+
+      - name: Confirm the registry read-back
+        if: ${{ !inputs.dry_run }}
+        # Report what the registry ACTUALLY stored, never what we asked it to store.
+        # Response shape (verified live 2026-08-03): servers[].server.{name,version} with the
+        # registry's own status as a SIBLING under servers[]._meta."io.modelcontextprotocol.registry/official".
+        run: |
+          set -uo pipefail
+          NAME="$(jq -r '.name' server.json)"
+          V='${{ steps.ver.outputs.version }}'
+          # The registry key is passed as a jq --arg, never interpolated by the shell: it contains
+          # dots, and splicing it after `._meta.` yields `._meta.."io.…"`, a jq compile error.
+          K='io.modelcontextprotocol.registry/official'
+          for i in 1 2 3 4 5 6; do
+            curl -sfL "https://registry.modelcontextprotocol.io/v0.1/servers?search=$NAME" -o reg.json || true
+            if [ -s reg.json ]; then
+              jq -r --arg n "$NAME" --arg k "$K" '
+                [.servers[] | select(.server.name == $n)
+                 | { version: .server.version,
+                     isLatest: ._meta[$k].isLatest,
+                     updatedAt: ._meta[$k].updatedAt }]
+                | sort_by(.updatedAt) | .[-3:] | .[]
+                | "  \(.version)  isLatest=\(.isLatest)  \(.updatedAt)"' reg.json
+              # `// "absent"` would be wrong here: jq's alternative operator treats a legitimate
+              # `false` as empty, so a version that IS present but not latest would read "absent".
+              FOUND="$(jq -r --arg n "$NAME" --arg v "$V" --arg k "$K" \
+                '[.servers[] | select(.server.name == $n and .server.version == $v)
+                  | ._meta[$k].isLatest]
+                 | if length == 0 then "absent" else (.[0] | tostring) end' reg.json)"
+              if [ "$FOUND" = "true" ]; then
+                echo "Registry read-back: $NAME @ $V is live and isLatest."
+                exit 0
+              fi
+              echo "attempt $i: $NAME @ $V reads back as '$FOUND' — retrying in 10s"
+            fi
+            sleep 10
+          done
+          # The publish step already exited non-zero on a real failure, so do not manufacture one
+          # here — say plainly that it could not be CONFIRMED, which is not the same as failed.
+          echo "::warning::Published, but could not confirm $NAME @ $V in the registry within 60s. Check https://registry.modelcontextprotocol.io/v0.1/servers?search=$NAME"
+
+  # ── A TAG IS NOT A RELEASE ────────────────────────────────────────────────────────────────────────
+  # `git push origin v<VERSION>` creates a tag and nothing promotes it to a GitHub Release. Measured
+  # 2026-08-26: this mirror held 12 tags and exactly 2 Releases (v0.1.15, v0.1.25), and TWO listings
+  # read Releases rather than tags —
+  #   • Glama grades *maintenance* off them: "Releases (12mo): 2" held the grade at B.
+  #   • LobeHub pins its ENTIRE listing to the latest Release, so it still advertised 0.1.15 / 72
+  #     tools from July while npm, the mirror and the MCP registry were all on 0.1.160 / 716.
+  #
+  # WHY IT RUNS HERE AND NOT FROM A LAPTOP: a Release records its actor PUBLICLY. `gh` on the dev box
+  # is authenticated as Dave's personal GitHub account, and nothing public may carry a personal handle
+  # (see cli/PUBLISHING.md § IDENTITY). Running it in Actions makes the actor `github-actions[bot]`,
+  # which is correct and attributable to no person. That is the whole reason this is automated.
+  #
+  # WHY IT HAS NO `needs: publish`: the two surfaces are independent, and coupling them makes the
+  # Release UNRECOVERABLE. `mcp-publisher publish` refuses a version the registry already holds, so if
+  # the registry succeeded and the Release step failed, a re-run would die at publish and never reach
+  # the Release again. Independent jobs mean either half can be re-run on its own. The one guard worth
+  # duplicating is the npm check — a Release is what LobeHub advertises, so it must never name a
+  # version nobody can install.
+  github-release:
+    # A plain workflow_dispatch (no backfill) has no tag to release and does nothing here.
+    if: ${{ github.event_name == 'push' || inputs.backfill }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create a Release. The repo default is read-only, so this must be declared.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # every tag: the backfill sweeps them, and a single release needs its predecessor
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cut a GitHub Release for each tag that has none
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # → actor is github-actions[bot], never a person
+          BACKFILL: ${{ inputs.backfill }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -uo pipefail
+
+          # THE COUNT IS DERIVED BY RUNNING, NEVER READ OFF A LITERAL. This number has been wrong four
+          # different ways at once (server.json 225 / two READMEs 205 / index.html 205 / reality 258),
+          # which is why the repo's standing rule is to count by registering against a stub and never
+          # to grep for it. Written outside the checkout so it survives `git checkout <tag>`.
+          cat > "$RUNNER_TEMP/count-tools.mjs" <<'EOF'
+          import { pathToFileURL } from 'node:url';
+          const { registerTools } = await import(pathToFileURL(process.cwd() + '/mcp/tools.mjs').href);
+          const seen = new Set();
+          // registerTools needs registerResource too; a stub missing it throws, and an over-broad
+          // catch upstream would turn that into a silently absent count.
+          registerTools({ registerTool: (n) => { seen.add(n); return {}; }, registerResource: () => ({}) });
+          process.stdout.write(String(seen.size));
+          EOF
+
+          # Which tags are in scope.
+          if [ "$BACKFILL" = "true" ]; then
+            TAGS="$(git tag -l 'v*' | sed 's/^v//' | sort -V | sed 's/^/v/')"
+            echo "Backfill: sweeping every v* tag ($(echo "$TAGS" | wc -l | tr -d ' ') found)."
+          else
+            TAGS="${REF#refs/tags/}"
+            echo "Tag push: $TAGS"
+          fi
+
+          # The newest tag by semver is the one GitHub should mark "Latest" — that is the single row
+          # LobeHub reads. Ascending order plus an explicit flag makes it deterministic whatever order
+          # a backfill happens to run in.
+          HIGHEST="$(git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1 | sed 's/^/v/')"
+          FAILED=0
+
+          for TAG in $TAGS; do
+            V="${TAG#v}"
+            echo "── $TAG ──────────────────────────────────────────────"
+
+            # IDEMPOTENT: a tag that already has a Release is a NO-OP, not an error. Re-running this
+            # workflow — after a transient failure, or over a tag someone released by hand — must be
+            # safe, or nobody will re-run it.
+            if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+              echo "  already has a Release — nothing to do"
+              continue
+            fi
+
+            # THE NPM GUARD. A Release is what LobeHub advertises, so it must never name a version
+            # nobody can install. A backfill WARNS and moves on (one unpublishable old tag must not
+            # take down a sweep of ten); a single tag push ERRORS, because cutting that one Release
+            # is the entire point of the run.
+            if ! curl -sfL "https://registry.npmjs.org/hermoso/$V" -o "$RUNNER_TEMP/npm.json"; then
+              if [ "$BACKFILL" = "true" ]; then
+                echo "::warning::npm does not serve hermoso@$V — skipping $TAG rather than advertising an uninstallable version."
+                continue
+              fi
+              echo "::error::npm does not serve hermoso@$V. Publish the npm package first, then re-run."
+              FAILED=1
+              continue
+            fi
+
+            # The tool count AT THAT TAG, not at HEAD — a backfilled Release must describe what it
+            # actually shipped.
+            git checkout --quiet --detach "$TAG" || true
+            COUNT=""
+            if npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1; then
+              COUNT="$(node "$RUNNER_TEMP/count-tools.mjs" 2>/dev/null || true)"
+            fi
+            case "$COUNT" in
+              ''|*[!0-9]*) COUNT=""; echo "::warning::could not derive the tool count at $TAG — the Release will simply omit it." ;;
+              *) echo "  registerTools() registers $COUNT tools at $TAG (derived, not grepped)" ;;
+            esac
+
+            # Notes. Short and accurate beats long and stale. NOTHING here is a number we did not
+            # measure: with no derived count, the line is ABSENT rather than guessed.
+            NOTES="$RUNNER_TEMP/notes-$TAG.md"
+            {
+              # NO EM DASHES. Release notes are outbound marketing copy and the house rule covers
+              # every outbound word (site, emails, vendor tickets); an em dash is the #1 AI tell.
+              echo "The Hermoso MCP server, CLI and Claude skills. Drive an AI ad studio from Claude Code, Claude.ai, Cursor, Codex or your own scripts."
+              echo
+              if [ -n "$COUNT" ]; then
+                echo "**$COUNT tools** in this release, counted by running \`registerTools()\` at this tag."
+                echo
+              fi
+              echo '```bash'
+              echo "claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso@$V mcp"
+              echo '```'
+              echo
+              echo "Or paste \`https://app.hermoso.ai/mcp\` into Claude → Settings → Connectors → Add custom connector."
+              echo
+              echo "- npm: https://www.npmjs.com/package/hermoso/v/$V"
+              echo "- MCP registry: \`io.github.hermoso-ai/hermoso\`"
+              PREV="$(git tag -l 'v*' | sed 's/^v//' | sort -V | sed 's/^/v/' | grep -B1 -x "$TAG" | head -1)"
+              if [ -n "$PREV" ] && [ "$PREV" != "$TAG" ]; then
+                echo "- Changes: https://github.com/${GITHUB_REPOSITORY}/compare/$PREV...$TAG"
+              fi
+              echo
+              echo "\`tools/list\` is always the authoritative set; \`hermoso_capabilities\` (free) returns the live model catalog and exact per-render credit costs."
+            } > "$NOTES"
+
+            if [ -n "$COUNT" ]; then TITLE="Hermoso $TAG — $COUNT tools"; else TITLE="Hermoso $TAG"; fi
+            if [ "$TAG" = "$HIGHEST" ]; then LATEST="--latest=true"; else LATEST="--latest=false"; fi
+
+            # --verify-tag: refuse to INVENT a tag. `gh release create` will happily create one, and a
+            # typo would then put a tag in a public repo that no commit was ever pushed for.
+            if gh release create "$TAG" --verify-tag --title "$TITLE" --notes-file "$NOTES" $LATEST; then
+              echo "  Release cut ($LATEST)"
+            else
+              echo "::error::failed to cut a Release for $TAG"
+              FAILED=1
+            fi
+          done
+
+          # THE ANSWER IS THE READ-BACK, NEVER THE EXIT CODE OF `gh release create`. Report what GitHub
+          # actually stored, including the actor — the one field this whole job exists to control.
+          echo
+          echo "── read-back ─────────────────────────────────────────"
+          gh release list --limit 20 --json tagName,isLatest,createdAt \
+            --jq '.[] | "  \(.tagName)\tlatest=\(.isLatest)\t\(.createdAt)"' || true
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | .author.login] | unique | "  actors: " + join(", ")' || true
+
+          exit $FAILED
