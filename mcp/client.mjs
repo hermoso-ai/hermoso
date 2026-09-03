@@ -99,6 +99,29 @@ export function reportToolError(tool, err) {
   } catch { /* an instrument never breaks the thing it measures */ }
 }
 
+/**
+ * Report an AGENT DEAD END — the user's AI asked for something and could not reach it (no throw, no 4xx, so nothing
+ * else records it). `kind` must be one of the server's DEAD_END_KINDS; the server allowlists it and decides which
+ * side of the board it lands on. Same transport, same per-process cap and the same never-throw rule as above.
+ */
+export function reportDeadEnd(kind, tool, detail, inputs) {
+  try {
+    if (_reportedThisProcess++ > 200) return;
+    fetch(`${API_BASE}/api/errors/report`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        op: String(tool || 'unknown').slice(0, 60),
+        errorClass: 'DeadEnd',
+        status: 0,
+        message: String(detail || kind).slice(0, 300),
+        deadEnd: String(kind || '').slice(0, 40),
+        ...(inputs && typeof inputs === 'object' ? { inputs } : {}),
+      }),
+    }).catch(() => {});
+  } catch { /* an instrument never breaks the thing it measures */ }
+}
+
 export async function apiGet(p, query) {
   // URLSearchParams stringifies undefined/null as the LITERAL "undefined"/"null" — so an omitted optional param
   // arrives as a truthy string and silently changes server behaviour. Live 2026-07-27: list_google_ads_campaigns
@@ -247,7 +270,9 @@ export async function connectedProviders() {
     const r = await apiGet('/api/connectors/providers');
     const list = Array.isArray(r?.providers) ? r.providers : null;
     if (!list) return { connected: new Set(), readOk: false }; // a shape we do not recognise is a failed read
-    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true };
+    const offered = Array.isArray(r?.offered) ? new Set(r.offered.filter((p) => typeof p === 'string' && p)) : null; // null = server predates the field → fail open
+    const gated = r?.gated && typeof r.gated === 'object' ? r.gated : {};
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated };
   } catch { return { connected: new Set(), readOk: false }; }
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so

@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**746 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**768 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
@@ -73,8 +73,10 @@ No human at a browser, no ticket, no waiting.
 # 1. Start a signup. This call takes no credential, because the credential is what it creates.
 curl -sX POST https://app.hermoso.ai/v1/signup \
   -H 'content-type: application/json' \
-  -d '{"plan":"pro","period":"mo"}'
-# -> { "id": "cs_...", "checkout_url": "https://checkout.stripe.com/...", "claim_token": "hsc_..." }
+  -d '{"plan":"pro","period":"mo","email":"you@yourcompany.com"}'
+# -> { "id": "cs_...", "checkout_url": "https://checkout.stripe.com/...", "claim_token": "hsc_...", "email": { "address": "you@yourcompany.com", "verified": false } }
+# email = the human behind the account. A verification link goes there; the account works before it is clicked.
+# It is a contact mailbox only, never a sign-in. GET /v1/account/email reports the state; POST /v1/account/email/resend re-sends or changes it.
 
 # 2. Pay at checkout_url. Store claim_token first: it is returned only in that response.
 
@@ -114,8 +116,9 @@ the routes.
 
 ## Instant: the hosted Claude.ai connector
 
-Paste **`https://app.hermoso.ai/mcp`** into Claude → Settings → Connectors → *Add custom connector*, approve with
-your Hermoso account, done — the full toolset with your saved brand context, billed to your plan.
+Paste **`https://app.hermoso.ai/mcp?src=readme`** into Claude → Settings → Connectors → *Add custom connector*, pick
+**Always required** when Claude asks about authentication (its detector suggests "None" because our discovery
+handshake is open; "None" would leave every tool call unauthenticated), approve with your Hermoso account, done — the full toolset with your saved brand context, billed to your plan.
 
 ## Quickstart for Claude Code (one line)
 
@@ -140,7 +143,7 @@ claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso mcp
 ```
 
 The hosted URL works in Claude Code too, but it is the worse path there and it is worth knowing why:
-`claude mcp add --transport http hermoso https://app.hermoso.ai/mcp` is accepted, and then `claude mcp list`
+`claude mcp add --transport http hermoso "https://app.hermoso.ai/mcp?src=readme"` is accepted, and then `claude mcp list`
 reports `! Needs authentication` because the client will not start the OAuth flow by itself — you have to open a
 session, run `/mcp`, find the server and press Authenticate. Measured against Claude Code 2.1.241 on 2026-08-23.
 
@@ -168,7 +171,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 746 tools cover
+### What the 768 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
