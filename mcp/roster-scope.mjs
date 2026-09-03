@@ -90,19 +90,28 @@ export const TOOL_PROVIDER_RULES = [
   [/amplitude/, 'amplitude'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
-  [/google_business|business_location/, 'google_business'],
-  [/_drive_|^list_drive|^get_drive|^create_drive|^save_to_drive$|_doc$|^read_doc|^create_doc|^update_doc|^append_to_doc|sheet/, 'google_drive'],
+  [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],
+  [/_drive_|^list_drive|^get_drive|^create_drive|^save_to_drive$|^export_swipefile_deck$|_doc$|^read_doc|^create_doc|^update_doc|^append_to_doc|sheet/, 'google_drive'],
   [/onedrive/, 'microsoft_onedrive'],
   [/bluesky/, 'bluesky'],
   [/telegram/, 'telegram'],
   [/^post_to_tiktok$|^tiktok_|_tiktok_/, 'tiktok'],
-  [/^post_to_x$|^delete_x_post$|^send_x_dm$|^list_x_dms$|^x_(mentions|post)/, 'x'],
+  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
   [/pinterest/, 'pinterest'],
   [/reddit/, 'reddit'],
   [/snapchat/, 'snapchat'],
 ];
 
 // The provider a tool needs, or null when this module cannot attribute it. null ⇒ NEVER dropped (property 2).
+// ── PROVIDERS HERMOSO DOES NOT OFFER, AND AS OF NOW WILL NOT (Dave, 2026-09-03) ────────────────────────────────
+// "make sure posting to reddit or snapchat are never offered, never described, never wasting context in a tools
+// list". Reddit organic posting needs Reddit's API approval we do not have; Snapchat posting is not even built. Both
+// have ADS connectors that are live and are NOT in this set (`reddit_ads`, `snapchat_ads`). A tool whose provider
+// is here is not registered on any roster, not listed by find_tools, not offered by the Studio agent, and not
+// counted. Gating at call time was not enough: a disabled tool still costs its schema in every canon and its name
+// in every listing. If Reddit ever approves the app, remove it from this set and the whole surface returns.
+export const UNOFFERED_PROVIDERS = new Set(['reddit', 'snapchat']);
+export function toolUnoffered(name) { const p = toolProvider(name); return !!p && UNOFFERED_PROVIDERS.has(p); }
 export function toolProvider(name) {
   const n = String(name || '');
   if (!n) return null;

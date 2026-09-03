@@ -20,7 +20,7 @@ import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
-export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
+export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null } = {}) {
   if ((process.env.HERMOSO_MCP_REMOTE ?? process.env.HEIST_MCP_REMOTE) !== '1') return false;             // gate 1: off by default
   if (typeof verifyBearer !== 'function') {                           // gate 2: refuse without real auth
     console.error('[mcp-remote] REFUSING to mount: no token verifier wired. A remote, money-spending MCP must authenticate every caller (no-anon-spend). Wire Firebase Auth → verifyBearer first.');
@@ -103,6 +103,9 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     const e = sessions.get(id);
     if (!e) return false;
     sessions.delete(id);
+    // What the session DID, handed to the host once, at the end, best-effort: listed-but-never-called is the dead-end
+    // signal the roster work is measured by. Never throws into the teardown.
+    if (typeof onSessionEnd === 'function') { try { onSessionEnd({ accountId: e.user?.accountId || null, userId: e.user?.userId || null, client: e.client || '', ua: e.ua || '', src: e.src || null, listed: !!e.listed, calls: e.calls || 0, ms: Date.now() - (e.startedAt || Date.now()), why }); } catch {} }
     try { e.transport.close(); } catch {}
     try { e.server.close(); } catch {}
     if (why) console.error(`[mcp-remote] session ${id} closed (${why}); ${sessions.size} live`);
@@ -198,10 +201,15 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
   // was the right instinct for a scope the SERVER changes silently, and the wrong one for a change the CLIENT
   // asked for and is told about.
   function scopeFor(req, res) {
-    const { groups, error } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
+    const { groups, error, directory } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
     if (error) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: error }, id: null }); return false; }
-    return { groups };
+    return { groups, directory: directory || false }; // `directory` = the Claude Connectors Directory cage (see DIRECTORY_GROUPS in tools.mjs)
   }
+  // `?src=<surface>` on the published URL (registry / glama / smithery / cursor / readme …) — attribution only. It may
+  // not change auth, scope or spend, and an unrecognisable value is simply dropped. The OAuth resource metadata is
+  // path-based (RFC 9728), so a query on the pasted URL changes nothing about the handshake.
+  const srcOf = (req) => { const v = String(req.query?.src || '').trim().toLowerCase(); return /^[a-z0-9][a-z0-9_.-]{0,39}$/.test(v) ? v : null; };
+  const methodsOf = (body) => (Array.isArray(body) ? body : [body]).map((m) => m && m.method).filter(Boolean);
 
   async function serveAnonDiscovery(req, res, scope) {
     const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
@@ -212,7 +220,8 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
     // scope to and nothing honest to read — and a registry crawler or an agent deciding whether to connect MUST
     // see the real catalog, not a zero-connector one. registerTools treats an absent `connectors` exactly like a
     // failed read: full roster. Do not "fix" this by reading the workspace off the request; it is forgeable.
-    registerTools(server, { only: scope?.groups, widgetHost: isWidgetHost(clientInfoOf(req.body), req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups, directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    if (typeof onAnonDiscovery === 'function' && methodsOf(req.body).includes('tools/list')) { try { onAnonDiscovery({ client: clientInfoOf(req.body), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req) }); } catch {} }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
     await server.connect(transport);
@@ -265,7 +274,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
@@ -275,7 +284,8 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
       // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
-      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req) };
+      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0 };
+      if (typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
       // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
       // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
       // the predicate can be corrected from evidence instead of from a hunch.
@@ -291,6 +301,9 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl } = {}) {
       entry.lastSeen = Date.now();
       sessions.delete(sid); sessions.set(sid, entry);
     }
+    // Counted here, before the transport sees the body, so the tally is of what the CLIENT asked and not of what
+    // the SDK answered — a refused tools/call is still a call the roster earned.
+    for (const m of methodsOf(req.body)) { if (m === 'tools/list') entry.listed = true; else if (m === 'tools/call') entry.calls = (entry.calls || 0) + 1; }
     // The caller's bearer rides into every /api call the tools make — spend bills THEIR account. `remote: true`
     // says what this store IS: a per-request tenant scope on a shared, multi-tenant process. client.mjs treats the
     // presence of this store as the signal to STOP falling back to the process's own HERMOSO_PROFILE / HERMOSO_OWNER,
