@@ -12064,18 +12064,19 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('tiktok_ads_pixel_stats', {
     title: 'Read how often a TikTok pixel\u2019s events fired',
-    description: 'Event-level statistics for one TikTok pixel over a date range — how many times each event actually fired, which is how you tell a pixel that is installed and working from one that is installed and silent. Takes the pixel CODE (not the id) as reported by list_tiktok_ads_pixels. Read-only, free.',
+    description: 'Event-level statistics for one TikTok pixel over a date range — how many times each event actually fired, which is how you tell a pixel that is installed and working from one that is installed and silent. Pass the pixelId or the pixelCode from list_tiktok_ads_pixels; default range is the last 7 days (UTC), at most 30. Counts are split into browser vs server per event. Read-only, free.',
     inputSchema: {
       advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts'),
-      pixelCode: z.string().describe('the pixelCode from list_tiktok_ads_pixels \u2014 NOT the pixelId'),
-      startDate: z.string().optional().describe('YYYY-MM-DD'),
-      endDate: z.string().optional().describe('YYYY-MM-DD'),
+      pixelId: z.string().optional().describe('the pixelId from list_tiktok_ads_pixels'),
+      pixelCode: z.string().optional().describe('or the pixelCode from list_tiktok_ads_pixels \u2014 resolved to its id'),
+      startDate: z.string().optional().describe('YYYY-MM-DD (UTC); default 6 days before endDate; the range may span at most 30 days'),
+      endDate: z.string().optional().describe('YYYY-MM-DD (UTC); default today'),
     },
-    outputSchema: { advertiserId: z.string().optional(), pixelCode: z.string().optional(), stats: z.any().optional() },
+    outputSchema: { advertiserId: z.string().optional(), pixelId: z.string().optional(), pixelCode: z.string().nullable().optional(), startDate: z.string().optional(), endDate: z.string().optional(), stats: z.any().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/pixel-stats', a);
-    return ok(`Pixel ${d.pixelCode} event stats.`, d);
+    return ok(`Pixel ${d.pixelCode || d.pixelId} event stats ${d.startDate} \u2192 ${d.endDate}: ${(d.stats || []).length ? d.stats.map((x) => `${x.pixel_event_type || x.custom_event_type}: ${x.total_count} (browser ${x.browser_event_total_count}, server ${x.server_event_total_count})`).join('; ') : 'no events received in that range'}.`, d);
   }));
   server.registerTool('list_tiktok_ads_custom_conversions', {
     title: 'List TikTok Custom Conversions',
