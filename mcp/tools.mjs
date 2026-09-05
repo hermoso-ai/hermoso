@@ -16194,6 +16194,10 @@ function memoryNoteVerdict(text) {
     if (row.platform !== 'creator' || !row.creator) return { content: [{ type: 'text', text: `${key} is a saved ad, not a creator — outreach status only applies to creators (platform "creator").` }], isError: true };
     const prev = row.creator.outreach || {};
     row.creator.outreach = { status: a.status != null ? a.status : (prev.status || 'new'), note: a.note != null ? String(a.note).slice(0, 2000) : (prev.note || ''), updatedAt: Date.now() };
+    // THE MERGE TIMESTAMP IS savedAt (adapters/sync-merge.js: swipefile.ads ts = savedAt, newer wins, ties go to the
+    // writer). A browser that pushes its cached copy seconds later carries the SAME savedAt and silently overwrote
+    // this edit (measured 2026-09-05). An edit bumps the row's savedAt so every device keeps it.
+    row.savedAt = Date.now();
     await writeStore(SWIPE_KEY, s);
     const o = row.creator.outreach;
     return ok(`@${row.creator.handle || key}: status ${o.status}${o.note ? ` — note: ${o.note}` : ''}.`, { ok: true, key, status: o.status, note: o.note, creator: row.creator });
