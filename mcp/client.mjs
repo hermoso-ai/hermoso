@@ -52,10 +52,20 @@ function headers(extra = {}) {
   // customer's tool call to whatever workspace the SERVER's environment happens to name — a cross-tenant leak that
   // is invisible because it succeeds. stdio/CLI keeps the env fallback: there the process and the caller are the
   // same person. Presence of the ctx store IS "remote" (see isRemote below).
-  const prof = ctx ? (ctx.profile || '') : PROFILE; // omit entirely when unpinned so the key's saved brand wins server-side
+  // 'default' is the CLI's old placeholder, not a pin — sending it overrode use_brand on every call (2026-09-04).
+  const prof = ctx ? (ctx.profile || '') : (PROFILE === 'default' ? '' : PROFILE); // omit entirely when unpinned so the key's saved brand wins server-side
   const own = ctx ? (ctx.owner || '') : OWNER; // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
   const tool = toolCtx.getStore()?.tool || '';
   const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-heist-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...(tool ? { 'x-hermoso-tool': tool } : {}), ...extra };
+  // AN IN-PROCESS SELF-CALL IS NOT THE CUSTOMER DOING SOMETHING. Serving a hosted session makes this process call
+  // its own API with the caller's bearer — to resolve their workspace and scope the roster — and that inner
+  // request was stamping api_keys.last_used_at, so merely CONNECTING an MCP client marked the account active for
+  // the day. Measured 2026-09-04: initialize + tools/list and no tool call moved "called" to the current minute.
+  // The marker is set only when a ctx store exists, which is exactly the hosted case; stdio and the CLI have no
+  // ctx and are REAL external callers whose requests must keep counting. Loopback was tried first and is not a
+  // reliable discriminator here. Forgeable, and harmlessly so: the worst a caller achieves is under-reporting
+  // their own activity, which is why this decides bookkeeping and nothing else.
+  if (ctx) h['x-hermoso-inproc'] = '1';
   if (process.env.EDGE_SECRET) h['x-edge-auth'] = process.env.EDGE_SECRET; // belt: in-process self-calls satisfy the edge shield even if the loopback exemption ever changes
   const tok = ctx?.token || TOKEN;
   if (tok) h.Authorization = `Bearer ${tok}`;

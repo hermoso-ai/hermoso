@@ -16,7 +16,7 @@ You drive the **Hermoso CLI** (`hermoso`) to render images and videos. Always re
 
 ## Setup (once)
 1. Ensure the CLI is available. From the Hermoso repo: `node bin/hermoso.mjs version` (or `hermoso version` if globally installed via `npm i -g`).
-2. `hermoso auth login` (opens your browser once; nothing to paste). On a machine with no browser: `hermoso auth login --token <your key>`, using a key from the app under **MCP & CLI**. No account at all? An agent can sign itself up on a paid plan with `POST /v1/signup` at app.hermoso.ai, no browser needed; see the Hermoso README.
+2. `hermoso auth login` (opens your browser once; nothing to paste). On a machine with no browser: `hermoso auth login --token <your key>`, using a key from the app under **MCP & CLI**.
 
 ## Procedure
 1. **Always run `hermoso capabilities` first.** It lists the valid image/video **model ids**, their credit costs, aspect ratios, video durations, and the recipe ids. Never guess a model id.

@@ -69,7 +69,9 @@ async function main() {
   if (group === 'auth') {
     if (sub === 'logout') { await saveConfig({}); return console.log('✓ Logged out (cleared ~/.hermoso/config.json)'); }
     const apiBase = (flags.url || cfg.apiBase || 'https://app.hermoso.ai').replace(/\/$/, '');
-    const profile = flags.profile || cfg.profile || 'default';
+    // NEVER PERSIST 'default' (2026-09-04): a saved profile is exported as HERMOSO_PROFILE and sent on every call, where it
+    // OVERRIDES the brand a key was pinned to server-side (use_brand). An unpinned CLI must send nothing so the key wins.
+    const profile = flags.profile || (cfg.profile && cfg.profile !== 'default' ? cfg.profile : '');
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(apiBase);
     if (flags.token) { await saveConfig({ apiBase, token: String(flags.token), profile }); return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`); }
     if (isLocal) { await saveConfig({ apiBase, token: '', profile }); return console.log(`✓ Local dev — no auth required. API: ${apiBase}`); }
@@ -90,7 +92,7 @@ async function main() {
   // resolve API base + token from config (env overrides), then load the shared client
   process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
-  if (cfg.profile && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
+  if (cfg.profile && cfg.profile !== 'default' && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
   if (cfg.owner && !process.env.HERMOSO_OWNER) process.env.HERMOSO_OWNER = cfg.owner; // shared team workspace: the owning account (server re-authorizes it)
 
   // `hermoso mcp` → run the stdio MCP server (Claude Code / Cursor / Codex spawn this, e.g. `npx -y hermoso mcp`).

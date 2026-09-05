@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**768 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**781 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
@@ -149,7 +149,7 @@ session, run `/mcp`, find the server and press Authenticate. Measured against Cl
 
 Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
-`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits — same prices as the Studio.
+`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits — same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics are free on every plan (X is the one per-call exception).
 
 ## 1. MCP server (stdio) — Claude Code / Cursor / Codex
 
@@ -171,7 +171,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 768 tools cover
+### What the 781 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
