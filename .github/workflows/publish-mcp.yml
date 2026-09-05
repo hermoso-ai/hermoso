@@ -265,7 +265,17 @@ jobs:
             # nobody can install. A backfill WARNS and moves on (one unpublishable old tag must not
             # take down a sweep of ten); a single tag push ERRORS, because cutting that one Release
             # is the entire point of the run.
-            if ! curl -sfL "https://registry.npmjs.org/hermoso/$V" -o "$RUNNER_TEMP/npm.json"; then
+            # A single tag push arrives seconds after `npm publish`, and the registry can take a few
+            # minutes to serve the new version — v0.1.203 and v0.1.204 both failed here on that race
+            # while the publish job (which polls) succeeded. So a tag push POLLS the same way the
+            # publish job does; a backfill still asks once, since its tags are old.
+            SERVED=0
+            TRIES=1; [ "$BACKFILL" = "true" ] || TRIES=20
+            for i in $(seq 1 $TRIES); do
+              if curl -sfL "https://registry.npmjs.org/hermoso/$V" -o "$RUNNER_TEMP/npm.json"; then SERVED=1; break; fi
+              [ "$i" -lt "$TRIES" ] && { echo "  npm does not serve hermoso@$V yet (attempt $i/$TRIES) — waiting 30s"; sleep 30; }
+            done
+            if [ "$SERVED" != "1" ]; then
               if [ "$BACKFILL" = "true" ]; then
                 echo "::warning::npm does not serve hermoso@$V — skipping $TAG rather than advertising an uninstallable version."
                 continue
