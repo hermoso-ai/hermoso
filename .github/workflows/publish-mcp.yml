@@ -93,8 +93,15 @@ jobs:
           V='${{ steps.ver.outputs.version }}'
           PKG="$(jq -r '.packages[0].identifier' server.json)"
           echo "Checking https://registry.npmjs.org/$PKG/$V"
-          if ! curl -sfL "https://registry.npmjs.org/$PKG/$V" -o npm-version.json; then
-            echo "::error::npm has no $PKG@$V yet. Publish the npm package first, then re-run this workflow."
+          # npm PROPAGATION IS NOT INSTANT: a tag pushed right after `npm publish` reached this step before the registry served
+          # the version (0.1.200 and 0.1.202 both failed here and passed on a rerun). Poll for up to ten minutes before calling it missing.
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -sfL "https://registry.npmjs.org/$PKG/$V" -o npm-version.json; then ok=1; break; fi
+            echo "npm does not serve $PKG@$V yet (attempt $i/20) — waiting 30s"; sleep 30
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::npm has no $PKG@$V after ten minutes. Publish the npm package first, then re-run this workflow."
             exit 1
           fi
           MCP_NAME="$(jq -r '.mcpName // empty' npm-version.json)"
