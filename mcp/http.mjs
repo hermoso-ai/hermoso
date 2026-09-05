@@ -94,7 +94,30 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   const SESSION_MAX = Math.max(2, Number(process.env.MCP_SESSION_MAX || 16));
   const SESSION_IDLE_MS = Math.max(1000, Number(process.env.MCP_SESSION_IDLE_MS || 30 * 60e3)); // 1s floor so the expiry is TESTABLE; a short TTL is merely wasteful now that eviction is recoverable
   const sessions = new Map(); // mcp-session-id -> { transport, server, user, lastSeen }  (insertion-ordered = LRU)
-  const challenge = (res) => res.status(401).set('WWW-Authenticate', `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource"`).json({ error: 'Authentication required' });
+  // THE 401 IS THE ONLY THING A STUCK AGENT EVER READS, so it carries the way out (2026-09-04). It used to be the
+  // three words `Authentication required`, and that is exactly how far a real user got: a Cursor-based client
+  // (Grok Bot) registered fine, listed all 160 tools, and then every call 401'd while its own consent card never
+  // appeared — the client never opened a browser. Its agent could see only "Authentication required", so it kept
+  // saying "tap the connect card" about a card that does not exist, and the user tried for fifteen minutes before
+  // being told the alternatives BY HAND. Both alternatives then worked first time.
+  //
+  // So the body now names them. This is not documentation — it is the machine-readable recovery path for the one
+  // moment a client is provably stuck, written for the model that will read it: OAuth first (the normal route),
+  // then the two that need no browser at all. `WWW-Authenticate` still points at the protected-resource metadata,
+  // which is what a spec-following client uses; this is for the one that is not following it.
+  const challenge = (res) => res.status(401)
+    .set('WWW-Authenticate', `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource"`)
+    .json({
+      error: 'Authentication required',
+      error_description: 'This Hermoso MCP server needs a signed-in account. Normally your client opens a browser consent page. IF NO BROWSER OR CONSENT CARD OPENED, your client cannot complete OAuth — retrying will keep failing the same way. Read the `how_to_connect` field of THIS response and use one of those two browser-free routes instead. Tell the user which one you are taking.',
+      how_to_connect: {
+        oauth: `Open ${BASE}/oauth/authorize through your client's own connector flow (a browser is required).`,
+        no_browser_stdio: `Add Hermoso as a STDIO command instead of a URL: run \`npx -y hermoso mcp\` with the environment variable HERMOSO_TOKEN set to a key from ${BASE}/#developers. THE TOKEN IS NOT OPTIONAL HERE: a sandbox that could not open a browser for OAuth cannot open one for \`hermoso auth login\` either, so plain stdio with no token connects and then has no account to act on. (On your own machine, where a browser exists, \`npx -y hermoso auth login\` once replaces the token.)`,
+        no_browser_header: `Keep this URL and send an \`Authorization: Bearer <key>\` header. Create the key at ${BASE}/#developers (Settings ▸ Agents & API). A key in the URL query does NOT work and is not supported.`,
+      },
+      // Named so an agent can branch on it rather than parsing prose.
+      retry_will_not_help: true,
+    });
 
   // Tear a session down for real — dropping the map entry alone would leave the McpServer reachable from
   // the transport's own callbacks. Deleting FIRST makes this re-entrant-safe: transport.close() fires onclose,
@@ -231,7 +254,15 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   app.all(MCP_PATH, async (req, res) => {
     const auth = req.headers.authorization || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const user = token ? await verifyBearer(token).catch(() => null) : null;
+    // A HANDSHAKE IS NOT USE. `verifyBearer` stamps the key's last_used_at, and the admin dashboard's "last
+    // active" takes the max of that, the billed ledger and the user's last_seen — so an agent that merely holds a
+    // connection open (initialize, tools/list, ping, a notification) kept reporting the account as ACTIVE while
+    // nobody had done anything with the product (Dave 2026-09-03: "many users are being shown active who arent
+    // actually using the app ... they may just be using an AI agent which has our mcp connected, but not actually
+    // doing anything"). Only a tools/call is somebody doing something, so only a tools/call stamps. Auth itself is
+    // unchanged in both branches: this decides bookkeeping, never access.
+    const didWork = methodsOf(req.body).includes('tools/call');
+    const user = token ? await verifyBearer(token, { stamp: didWork }).catch(() => null) : null;
     if (!user) {
       // No valid bearer: allow ONLY the read-only discovery handshake (POST), fail CLOSED for everything else.
       if (req.method === 'POST' && isAllPreauth(req.body)) {

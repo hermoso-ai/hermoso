@@ -1,6 +1,6 @@
 {
   "name": "hermoso",
-  "version": "0.1.200",
+  "version": "0.1.201",
   "mcpName": "io.github.hermoso-ai/hermoso",
   "description": "AI ad studio and marketing MCP server with 781 tools. Research the ads already running in any market, generate finished image, video and UGC avatar ads, publish and schedule them to your own channels, build and manage the ad campaigns behind them, and read what they achieved. AD PLATFORMS: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in Google Merchant Center. PUBLISHING AND SCHEDULING: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. AD RESEARCH: the Meta, Google and LinkedIn ad libraries plus organic TikTok, Instagram, YouTube, Threads and Reddit. ANALYTICS: Google Analytics 4, Google Search Console and every connected platform's own post and campaign insights. Also brand onboarding, 50+ image and video generation models, ad scoring, competitor teardowns, Google Drive and OneDrive, a CLI and installable Claude skills.",
   "type": "module",
