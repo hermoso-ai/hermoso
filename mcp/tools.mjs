@@ -16161,12 +16161,42 @@ function memoryNoteVerdict(text) {
       const key = swipeKeyOf(it);
       const ex = s.ads.find(x => x && x.key === key);
       if (ex) { if (ex.collectionId !== col.id) moved++; ex.collectionId = col.id; continue; }
-      s.ads.push({ key, collectionId: col.id, advertiser: String(it.advertiser || '').slice(0, 120), title: String(it.title || '').slice(0, 300), body: String(it.body || '').slice(0, 2000), image: String(it.image || ''), video: String(it.video || ''), link: String(it.link || it.url || ''), platform: String(it.platform || '').slice(0, 40), savedAt: Date.now() });
+      s.ads.push({ key, collectionId: col.id, advertiser: String(it.advertiser || '').slice(0, 120), title: String(it.title || '').slice(0, 300), body: String(it.body || '').slice(0, 2000), image: String(it.image || ''), video: String(it.video || ''), link: String(it.link || it.url || ''), platform: String(it.platform || '').slice(0, 40), savedAt: Date.now() , ...(it.platform === 'creator' && it.creator && typeof it.creator === 'object' ? { creator: it.creator } : {}) });
       saved++;
     }
     s.activeId = col.id;
     await writeStore(SWIPE_KEY, s);
     return ok(`${saved} ad(s) saved${moved ? `, ${moved} moved` : ''} into “${col.name}”${created ? ' (new collection)' : ''} — it’s on the workspace swipefile now (list_swipefile to read it back).`, { ok: true, collection: col.name, collectionId: col.id, saved, moved, total: s.ads.length });
+  }));
+
+
+  // ── SAVED CREATORS: outreach status + notes (2026-09-05, Dave: "parity with dedicated tools"). A creator saved by
+  // find_creators → save_to_swipefile carries `creator`; this writes the OUTREACH state onto that row so the whole
+  // team — web and agent — sees who has been contacted, who replied, who is booked. One row, one field, never a
+  // second store: the swipefile is already synced, tombstoned and union-merged.
+  server.registerTool('update_saved_creator', {
+    title: 'Update a saved creator (outreach status, note)',
+    description: 'Set the OUTREACH STATUS and/or a NOTE on a creator already saved in the swipefile (find_creators → save_to_swipefile, or the ♥ on a creator card). Status is one of new | contacted | replied | booked | passed. The note is free text (deal terms, rate, what was sent). Reads back the updated row. Use list_swipefile to find the key. Free.',
+    inputSchema: {
+      key: z.string().describe("the saved row's key from list_swipefile, e.g. tiktok:handle"),
+      status: z.enum(['new', 'contacted', 'replied', 'booked', 'passed']).optional(),
+      note: z.string().max(2000).optional().describe('replaces the existing note; pass "" to clear it'),
+    },
+    outputSchema: { ok: z.boolean().optional(), key: z.string().optional(), status: z.string().optional(), note: z.string().optional(), creator: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const key = String(a.key || '').trim();
+    if (!key) return { content: [{ type: 'text', text: 'Pass the saved creator key (from list_swipefile).' }], isError: true };
+    if (a.status == null && a.note == null) return { content: [{ type: 'text', text: 'Pass a status and/or a note.' }], isError: true };
+    const s = await readSwipe();
+    const row = s.ads.find(x => x && x.key === key);
+    if (!row) return { content: [{ type: 'text', text: `No saved row with key ${key}. list_swipefile shows every key.` }], isError: true };
+    if (row.platform !== 'creator' || !row.creator) return { content: [{ type: 'text', text: `${key} is a saved ad, not a creator — outreach status only applies to creators (platform "creator").` }], isError: true };
+    const prev = row.creator.outreach || {};
+    row.creator.outreach = { status: a.status != null ? a.status : (prev.status || 'new'), note: a.note != null ? String(a.note).slice(0, 2000) : (prev.note || ''), updatedAt: Date.now() };
+    await writeStore(SWIPE_KEY, s);
+    const o = row.creator.outreach;
+    return ok(`@${row.creator.handle || key}: status ${o.status}${o.note ? ` — note: ${o.note}` : ''}.`, { ok: true, key, status: o.status, note: o.note, creator: row.creator });
   }));
 
   // ── PLAYBOOKS — the "what's working + the plays to run" cards, distinct from the swipefile's raw creative. Same
