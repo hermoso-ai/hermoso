@@ -16109,7 +16109,7 @@ function memoryNoteVerdict(text) {
     },
     outputSchema: {
       collections: z.array(z.any()).optional().describe('the named collections ({id, name, ads} counts)'),
-      ads: z.array(z.any()).optional().describe('the saved ads ({key, collection, advertiser, title, body, image, video, link, platform, savedAt, tags})'),
+      ads: z.array(z.any()).optional().describe('the saved ads ({key, collection, advertiser, title, body, image, video, link, platform, savedAt, tags}); a saved CREATOR (platform "creator") also carries `creator` — handle, platform, email, phone, link, category, followers, posts, medianPlays, engagementRate, score, profileUrl'),
       total: z.number().optional().describe('how many ads the board holds in total, before any collection filter or limit'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -16121,7 +16121,7 @@ function memoryNoteVerdict(text) {
     if (want && !hit) return { content: [{ type: 'text', text: `No swipefile collection called "${a.collection}". This board has: ${s.collections.map(c => c.name).join(', ') || '(none)'}.` }], isError: true };
     const nameOf = (id) => (s.collections.find(c => c.id === id) || {}).name || 'My Swipefile';
     const rows = s.ads.filter(x => x && (!hit || x.collectionId === hit.id));
-    const ads = rows.slice(0, lim).map(x => ({ key: x.key, collection: nameOf(x.collectionId), advertiser: x.advertiser || '', title: x.title || '', body: String(x.body || '').slice(0, 400), image: abs(x.image || ''), video: abs(x.video || ''), link: x.link || '', platform: x.platform || '', savedAt: x.savedAt || 0, tags: x.tags || null }));
+    const ads = rows.slice(0, lim).map(x => ({ key: x.key, collection: nameOf(x.collectionId), advertiser: x.advertiser || '', title: x.title || '', body: String(x.body || '').slice(0, 400), image: abs(x.image || ''), video: abs(x.video || ''), link: x.link || '', platform: x.platform || '', savedAt: x.savedAt || 0, tags: x.tags || null, ...(x.platform === 'creator' && x.creator ? { creator: { handle: x.creator.handle, platform: x.creator.platform, name: x.creator.name, email: x.creator.email || null, phone: x.creator.phone || null, link: x.creator.link || null, category: x.creator.category || null, followers: x.creator.followers ?? null, posts: x.creator.posts, medianPlays: x.creator.medianPlays, engagementRate: x.creator.engagementRate ?? null, score: x.creator.score, profileUrl: x.creator.profileUrl || '' } } : {}) }));
     const collections = s.collections.map(c => ({ id: c.id, name: c.name, ads: s.ads.filter(x => x && x.collectionId === c.id).length }));
     if (!ads.length) return ok(`The swipefile is empty${hit ? ` in "${hit.name}"` : ''}. Collections: ${collections.map(c => `${c.name} (${c.ads})`).join(', ')}.`, { collections, ads: [], total: rows.length });
     const text = `${rows.length} saved ad(s)${hit ? ` in "${hit.name}"` : ''}${ads.length < rows.length ? ` — showing ${ads.length}` : ''}:\n`
