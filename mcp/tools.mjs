@@ -6687,6 +6687,92 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/meta/audience/delete', a);
     return ok(d.note, d);
   }));
+
+  // ── MESSENGER MARKETING MESSAGES (2026-09-05). Meta's paid re-engagement channel: messages OUTSIDE the 24-hour
+  // window to people who opted in, billed by Meta to the brand's ad account per delivered message. Flow 2 of Meta's
+  // onboarding (user token + marketing_messages_messenger) rides the existing Meta connection. App-Review gated:
+  // until Meta grants the scope it works for app-role holders only, and list_messenger_subscribers says which.
+  // Every endpoint, limit and error code: lib/messenger-marketing.mjs (read live 2026-09-05).
+  server.registerTool('list_messenger_subscribers', {
+    title: 'List Messenger marketing-message subscribers',
+    description: 'The people who OPTED IN to marketing messages from a Facebook Page — their subscription tokens, the only address a paid Messenger marketing message can go to (there is no "message everyone"). Also reports whether this Meta connection carries the marketing_messages_messenger permission; a connection made before it was added must be reconnected. Free.',
+    inputSchema: {
+      pageId: z.string().optional().describe('Facebook Page id (from list_meta_pages); defaults to the brand’s one shared Page'),
+      limit: z.number().optional().describe('1–1000, default 100'),
+      customAudienceIds: z.string().optional().describe('comma-separated Messenger custom audience ids to filter by'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/meta/marketing-messages/subscribers', a);
+    const lines = (d.subscribers || []).slice(0, 50).map(r => `• ${r.token}${r.topic ? ` — “${r.topic}”` : ''}${r.status ? ` (${r.status})` : ''}${r.nextEligible ? `, next eligible ${r.nextEligible}` : ''}`);
+    return ok(`${d.note}${lines.length ? `\n${lines.join('\n')}` : ''}${(d.subscribers || []).length > 50 ? `\n…and ${d.subscribers.length - 50} more` : ''}`, d);
+  }));
+  server.registerTool('create_messenger_marketing_campaign', {
+    title: 'Create a Messenger marketing-message campaign',
+    description: 'The container a paid Messenger marketing message is sent from (Meta act_<AD>/message_campaign). Budgets in USD; Meta bills per DELIVERED message against the campaign budget, and creating it sends and charges nothing. dailyBudgetUsd OR lifetimeBudgetUsd (omit both and Meta sets an estimated daily cap; Meta may spend up to 175% of a daily budget on one day, never more than 7× per week). REGION LAW: Meta lets us serve businesses in 20 countries only — US, Mexico, Brazil, India, Australia, Singapore, UAE, Saudi Arabia, Hong Kong, Taiwan, Thailand, Malaysia, Indonesia, Philippines, Vietnam, New Zealand, Chile, Colombia, Peru, Israel — NOT Canada, the EU or the UK — and cannot deliver to people in the EU, UK, Japan, South Korea or Australia. Political Pages are excluded. dryRun:true shows the exact body.',
+    inputSchema: {
+      adAccountId: z.string().describe('ad account id (act_… or digits)'),
+      pageId: z.string().optional().describe('the sending Page; defaults to the brand’s one shared Page'),
+      name: z.string(),
+      dailyBudgetUsd: z.number().optional(),
+      lifetimeBudgetUsd: z.number().optional(),
+      pixelId: z.string().optional().describe('Meta Pixel for offsite conversion attribution'),
+      startTime: z.string().optional().describe('ISO time, now or within 30 days'),
+      endTime: z.string().optional(),
+      dryRun: z.boolean().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/meta/marketing-messages/campaign', a); return ok(d.note, d); }));
+  server.registerTool('list_messenger_marketing_campaigns', {
+    title: 'List Messenger marketing-message campaigns',
+    description: 'The marketing-message campaigns on an ad account: name, id, budgets, schedule. Free.',
+    inputSchema: { adAccountId: z.string() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/meta/marketing-messages/campaigns', a);
+    return ok(`${d.note}${(d.campaigns || []).length ? `\n${d.campaigns.map(c => `• ${c.name || '(unnamed)'} — ${c.campaignId}${c.dailyBudgetUsd != null ? `, $${c.dailyBudgetUsd}/day` : ''}${c.lifetimeBudgetUsd != null ? `, $${c.lifetimeBudgetUsd} lifetime` : ''}`).join('\n')}` : ''}`, d);
+  }));
+  server.registerTool('estimate_messenger_marketing_delivery', {
+    title: 'Estimate Messenger marketing-message delivery and cost',
+    description: 'Meta’s own estimate of how many marketing messages a budget would deliver from a Page and what it would cost, before anything is created. Free. Meta marks the metric “in development”, so treat it as a range.',
+    inputSchema: { adAccountId: z.string(), pageId: z.string().optional(), dailyBudgetUsd: z.number().optional(), lifetimeBudgetUsd: z.number().optional(), lifetimeDays: z.number().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/meta/marketing-messages/estimate', a); return ok(d.note, d); }));
+  server.registerTool('send_messenger_marketing_message', {
+    title: 'Send a paid Messenger marketing message',
+    description: 'Send a PAID marketing message on Messenger to opted-in subscribers (Meta act_<AD>/messages). One message per subscriber per 12 hours — Meta’s rule, enforced before dispatch and by Meta. message.type: text | button (text + up to 3 web_url buttons) | generic (a card: title, subtitle, image, tap-through url, up to 3 buttons) | media (imageUrl or videoId + buttons). Give subscriptionTokens (≤200 per call, from list_messenger_subscribers) OR customAudienceId of a MESSENGER_SUBSCRIBER_LIST audience of 100+ people for a bulk send. Meta bills the ad account per delivered message; delivery, read and click events arrive on the Page webhook. dryRun:true previews the wire body and sends nothing. Meta’s frequency caps are silent: a refusal saying the person is capped is Meta protecting them, not a broken send.',
+    inputSchema: {
+      adAccountId: z.string(),
+      campaignId: z.string().describe('from create_messenger_marketing_campaign'),
+      subscriptionTokens: z.array(z.string()).optional(),
+      customAudienceId: z.string().optional(),
+      message: z.object({
+        type: z.enum(['text', 'button', 'generic', 'media']),
+        text: z.string().optional(), title: z.string().optional(), subtitle: z.string().optional(),
+        imageUrl: z.string().optional(), videoId: z.string().optional(), url: z.string().optional().describe('card tap-through URL'),
+        buttons: z.array(z.object({ title: z.string(), url: z.string() })).optional(),
+      }),
+      minConversationGapSeconds: z.number().optional().describe('hold the send if the person chatted with the Page within this many seconds'),
+      dryRun: z.boolean().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/meta/marketing-messages/send', a);
+    const bad = (d.results || []).filter(r => r.error);
+    return ok(`${d.note}${bad.length ? `\nRefused: ${bad.slice(0, 10).map(r => `${r.token ? r.token.slice(0, 12) + '…' : 'audience'}: ${r.error}`).join('; ')}` : ''}`, d);
+  }));
+  server.registerTool('request_messenger_optin', {
+    title: 'Ask a Messenger contact to subscribe to marketing messages',
+    description: 'Send Meta’s opt-in request (the notification_messages template) to someone ALREADY in a Messenger conversation with the Page, inside the 24-hour window. If they accept, Meta posts a messaging_optin webhook with their subscription token and they appear in list_messenger_subscribers. One identical-title request per person per week. Free to send. The PSID comes from the Page inbox.',
+    inputSchema: { pageId: z.string().optional(), psid: z.string().describe('the person’s Page-scoped id'), title: z.string().describe('what they are subscribing to, ≤65 characters'), imageUrl: z.string().optional(), timezone: z.string().optional().describe('their timezone, e.g. America/New_York'), dryRun: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/meta/marketing-messages/optin', a); return ok(d.note, d); }));
+  server.registerTool('delete_messenger_marketing_campaign', {
+    title: 'Delete a Messenger marketing-message campaign',
+    description: 'Delete a marketing-message campaign. Irreversible: the first call names it and refuses; confirm:true deletes.',
+    inputSchema: { adAccountId: z.string(), campaignId: z.string(), confirm: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/meta/marketing-messages/campaign/delete', a); return ok(d.note, d); }));
   // ---------- Google Ads: read + manage (flagship, Meta-parity). Every spend change is confirm-gated. ----------
   server.group('ads');
   // GOOGLE MERCHANT CENTER (2026-08-07) — rides the google_ads connection (same grant, extra `content` scope).
@@ -17156,6 +17242,28 @@ function memoryNoteVerdict(text) {
     return adsOut('ads', d.totalAds ?? raw.length, ads, '', 'linkedin');
   }));
 
+  // ── CREATOR SEARCH (2026-09-05): the creators already winning in a niche, folded out of the organic posts Ad Spy
+  // already searches. Real people, scored on median views + engagement + consistency; no marketplace scope needed.
+  server.registerTool('find_creators', {
+    title: 'Find the creators already winning in a niche',
+    description: 'Scan organic TikTok, Instagram Reels and YouTube for a niche across a few query variants, fold the posts into creators, and rank them on median views, engagement rate and how often they show up for that niche; the top rows get follower counts. Real people, not AI actors — for influencer sourcing, UGC casting and partnership prospecting ("who should we send product to?"). About one credit per search call (platforms × queries, default 3 × 3) plus one per enriched profile; repeats inside 20 minutes are free. Then shortlist (save_to_swipefile), check a profile (instagram_profile / fetch_social_data), draft outreach (generate_text), or approve them for Partnership Ads (manage_meta_partnership_creator).',
+    inputSchema: {
+      niche: z.string().describe('product category, topic or hashtag — "calorie tracker app", "matcha", "#cleanbeauty"'),
+      platforms: z.array(z.enum(['tiktok', 'instagram', 'youtube'])).optional().describe('default all three'),
+      limit: z.number().optional().describe('creators to return, 1–30 (default 12)'),
+      queries: z.number().optional().describe('query variants per platform, 1–4 (default 3); each is a paid search call'),
+      minAvgViews: z.number().optional(),
+      minEngagement: z.number().optional().describe('interactions per view, 0–1 (0.05 = 5%)'),
+      enrich: z.boolean().optional().describe('read follower counts for the top 6 (default true, ~1 credit each)'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/creators/search', a);
+    const fmt = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}K` : String(v);
+    if (!(d.creators || []).length) return ok(`${d.summary} Nobody passed the floors — widen the niche, lower minAvgViews / minEngagement, or add platforms.`, d);
+    const lines = d.creators.map(c => `• @${c.handle} (${c.platform})${c.name && c.name !== c.handle ? ` — ${c.name}` : ''}: ${c.posts} post${c.posts === 1 ? '' : 's'} in this niche, median ${fmt(c.medianPlays)} views, ${c.engagementRate == null ? 'engagement unknown' : `${(100 * c.engagementRate).toFixed(1)}% engagement`}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}, score ${c.score}${c.top?.link ? ` — top: ${c.top.link}` : ''}${c.profileUrl ? ` — ${c.profileUrl}` : ''}`);
+    return ok(`${d.note}\n${lines.join('\n')}`, d);
+  }));
   server.registerTool('search_tiktok', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching TikTok videos…', 'Found TikTok videos'),
     title: 'Search TikTok',
