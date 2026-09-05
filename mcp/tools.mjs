@@ -3522,6 +3522,19 @@ function buildTools(rawServer, opts = {}, sink = null) {
       : `Comment posted to ${d.postId} (${d.id || 'no id returned'}), but ${d.verifyNote || 'it could not be read back to confirm it is on the post.'}`, d);
   }));
 
+  // ── INSTAGRAM LIKE / UNLIKE (2026-09-05): Meta's Like Media and Comments API (changelog 2026-04-22). Facebook-Login
+  // family only; App-Review gated on instagram_manage_engagement. Scoped by description to the brand's own surface.
+  server.registerTool('like_instagram', {
+    title: 'Like or unlike on Instagram as the brand',
+    description: 'Like (or unlike) an Instagram post, Reel, comment or reply AS the brand’s Instagram account — Meta’s Like Media and Comments API (April 2026). The cheapest engagement a brand does: like the good comments on your own posts and the posts you are tagged in. Pass exactly one of mediaId or commentId; undo:true unlikes. Stories and private accounts cannot be liked. Needs the Meta (Facebook Login) connector — a direct Instagram login has no likes edge. Until Meta’s App Review grants instagram_manage_engagement it works for app-role holders only. Roughly 200 likes per account per hour. Free.',
+    inputSchema: {
+      mediaId: z.string().optional().describe('an IG media id (post or Reel), from list_instagram_media'),
+      commentId: z.string().optional().describe('an IG comment or reply id, from list_meta_comments'),
+      undo: z.boolean().optional().describe('true to unlike'),
+      pageId: z.string().optional(), account: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/instagram/engagement', a); return ok(d.note, d); }));
   server.registerTool('reply_to_meta_comment', {
     title: 'Reply to a Facebook/Instagram comment',
     description: 'Post a public reply to a comment on the brand’s Facebook or Instagram post. This is PUBLIC and posted as the brand — show the user the exact wording and get their go-ahead first.',
