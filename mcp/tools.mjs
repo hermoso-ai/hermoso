@@ -2103,7 +2103,7 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
       // THE GROUP FLIP MUST NOT UNDO THE CONNECTOR GATE (2026-08-26). Enabling a group is a statement about SIZE —
       // "I am willing to carry these schemas" — not a claim that the workspace has connected eleven ad platforms.
       // A blind `h.enable()` here would have re-listed every tool applyToolGates had just held back, so the saving
-      // would survive exactly until the first `enable_tools(['ads'])`. Counted, not silently skipped: the reply
+      // would survive exactly until the first `enable_tools(["ads"])`. Counted, not silently skipped: the reply
       // says how many and why, because a group that turns on "8 tools" when the agent expected 240 with no
       // explanation is the [[prompt-rosters-go-stale]] failure — the agent concludes the capability is missing.
       if (toolHeldBackByConnectors(name, ctx.conn)) { heldBack++; continue; }
@@ -6132,7 +6132,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('reply_to_meta_message', {
     title: 'Reply to a Messenger / Instagram DM',
-    description: 'Send a text reply to someone who has messaged the brand. THIS REACHES A REAL PERSON — show the user the exact text and who it goes to, get a yes, then send. Pass `conversationId` as well as `recipientId` and Hermoso checks Meta’s 24-hour window for free BEFORE sending, and refuses with the real reason instead of letting Meta refuse it; without one it sends and discloses that the window could not be checked. HERMOSO SENDS REPLIES ONLY: messaging_type is always RESPONSE, and proactive messages and message tags are not offered at all — that is a deliberate product boundary, not a gap, and a closed window is a RULE that only the person writing again reopens. `recipientId` is a PAGE-SCOPED ID on Messenger and an INSTAGRAM-SCOPED ID on Instagram (read_meta_conversation returns it as `replyTo`); a username or a handle is not one and cannot be turned into one. ACCEPTED IS NOT DELIVERED — never report it as delivered or read. 0 credits.',
+    description: 'Send a text reply to someone who has messaged the brand. THIS REACHES A REAL PERSON — show the user the exact text and who it goes to, get a yes, then send. Pass `conversationId` as well as `recipientId` and Hermoso checks Meta’s 24-hour window for free BEFORE sending, and refuses with the real reason instead of letting Meta refuse it; without one it sends and discloses that the window could not be checked. HERMOSO SENDS REPLIES ONLY: messaging_type is always RESPONSE, and proactive messages and message tags are not offered at all — that is a deliberate product boundary, not a gap. THE ONE PROACTIVE THING MESSENGER ALLOWS IS A MARKETING-MESSAGES SUBSCRIPTION: to ask a person in the inbox to SUBSCRIBE to marketing messages, call request_messenger_optin (Meta’s own opt-in template, in the ads group — enable_tools(["ads"]) or find_tools if it is not in your list). Never answer that with a plain-text reply asking them to say YES, and never say the capability does not exist. And a closed window is a RULE that only the person writing again reopens. `recipientId` is a PAGE-SCOPED ID on Messenger and an INSTAGRAM-SCOPED ID on Instagram (read_meta_conversation returns it as `replyTo`); a username or a handle is not one and cannot be turned into one. ACCEPTED IS NOT DELIVERED — never report it as delivered or read. 0 credits.',
     inputSchema: {
       recipientId: z.string().describe('the PSID (Messenger) or IGSID (Instagram) to reply to — `replyTo` from read_meta_conversation'),
       text: z.string().describe('the reply'),
@@ -9498,7 +9498,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: z.string().describe('the headline — 3 to 50 characters, enforced'),
     body: z.string().describe('the description under the headline — 100 characters maximum, enforced'),
     targetUrl: z.string().describe('the landing page (must not block OAI-AdsBot / OAI-SearchBot in robots.txt)'),
-    imageUrl: z.string().optional().describe('public https URL of a STILL image — a video URL is refused, this channel has no video format'),
+    imageUrl: z.string().optional().describe('public https URL of a STILL image — REQUIRED on every text ad (ChatGPT Ads refuses an ad with no creative.file_id unless the campaign is a product feed; measured 2026-09-06); a video URL is refused, this channel has no video format'),
     price: z.string().optional().describe('optional price string shown on the card'),
   });
   server.registerTool('list_openai_ads_campaigns', {
@@ -18111,7 +18111,7 @@ function memoryNoteVerdict(text) {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/posts/collect', { ...(a.includeMetered ? { includeMetered: true } : {}), ...(a.max ? { max: a.max } : {}) });
-    const bits = [`Read ${d.collected} post(s)`, d.couldNotTell ? `${d.couldNotTell} could NOT be read (that is "could not tell", not zero engagement)` : null, d.remaining ? `${d.remaining} still due — call again` : null, d.meteredNote || null].filter(Boolean);
+    const bits = [`Read ${d.collected} post(s)`, d.couldNotTell ? `${d.couldNotTell} could NOT be read (that is "could not tell", not zero engagement)` : null, d.gone ? `${d.gone} no longer exist at the platform (deleted or taken down) and will not be read again` : null, d.remaining ? `${d.remaining} still due — call again` : null, d.meteredNote || null].filter(Boolean);
     return ok(`${bits.join('. ')}.${d.collected ? ' Ask post_performance which hooks are winning.' : ''}`, d);
   }));
 
