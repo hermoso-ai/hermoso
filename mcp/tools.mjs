@@ -3474,6 +3474,78 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`${d.summary}${d.note ? ` ${d.note}` : ''}`, d);
   }));
 
+  // INSTAGRAM AUDIO + COLLAB INVITES (2026-09-06) — Instagram's 2026 changelog, on permissions already held. The
+  // audio one is the reason to care: everything it returns is music Instagram has cleared for third-party use, i.e.
+  // safe under a Reel. The invite pair is the OTHER direction from instagram_collaborators — a creator tagged the
+  // brand, and the post reaches the brand's profile only when the brand accepts, which no agent could do before.
+  server.registerTool('search_instagram_audio', {
+    title: 'Trending or searched Instagram audio',
+    description: 'Audio the brand may legally put under a Reel — music or original sound — with title, artist, length, whether it is eligible for ads, a preview link and a download link. Omit the query for what is TRENDING right now; pass one to search. Everything returned is audio Instagram has authorized for third-party use. Download links expire after roughly 1.5 days. Read-only, free.',
+    inputSchema: {
+      audioType: z.enum(['music', 'original_sound']).optional().describe('default music'),
+      query: z.string().optional().describe('omit for trending audio'),
+      limit: z.number().optional().describe('1–50, default 15'),
+      account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"); omit for the one Page-linked account'),
+      pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
+    },
+    outputSchema: { instagramId: z.string().optional(), kind: z.string().optional(), query: z.string().nullable().optional(), trending: z.boolean().optional(), count: z.number().optional(), audio: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/instagram/audio', { audioType: a.audioType, query: a.query, limit: a.limit, account: a.account, pageId: a.pageId });
+    if (!d.count) return ok(`Instagram returned no ${d.kind === 'music' ? 'tracks' : 'original sounds'}${d.trending ? ' for trending' : ` for "${d.query}"`}.`, d);
+    return ok(`${d.count} ${d.kind === 'music' ? 'track' : 'original sound'}(s)${d.trending ? ' trending' : ` for “${d.query}”`}:\n${d.audio.map(x => `• ${x.title || '(untitled)'} — ${x.artist || '—'}${x.seconds != null ? ` · ${x.seconds}s` : ''}${x.adsEligible ? ' · ads-eligible' : ''} · id ${x.id}${x.preview ? ` · ${x.preview}` : ''}`).join('\n')}\n${d.note}`, d);
+  }));
+
+  server.registerTool('list_instagram_collab_invites', {
+    title: 'Collab invites waiting on the brand',
+    description: 'Posts where a creator tagged this Instagram account as a COLLABORATOR and is waiting for an answer. The post appears on the brand’s profile only once the brand accepts, and Instagram sends no notification here, so this list is the only way to see them. Answer each with respond_instagram_collab_invite. Read-only, free. Instagram allows 300 reads per account per day.',
+    inputSchema: {
+      limit: z.number().optional().describe('1–100, default 25'),
+      after: z.string().optional().describe('cursor from a previous page'),
+      account: z.string().optional().describe('which Instagram account — @handle or id; omit for the one Page-linked account'),
+      pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
+    },
+    outputSchema: { instagramId: z.string().optional(), count: z.number().optional(), invites: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/instagram/collab-invites', { limit: a.limit, after: a.after, account: a.account, pageId: a.pageId });
+    if (!d.count) return ok('No collab invites are waiting on this Instagram account.', d);
+    return ok(`${d.count} collab invite(s) waiting:\n${d.invites.map(i => `• from @${i.from || '?'} — ${String(i.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 90)} · media ${i.mediaId}`).join('\n')}\nAnswer each with respond_instagram_collab_invite(mediaId, accept:true|false).`, d);
+  }));
+
+  server.registerTool('respond_instagram_collab_invite', {
+    title: 'Accept or decline a collab invite',
+    description: 'Answer a collab invite from list_instagram_collab_invites. accept:true makes this account a co-author and the creator’s post appears on its profile; accept:false declines. `accept` is REQUIRED — never guess which way the user wants it. The reply is read back from Instagram (the invite leaves the pending list), not taken from the vendor’s 200. Free. Instagram allows 50 answers per account per day.',
+    inputSchema: {
+      mediaId: z.string().describe('the media id from list_instagram_collab_invites'),
+      accept: z.boolean().describe('true = accept and co-author the post; false = decline'),
+      account: z.string().optional().describe('which Instagram account — @handle or id; omit for the one Page-linked account'),
+      pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
+    },
+    outputSchema: { mediaId: z.string().optional(), accepted: z.boolean().optional(), vendorSuccess: z.boolean().optional(), confirmed: z.boolean().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/instagram/collab-invites/respond', { mediaId: a.mediaId, accept: a.accept, account: a.account, pageId: a.pageId });
+    return ok(d.summary, d);
+  }));
+
+  server.registerTool('list_instagram_collab_media', {
+    title: 'Posts this account co-authors',
+    description: 'Every collaborative post this Instagram account is a co-author on — who posted it, and the COMBINED engagement across all co-authors (total likes and comments, plus saves, shares and reposts where Instagram provides them). Read-only, free.',
+    inputSchema: {
+      limit: z.number().optional().describe('1–100, default 25'),
+      after: z.string().optional().describe('cursor from a previous page'),
+      account: z.string().optional().describe('which Instagram account — @handle or id; omit for the one Page-linked account'),
+      pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
+    },
+    outputSchema: { instagramId: z.string().optional(), count: z.number().optional(), media: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/instagram/collab-media', { limit: a.limit, after: a.after, account: a.account, pageId: a.pageId });
+    if (!d.count) return ok('This Instagram account is not a co-author on any collaborative post.', d);
+    return ok(`${d.count} collaborative post(s):\n${d.media.map(m => `• [${m.mediaKind}] with @${m.by || '?'} — ${String(m.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 70)} — ${m.totalLikes ?? m.likes ?? '—'} likes, ${m.totalComments ?? m.comments ?? '—'} comments${m.saves != null ? `, ${m.saves} saves` : ''}${m.shares != null ? `, ${m.shares} shares` : ''} · ${m.url || m.id}`).join('\n')}`, d);
+  }));
+
   server.registerTool('list_meta_comments', {
     title: 'Read comments on a Meta post',
     description: 'Read the comments under a Facebook Page post or Instagram media object — customer questions, objections and the exact language real people use about the product. Good raw material for ad copy, and the first step before replying or moderating. REPLIES: a reply is a comment ON a comment, and its id exists only under its PARENT — it is never returned by the post. Each row says how many replies it has; to read them (and to get the id reply_to_meta_comment / moderate_meta_comment need), call this tool again with postId set to that COMMENT id.',
