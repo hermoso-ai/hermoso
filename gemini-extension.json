@@ -1,0 +1,19 @@
+{
+  "name": "hermoso",
+  "version": "1.0.0",
+  "contextFileName": "GEMINI.md",
+  "settings": [
+    {
+      "name": "Hermoso agent key",
+      "description": "Create one in the Hermoso app under Settings, Agents and API. It is stored as HERMOSO_TOKEN and never placed in a URL.",
+      "envVar": "HERMOSO_TOKEN",
+      "sensitive": true
+    }
+  ],
+  "mcpServers": {
+    "hermoso": {
+      "command": "npx",
+      "args": ["-y", "hermoso", "mcp"]
+    }
+  }
+}
