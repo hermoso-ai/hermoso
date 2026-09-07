@@ -11721,6 +11721,80 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiGet('/api/reddit-ads/pixels', a);
     return ok(d.note, d);
   }));
+  // REDDIT CREATIVE ASSET LIBRARY (2026-09-07) — read off Reddit's own OpenAPI (spec v3). Reddit DOWNLOADS the
+  // media from a url you hand it; there is no byte upload. The library is STANDALONE today: no ad/post field in the
+  // spec consumes an asset id yet, and every description says so rather than implying an ad can be built from it.
+  server.registerTool('upload_reddit_ads_assets', {
+    title: 'Upload creatives to the Reddit asset library',
+    description: 'Store creatives in the Reddit Ads ASSET LIBRARY for a profile: images and videos (from a public https url — Reddit downloads it; a video may carry a posterUrl), HEADLINE text, and CTA labels from Reddit’s fixed list (Shop Now, Learn More, Sign Up, …). 1–20 per call. Processing is asynchronous: the reply is read back from the library after polling (up to ~20s) and says which assets are ACTIVE, which Reddit REJECTED and why, and which are still processing (finish those with get_reddit_ads_asset_uploads). NOTE: Reddit’s spec exposes no ad or post field that consumes an asset id yet, so this stores and organises creative; it does not attach it to an ad. Free.',
+    inputSchema: {
+      adAccountId: z.string().optional().describe('Reddit ad account id (a2_…) — omit when only one is shared'),
+      redditProfileId: z.string().describe('the Reddit profile id (t2_…) from list_reddit_ads_profiles — assets hang off a profile, and it must be on the shared ad account'),
+      assets: z.array(z.object({
+        type: z.enum(['IMAGE', 'VIDEO', 'HEADLINE', 'CTA']),
+        url: z.string().optional().describe('IMAGE/VIDEO: a public https url Reddit can download (upload_file gives you one)'),
+        name: z.string().optional().describe('IMAGE/VIDEO: library name; defaults to the file name'),
+        posterUrl: z.string().optional().describe('VIDEO only: an https url for the poster frame'),
+        text: z.string().optional().describe('HEADLINE: the headline text'),
+        callToAction: z.string().optional().describe('CTA: one of Reddit’s labels — Apply Now | Contact Us | Download | Get a Quote | Get Showtimes | Install | Learn More | Order Now | Play Now | Pre-order Now | See Menu | Shop Now | Sign Up | View More | Watch Now | Book Now | Buy Tickets | Get Directions | Listen Now | Read More | Subscribe | Visit Store | Donate Now | Remind Me'),
+        referenceId: z.string().optional().describe('your own id, echoed back per upload'),
+      })).min(1).max(20),
+    },
+    outputSchema: { adAccountId: z.string().optional(), profileId: z.string().optional(), count: z.number().optional(), ready: z.number().optional(), failed: z.number().optional(), pending: z.number().optional(), uploads: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/reddit-ads/assets/upload', a); return ok(d.note, d); }));
+
+  server.registerTool('get_reddit_ads_asset_uploads', {
+    title: 'Poll Reddit asset uploads',
+    description: 'The processing state of one or more Reddit creative-asset uploads (ids from upload_reddit_ads_assets): PROCESSING, ACTIVE with the stored asset, or INVALID_MEDIA with Reddit’s reasons. Ids Reddit no longer knows are listed as missing, never silently dropped. Free.',
+    inputSchema: {
+      adAccountId: z.string().optional().describe('Reddit ad account id (a2_…) — omit when only one is shared'),
+      redditProfileId: z.string().describe('the Reddit profile id (t2_…) from list_reddit_ads_profiles — assets hang off a profile, and it must be on the shared ad account'),
+      uploadIds: z.array(z.string()).min(1).max(50),
+    },
+    outputSchema: { profileId: z.string().optional(), count: z.number().optional(), uploads: z.array(z.any()).optional(), missing: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/reddit-ads/assets/uploads', a); return ok(d.note, d); }));
+
+  server.registerTool('list_reddit_ads_assets', {
+    title: 'List the Reddit asset library',
+    description: 'The IMAGE and VIDEO assets stored on a Reddit profile, with status, dimensions and media urls; filter by type and name, paginate with pageToken. Reddit’s list is media-only: HEADLINE and CTA assets are stored but never listed here — read those by id with get_reddit_ads_asset (ids come from upload_reddit_ads_assets). Free.',
+    inputSchema: {
+      adAccountId: z.string().optional().describe('Reddit ad account id (a2_…) — omit when only one is shared'),
+      redditProfileId: z.string().describe('the Reddit profile id (t2_…) from list_reddit_ads_profiles — assets hang off a profile, and it must be on the shared ad account'),
+      types: z.array(z.enum(['IMAGE', 'VIDEO'])).optional().describe('Reddit lists media only'),
+      name: z.string().optional().describe('filter by asset name'),
+      limit: z.number().optional().describe('1–100, default 25'),
+      pageToken: z.string().optional(),
+    },
+    outputSchema: { profileId: z.string().optional(), count: z.number().optional(), assets: z.array(z.any()).optional(), nextPageToken: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/reddit-ads/assets', a); return ok(d.note, d); }));
+
+  server.registerTool('get_reddit_ads_asset', {
+    title: 'Read one Reddit creative asset',
+    description: 'One stored Reddit creative asset by id — type, name, status, media dimensions and urls, or the headline/CTA text, plus any processing errors Reddit holds for it. Free.',
+    inputSchema: { adAccountId: z.string().optional(), assetId: z.string() },
+    outputSchema: { asset: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/reddit-ads/asset', a); return ok(d.note, d); }));
+
+  server.registerTool('rename_reddit_ads_asset', {
+    title: 'Rename a Reddit creative asset',
+    description: 'Change a stored Reddit creative asset’s name — the ONLY field Reddit lets you edit on an asset (its PATCH takes {name} and nothing else). The reply is read back from the library. Free.',
+    inputSchema: { adAccountId: z.string().optional(), assetId: z.string(), name: z.string() },
+    outputSchema: { asset: z.any().optional(), confirmed: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/reddit-ads/asset/rename', a); return ok(d.note, d); }));
+
+  server.registerTool('delete_reddit_ads_asset', {
+    title: 'Delete a Reddit creative asset',
+    description: 'Permanently delete a creative asset from the Reddit asset library. Without confirm:true it deletes nothing and reports what the asset is; with it, the reply is the read-back (the asset reads as DELETED or gone), never Reddit’s 200. Free.',
+    inputSchema: { adAccountId: z.string().optional(), assetId: z.string(), confirm: z.boolean().optional() },
+    outputSchema: { assetId: z.string().optional(), confirmed: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/reddit-ads/asset/delete', a); return ok(d.note, d); }));
+
   server.registerTool('send_reddit_ads_conversions', {
     title: 'Send conversions to Reddit (Conversions API)',
     description: 'Report conversions to Reddit server-side — purchases, leads, sign-ups, or your own custom events — so Reddit can attribute them to the ads that caused them and optimise delivery toward them. This is what makes a CONVERSIONS campaign work; without it Reddit optimises blind. Send events as close to real time as you can: Reddit REFUSES anything older than seven days, and deduplication against the browser pixel only works inside two days. Pass ordinary email addresses and phone numbers — they are canonicalised and SHA-256 hashed on our server before they reach Reddit, and a value you already hashed is passed through untouched. The more match keys per event (email, phone, clickId, uuid, externalId, IP + user agent) the better the attribution. Set conversionId on every event if you ALSO run the browser pixel, or the same purchase is counted twice. Costs no credits and spends no ad money — this is measurement. Needs the "adsconversions" permission: if Reddit answers 403, the connection predates it and the user must reconnect Reddit Ads.',
