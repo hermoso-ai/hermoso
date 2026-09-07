@@ -3914,7 +3914,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('list_threads_profile_posts', {
     title: 'Read a public Threads account\u2019s posts',
-    description: 'The recent PUBLIC posts of any Threads account \u2014 the raw material for a teardown, for mine_angles, and for ad copy in the language the market actually uses. Use it after threads_profile, or on its own when you already know the handle, and then USE what it returns: draft the brand\u2019s next post or plan_ad off the angles you found. AN EMPTY LIST IS NEVER PROOF THEY HAVE NOT POSTED \u2014 Meta returns nothing for a private account, for any account under 100 followers, and for handles our app is not yet approved to read (the `threads_profile_discovery` permission); the note says which of those applies. Read-only, 0 credits. Needs Threads connected.',
+    description: 'The recent PUBLIC posts of any Threads account \u2014 the raw material for a teardown, for mine_angles, and for ad copy in the language the market actually uses. Use it after threads_profile, or on its own when you already know the handle, and then USE what it returns: draft the brand\u2019s next post or plan_ad off the angles you found. AN EMPTY LIST IS NEVER PROOF THEY HAVE NOT POSTED \u2014 Meta returns nothing for a private account, for any account under 100 followers, and when the Threads connection predates the `threads_profile_discovery` permission (approved for the app 2026-09-05; reconnect Threads to grant it); the note says which of those applies. Read-only, 0 credits. Needs Threads connected.',
     inputSchema: {
       username: z.string().describe('the Threads handle \u2014 "nike", "@nike", or a threads.net profile link'),
       limit: z.number().optional().describe('how many posts (1\u201350, default 25)'),
@@ -6779,6 +6779,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // onboarding (user token + marketing_messages_messenger) rides the existing Meta connection. App-Review gated:
   // until Meta grants the scope it works for app-role holders only, and list_messenger_subscribers says which.
   // Every endpoint, limit and error code: lib/messenger-marketing.mjs (read live 2026-09-05).
+  // MESSENGER MARKETING MESSAGES ARE A CHANNEL CAPABILITY, NOT PAID ADS (2026-09-07). This block was registered inside
+  // the ads section, so it rode the heaviest opt-in group while dispatching to no paid-advertising route — unreachable
+  // for anyone who had not switched on 'ads', and counted as 'ads' tools on an account with no ad platform at all.
+  server.group('channel_admin'); // Messenger marketing — the marker at the end of this block re-opens 'ads'
   server.registerTool('list_messenger_subscribers', {
     title: 'List Messenger marketing-message subscribers',
     description: 'The people who OPTED IN to marketing messages from a Facebook Page — their subscription tokens, the only address a paid Messenger marketing message can go to (there is no "message everyone"). Also reports whether this Meta connection carries the marketing_messages_messenger permission; a connection made before it was added must be reconnected. Free.',
