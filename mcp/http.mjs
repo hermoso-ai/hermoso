@@ -20,7 +20,7 @@ import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
-export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null } = {}) {
+export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null } = {}) {
   if ((process.env.HERMOSO_MCP_REMOTE ?? process.env.HEIST_MCP_REMOTE) !== '1') return false;             // gate 1: off by default
   if (typeof verifyBearer !== 'function') {                           // gate 2: refuse without real auth
     console.error('[mcp-remote] REFUSING to mount: no token verifier wired. A remote, money-spending MCP must authenticate every caller (no-anon-spend). Wire Firebase Auth → verifyBearer first.');
@@ -334,7 +334,16 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
     }
     // Counted here, before the transport sees the body, so the tally is of what the CLIENT asked and not of what
     // the SDK answered — a refused tools/call is still a call the roster earned.
-    for (const m of methodsOf(req.body)) { if (m === 'tools/list') entry.listed = true; else if (m === 'tools/call') entry.calls = (entry.calls || 0) + 1; }
+    for (const m of methodsOf(req.body)) {
+      if (m === 'tools/list') entry.listed = true;
+      else if (m === 'tools/call') {
+        entry.calls = (entry.calls || 0) + 1;
+        // THE FIRST CALL IS THE MILESTONE, NOT THE LISTING (2026-09-07). The connect_mcp reward was granted on "an API
+        // key exists", and 37 sessions last week listed the roster and never called a tool while 803 grants went out.
+        // A session's first tools/call is what proves the connection is USED; the hook stamps the account's touch row.
+        if (entry.calls === 1 && typeof onFirstCall === 'function' && entry.user?.accountId) { try { onFirstCall({ accountId: entry.user.accountId, userId: entry.user.userId || null, client: entry.client || '', ua: entry.ua || '', src: entry.src || null }); } catch {} }
+      }
+    }
     // The caller's bearer rides into every /api call the tools make — spend bills THEIR account. `remote: true`
     // says what this store IS: a per-request tenant scope on a shared, multi-tenant process. client.mjs treats the
     // presence of this store as the signal to STOP falling back to the process's own HERMOSO_PROFILE / HERMOSO_OWNER,
