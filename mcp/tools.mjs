@@ -17524,7 +17524,9 @@ function memoryNoteVerdict(text) {
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async ({ query, limit }) => {
-    const d = await apiGet('/api/sc/run', { __path: '/v2/instagram/reels/search', query });
+    let d;
+    try { d = await apiGet('/api/sc/run', { __path: '/v2/instagram/reels/search', query }); }
+    catch (e) { if (e?.status === 404) d = { reels: [] }; else throw e; } // a vendor 404 is "no reels match", not a failure (2026-09-07)
     const all = (d.reels || d.items || []).map((r) => {
       const o = r.owner || r.user || {};
       return qp({
