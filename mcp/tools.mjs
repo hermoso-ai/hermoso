@@ -2578,10 +2578,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (g && !TOOL_GROUP_NAMES.includes(g)) return { content: [{ type: 'text', text: `Unknown group "${g}". Groups: ${TOOL_GROUP_NAMES.join(', ')}.` }], isError: true };
     const rows = [];
     const tokenWeight = tokenWeightFor(ctx);
+    const _offGroup = new Map(); // name → { grp, h } for tools the group filter excluded (see below)
     for (const [name, h] of Object.entries(ctx.handleOf)) {
       if (!h) continue;
       const grp = ctx.groupOf[name] || 'core';
-      if (g && grp !== g) continue;
+      // A GROUP FILTER NARROWS, IT NEVER HIDES (2026-09-07). `find_tools({query:'tiktok_creator_info', group:'channels'})` reported a
+      // dead end because the tool lives in channel_admin — the exact-name hit was thrown away by the filter, and the agent
+      // was told we have no such tool. Off-group matches are kept aside; if the scoped search finds nothing, they are
+      // returned WITH their real group so the caller learns which group to enable instead of giving up.
+      if (g && grp !== g) { if (!_offGroup.has(name)) _offGroup.set(name, { grp, h }); continue; }
       const desc = String(h.description || '');
       let score = 0;
       if (q) {
@@ -2615,6 +2620,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE MOST VALUABLE ROW ON THE DEFECT BOARD: what a user asked for, in their agent's words, that our catalog could
     // not name. Unquoted and lowercased on purpose — the ledger collapses quoted strings to <q>, and one group per
     // distinct ask is exactly what we want to read.
+    if (!total && g && _offGroup.size) {
+      // Re-score the excluded tools by NAME only (the cheap, unambiguous half): an exact or token hit outside the
+      // asked-for group is an answer, not a dead end — "it exists, in channel_admin; enable that group".
+      const qw = String(q || '').toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
+      const off = [..._offGroup.entries()].filter(([name]) => qw.some((w) => name === w || name.includes(w))).slice(0, cap)
+        .map(([name, { grp, h }]) => `• ${name} [${grp}, not in the ${g} group] — ${String(h.description || '').replace(/\s+/g, ' ').slice(0, 200)}`);
+      if (off.length) return ok(`Nothing in the ${g} group matches, but these tools do — they live in another group (enable it with enable_tools, or call them by name through run_tool):\n${off.join('\n')}`, { query: q, group: g, offGroup: off.length });
+    }
     if (!total) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
     for (const r of top) r.params = compactParams(ctx.handleOf[r.name]);
     const lines = top.map((r) => `• ${r.name} [${r.group}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] — ${r.description}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
