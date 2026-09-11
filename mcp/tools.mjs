@@ -500,6 +500,14 @@ const AR_UNIVERSAL = ['9:16', '16:9'];
 const RAW_TOOL_NOTE = 'raw:true dispatches your prompt to the model BYTE-IDENTICAL — no rewriting, no appended guidance, no negative prompt, no brand references attached on your behalf. Credits, the durable delivery of the finished asset and the per-model validation are unchanged.';
 const AD_LENGTH_MAX = 180, AD_LENGTH_MIN = 4;
 const clampAdSeconds = (n) => Math.max(AD_LENGTH_MIN, Math.min(AD_LENGTH_MAX, Math.round(n)));
+// What a video reference ACTUALLY gave the planner (/api/create's `reference_watched`), in one line. A remix of footage
+// nobody watched must say so, so the ⚠ note is printed whenever the server wrote one.
+const refWatchedLine = (w) => {
+  if (!w) return '';
+  const src = { tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', x: 'X', youtube: 'YouTube' }[w.platform] || 'video';
+  const got = [w.durationSeconds ? `${w.durationSeconds}s` : '', w.frames ? `${w.frames} ${w.footage ? 'frames' : 'thumbnail'}` : '', w.transcript ? 'transcript' : ''].filter(Boolean).join(' · ');
+  return `\nWatched: ${src}${got ? ` — ${got}` : ''}${w.note ? `\n⚠ ${w.note}` : ''}`;
+};
 
 // ── THE ATTRIBUTION PAIR EVERY PUBLISH TOOL CARRIES (2026-08-05) ─────────────────────────────────────────────────
 // The hook and the subject are the INTENT behind a post, and publish time is the ONLY moment they exist: a caption
@@ -15629,7 +15637,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       hook: z.string().optional().describe('force the VISUAL scroll-stop mechanic the opening beat is built on — a hook id from list_hooks (e.g. "direct_callout", "mid_problem", "macro_asmr"). Omit to let the planner pick. A hook that cannot be delivered in this brief is DROPPED with the reason rather than rendered wrongly — an on-screen-text hook on an authentic/UGC ad is the one that bites, because that register carries zero on-screen text.'),
       setting: z.string().optional().describe('force the WHERE — a setting id from list_hooks (e.g. "kitchen", "gym", or a surreal one like "volcano_rim" / "airplane_wing", which are played 100% straight and never acknowledged). Omit for a neutral setting.'),
       recipe: z.string().optional().describe('a recipe id from hermoso_capabilities to force an archetype'),
-      reference: z.string().optional().describe('a reference ad URL to remix the angle from — Facebook Ad Library, LinkedIn Ad Library or Google Ads Transparency links (the real ad’s copy/advertiser are fetched and fed into the concept)'),
+      reference: z.string().optional().describe('a reference to remix: an ad-library link (Facebook Ad Library, LinkedIn Ad Library, Google Ads Transparency — its real copy/advertiser are fetched) OR a VIDEO link — a TikTok, Instagram Reel, Facebook video, X post, YouTube Short/video or a direct video file — which is WATCHED first (frames + voiceover/on-screen-text transcript) so the concept keeps its hook, structure and pacing. To remake one video for this brand at its own length, clone_video is the direct tool'),
       language: z.string().optional().describe('output language for the ad copy (e.g. Spanish) — default English'),
     },
     outputSchema: {
@@ -15690,7 +15698,56 @@ function buildTools(rawServer, opts = {}, sink = null) {
         + (_askedLen && _askedLen !== _len ? ` — you asked for ${_askedLen}s, which is outside the supported 4–180s range, so it was clamped to ${_len}s` : '')
         + (_len && _planned && Math.abs(_planned - _len) > 1 ? ` — ⚠ this does NOT match the ${_len}s you asked for; tell the user before rendering, or re-plan` : '');
     }
-    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"${_lenLine}${_hookLine}\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a storyboard that fits ONE clip of the render model renders as a single continuous pass, a longer plan renders as stitched acts automatically — never hand-stitch)' : 'generate_image with the image_concept.prompt'}.`;
+    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"${refWatchedLine(c.reference_watched)}${_lenLine}${_hookLine}\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a storyboard that fits ONE clip of the render model renders as a single continuous pass, a longer plan renders as stitched acts automatically — never hand-stitch)' : 'generate_image with the image_concept.prompt'}.`;
+    return ok(text, c);
+  }));
+
+  // ── CLONE A VIDEO FROM A LINK (2026-09-11) ────────────────────────────────────────────────────────────────────
+  // Arcads' "paste a TikTok, clone it for my brand". The server does the watching (/api/create resolves a social post
+  // to its real file, samples frames across it and transcribes it) and plans a board that keeps the ORIGINAL'S
+  // skeleton — hook device, segment map, deliberate jump cuts, pacing — with this brand's product, cast and words.
+  // It stops at the plan on purpose: render_ad is the spend, and the user sees the concept before paying for it.
+  // Streamed (apiSSE), because watching + planning can outlast a 100s proxy limit on the non-streaming path.
+  server.registerTool('clone_video', {
+    title: 'Clone a video for your brand',
+    description: 'Remake a video you like FOR THIS BRAND from its link — a TikTok, Instagram Reel, Facebook video or reel, X post, YouTube Short or video, or a direct video file URL. Hermoso WATCHES it first (frames across the whole clip plus a transcript of the voiceover, on-screen text and cut map), then plans a storyboard that keeps its hook device, structure, jump cuts and pacing while swapping in THIS brand\'s product, cast, setting and words — never the original\'s words, face or brand. The new ad MATCHES THE ORIGINAL\'S LENGTH (capped at 60s) unless durationSeconds is given. Renders nothing: pass the returned creative to render_ad to make the video. Costs the plan plus about 2 credits to read the link. The reply says exactly what was watched, and when a platform will not hand over the footage (YouTube sometimes refuses servers) it says the plan rests on the captions and thumbnail only. For a local file, upload_file it first and pass the URL.',
+    inputSchema: {
+      url: z.string().describe('the video to clone — a TikTok / Instagram Reel / Facebook / X / YouTube link, or a direct https video file URL'),
+      product: z.string().optional().describe('what the new ad sells, plus any angle or offer; omit to use the saved brand\'s product'),
+      changes: z.string().optional().describe('what to change or keep from the original, in the user\'s words (e.g. "same hook but in a gym", "keep the jump cut, older creator")'),
+      brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object; OMIT to use the workspace\'s saved brand (see get_brand)'),
+      durationSeconds: z.number().optional().describe('override the length in seconds; omit to match the original'),
+      language: z.string().optional().describe('language for the new ad\'s script and copy — default English'),
+    },
+    outputSchema: {
+      format: z.string().optional().describe("always 'video'"),
+      concept: z.string().optional().describe('the one-line creative concept'),
+      copy: z.array(z.any()).optional().describe('copy variants ({headline, primary, cta})'),
+      video_storyboard: z.any().optional().describe('the timed storyboard rebuilt from the original'),
+      render_plan: z.any().optional().describe('the routing plan (structure/duration) render_ad honors'),
+      vmodel: z.string().optional().describe('the video model id to render with'),
+      reference_watched: z.any().optional().describe('what was actually read from the link: platform, durationSeconds, frames, transcript, footage, note'),
+      brand: z.any().optional().describe('the brand grounding embedded in the creative'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async ({ url, product, changes, brand, durationSeconds, language }) => {
+    const link = String(url || '').trim();
+    if (!/^https?:\/\//i.test(link)) return ok('clone_video needs an https:// link to the video (a TikTok, Reel, Facebook, X or YouTube post, or a direct file). For a file on this machine, call upload_file first and pass the URL it returns. Nothing was charged.');
+    const _askedLen = +durationSeconds > 0 ? Math.round(+durationSeconds) : 0;
+    const _len = _askedLen ? clampAdSeconds(_askedLen) : 0;
+    let brandObj = brand ? (typeof brand === 'string' ? { name: brand } : brand) : null;
+    if (typeof brand === 'string' && brand.trim()) {
+      const _n = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      try { const cur = await apiGet('/api/brand/current'); if (cur?.hasBrand && cur.brand && _n(cur.brand.name) === _n(brand)) brandObj = cur.brand; } catch {}
+    }
+    const brief = [`Recreate the reference video for this brand${product ? ` — advertising ${product}` : ''}: keep its hook device, structure, cuts and pacing, but make every word, face, setting and product this brand's own`, changes ? `What the user wants changed or kept: ${changes}` : ''].filter(Boolean).join('. ');
+    const d = await apiSSE('/api/create', { stream: true, brand: brandObj, product: brief, format: 'video', reference: { url: link }, matchReferenceLength: !_len, ...(_len ? { durationSeconds: _len } : {}), language: language || '', userAsk: brief });
+    const c = d?.data?.creative || d?.creative || d;
+    if (brandObj && !c.brand) c.brand = { name: brandObj.name || '', domain: brandObj.domain || '', logo: brandObj.logo || '', sells: brandObj.sells || '', palette: (brandObj.palette || []).slice(0, 4), productImages: (brandObj.productImages || []).slice(0, 4) };
+    const planned = Math.round(+c.render_plan?.duration_seconds || (c.video_storyboard?.scenes || []).reduce((s, x) => s + (+x.seconds || 0), 0) || 0);
+    const w = c.reference_watched || null;
+    const lenNote = _askedLen && _askedLen !== _len ? ` — you asked for ${_askedLen}s, outside the supported 4–180s, so it was clamped to ${_len}s` : (!_len && w?.lengthMatched ? (w.durationSeconds > w.lengthMatched + 1 ? ` — the original is ${w.durationSeconds}s; a clone matches its length up to 60s, so pass durationSeconds for a different length` : ' — matches the original') : '') + (!_len && w?.lengthMatched && planned && Math.abs(planned - w.lengthMatched) > 1 ? ` — ⚠ the plan came out at ${planned}s, not the ${w.lengthMatched}s asked for; say so before rendering` : '');
+    const text = `Clone plan: "${c.concept || ''}"${refWatchedLine(w)}${w ? '' : '\n⚠ The link was not watched — the plan is not grounded in the original video.'}\nLength: ${planned || '—'}s${lenNote}\nHeadline: ${c.copy?.[0]?.headline || ''}\nScenes: ${(c.video_storyboard?.scenes || []).length}. Render model: ${c.vmodel || '—'}.\nNext: call render_ad with THIS ENTIRE creative object to make the video (it spends credits; show the user the concept first).`;
     return ok(text, c);
   }));
 
