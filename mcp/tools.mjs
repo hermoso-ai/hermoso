@@ -427,7 +427,9 @@ async function renderJob(type, input, label) {
       deliveredWidth: result?.deliveredWidth ?? null, deliveredHeight: result?.deliveredHeight ?? null,
       raw: result };
   } catch (e) {
-    if (remote && e?.jobId) return { jobId: job.id, url: null, stillRendering: true, raw: null }; // not an error — resume via get_job
+    // not an error — resume via get_job. On EVERY transport (2026-09-11): a 20–24s long-clip render queued behind two
+    // others outlived the local 10-minute poll, and the tool reported "Render timed out" while the job finished fine.
+    if (e?.jobId) return { jobId: job.id, url: null, stillRendering: true, raw: null };
     throw e;
   }
 }
@@ -506,7 +508,8 @@ const refWatchedLine = (w) => {
   if (!w) return '';
   const src = { tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', x: 'X', youtube: 'YouTube' }[w.platform] || 'video';
   const got = [w.durationSeconds ? `${w.durationSeconds}s` : '', w.frames ? `${w.frames} ${w.footage ? 'frames' : 'thumbnail'}` : '', w.transcript ? 'transcript' : ''].filter(Boolean).join(' · ');
-  return `\nWatched: ${src}${got ? ` — ${got}` : ''}${w.note ? `\n⚠ ${w.note}` : ''}`;
+  const shot = { 'raw-self-filmed': 'self-filmed on a phone, so the remix is too', 'creator-polished': 'a creator on a phone', 'produced-commercial': 'a produced commercial' }[w.register] || '';
+  return `\nWatched: ${src}${got ? ` — ${got}` : ''}${shot ? `\nShot as: ${shot}` : ''}${w.note ? `\n⚠ ${w.note}` : ''}`;
 };
 
 // ── THE ATTRIBUTION PAIR EVERY PUBLISH TOOL CARRIES (2026-08-05) ─────────────────────────────────────────────────
@@ -15895,7 +15898,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('render_ad', {
     title: 'Render ad video',
-    description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), brand end card, licensed music bed, real product references. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
+    description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), licensed music bed, real product references. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
       creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if the plan has nobody on camera, or if they are a REAL person with no likeness consent on file.'),
@@ -15903,10 +15906,23 @@ function buildTools(rawServer, opts = {}, sink = null) {
       durationSeconds: z.number().optional().describe('total ad length in seconds (supported range 4–180; outside that it is clamped). Omit to honor the plan’s own duration — that is almost always right. This only RE-TIMES an already-authored board (its scenes are scaled to fit), it does NOT re-write it, so to change the length of the ad the user asked for, re-run plan_ad with durationSeconds instead. A length that fits ONE clip of the render model renders as one continuous pass; longer is stitched from acts filled to that model’s clip maximum with the remainder last — the maximum is 15s on most models and 30s on the longest-clip one, so use dryRun:true to see the exact act split for free before spending.'),
       aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
       resolution: z.enum(['480p', '720p', '1080p', '4k']).optional().describe("'1080p' default (what we ship and bill for); '480p'/'720p' = cheaper draft passes, '4k' = premium final delivery (more credits). NOT EVERY MODEL OFFERS EVERY TIER — this enum is what the tool accepts, and each model's OWN `resolutions` list in hermoso_capabilities is what it can actually render (the longest-clip 30s model, for one, tops out at 720p). Ask for a tier the chosen model does not list and it is rendered at that model's best available tier instead, with nothing in the reply saying so — so check `resolutions` before promising anyone 1080p or 4k."),
-      captions: z.boolean().optional().describe('burn the plan\'s per-scene on-screen words as caption pills. DEFAULT FALSE — leave it off unless the user asks for on-screen text (no captions, or true subtitles of what is said; never scene or emphasis labels); a recipe whose format IS on-screen text keeps its text either way'),
-      endCard: z.boolean().optional().describe('branded end card on/off (default: on, except organic recipes)'),
+      captions: z.boolean().optional().describe('burn the plan\'s per-scene on-screen words as caption pills. DEFAULT FALSE on every recipe — set true ONLY when the user asks for on-screen text or captions; no recipe turns them on by itself'),
+      endCard: z.boolean().optional().describe('append the branded end card. DEFAULT FALSE on every recipe — set true ONLY when the user asks for an end card (a clone of a video that had none should not grow one)'),
       music: z.boolean().optional().describe('licensed music bed on/off (default on)'),
-      lockup: z.boolean().optional().describe('persistent brand-logo lockup overlay on/off'),
+      lockup: z.boolean().optional().describe('brand wordmark + tagline composited over the closing seconds. DEFAULT FALSE — set true ONLY when the user asks for branding on the close'),
+      textStyle: z.union([
+        z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']),
+        z.object({
+          preset: z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']).optional(),
+          font: z.enum(['sans', 'serif', 'elegant', 'condensed', 'hand']).optional(),
+          subFont: z.enum(['sans', 'serif', 'elegant', 'condensed', 'hand']).optional(),
+          weight: z.number().optional(), size: z.union([z.enum(['s', 'm', 'l', 'xl']), z.number()]).optional(),
+          color: z.string().optional().describe('#hex'), background: z.string().optional().describe('"none", "pill", or a #hex box'),
+          position: z.enum(['top', 'center', 'lower', 'bottom']).optional(), textCase: z.enum(['as-is', 'upper', 'lower', 'title']).optional(),
+          italic: z.boolean().optional(), subItalic: z.boolean().optional(), outline: z.boolean().optional(), shadow: z.boolean().optional(),
+          tilt: z.number().optional().describe('degrees, ±12'), cardColor: z.string().optional().describe('#hex end card background'),
+        }),
+      ]).optional().describe('THE LOOK of captions and the end card — only meaningful with captions:true or endCard:true, and only when the user described a look. Presets: editorial (a large elegant serif title mid-frame with a small italic line under it, no box), bold (tall condensed caps with a black outline), minimal (small lowercase near the bottom), handwritten (tilted marker), boxed (dark words on a white box), pill (the plain default). Pass a preset name, or an object with a preset plus overrides. A caption written "TITLE · small line" puts the part after the middle dot on a second line. An invalid field is refused by name before anything renders.'),
       ttsVoice: z.string().optional().describe('voiceover voice name (e.g. Rachel / George) when the plan voices over'),
       dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) WITHOUT submitting a render — free, nothing charged'),
       allowGenericProduct: z.boolean().optional().describe('proceed even though this brand has NO product photo on file and the ad features a product — the packaging will be INVENTED. Only pass true after telling the user that and hearing they are fine with a generic stand-in'),
@@ -16093,7 +16109,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       subtitles: z.boolean().optional().describe('which on-screen text, once `captions` is on. LEAVE IT UNSET (or true) for SUBTITLES — every spoken word, in order, timed to the narration; free, no extra render, no extra credits, and there is NO cue limit, so the whole film is subtitled however long it runs (at most 5 words / 32 characters a line). Set it FALSE only if the user explicitly wants section HEADINGS instead: one short summary label held over each ~7-15s section. That is NOT what is being said — it is a label about it — so it is the wrong answer to "add captions" and to anyone watching on mute. `subtitles:true` also implies `captions:true`. TIMING: each cue is anchored to that section’s REAL measured narration length and distributed inside the section by character count — exact at every section boundary, approximate to a few tenths of a second within one. It is not a word-level speech clock, so never promise frame-accurate sync.'),
       music: z.string().optional().describe("music bed under the narration, measured to sit about 14 dB under the voice and sidechain-ducked beneath it. Omit and the KIDS and FAIRYTALE channels get their recommended bed COMPOSED for this film — those two are the only channels a bed is due on unasked, and it costs a small flat fee; every other channel ships dry. 'off' forces silence. 'library' takes a free curated track only, and ships dry when none is on file. NAME A MOOD — upbeat / calm / warm / epic / tense / playful / elegant / hype / chill / dramatic — to compose one on ANY channel, at the same fee. hermoso_capabilities reports the exact figure as explainerMusicCredits; quote it before you turn a bed on or pick a mood."),
       upscale: z.number().optional().describe("optional FINAL upscale — 2 doubles each side, 4 quadruples. Captions and the end card are burned BEFORE it so they upscale with the frame. It is priced BY LENGTH and it is the expensive part — several times the cost of rendering the film itself. hermoso_capabilities reports the exact figures per length as explainerUpscaleCredits. Never turn it on unasked: quote the number and let the user choose."),
-      endCard: z.boolean().optional().describe('append the branded end card (default true)'),
+      endCard: z.boolean().optional().describe('append the branded end card. DEFAULT FALSE — set true ONLY when the user asks for one'),
       brandName: z.string().optional().describe('brand name for the end card — omit to leave it unbranded'),
     },
     outputSchema: { ...JOB_OUT },
@@ -18497,15 +18513,24 @@ function memoryNoteVerdict(text) {
       axis: z.enum(['hook', 'subject', 'channel', 'media', 'hour']).optional().describe('what to group by — default hook'),
       channel: z.string().optional().describe('restrict to one channel'),
     },
-    outputSchema: { axis: z.string().optional(), groups: z.array(z.any()).optional(), finding: z.any().optional(), excludedUnattributed: z.number().optional(), minN: z.number().optional(), totalPosts: z.number().optional() },
+    outputSchema: { axis: z.string().optional(), groups: z.array(z.any()).optional(), finding: z.any().optional(), excludedUnattributed: z.number().optional(), minN: z.number().optional(), totalPosts: z.number().optional(), trend: z.any().optional(), health: z.any().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/posts/performance', { ...(a.axis ? { axis: a.axis } : {}), ...(a.channel ? { channel: a.channel } : {}) });
     const gs = d.groups || [];
-    if (!gs.length) return ok(`Nothing to compare on "${d.axis}" yet. ${d.finding?.why || ''}`.trim(), d);
+    // OVER TIME + MEASUREMENT HEALTH (2026-09-11): week-by-week medians per channel and why unmeasured posts have no
+    // numbers. Printed even when no hook comparison exists yet — "is it getting better" does not need five hooks.
+    const fmtN = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: v < 10 ? 1 : 0 }));
+    const trendTxt = (d.trend?.channels || []).slice(0, 10).map(c => {
+      const recent = c.buckets.slice(-4).map(b => `${b.week.slice(5)}: ${b.posts ? `${fmtN(c.reachUnit ? b.medianReach : b.medianEngagement)} (${b.posts}p${b.maturing ? ', maturing' : ''})` : '·'}`).join(' | ');
+      return `• ${c.channel} — median ${c.reachUnit || 'engagement'}/post by week: ${recent}. ${c.direction?.verdict ? c.direction.why : `No direction yet: ${c.direction?.why || 'not enough data'}`}`;
+    });
+    const healthTxt = (d.health || []).filter(h => h.coverage == null || h.coverage < 0.8 || h.failed || h.neverRead).slice(0, 10).map(h => `• ${h.channel}: ${h.measured}/${h.posts} measured${h.coverage == null ? '' : ` (${Math.round(h.coverage * 100)}% of what could be)`}${h.neverRead ? ` · ${h.neverRead} never read` : ''}${h.empty ? ` · ${h.empty} read but empty${h.topEmpty ? ` (${h.topEmpty.message})` : ''}` : ''}${h.failed ? ` · ${h.failed} failed${h.topError ? ` — ${h.topError.message}` : ''}` : ''}${h.pending ? ` · ${h.pending} too new` : ''}`);
+    const overTime = `${trendTxt.length ? `\n\nOVER TIME (last ${d.trend.weeks.length} weeks, 7-day readings where they exist):\n${trendTxt.join('\n')}` : ''}${healthTxt.length ? `\n\nMEASUREMENT GAPS:\n${healthTxt.join('\n')}` : ''}`;
+    if (!gs.length) return ok(`Nothing to compare on "${d.axis}" yet. ${d.finding?.why || ''}`.trim() + overTime, d);
     const rows = gs.map(g => `• "${g.key}" · ${g.channel} — ${g.meanRate == null ? (g.meanEngagement == null ? 'no measurable engagement' : `${g.meanEngagement.toFixed(1)} engagements (no reach denominator on this channel, so no rate)`) : `${(g.meanRate * 100).toFixed(2)}% engagement`} · ${g.n} post(s), ${g.nRated} measured${g.verdict === 'ready' ? '' : ` — ${g.suppressed}`}`);
     const head = d.finding?.finding ? `FINDING: ${d.finding.finding}` : `NO FINDING YET: ${d.finding?.why || 'not enough measured posts'}`;
-    return ok(`${head}\n\nBy ${d.axis}:\n${rows.join('\n')}${d.excludedUnattributed ? `\n\n${d.excludedUnattributed} post(s) were excluded from this axis because no hook was recorded for them — they still count toward channel and format totals.` : ''}`, d);
+    return ok(`${head}\n\nBy ${d.axis}:\n${rows.join('\n')}${d.excludedUnattributed ? `\n\n${d.excludedUnattributed} post(s) were excluded from this axis because no hook was recorded for them — they still count toward channel and format totals.` : ''}${overTime}`, d);
   }));
 
   server.registerTool('diagnose_posts', {
@@ -18531,11 +18556,13 @@ function memoryNoteVerdict(text) {
     inputSchema: {
       includeMetered: z.boolean().optional().describe('also read X, which BILLS CREDITS per post read — ask the user first'),
       max: z.number().optional().describe('cap how many posts to read in this run (default 40)'),
+      remeasure: z.boolean().optional().describe('ALSO re-read posts older than 7 days whose every reading came back empty or failed — use after post_performance reports posts "read but empty", or once a channel\'s reader has been fixed. Otherwise those windows stay closed.'),
     },
-    outputSchema: { collected: z.number().optional(), due: z.number().optional(), remaining: z.number().optional(), couldNotTell: z.number().optional(), skippedMetered: z.number().optional(), meteredNote: z.string().optional(), windows: z.array(z.any()).optional() },
+    outputSchema: { collected: z.number().optional(), due: z.number().optional(), remaining: z.number().optional(), couldNotTell: z.number().optional(), skippedMetered: z.number().optional(), meteredNote: z.string().optional(), windows: z.array(z.any()).optional(), remeasured: z.number().optional(), remeasuredWithNumbers: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/posts/collect', { ...(a.includeMetered ? { includeMetered: true } : {}), ...(a.max ? { max: a.max } : {}) });
+    const d = await apiPost('/api/posts/collect', { ...(a.includeMetered ? { includeMetered: true } : {}), ...(a.max ? { max: a.max } : {}), ...(a.remeasure ? { remeasure: true } : {}) });
+    if (a.remeasure) return ok(`Re-read ${d.remeasured || 0} old post(s) whose earlier readings were empty or failed; ${d.remeasuredWithNumbers || 0} now have numbers. Read ${d.collected} post(s) in total${d.remaining ? `, ${d.remaining} still waiting — run it again to continue` : ''}.${d.meteredNote ? ` ${d.meteredNote}` : ''}`, d);
     const bits = [`Read ${d.collected} post(s)`, d.couldNotTell ? `${d.couldNotTell} could NOT be read (that is "could not tell", not zero engagement)` : null, d.gone ? `${d.gone} no longer exist at the platform (deleted or taken down) and will not be read again` : null, d.remaining ? `${d.remaining} still due — call again` : null, d.meteredNote || null].filter(Boolean);
     return ok(`${bits.join('. ')}.${d.collected ? ' Ask post_performance which hooks are winning.' : ''}`, d);
   }));
