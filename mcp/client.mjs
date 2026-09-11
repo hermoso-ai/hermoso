@@ -3,8 +3,9 @@
 // gateSpend pass. Set HERMOSO_TOKEN (a Bearer) and the SAME calls become authoritative — no
 // changes here. We attach the x-heist-plan / x-heist-user headers (legacy wire names the server still reads) the browser also sends, purely for parity;
 // the server treats them as non-authoritative (identity comes from the verified token / local dev user).
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 // Remote-connector identity: mcp/http.mjs wraps each request in mcpCtx.run({ token }) so every /api call a tool
@@ -34,6 +35,30 @@ export const PROFILE = (process.env.HERMOSO_PROFILE ?? process.env.HEIST_PROFILE
 // PAIR IT WITH THE PROFILE UUID, not the slug: profile_members keys on profiles.id, so a client_slug is the one
 // thing isMember() cannot match and it 403s. list_brands names both values for every workspace you can enter.
 export const OWNER = (process.env.HERMOSO_OWNER ?? process.env.HEIST_OWNER) || '';
+// THE PIN IS MUTABLE, AND IT OUTLIVES THE PROCESS (2026-09-09). `PROFILE` above is read ONCE at import from the env the
+// CLI exported out of ~/.hermoso/config.json. use_brand re-pinned the KEY server-side and then every later request in
+// the same process (and every later CLI invocation) kept sending the stale saved profile as x-heist-user — which the
+// server ranks ABOVE the key's pin — so "Now acting on Blume" was printed while /api/workspace still answered the
+// Hermoso brand, and the next connector write landed on the wrong brand (live 2026-09-09: a live Stripe key was
+// overwritten by a test key). So: the pin lives here, headers() reads it, and on stdio/CLI it is written back to the
+// CLI config so the next invocation starts on the same brand. Hosted (mcpCtx) never touches any of this.
+let _pin = null; // { profile, owner } once use_brand pinned this process; null = whatever the env said at import
+export const pinnedProfile = () => (_pin ? _pin.profile : (PROFILE === 'default' ? '' : PROFILE));
+export const pinnedOwner = () => (_pin ? _pin.owner : OWNER);
+const cliConfigFile = () => path.join(os.homedir(), '.hermoso', 'config.json');
+export async function setPinnedProfile(profile, owner = '') {
+  const prof = !profile || profile === 'default' ? '' : String(profile);
+  if (mcpCtx.getStore()) return; // hosted: the pin lives on the api_keys row, resolved per request; nothing in-process to update
+  _pin = { profile: prof, owner: owner ? String(owner) : '' };
+  // Best-effort write-back to the CLI's own config, only when that file exists (a stdio server launched from an IDE
+  // has none, and must not create one). A failed write never fails the switch: the server-side pin already took.
+  try {
+    const f = cliConfigFile(); const cfg = JSON.parse(await readFile(f, 'utf8'));
+    if (!cfg || typeof cfg !== 'object') return;
+    cfg.profile = prof; if (_pin.owner) cfg.owner = _pin.owner; else delete cfg.owner;
+    await writeFile(f, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  } catch { /* no CLI config here */ }
+}
 // The env-var prefix THIS build reads. tools.mjs is byte-identical across the two twins, so it cannot
 // hardcode either name when it tells a user which variables to set — it asks its own client.
 export const ENV_PREFIX = 'HERMOSO';
@@ -53,8 +78,8 @@ function headers(extra = {}) {
   // is invisible because it succeeds. stdio/CLI keeps the env fallback: there the process and the caller are the
   // same person. Presence of the ctx store IS "remote" (see isRemote below).
   // 'default' is the CLI's old placeholder, not a pin — sending it overrode use_brand on every call (2026-09-04).
-  const prof = ctx ? (ctx.profile || '') : (PROFILE === 'default' ? '' : PROFILE); // omit entirely when unpinned so the key's saved brand wins server-side
-  const own = ctx ? (ctx.owner || '') : OWNER; // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
+  const prof = ctx ? (ctx.profile || '') : pinnedProfile(); // omit entirely when unpinned so the key's saved brand wins server-side
+  const own = ctx ? (ctx.owner || '') : pinnedOwner(); // the wire name is x-hermoso-owner on BOTH twins — it is the server's header, not a brand
   const tool = toolCtx.getStore()?.tool || '';
   const h = { 'Content-Type': 'application/json', ...(prof ? { 'x-heist-user': prof } : {}), ...(own ? { 'x-hermoso-owner': own } : {}), ...(tool ? { 'x-hermoso-tool': tool } : {}), ...extra };
   // AN IN-PROCESS SELF-CALL IS NOT THE CUSTOMER DOING SOMETHING. Serving a hosted session makes this process call
@@ -248,7 +273,7 @@ export async function storeSuffix() {
     // the fallback when an older server has no /api/workspace. A hosted call has no such fallback and must throw:
     // guessing `bare` on a failed read is how the anchor brand gets overwritten, and a FAILED READ IS NOT EMPTY.
     try { _suffixMemo = await fetchStoreSuffix(); }
-    catch { _suffixMemo = PROFILE && PROFILE !== 'default' ? PROFILE : ''; }
+    catch { _suffixMemo = pinnedProfile(); }
   }
   return _suffixMemo;
 }
@@ -418,4 +443,4 @@ export async function toRef(srcOrPath) {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
-export const authState = () => ({ apiBase: API_BASE, hasToken: !!TOKEN, profile: PROFILE, owner: OWNER });
+export const authState = () => ({ apiBase: API_BASE, hasToken: !!TOKEN, profile: pinnedProfile(), owner: pinnedOwner() });

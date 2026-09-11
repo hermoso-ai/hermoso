@@ -79,7 +79,7 @@ export const TOOL_PROVIDER_RULES = [
   [/linkedin/, 'linkedin'],
   // ── Meta: ads management AND FB/IG posting are one connector ([[meta-integration]]). Threads is separate. ──
   [/^threads_|_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
-  [/_meta_|^meta_|_meta$|instagram|whatsapp/, 'meta'],
+  [/_meta_|^meta_|_meta$|instagram|whatsapp|messenger/, 'meta'], // messenger: Page marketing messages ride the Meta connector (2026-09-07)
   // ── analytics / measurement, each its own connection ──
   [/_analytics_|^analytics_(realtime|report)$|analytics_compatibility|analytics_stream/, 'google_analytics'],
   [/mixpanel/, 'mixpanel'],
@@ -88,6 +88,12 @@ export const TOOL_PROVIDER_RULES = [
   [/bing_webmaster/, 'bing_webmaster'],
   [/posthog/, 'posthog'],
   [/amplitude/, 'amplitude'],
+  // Stripe and HubSpot shipped 2026-09-09 with 21 tools and NO pattern here, so every one of them sat outside
+  // connector scoping: they were offered to a workspace with no Stripe key and no HubSpot grant, and the site
+  // channel pages counted them as 0 tools. Both are the brand's OWN account, not ours — none of these names
+  // collide with Hermoso billing, which is buy_credits / billing_status / upgrade_plan and never says "stripe".
+  [/stripe/, 'stripe'],
+  [/hubspot/, 'hubspot'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],

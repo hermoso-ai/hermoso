@@ -4,7 +4,7 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders} from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -3275,13 +3275,23 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // server always writes both fields rather than leaving an omitted one alone.
     if (hit) {
       await apiPost('/api/keys/brand', { profileId: hit.id });
+      // THE PROCESS PIN MOVES WITH THE KEY PIN (2026-09-09). The stdio/CLI twin kept sending the profile it was
+      // launched with as x-heist-user on every later call, and the server ranks that header above the key's pin —
+      // so the switch "took" on the api_keys row and nothing else ever saw it (a live Stripe key was overwritten on
+      // the wrong brand). Hosted is a no-op here: its pin is read off the key on every request.
+      await setPinnedProfile(hit.id, '');
       forgetWorkspaceScope(); // the store namespace just changed server-side — a memo from before the switch would write the OLD brand
+      // THE READ-BACK IS THE SERVER'S, NEVER THE REQUEST'S. /api/workspace resolves exactly the way every tool call
+      // will; if it does not name the brand we just pinned, the switch did not take and saying otherwise is the bug.
+      const w = await apiGet('/api/workspace').catch(() => null);
+      const took = w && (hit.id === 'default' ? (!w.profileId || w.profileId === 'default' || w.storeSuffix === '') : String(w.profileId) === String(hit.id)) && !w.shared;
+      if (!took) return { content: [{ type: 'text', text: `The switch to ${hit.name} (${hit.id}) did NOT take: after pinning, the server still resolves this connection to ${w ? `profile ${w.profileId || 'default'}${w.shared ? ' (a shared workspace)' : ''}` : 'an unreadable workspace'}. Nothing was changed on that brand. If this is a CLI, an exported ${ENV_PREFIX}_PROFILE / ${ENV_PREFIX}_OWNER in your shell is overriding the key's pin — unset it and try again.` }], isError: true };
       // The roster was gated to the workspace this SESSION started in; the workspace just moved, so re-gate it.
       const _rg = await regateForWorkspace(ctx);
       const _rgNote = _rg && _rg.providers
         ? ` ${_rg.providers.length} connector(s) here — the tool roster has been re-scoped to them.`
         : '';
-      return ok(`Now acting on ${hit.name} (${hit.id}) — brand, memory, renders and Library all scope to it.${_rgNote}`, { ok: true, brand: hit, shared: false });
+      return ok(`Now acting on ${hit.name} (${hit.id}) — the server confirms it (workspace profile ${w.profileId || 'default'}). Brand, memory, renders and Library all scope to it.${_rgNote}`, { ok: true, brand: hit, shared: false, readBack: { profileId: w.profileId || 'default', storeSuffix: w.storeSuffix || '' } });
     }
     // A SHARED WORKSPACE IS SWITCHED INTO THE SAME WAY. It used to need two environment variables and a restart,
     // which the hosted connector cannot do at all — so a teammate on Claude.ai saw an empty workspace and a remedy
@@ -3293,7 +3303,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const sh = shared.find(w => String(w.profileUuid || '').toLowerCase() === want || String(w.name || '').toLowerCase() === want);
     if (sh) {
       await apiPost('/api/keys/brand', { profileId: sh.profileUuid, ownerAccountId: sh.ownerAccountId });
+      await setPinnedProfile(sh.profileUuid, sh.ownerAccountId);
       forgetWorkspaceScope(); // a shared workspace re-keys to BARE — re-resolve rather than carry the previous brand's suffix
+      const w = await apiGet('/api/workspace').catch(() => null);
+      if (!w || !w.shared || String(w.profileId) !== String(sh.profileUuid)) return { content: [{ type: 'text', text: `The switch to ${sh.name || 'that shared workspace'} did NOT take: after pinning, the server still resolves this connection to ${w ? `profile ${w.profileId || 'default'}${w.shared ? '' : ' on your own account'}` : 'an unreadable workspace'}. Nothing was changed there.` }], isError: true };
       // Same re-gate as the own-brand branch: a shared workspace has its OWN connectors, and the roster was gated
       // to the one this session started in.
       await regateForWorkspace(ctx);
@@ -4239,7 +4252,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       locationId: z.string().optional().describe("GOOGLE BUSINESS PROFILE — which listing, e.g. 'locations/123' from list_business_locations. Needed when the account manages more than one storefront; it is never chosen for the user."),
       visibility: z.enum(['public', 'unlisted', 'private', 'draft']).optional().describe("how it should be published — DEFAULT 'public' (live). Only pass something else if the user explicitly asked to stage/hide it. Not every channel supports every value; an impossible combination is refused when you schedule it, with the reason."),
       visibilityByChannel: z.record(z.string()).optional().describe('override visibility for one channel, e.g. { "tiktok": "draft" } to go live everywhere but stage TikTok for review'),
-      optimizeCopy: z.boolean().optional().describe('RECOMMENDED when one caption goes to several channels: fit the shared caption to each channel’s own rules at publish time wherever no per-channel caption was written — YouTube gets a keyword title, a structured multi-paragraph description and search tags; Instagram/TikTok hashtags; LinkedIn longer; X/Bluesky short; Pinterest keyword-rich. The angle and every claim stay the author’s; a channel with its own caption is left exactly as written. Off by default so nobody’s words are rewritten unasked.'),
+      optimizeCopy: z.boolean().optional().describe('RECOMMENDED when one caption goes to several channels: fit the shared caption to each channel’s own rules when you schedule it (the fitted caption is stored on the scheduled post, so what you scheduled is what publishes) wherever no per-channel caption was written — YouTube gets a keyword title, a structured multi-paragraph description and search tags; Instagram/TikTok hashtags; LinkedIn longer; X/Bluesky short; Pinterest keyword-rich. The angle and every claim stay the author’s; a channel with its own caption is left exactly as written. Off by default so nobody’s words are rewritten unasked.'),
     },
     outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), label: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -4279,7 +4292,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       at: z.string().optional().describe('the new time — ISO timestamp (2026-08-05T09:00:00Z) or epoch milliseconds. Must be in the future, at most 365 days out.'),
       message: z.string().optional().describe('replace the caption used for every channel that has no override'),
       captions: z.record(z.string()).optional().describe('replaces the WHOLE per-channel caption map — send every override you want to keep, not just the new one'),
-      optimizeCopy: z.boolean().optional().describe('fit the shared caption to each channel’s own rules at publish time wherever no per-channel caption was written (YouTube keyword title + structured description + tags, Instagram/TikTok hashtags, LinkedIn longer, X/Bluesky short, Pinterest keyword-rich); a channel with its own caption is left exactly as written. Send false to switch it off on this item.'),
+      optimizeCopy: z.boolean().optional().describe('fit the shared caption to each channel’s own rules when you schedule it (the fitted caption is stored on the scheduled post, so what you scheduled is what publishes) wherever no per-channel caption was written (YouTube keyword title + structured description + tags, Instagram/TikTok hashtags, LinkedIn longer, X/Bluesky short, Pinterest keyword-rich); a channel with its own caption is left exactly as written. Send false to switch it off on this item.'),
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).optional().describe('replaces the channel list'),
       imageUrl: z.string().optional().describe('swap the image; "" removes it'),
       videoUrl: z.string().optional().describe('swap the video; "" removes it'),
@@ -9157,6 +9170,179 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const rows = (d.profiles || []).slice(0, 40).map(pr => `• ${pr.distinctId} — ${Object.entries(pr.properties || {}).slice(0, 6).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')}`);
     return ok([head, ...rows, d.note || '', d.pageNote || ''].filter(Boolean).join('\n'), d);
   }));
+  // ---------- Stripe (2026-09-09): the brand's OWN revenue, read-only via a restricted key ----------
+  server.registerTool('stripe_report', {
+    title: 'Stripe revenue report',
+    description: "Revenue from the brand's OWN Stripe account: gross, refunds, net and succeeded-charge count per day/week/month, new customers in the window, and active subscriptions + MRR where the key can read them. This is the money side of the loop — read an ad, a hook or a launch against real revenue instead of clicks. Default window is the last 30 days; a window with no charges answers a real zero, not a failed read. Read-only, never moves money, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe: paste a restricted key from Developers ▸ Restricted keys).",
+    inputSchema: {
+      since: z.string().optional().describe('YYYY-MM-DD (default 30 days ago)'),
+      until: z.string().optional().describe('YYYY-MM-DD (default today)'),
+      granularity: z.enum(['day', 'week', 'month']).optional().describe('default day'),
+      currency: z.string().optional().describe('ISO code to isolate one currency, e.g. USD; omit to sum every currency as-is'),
+    },
+    outputSchema: { ok: z.boolean().optional(), since: z.string().optional(), until: z.string().optional(), granularity: z.string().optional(), currencies: z.array(z.string()).optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), subscriptions: z.any().optional(), capped: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/stripe/report', a);
+    return ok([d.note, ...(d.rows || []).map(r => `${r.period}: gross ${r.gross}, refunds ${r.refunds}, net ${r.net}, ${r.charges} charge(s), ${r.newCustomers} new customer(s)`)].filter(Boolean).join('\n'), d);
+  }));
+  server.registerTool('list_stripe_customers', {
+    title: 'List Stripe customers',
+    description: "Recent customers on the brand's OWN Stripe account — email, name, created, currency, delinquent — newest first, or one customer by exact email. Read-only, free. Needs Stripe connected.",
+    inputSchema: { email: z.string().optional().describe('exact email match'), limit: z.number().optional().describe('1–100, default 25'), after: z.string().optional().describe('pagination cursor: the last id of the previous page') },
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), customers: z.array(z.any()).optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/stripe/customers', a);
+    return ok(d.count ? `${d.count} customer(s):\n${d.customers.map(c => `• ${c.email || c.name || c.id} — ${String(c.created).slice(0, 10)}${c.currency ? ` · ${c.currency}` : ''}${c.delinquent ? ' · delinquent' : ''} (${c.id})`).join('\n')}${d.hasMore ? '\n(more: pass after=' + d.customers[d.customers.length - 1].id + ')' : ''}` : d.note, d);
+  }));
+  server.registerTool('list_stripe_charges', {
+    title: 'List Stripe charges',
+    description: "Recent charges on the brand's OWN Stripe account — amount, currency, status, refunds, customer email, description — newest first, optionally for one customer. Read-only, free. Needs Stripe connected.",
+    inputSchema: { customerId: z.string().optional().describe('a Stripe customer id (cus_…)'), limit: z.number().optional().describe('1–100, default 25'), after: z.string().optional().describe('pagination cursor: the last id of the previous page') },
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), charges: z.array(z.any()).optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/stripe/charges', a);
+    return ok(d.count ? `${d.count} charge(s):\n${d.charges.map(c => `• ${String(c.created).slice(0, 10)} ${c.amount} ${c.currency} ${c.status}${c.amountRefunded ? ` (refunded ${c.amountRefunded})` : ''} — ${c.customerEmail || c.customer || 'no customer'}${c.description ? ` · ${c.description}` : ''}`).join('\n')}${d.hasMore ? '\n(more: pass after=' + d.charges[d.charges.length - 1].id + ')' : ''}` : d.note, d);
+  }));
+  // ---------- Stripe, the full surface (2026-09-09): reads, and writes that confirm on a live key ----------
+  server.registerTool('list_stripe_subscriptions', {
+    title: 'list stripe subscriptions',
+    description: "Subscriptions on the brand's OWN Stripe account with each item's price in MAJOR units (19.00 means $19.00), interval and quantity, and the MRR each contributes. With NO status it returns everything that counts toward MRR — active + trialing + past_due — and says so; pass status all, canceled, unpaid, incomplete, incomplete_expired or paused for the rest, or filter by customer or price. Read-only, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { status: z.string().optional(), customerId: z.string().optional(), priceId: z.string().optional(), limit: z.number().optional(), after: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/stripe/subscriptions', a); return ok(d.count ? `${d.note}\n${d.subscriptions.map(x => `• ${x.id} ${x.status} — ${x.customerEmail || x.customer}: ${x.items.map(i => `${i.quantity}×${i.amount == null ? '?' : i.amount.toFixed(2)} ${i.currency}/${i.interval || 'once'}${i.nickname ? ` (${i.nickname})` : ''}`).join(', ')} · MRR ${x.mrr}${x.cancelAtPeriodEnd ? ' · cancels at period end' : ''}`).join('\n')}` : d.note, d); }));
+  server.registerTool('list_stripe_invoices', {
+    title: 'list stripe invoices',
+    description: "Invoices on the brand's Stripe account, newest first: number, status (draft, open, paid, uncollectible, void), amount due and paid, customer email, dates and the hosted invoice link; filter by status or customer. Read-only, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { status: z.string().optional(), customerId: z.string().optional(), limit: z.number().optional(), after: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/stripe/invoices', a); return ok(d.count ? `${d.count} invoice(s):\n${d.invoices.map(i => `• ${i.number || i.id} ${i.status} — ${i.amountPaid}/${i.amountDue} ${i.currency} — ${i.customerEmail || i.customer} — ${i.created.slice(0, 10)}${i.hostedInvoiceUrl ? ` ${i.hostedInvoiceUrl}` : ''}`).join('\n')}${d.hasMore ? '\n(more: pass after=' + d.invoices[d.invoices.length - 1].id + ')' : ''}` : d.note, d); }));
+  server.registerTool('list_stripe_products', {
+    title: 'list stripe products',
+    description: "Products on the brand's Stripe account with their active prices (amount, currency, one-time or recurring interval), which is what create_stripe_payment_link and create_stripe_subscription take. active:false lists archived products too. Read-only, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { active: z.boolean().optional(), limit: z.number().optional(), after: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/stripe/products', a); return ok(d.count ? `${d.count} product(s):\n${d.products.map(p => `• ${p.name} (${p.id})${p.active ? '' : ' · archived'}: ${p.prices.map(x => `${x.id} ${x.amount == null ? '?' : x.amount.toFixed(2)} ${x.currency}${x.interval ? '/' + x.interval : ''}${x.nickname ? ` (${x.nickname})` : ''}`).join(', ') || 'no active price'}`).join('\n')}${d.hasMore ? '\n(more: pass after=' + d.products[d.products.length - 1].id + ')' : ''}` : d.note, d); }));
+  server.registerTool('stripe_balance', {
+    title: 'stripe balance',
+    description: "The brand's Stripe balance (available and pending, per currency) and the most recent payouts with status and arrival date. Read-only, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { limit: z.number().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/stripe/balance', a); return ok(`${d.note}\n${(d.payouts || []).map(p => `• ${p.arrivalDate} ${p.amount} ${p.currency} ${p.status} (${p.id})`).join('\n')}`, d); }));
+  server.registerTool('list_stripe_refunds', {
+    title: 'list stripe refunds',
+    description: "Refunds on the brand's Stripe account, newest first: amount, status, reason and the charge refunded; filter by charge. Read-only, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { chargeId: z.string().optional(), limit: z.number().optional(), after: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/stripe/refunds', a); return ok(d.count ? `${d.count} refund(s):\n${d.refunds.map(r => `• ${r.created.slice(0, 10)} ${r.amount} ${r.currency} ${r.status}${r.reason ? ` (${r.reason})` : ''} on ${r.charge} (${r.id})`).join('\n')}` : d.note, d); }));
+  server.registerTool('list_stripe_coupons', {
+    title: 'list stripe coupons',
+    description: "Coupons on the brand's Stripe account: percent or amount off, duration, validity and redemptions. Read-only, free. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { limit: z.number().optional(), after: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/stripe/coupons', a); return ok(d.count ? `${d.count} coupon(s):\n${d.coupons.map(c => `• ${c.id}${c.name ? ` ${c.name}` : ''}: ${c.percentOff != null ? c.percentOff + '% off' : c.amountOff + ' ' + c.currency + ' off'}, ${c.duration}${c.durationInMonths ? ' ' + c.durationInMonths + ' months' : ''}${c.valid ? '' : ' · no longer valid'} · redeemed ${c.timesRedeemed}${c.maxRedemptions ? '/' + c.maxRedemptions : ''}`).join('\n')}` : d.note, d); }));
+  server.registerTool('create_stripe_product', {
+    title: 'create stripe product',
+    description: "Create a product on the brand's Stripe account together with its default price: name, optional description, `amount` in MAJOR units — 19 or 19.00 both mean $19.00, and a zero-decimal currency like JPY is whole — a 3-letter currency, and an optional recurring interval (day, week, month, year) with intervalCount. Returns both ids, read back. On a LIVE key it shows what it is about to create and needs confirm:true; on a test key it just does it. Idempotent on its arguments. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { name: z.string(), description: z.string().optional(), amount: z.number().describe('MAJOR units — 19 or 19.00 is $19.00, never 1900'), currency: z.string(), interval: z.string().optional(), intervalCount: z.number().optional(), nickname: z.string().optional(), metadata: z.record(z.any()).optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/product', a); return ok(d.note, d); }));
+  server.registerTool('create_stripe_price', {
+    title: 'create stripe price',
+    description: "Add a price to an existing Stripe product: `amount` in MAJOR units (19 or 19.00 is $19.00, never 1900), currency, optional recurring interval and intervalCount, optional nickname. Read back. LIVE key: confirm:true after showing the preview. Idempotent on its arguments. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { productId: z.string(), amount: z.number().describe('MAJOR units — 19 or 19.00 is $19.00, never 1900'), currency: z.string(), interval: z.string().optional(), intervalCount: z.number().optional(), nickname: z.string().optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/price', a); return ok(d.note, d); }));
+  server.registerTool('create_stripe_payment_link', {
+    title: 'create stripe payment link',
+    description: "Create a shareable Stripe Payment Link: for ONE price pass priceId (price_…) with an optional quantity; for several pass lineItems: [{priceId, quantity}]. Optionally redirect to afterCompletionUrl when paid. Returns the URL. LIVE key: confirm:true after showing the preview. Idempotent on its arguments. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { priceId: z.string().optional().describe('one price — the shorthand for a single line item'), quantity: z.number().optional(), lineItems: z.array(z.object({ priceId: z.string(), quantity: z.number().optional() })).optional().describe('several prices at once; use instead of priceId'), afterCompletionUrl: z.string().optional(), metadata: z.record(z.any()).optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/payment-link', a); return ok(d.note, d); }));
+  server.registerTool('create_stripe_coupon', {
+    title: 'create stripe coupon',
+    description: "Create a Stripe coupon: exactly one of percentOff (1–100) or amountOff (major units) + currency; duration once (default), repeating (with durationInMonths) or forever; optional name, id and maxRedemptions. Read back. LIVE key: confirm:true after showing the preview. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { name: z.string().optional(), id: z.string().optional(), percentOff: z.number().optional(), amountOff: z.number().optional(), currency: z.string().optional(), duration: z.string().optional(), durationInMonths: z.number().optional(), maxRedemptions: z.number().optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/coupon', a); return ok(d.note, d); }));
+  server.registerTool('create_stripe_customer', {
+    title: 'create stripe customer',
+    description: "Create a Stripe customer by email (optional name, phone, description, metadata). If a customer with that email already exists it is returned instead and nothing is created — pass allowDuplicate:true to create a second one on purpose. LIVE key: confirm:true after showing the preview. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { email: z.string(), name: z.string().optional(), phone: z.string().optional(), description: z.string().optional(), metadata: z.record(z.any()).optional(), allowDuplicate: z.boolean().optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/customer', a); return ok(d.note, d); }));
+  server.registerTool('create_stripe_subscription', {
+    title: 'create stripe subscription',
+    description: "Subscribe a Stripe customer (cus_…) to a price (price_…), optional quantity and trialDays. THIS CHARGES THE CUSTOMER'S SAVED PAYMENT METHOD when there is no trial, so it ALWAYS needs confirm:true (test keys included) after you show the user exactly what will be created. Read back; an INCOMPLETE status means no chargeable card is on file. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { customerId: z.string(), priceId: z.string(), quantity: z.number().optional(), trialDays: z.number().optional(), metadata: z.record(z.any()).optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/subscription', a); return ok(d.note, d); }));
+  server.registerTool('cancel_stripe_subscription', {
+    title: 'cancel stripe subscription',
+    description: "Cancel a Stripe subscription: at the end of the current period by default (the customer keeps access until then), or immediately:true to end it now. ALWAYS needs confirm:true, test keys included. The read-back distinguishes the two — a period-end cancel reports the date it will end and the status it keeps until then, an immediate one reports status canceled. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { subscriptionId: z.string(), immediately: z.boolean().optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/subscription/cancel', a); return ok(d.note, d); }));
+  server.registerTool('refund_stripe_charge', {
+    title: 'refund stripe charge',
+    description: "Refund a Stripe charge (ch_… or a pi_… payment intent): the full refundable amount, or a partial `amount` in major units; optional reason duplicate / fraudulent / requested_by_customer. ALWAYS needs confirm:true, test keys included. Read back. Needs Stripe connected (Settings ▸ Connectors ▸ Stripe).",
+    inputSchema: { chargeId: z.string(), amount: z.number().optional(), reason: z.string().optional(), confirm: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/stripe/refund', a); return ok(d.note, d); }));
+  // ---------- HubSpot (2026-09-09): the brand's OWN CRM — contacts, an upsert by email, lead forms → contacts, deals ----------
+  server.registerTool('list_hubspot_contacts', {
+    title: 'List or search HubSpot contacts',
+    description: "Contacts from the brand's OWN HubSpot CRM, newest first — email, name, lifecycle stage, lead status, created date, original source — or a search by email / first name / last name (whole-token match, wildcards allowed). Read-only, free. Needs HubSpot connected (Settings ▸ Connectors ▸ HubSpot).",
+    inputSchema: { search: z.string().optional().describe('email or name to search for'), limit: z.number().optional().describe('1–100, default 25'), after: z.string().optional().describe('pagination cursor from the previous page') },
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), contacts: z.array(z.any()).optional(), after: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/hubspot/contacts', a);
+    return ok(d.count ? `${d.count} contact(s):\n${d.contacts.map(c => `• ${c.email || '(no email)'} ${[c.firstName, c.lastName].filter(Boolean).join(' ')}${c.lifecycleStage ? ` · ${c.lifecycleStage}` : ''}${c.leadStatus ? ` · ${c.leadStatus}` : ''}${c.source ? ` · ${c.source}` : ''} (${c.id})`).join('\n')}${d.after ? '\n(more: pass after=' + d.after + ')' : ''}` : d.note, d);
+  }));
+  server.registerTool('create_hubspot_contact', {
+    title: 'Create or update a HubSpot contact',
+    description: "Create a contact in the brand's HubSpot by email, or UPDATE the contact that already has that email — HubSpot's duplicate answer carries the existing id, so this is an UPSERT and never makes a twin. Optional firstname, lastname, phone, company, website, lifecyclestage, hs_lead_status, plus any other writable contact property in `properties` (by internal name). The contact is READ BACK after the write; the reply says created or updated. Free. Needs HubSpot connected.",
+    inputSchema: { email: z.string().describe('the contact email — the key HubSpot de-duplicates on'), firstname: z.string().optional(), lastname: z.string().optional(), phone: z.string().optional(), company: z.string().optional(), website: z.string().optional(), lifecyclestage: z.string().optional(), hs_lead_status: z.string().optional(), properties: z.record(z.any()).optional().describe('any other writable contact properties, by internal name') },
+    outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), contact: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/hubspot/contact', a); return ok(d.note, d); }));
+  server.registerTool('sync_leads_to_hubspot', {
+    title: 'Push lead-form leads into HubSpot',
+    description: "Push the leads collected by the brand's Meta and LinkedIn LEAD FORMS into HubSpot as contacts. Each lead is upserted by email with lead status NEW and the platform + form name written into the contact's Message property (a default HubSpot property, so no schema scope is needed). Synced lead ids are remembered per workspace, so a re-run, a retry or a second agent never creates twins. Reports created / updated / already-synced / no-email per platform; a platform that is not connected is REPORTED, not fatal. dryRun:true lists what would be synced and writes nothing. Free. Needs HubSpot connected, plus Meta and/or LinkedIn for the leads.",
+    inputSchema: { since: z.string().optional().describe('ISO date; default 7 days ago'), dryRun: z.boolean().optional().describe('list what would be synced and write nothing') },
+    outputSchema: { ok: z.boolean().optional(), dryRun: z.boolean().optional(), since: z.string().optional(), gathered: z.number().optional(), perPlatform: z.any().optional(), unavailable: z.any().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/hubspot/sync-leads', a);
+    return ok(`${d.note}\n${(d.results || []).slice(0, 40).map(r => `• ${r.key}: ${r.action}${r.email ? ` ${r.email}` : ''}${r.contactId ? ` → ${r.contactId}` : ''}${r.error ? ` (${r.error})` : ''}`).join('\n')}`, d);
+  }));
+  server.registerTool('hubspot_deals_report', {
+    title: 'HubSpot deals report',
+    description: "Deals from the brand's HubSpot created in the window (default the last 90 days): count and amount by stage (labels resolved through the deal pipelines, closed-won recognised from the stage's own metadata), by original source, a monthly created / closed-won series, and totals. Capped at 2,000 deals and says so. Read-only, free. Needs HubSpot connected.",
+    inputSchema: { since: z.string().optional().describe('YYYY-MM-DD, default 90 days ago'), until: z.string().optional().describe('YYYY-MM-DD, default today') },
+    outputSchema: { ok: z.boolean().optional(), since: z.string().optional(), until: z.string().optional(), byStage: z.array(z.any()).optional(), bySource: z.array(z.any()).optional(), monthly: z.array(z.any()).optional(), totals: z.any().optional(), capped: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/hubspot/deals/report', a);
+    return ok([d.note, `By stage: ${(d.byStage || []).map(x => `${x.pipeline ? x.pipeline + ' / ' : ''}${x.stage} ${x.count} (${x.amount})`).join('; ') || 'none'}`, `By source: ${(d.bySource || []).map(x => `${x.source} ${x.count} (${x.amount})`).join('; ') || 'none'}`, `Monthly: ${(d.monthly || []).map(m => `${m.month} created ${m.created} (${m.createdAmount}), won ${m.closedWon} (${m.closedWonAmount})`).join('; ') || 'none'}`].join('\n'), d);
+  }));
   server.group('ads'); // end of the measurement block — back to paid-campaign management
   // ---------- Microsoft Advertising (Bing Ads): read + manage. Same spend law as Google — everything is created
   //            Paused, only an explicit confirm:true arms real money, and every narration comes from a READ-BACK.
@@ -10810,6 +10996,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platforms: z.array(z.enum(['ios_app', 'android_app', 'web'])).optional().describe('WHICH CHATGPT SURFACES THIS CAMPAIGN RUNS ON — OpenAI’s “Eligible platforms”: any of ios_app (the ChatGPT iOS app), android_app (the Android app) and web (chatgpt.com in a browser). OMIT IT to run on all three, which is the default and almost always right; naming a subset STOPS the ad serving everywhere else. There is no empty state — ChatGPT Ads refuses an empty list — so widening back means naming all three.'),
       customAudienceIds: z.array(z.string()).optional().describe('TARGET a CUSTOM AUDIENCE — ids from list_openai_ads_audiences (created with create_openai_ads_audience, then filled with members). Until 2026-08-12 an audience could be created AND uploaded and then pointed at nothing: this is the field that consumes them. Combines with geo — the ad reaches people in the named locations who are ALSO in these audiences.'),
       excludedCustomAudienceIds: z.array(z.string()).optional().describe('EXCLUDE custom audiences — same ids, opposite effect (suppressing existing customers, say). An id in BOTH lists is refused rather than resolved by a guess, because OpenAI does not document which side wins.'),
+      conversionEventSettingIds: z.array(z.string()).optional().describe('REQUIRED when biddingType is "conversions" (oCPC): exactly one active conversion-event-setting id from list_openai_ads_conversion_events, the event ChatGPT Ads optimises toward. Ignored for clicks/impressions bidding.'),
       startTime: z.number().optional().describe('unix seconds'), endTime: z.number().optional().describe('unix seconds'),
       adGroup: z.object({
         name: z.string(), description: z.string().optional(),
@@ -10904,6 +11091,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platforms: z.array(z.enum(['ios_app', 'android_app', 'web'])).optional().describe('REPLACES which ChatGPT surfaces the campaign runs on (ios_app / android_app / web). Wholesale like the rest of targeting: a patch that changes geo or audiences on a campaign that already restricts platforms is REFUSED by name rather than silently widening it back to every surface. There is no [] — name all three to go back to everywhere.'),
       customAudienceIds: z.array(z.string()).optional().describe('REPLACES the campaign’s targeted custom audiences. TARGETING IS REPLACED WHOLESALE, not merged — a patch that omits something the campaign already targets is REFUSED by name rather than silently dropping it, so restate it here or pass [] to clear it deliberately.'),
       excludedCustomAudienceIds: z.array(z.string()).optional().describe('REPLACES the campaign’s excluded custom audiences — same wholesale rule as customAudienceIds.'),
+      conversionEventSettingIds: z.array(z.string()).optional().describe('REPLACE the conversion-event-setting id a "conversions" campaign optimises toward (exactly one active id from list_openai_ads_conversion_events).'),
       contextHints: z.array(z.string()).optional().describe('REPLACES the existing list'),
       maxBid: z.number().optional(), billingEvent: z.enum(['click', 'impression']).optional().describe('required alongside maxBid — bidding is replaced wholesale'),
       bidStrategy: z.enum(['fixed_bid', 'maximize_clicks', 'maximize_conversions']).optional().describe('CHANGE HOW THIS AD GROUP BIDS (OpenAI’s “Maximize results”). BIDDING IS REPLACED WHOLESALE, so a patch that moves the bid without restating the strategy would DEMOTE a maximize_* ad group to a fixed bid, and one that sets a strategy without restating maxBid DELETES the cap — both are refused by name with what would have been lost.'),
@@ -17627,7 +17815,12 @@ function memoryNoteVerdict(text) {
   }, wrap(async ({ path, params }) => {
     const d = await apiGet('/api/sc/run', { __path: path, ...qp(params || {}) });
     const raw = JSON.stringify(d);
-    return ok(raw.length > 24000 ? raw.slice(0, 24000) + '\n… (truncated — narrow the query or use a dedicated search_* tool)' : raw); // no structuredContent: raw payloads can be huge, the text IS the result
+    const truncated = raw.length > 24000;
+    const text = truncated ? raw.slice(0, 24000) + '\n… (truncated — narrow the query or use a dedicated search_* tool)' : raw;
+    // THE PAYLOAD RIDES IN BOTH PLACES (2026-09-09). ok(text) with no data set structuredContent to {} — and a host that
+    // renders structuredContent over the text block (claude.ai does) showed a bare `{}` for a 40KB Instagram profile
+    // that had arrived intact in the text. Same bounded copy in structuredContent, so either rendering answers.
+    return ok(text, truncated ? { path, truncated: true, text } : { path, truncated: false, data: d });
   }));
 
   // ---------- brand onboarding ----------
