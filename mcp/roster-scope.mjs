@@ -131,10 +131,23 @@ export function toolProvider(name) {
 // Returns TRUE only when we KNOW the read succeeded AND we can attribute the tool to a provider AND that provider
 // is not connected. Every other answer is FALSE, i.e. keep it — which is properties 1 and 2 expressed as the
 // default rather than as two branches somebody could forget to write.
+// AN INSTAGRAM LOGIN CONNECTION SERVES PART OF THE META FAMILY (2026-09-12). Each tool below is filed under `meta`
+// by name, but its server route resolves an Instagram Login token when the brand has one (igStandaloneFor in
+// metaPublish, igGraphFor, igDmCtx, igAccountInsights, igEngage, the collab and audio readers). So a brand that
+// connected only Instagram, with no Facebook Page and no Meta connection, must still be offered them: before this it
+// could connect Instagram and then had no tool to post, reply, read its inbox or measure with. Only routes verified
+// to take the Login token are listed; a Page-only tool (ads, hashtag search, comment_on_meta_post) stays gated on meta.
+export const INSTAGRAM_LOGIN_TOOLS = new Set([
+  'post_to_meta', 'list_meta_posts', 'list_instagram_media', 'instagram_insights', 'meta_post_insights',
+  'list_meta_comments', 'reply_to_meta_comment', 'moderate_meta_comment', 'like_instagram',
+  'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
+  'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',
+]);
 export function toolHeldBackByConnectors(name, conn) {
   if (!conn || !conn.readOk) return false;                       // property 1 — fail OPEN on an unreadable store
   const p = toolProvider(name);
   if (p === null) return false;                                  // property 2 — unmapped is never held back
   const on = conn.connected instanceof Set ? conn.connected : new Set(conn.connected || []);
+  if (p === 'meta' && on.has('instagram') && INSTAGRAM_LOGIN_TOOLS.has(name)) return false;
   return !on.has(p);
 }
