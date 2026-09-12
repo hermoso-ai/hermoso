@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**823 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**824 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
@@ -171,7 +171,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 823 tools cover
+### What the 824 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -184,7 +184,7 @@ The workspace's **saved cast** is reusable: `list_creators` returns every saved 
 `save_creator` adds one, `delete_creator` drops one — re-pass a portrait to `generate_avatar` / `generate_video` /
 `recast_motion` and the SAME person stars in every ad, instead of a new face each render.
 Also `make_template_ad` (native HTML ad formats), `make_explainer`, `product_sizzle`, `make_thumbnail`,
-`remix_static`, `recast_motion`, `reframe_video`, `upscale_video`, `dub_video`, `change_voice`, `finish_video`,
+`clone_static`, `recast_motion`, `reframe_video`, `upscale_video`, `dub_video`, `change_voice`, `finish_video`,
 `fix_beat`, `stitch_video`, `clip_video`, `post_edit`, plus `plan_variations` + `score_ad` to fan out and rank.
 **Length is yours to set:** pass `durationSeconds` to `plan_ad` and the storyboard is *authored* to it — a length
 that fits one clip of the render model renders as a single continuous take, longer is stitched from acts (on a
