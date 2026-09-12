@@ -16098,6 +16098,47 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Cut ${clips.length} ranked clip${clips.length === 1 ? '' : 's'}  [job ${r.jobId}]:\n${lines.join('\n')}${capLine}${trunc}${capNote}`, r);
   }));
 
+  // ADD SUBTITLES TO ANY VIDEO (2026-09-12). A plain comment, not a "── SECTION ──" header: build-docs groups tools by
+  // those headers, and this tool belongs to the section clip_video is in.
+  // Dave: "Do we have functionality to add subtitles to our videos or others? … it should be possible to customize the
+  // style of them as well". Burned subtitles existed only INSIDE clip_video and make_explainer; a finished render, an
+  // upload or someone else's video had no way to get them. The look is the same textStyle vocabulary render_ad speaks.
+  server.registerTool('add_subtitles', {
+    title: 'Add subtitles to a video',
+    description: "Burn subtitles into ANY existing video and get the .srt too. It transcribes the speech and burns short readable lines onto the whole video; nothing is cut or re-rendered. Set textStyle only when the user describes a look; with none, white sentence-case text with a thin outline sits in the bottom safe band. Timing is approximate (per spoken sentence), not word-level sync. burn:false returns only the .srt. Takes a /generated/ URL, a direct .mp4/.mov/.webm, or a YouTube/Vimeo/Loom-style link; not TikTok, Instagram or Facebook. No speech is refused and refunded. Runs in the background and lands in the Library.",
+    inputSchema: {
+      video: z.string().describe('the video to subtitle'),
+      textStyle: z.union([
+        z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']),
+        z.object({
+          preset: z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']).optional(),
+          font: z.enum(['sans', 'serif', 'elegant', 'condensed', 'hand']).optional(),
+          weight: z.number().optional(), size: z.union([z.enum(['s', 'm', 'l', 'xl']), z.number()]).optional(),
+          color: z.string().optional().describe('#hex'), background: z.string().optional().describe('none | pill | #hex box'),
+          position: z.enum(['top', 'center', 'lower', 'bottom']).optional(), textCase: z.enum(['as-is', 'upper', 'lower', 'title']).optional(),
+          italic: z.boolean().optional(), outline: z.boolean().optional(), shadow: z.boolean().optional(),
+          tilt: z.number().optional().describe('degrees, ±12'),
+        }),
+      ]).optional().describe('the look: a preset or overrides; omit for the default'),
+      burn: z.boolean().optional().describe('false = only the .srt'),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const r = await renderJob('subtitles', { video: a.video, textStyle: a.textStyle, burn: a.burn }, 'MCP subtitles');
+    if (r.stillRendering) return okVideo('', r); // resumable handle — get_job carries the result when it lands
+    const raw = r?.raw || {};
+    // THE HEADLINE IS THE READ-BACK: "burned" only when the returned file really carries the subtitles.
+    const head = raw.captionsBurned && raw.video
+      ? `Subtitles burned in (${raw.captionStyle || 'default'} look, approximate per-sentence timing, not word-level sync): ${abs(raw.video)}`
+      : 'No subtitled video came back — the subtitle file is below.';
+    const note = raw.captionNote ? `\nNOTE: ${raw.captionNote}` : '';
+    const trunc = raw.truncated ? `\nNOTE: only the first ${Math.round((raw.analyzedSeconds || 0) / 60)} min of ${Math.round((raw.sourceDuration || 0) / 60)} min was transcribed, so the subtitles stop there.` : '';
+    const srt = String(raw.srt || '');
+    const file = srt ? `\n\n.srt (${raw.cues || 0} lines):\n${srt.slice(0, 1500)}${srt.length > 1500 ? '\n…' : ''}` : '';
+    return ok(`${head}  [job ${r.jobId}]${note}${trunc}${file}`, r);
+  }));
+
   server.registerTool('make_explainer', {
     title: 'Make an explainer video',
     description: "Turn a TOPIC into a finished narrated explainer video. Writes a sectioned script, paints a BURST of pictures per section (about one every 1.5s — most of them one-detail edits of the frame before, so it reads as movement rather than a slideshow), narrates each section with TTS, holds each picture PERFECTLY STILL for its own slice of the narration (the motion is the CUT RATE — a slow move on a still shimmers), then composites the end card (and any on-screen text you asked for) with the Chrome+ffmpeg engine the ads use (text is never model-painted, so it never garbles). BURNED ON-SCREEN TEXT IS OFF BY DEFAULT — the narration carries the point and the pictures carry the story, so the film ships clean unless the user asks otherwise; `captions:true` adds held key points and `subtitles:true` adds narration-timed CAPS (see both). It is an image film WITH motion, not N video-model renders — that's what keeps it affordable. `style` picks the visual family: the default 'cinematic' is photoreal editorial; every other id is a STYLED, strictly non-photoreal look (illustrated / collage / clay / pixel …) that first renders ONE style-key image and then locks every scene to it, so the whole film holds one look. Cost at the default frame density: a ~130-credit hold for a 60s explainer on the default style, ~100 styled; `frameDensity:'lean'` roughly halves it and `'minimal'` (one picture per section) is ~30. All settle to the exact per-frame image + narration spend (a longer target = more sections = more). Takes SEVERAL minutes — one image render per frame; independent frames are painted concurrently, so it is far faster than the frame count suggests. Needs the writing model and a narration voice engine connected. NOT the tool for a short product ad — use render_ad or generate_video for those, and make_template_ad for the deterministic native formats.",
