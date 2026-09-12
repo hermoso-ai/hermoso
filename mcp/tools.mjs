@@ -2601,7 +2601,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const desc = String(h.description || '');
       let score = 0;
       if (q) {
-        const words = q.split(/[\s,]+/).map(expandQueryWord).filter(Boolean);
+        // A NAME-SHAPED ASK IS ALSO ITS WORDS (2026-09-12). Agents search the name they guess (list_meta_campaigns,
+        // update_meta_ad, edit_meta): kept as one literal token it matched nothing and filed a dead end, while its parts
+        // (meta + campaigns, update + meta) name real tools. The literal still scores first when it exists.
+        const words = q.split(/[\s,]+/).flatMap((r) => (r.includes('_') ? [r, ...r.split('_').filter((p) => p.length >= 2)] : [r])).map(expandQueryWord).filter(Boolean);
         const descLc = desc.toLowerCase();
         const nameTokens = name.split('_');
         let nameHits = 0, covered = 0;
@@ -18377,7 +18380,7 @@ function memoryNoteVerdict(text) {
       residual: z.any().optional().describe('source-branding sweep result ({clean, note})'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, cloneStaticHandler);
+  }, (a, extra) => cloneStaticHandler(a, extra)); // its OWN function object: the registry stamps each handler with one tool name, and a shared one ended up named remix_static for both
 
   server.registerTool('mine_angles', {
     title: 'Mine customer angles',
