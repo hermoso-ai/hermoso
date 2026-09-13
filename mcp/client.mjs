@@ -106,7 +106,8 @@ async function unwrap(res) {
     // `_viaApi` MARKS AN ERROR THAT ALREADY REACHED THE SERVER, so route() has already recorded it in the error
     // ledger with the tool name off x-hermoso-tool. wrap() reports ONLY the errors that lack this marker — a local
     // throw, a schema rejection, a socket reset — which is what stops the twins double-counting every 4xx.
-    throw Object.assign(new Error(msg), { status: res.status, _viaApi: true, ...(body?.connector ? { connector: body.connector } : {}) });
+    // `connectUrl` rides a not-connected 401 with the brand already in it, so a hint never rebuilds the link.
+    throw Object.assign(new Error(msg), { status: res.status, _viaApi: true, ...(body?.connector ? { connector: body.connector } : {}), ...(typeof body?.connectUrl === 'string' ? { connectUrl: body.connectUrl } : {}) });
   }
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
 }
