@@ -9898,7 +9898,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: z.string().describe('the headline — 3 to 50 characters, enforced'),
     body: z.string().describe('the description under the headline — 100 characters maximum, enforced'),
     targetUrl: z.string().describe('the landing page (must not block OAI-AdsBot / OAI-SearchBot in robots.txt)'),
-    imageUrl: z.string().optional().describe('public https URL of a STILL image — REQUIRED on every text ad (ChatGPT Ads refuses an ad with no creative.file_id unless the campaign is a product feed; measured 2026-09-06); a video URL is refused, this channel has no video format'),
+    imageUrl: z.string().optional().describe('public https URL of a STILL image — every text ad needs imageUrl OR fileId (ChatGPT Ads refuses an ad with no creative.file_id unless the campaign is a product feed; measured 2026-09-06); a video URL is refused, this channel has no video format'),
+    fileId: z.string().optional().describe('reuse an image ChatGPT Ads already holds: the fileId list_openai_ads_campaigns returns for an existing ad (list with adGroupId). Wins over imageUrl; use it to copy an ad exactly'),
     price: z.string().optional().describe('optional price string shown on the card'),
   });
   server.registerTool('list_openai_ads_campaigns', {
