@@ -5256,13 +5256,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channel_admin');
   server.registerTool('youtube_channel', {
     title: 'Get the connected YouTube channel',
-    description: 'Read the brand’s connected YouTube channel — title + subscriber / view / video counts (for reporting). Needs a connected YouTube channel.',
+    description: 'Read the brand’s connected YouTube channel — title + subscriber / view / video counts (for reporting), and whether CUSTOM THUMBNAILS are on (customThumbnails: enabled | needs_verification | unavailable | unknown). When they are not on, the reply carries YouTube’s own step-by-step to turn them on (a phone verification in YouTube Studio), so check this before promising a custom thumbnail. Needs a connected YouTube channel.',
     inputSchema: {},
-    outputSchema: { id: z.string().optional(), title: z.string().optional(), subscribers: z.string().optional(), views: z.string().optional(), videos: z.string().optional() },
+    outputSchema: { id: z.string().optional(), title: z.string().optional(), subscribers: z.string().optional(), views: z.string().optional(), videos: z.string().optional(), customThumbnails: z.string().optional(), customThumbnailsNote: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/youtube/channel', {});
-    return ok(`${d.title} — ${d.subscribers} subscribers, ${d.videos} videos, ${d.views} total views.`, d);
+    return ok(`${d.title} — ${d.subscribers} subscribers, ${d.videos} videos, ${d.views} total views.${d.customThumbnails && d.customThumbnails !== 'enabled' && d.customThumbnailsNote ? `\n${d.customThumbnailsNote}` : ''}`, d);
   }));
   // ── YOUTUBE: MEASURE + MANAGE (2026-07-30). We requested yt-analytics.readonly and youtube.force-ssl from day one
   // and shipped nothing that used them, so an agent could publish to YouTube and then neither measure nor manage it.
