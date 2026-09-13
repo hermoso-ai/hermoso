@@ -308,7 +308,10 @@ export async function connectedProviders() {
     if (!list) return { connected: new Set(), readOk: false }; // a shape we do not recognise is a failed read
     const offered = Array.isArray(r?.offered) ? new Set(r.offered.filter((p) => typeof p === 'string' && p)) : null; // null = server predates the field → fail open
     const gated = r?.gated && typeof r.gated === 'object' ? r.gated : {};
-    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated };
+    // connectLink: the app deep link for THIS brand with a {provider} slot, so a tool held back for a missing
+    // connection can hand the user the one-click link instead of only naming the Connectors page.
+    const connectLink = typeof r?.connectLink === 'string' && r.connectLink.includes('{provider}') ? r.connectLink : '';
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink };
   } catch { return { connected: new Set(), readOk: false }; }
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so

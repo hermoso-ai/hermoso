@@ -2066,7 +2066,15 @@ export const holdReasonText = (name, why, ctx = null) => {
     return `${name} is not available: Hermoso does not offer the "${prov}" connection yet${because}. There is nothing the user can connect, so do not point them at Settings ▸ Connectors and do not offer this capability.${reddit}`;
   }
   if (why === 'host_policy') return `${name} is not offered on this host (the host's own commerce policy). Use the Hermoso app or another client for it.`;
-  if (why === 'not_connected') return `${name} needs the "${toolProvider(name)}" connection and this workspace has not made it. Connect it under Settings ▸ Connectors in the Hermoso app${Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, toolProvider(name)) ? ', or right here with connect_connector if the user prefers' : ''}, then call again.`;
+  if (why === 'not_connected') {
+    // THE LINK BELONGS HERE TOO (2026-09-13, found live on a brand with no YouTube). A tool held back for a missing
+    // connection is answered by this sentence BEFORE any request reaches the server, so the brand-scoped link the
+    // server puts on its own 401 never arrived. The template comes from the same providers read that decided the hold.
+    const prov = toolProvider(name);
+    const isKey = Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, prov);
+    const tpl = typeof ctx?.conn?.connectLink === 'string' && ctx.conn.connectLink.includes('{provider}') ? ctx.conn.connectLink : 'https://app.hermoso.ai/?connect={provider}';
+    return `${name} needs the "${prov}" connection and this workspace has not made it. Connect it under Settings ▸ Connectors in the Hermoso app${isKey ? ', or right here with connect_connector if the user prefers' : `, or hand the user this one-click link: ${tpl.replace('{provider}', prov)} (it opens Hermoso on this brand and goes straight to the sign-in)`}, then call again.`;
+  }
   if (why === 'directory') return `${name} is outside what this Claude directory connection may run. Use the Hermoso app, or connect the unscoped server URL.`;
   return null;
 };
@@ -7707,6 +7715,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       campaignResourceName: z.string().optional().describe('full resource name, e.g. customers/{cid}/campaigns/{id}'),
       status: z.enum(['ENABLED', 'PAUSED', 'REMOVED']).describe('ENABLED = start spending; PAUSED = stop; REMOVED = permanent'),
       confirm: z.boolean().optional().describe('REQUIRED true to ENABLE (real spend) or to REMOVE (permanent)'),
+      confirmName: z.string().optional().describe('when archiving or removing: its EXACT name, as the unconfirmed call names it. Required when it has children or is live'),
+      confirmChildren: z.number().optional().describe('when archiving or removing: the exact number of children the unconfirmed call reported. Required when it has any'),
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), resourceName: z.string().optional(), status: z.string().optional(), verifiedStatus: z.string().optional(), note: z.string().optional() },
@@ -11301,6 +11311,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(),
       status: z.enum(['active', 'paused', 'archived']).describe('active = start spending; paused = stop; archived = permanent (not available at level "account")'),
       confirm: z.boolean().optional().describe('REQUIRED true to activate (real spend), to archive (irreversible), or for EITHER direction at level "account"'),
+      confirmName: z.string().optional().describe('when archiving or removing: its EXACT name, as the unconfirmed call names it. Required when it has children or is live'),
+      confirmChildren: z.number().optional().describe('when archiving or removing: the exact number of children the unconfirmed call reported. Required when it has any'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), object: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // destructive: the enum carries 'archived', which is terminal
@@ -11449,7 +11461,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/daily-spend-limit/delete', a))));
   server.registerTool('set_openai_ads_negative_keywords', {
-    title: 'Set ChatGPT Ads account negative keywords', description: 'REPLACE the account-level negative keywords on ChatGPT Ads — conversations matching them are ineligible for every campaign. Pass the COMPLETE list (this is a replace, not an add; [] clears it). The reply names the previous count so the user can see what changed.',
+    title: 'Set ChatGPT Ads account negative keywords', description: 'CURRENTLY UNAVAILABLE: OpenAI no longer serves account-level negative keywords. The live API answers "Invalid URL" (measured 2026-09-13) and the endpoint left its published ChatGPT Ads spec the same week, so nothing can be set through Hermoso or any other API client. Tell the user that plainly instead of retrying. When it did work it REPLACED the whole account list, and the API never offered a way to read the current one.',
     inputSchema: { keywords: z.array(z.string()) }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/negative-keywords', a))));
   server.registerTool('list_openai_ads_feeds', {
@@ -11667,6 +11679,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       adId: z.string().optional(),
       status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DRAFT']).describe('ACTIVE = start spending; PAUSED = stop; ARCHIVED = retire (Pinterest’s delete)'),
       confirm: z.boolean().optional().describe('REQUIRED true for ACTIVE (real spend) or ARCHIVED (irreversible retirement)'),
+      confirmName: z.string().optional().describe('when archiving or removing: its EXACT name, as the unconfirmed call names it. Required when it has children or is live'),
+      confirmChildren: z.number().optional().describe('when archiving or removing: the exact number of children the unconfirmed call reported. Required when it has any'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), status: z.string().optional(), verifiedStatus: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
@@ -12015,6 +12029,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       id: z.string(),
       status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DELETED']).describe('ACTIVE = start spending; PAUSED = stop; ARCHIVED = retire; DELETED = permanent, and blocked for 3h after any change'),
       confirm: z.boolean().optional().describe('REQUIRED true for ACTIVE (real spend), ARCHIVED and DELETED'),
+      confirmName: z.string().optional().describe('when archiving or removing: its EXACT name, as the unconfirmed call names it. Required when it has children or is live'),
+      confirmChildren: z.number().optional().describe('when archiving or removing: the exact number of children the unconfirmed call reported. Required when it has any'),
     },
     outputSchema: { id: z.string().optional(), kind: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
