@@ -9670,10 +9670,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('search_microsoft_ads_profiles', {
     title: 'Find Microsoft Advertising LinkedIn profile ids',
-    description: 'Find the LinkedIn profile ids Microsoft Advertising can target: a company (CompanyName), an Industry, a JobFunction, a JobSeniority or a JobTitle. A company is found with Microsoft’s own company search (3+ characters); the other types are matched against the profile list Microsoft publishes for that type. Read-only, free. Pass the ids to set_microsoft_ads_profile_targeting.',
+    description: 'Find the LinkedIn profile ids Microsoft Advertising can target: a company (CompanyName), an Industry or a JobFunction. A company is found with Microsoft’s own company search (3+ characters); industries and job functions are matched against the profile list Microsoft publishes for them. Microsoft publishes no lookup for JobTitle or JobSeniority ids, so those cannot be searched here; an id you already have can still be targeted. Read-only, free. Pass the ids to set_microsoft_ads_profile_targeting.',
     inputSchema: {
       accountId: z.string().optional().describe('Microsoft ad account id; omit to use the brand’s single shared account'),
-      profileType: z.enum(['CompanyName', 'Industry', 'JobFunction', 'JobSeniority', 'JobTitle']),
+      profileType: z.enum(['CompanyName', 'Industry', 'JobFunction']),
       query: z.string().describe('part of the name to find (3+ characters for a company)'),
       languageLocale: z.string().optional().describe('en (default), fr, de, it, pt-BR, es or zh-Hant'),
       limit: z.number().optional().describe('1-100, default 25'),
