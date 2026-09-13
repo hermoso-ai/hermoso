@@ -2709,11 +2709,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     }
     if (n === 'call_tool' || n === 'find_tools' || n === 'enable_tools') return { content: [{ type: 'text', text: `${n} is a roster tool; call it directly.` }], isError: true };
     const why = toolHoldReason(n, ctx);
-    if (why) reportDeadEnd(why, n, holdReasonText(n, why, ctx));
-    if (why === 'not_offered') return { content: [{ type: 'text', text: holdReasonText(n, why, ctx) }], isError: true };
-    if (why === 'host_policy') return { content: [{ type: 'text', text: `${n} is not offered on this host (the host's own commerce policy). Use the Hermoso app or another client for it.` }], isError: true };
-    if (why === 'not_connected') return { content: [{ type: 'text', text: `${n} needs the "${toolProvider(n)}" connection and this workspace has not made it. Connect it under Settings ▸ Connectors in the Hermoso app${Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, toolProvider(n)) ? ', or right here with connect_connector if the user prefers' : ''}, then call again.` }], isError: true };
-    if (why === 'directory') return { content: [{ type: 'text', text: `${n} is outside what this Claude directory connection may run. Use the Hermoso app, or connect the unscoped server URL.` }], isError: true };
+    // ONE sentence per hold, from holdReasonText. call_tool used to spell its own copies, so the connect link added there
+    // never reached claude.ai or ChatGPT, the two hosts that run held tools through here.
+    if (why) {
+      const t = holdReasonText(n, why, ctx);
+      reportDeadEnd(why, n, t);
+      if (t) return { content: [{ type: 'text', text: t }], isError: true };
+    }
     let input = args && typeof args === 'object' ? args : {};
     if (h.inputSchema) {
       const parsed = h.inputSchema.safeParse(input);
