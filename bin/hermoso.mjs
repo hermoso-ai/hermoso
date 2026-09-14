@@ -391,22 +391,36 @@ async function browserLogin(apiBase) {
   return await new Promise((resolve) => {
     let done = false;
     const finish = (val) => { if (done) return; done = true; try { server.close(); } catch {} resolve(val); };
+    // THE KEY NEVER RIDES A URL (2026-09-14). The app hands it back in the URL FRAGMENT, which a browser keeps out of
+    // history, logs and referers; this page reads the fragment and POSTs it to itself over the same loopback origin.
+    // An app that predates that still answers with ?key= on the query string, and that path is kept below.
+    const settle = (res, key, st) => {
+      const ok = st === state && /^hmk_[A-Za-z0-9_-]{20,}$/.test(key);
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(cliAuthPage(ok ? 'You’re signed in ✓' : 'Sign-in didn’t complete', ok ? 'Hermoso CLI is connected. You can close this tab and return to your terminal.' : 'Please close this tab and run the command again.'));
+      finish(ok ? key : null);
+    };
     const server = http.createServer((req, res) => {
       try {
         const u = new URL(req.url, 'http://127.0.0.1');
         if (u.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
-        const key = u.searchParams.get('key') || '';
-        const st = u.searchParams.get('state') || '';
-        const ok = st === state && /^hmk_[A-Za-z0-9_-]{20,}$/.test(key);
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end(cliAuthPage(ok ? 'You’re signed in ✓' : 'Sign-in didn’t complete', ok ? 'Hermoso CLI is connected. You can close this tab and return to your terminal.' : 'Please close this tab and run the command again.'));
-        finish(ok ? key : null);
+        if (u.pathname !== '/callback') { res.writeHead(404); return res.end(); }
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+          req.on('end', () => { let j = {}; try { j = JSON.parse(body || '{}'); } catch {} settle(res, String(j.key || ''), String(j.state || '')); });
+          return;
+        }
+        if (u.searchParams.has('key') || u.searchParams.has('error')) return settle(res, u.searchParams.get('key') || '', u.searchParams.get('state') || ''); // legacy query form
+        // Fragment form: nothing on the query string, the key is in location.hash. Relay it with a same-origin POST.
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(cliAuthRelayPage());
       } catch { try { res.writeHead(500); res.end('error'); } catch {} finish(null); }
     });
     server.on('error', () => finish(null));
     server.listen(0, '127.0.0.1', () => {
       const port = server.address().port;
-      const authUrl = `${apiBase}/?cliauth=1&port=${port}&state=${state}`;
+      const authUrl = `${apiBase}/?cliauth=1&recv=2&port=${port}&state=${state}`; // recv=2: hand the key back in the fragment
       console.log(`\nOpening your browser to sign in…\nIf it doesn’t open, paste this into your browser:\n  ${authUrl}\n`);
       openBrowser(authUrl);
     });
@@ -420,6 +434,14 @@ function openBrowser(url) {
     const args = plat === 'win32' ? ['/c', 'start', '', url] : [url];
     try { const c = spawn(cmd, args, { stdio: 'ignore', detached: true }); c.on('error', () => {}); c.unref(); } catch {}
   }).catch(() => {});
+}
+function cliAuthRelayPage() {
+  return `<!doctype html><meta charset=utf-8><title>Hermoso CLI</title><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f4ef;color:#1d1e1c;display:grid;place-items:center;min-height:100vh;margin:0"><p id=m>Finishing sign-in…</p><script>
+(function(){var h=new URLSearchParams(location.hash.slice(1));try{history.replaceState(null,'',location.pathname);}catch(e){}
+fetch('/callback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:h.get('key')||'',state:h.get('state')||''})})
+.then(function(r){return r.text()}).then(function(t){document.open();document.write(t);document.close();})
+.catch(function(){document.getElementById('m').textContent='Sign-in did not complete. Return to your terminal and run: hermoso auth login';});})();
+</script>`;
 }
 function cliAuthPage(title, body) {
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Hermoso CLI</title><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0e0e10;color:#f4f1ea;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0"><div style="text-align:center;max-width:420px;padding:32px"><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:700;letter-spacing:-.5px;margin-bottom:18px">hermoso<span style="color:#d9714e">.ai</span></div><h1 style="font-size:20px;margin:14px 0 8px;font-weight:600">${title}</h1><p style="color:#a7a29a;line-height:1.55;font-size:15px">${body}</p></div></body>`;

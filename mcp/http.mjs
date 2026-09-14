@@ -322,6 +322,12 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
       // the predicate can be corrected from evidence instead of from a hunch.
       if (entry.client) console.error(`[mcp-remote] client: ${entry.client}`);
       await server.connect(transport);
+      // A ONE-SHOT NUDGE FOR A HOST THAT SNAPSHOTS THE ROSTER (2026-09-14). ChatGPT serves its users the tool list
+      // OpenAI scanned at review time; whether it honours a tools/list_changed notification is UNVERIFIED (the
+      // published app cannot be observed from here). It costs one frame after the handshake, it is only sent to
+      // widget hosts, and if the host does honour it the stale-snapshot problem heals itself. The real belt is
+      // LEGACY_TOOL_NAMES in tools.mjs, which keeps every name a snapshot could hold answering.
+      if (isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
       // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
       // objects are otherwise reachable only from this request's still-open response — close them explicitly
       // rather than leaving a session pinned by a dead socket.

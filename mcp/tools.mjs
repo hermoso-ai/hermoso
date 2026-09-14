@@ -1870,6 +1870,57 @@ export function parseToolScope(raw) {
 // a HOST rule, not a capability we removed: every other surface still offers both.
 export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload']);
 
+// ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
+// ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
+// chatgpt-caches-the-connector). Their snapshot from August still names eight tools that no longer exist: seven
+// Reddit posting tools we withdrew (Reddit's Data API never approved us) and scrapecreators_fetch, renamed. A call
+// to any of them answered the SDK's bare "unknown tool", which the agent reads as "Hermoso is broken". So every name
+// that was ever published is kept here for as long as a host could hold it: a rename FORWARDS to its successor with
+// the same arguments; a withdrawn tool answers the same sentence the live roster would give for it. Neither is ever
+// listed — this table is reached only through tools/call, from a host whose list is stale, which is exactly the
+// evidence installHeldToolCalls records as `stale_roster`.
+//
+// The eight names are the diff of registerTool() calls between 2ba8e3a63 (2026-08-23, the last commit before the
+// August scan's descendants) and HEAD — tools/chatgpt-legacy-names-check.mjs re-derives the "gone from HEAD" half.
+export const LEGACY_TOOL_NAMES = Object.freeze({
+  scrapecreators_fetch: { to: 'fetch_social_data' },
+  post_to_reddit: { gone: 'reddit' }, edit_reddit_post: { gone: 'reddit' }, delete_reddit_post: { gone: 'reddit' },
+  list_reddit_posts: { gone: 'reddit' }, list_reddit_comments: { gone: 'reddit' }, reply_to_reddit_comment: { gone: 'reddit' },
+  reddit_post_stats: { gone: 'reddit' },
+});
+// Agent-facing, never user-facing: a host on an old snapshot cannot be refreshed from our side (only the host's own
+// publish does that), so the one useful thing to say is "carry on, nothing to tell the user".
+export const STALE_ROSTER_NOTE = 'Note for the assistant, not for the user: your Hermoso tool list is an older published snapshot. Hermoso has added tools since, including find_tools and call_tool, which reach every capability by name. Keep working with the tools you have and do not ask the user to reconnect; the list refreshes on its own when this host publishes the newer version.';
+export const withStaleNote = (out, ctx) => {
+  if (!ctx?.widgetHost || !out || !Array.isArray(out.content)) return out;
+  const last = [...out.content].reverse().find((c) => c && c.type === 'text' && typeof c.text === 'string');
+  if (last) last.text = `${last.text}\n\n${STALE_ROSTER_NOTE}`; else out.content.push({ type: 'text', text: STALE_ROSTER_NOTE });
+  return out;
+};
+export async function legacyToolAnswer(name, request, extra, ctx) {
+  const spec = LEGACY_TOOL_NAMES[name];
+  reportDeadEnd('stale_roster', name, `${name} no longer exists — the host's tool list is an older published snapshot`);
+  if (spec.gone) {
+    const text = spec.gone === 'reddit'
+      ? `${name} is no longer offered: Hermoso does not publish to Reddit (Reddit's Data API has not approved it). Reddit ADS are available through the reddit_ads tools; organic Reddit posting is not. There is nothing the user can connect, so do not point them at Settings ▸ Connectors.`
+      : `${name} is no longer offered by Hermoso.`;
+    return withStaleNote({ content: [{ type: 'text', text }], isError: false }, ctx);
+  }
+  const h = ctx.handleOf[spec.to];
+  const fn = h && (h.handler || h.callback);
+  if (typeof fn !== 'function') return withStaleNote({ content: [{ type: 'text', text: `${name} was renamed to ${spec.to}, which is not part of this session's roster.` }], isError: true }, ctx);
+  let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
+  if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
+    const parsed = h.inputSchema.safeParse(input);
+    if (!parsed.success) {
+      const issues = (parsed.error?.issues || []).slice(0, 8).map((i) => `${(i.path || []).join('.') || '(root)'}: ${i.message}`).join('; ');
+      return withStaleNote({ content: [{ type: 'text', text: `Arguments for ${name} (now ${spec.to}) did not validate — ${issues}.` }], isError: true }, ctx);
+    }
+    input = parsed.data;
+  }
+  return withStaleNote(h.inputSchema ? await fn(input, extra) : await fn(extra), ctx);
+}
+
 // ── THE DIRECTORY ROSTER (2026-09-02) — `?tools=directory` ─────────────────────────────────────────────────────
 // Anthropic's Software Directory Policy prohibits "software that uses AI models to generate images, video, or
 // audio content" (design aids excepted) and software that "executes financial transactions on behalf of users".
@@ -2099,6 +2150,7 @@ export function installHeldToolCalls(mcp, ctx) {
     const wrapped = async (request, extra) => {
       const name = String(request?.params?.name || '');
       const h = name && ctx.handleOf[name];
+      if (!h && LEGACY_TOOL_NAMES[name]) return legacyToolAnswer(name, request, extra, ctx); // a name only an old snapshot still holds
       if (h && h.enabled === false) {
         const why = holdReasonFor(name, ctx);
         if (why) { const t = holdReasonText(name, why, ctx); reportDeadEnd(why, name, t); return { content: [{ type: 'text', text: t }], isError: true }; }
@@ -2116,7 +2168,7 @@ export function installHeldToolCalls(mcp, ctx) {
             }
             input = parsed.data;
           }
-          return h.inputSchema ? await fn(input, extra) : await fn(extra);
+          return withStaleNote(h.inputSchema ? await fn(input, extra) : await fn(extra), ctx); // the call proves the roster is stale; a widget host's agent is told so, its user is not
         }
       }
       return orig(request, extra);
@@ -2791,7 +2843,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Delete a post from the connected Bluesky account',
     description: "PERMANENTLY delete one of the connected Bluesky account's OWN posts. IRREVERSIBLE — the AT Protocol removes the record from the account's repo, there is no trash and no undelete, and the post's likes, reposts, replies and quotes go with it. Call it WITHOUT confirm first: nothing is deleted, and it reports the post's REAL text and its live like / repost / reply / quote counts read back from Bluesky. Show the user that, get an unambiguous yes, then call again with confirm:true — plus, once the post has ANY engagement, confirmText echoing the post's own text (the first 40 characters is enough; any longer leading run works too). confirmText exists because confirming that you meant to delete SOMETHING does not prove you aimed at the right post, and a wrong id must not be confirmable blind. A brand-new post with nothing on it stays a ONE-call delete. Identify the post by its AT-URI or by just its RECORD KEY — the short id at the end of its bsky.app link, e.g. 3mtc4n3fibn2x. Deleting only ever works on the connected account's own posts; another account's URI is refused. 0 credits. Needs Bluesky connected (Settings ▸ Connectors ▸ Bluesky, or connect_connector).",
     inputSchema: {
-      uri: z.string().describe("the post's AT-URI (at://did:plc:…/app.bsky.feed.post/…) as post_to_bluesky returned it, or just its record key (3mtc4n3fibn2x)"),
+      uri: z.string().describe("the post's AT-URI (at://did:plc:…/app.bsky.feed.post/…) as post_to_bluesky returned it, the handle form of the same URI for the CONNECTED account only (at://<its handle>/app.bsky.feed.post/…), or just its record key (3mtc4n3fibn2x)"),
       confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent and cannot be undone'),
       confirmText: z.string().optional().describe("the post's own text as the unconfirmed call reported it — the first 40 characters is enough. Required once the post has any likes, reposts, replies or quotes. A post with no text asks for its cid instead."),
     },
@@ -16865,6 +16917,8 @@ function memoryNoteVerdict(text) {
       items: z.array(z.object({
         key: z.string().optional().describe('a stable id for this ad if you have one (an ad_archive_id, creativeId, …). Omit and one is derived from the link/media so re-saving is idempotent'),
         advertiser: z.string().optional().describe('the brand running the ad'),
+        page_name: z.string().optional().describe('alias of advertiser: the field search_meta_ads returns, accepted as-is'),
+        pageName: z.string().optional().describe('alias of advertiser'),
         title: z.string().optional().describe('headline / hook'),
         body: z.string().optional().describe('the ad copy'),
         image: z.string().optional().describe('image URL'),
@@ -16889,7 +16943,7 @@ function memoryNoteVerdict(text) {
       const key = swipeKeyOf(it);
       const ex = s.ads.find(x => x && x.key === key);
       if (ex) { if (ex.collectionId !== col.id) moved++; ex.collectionId = col.id; continue; }
-      s.ads.push({ key, collectionId: col.id, advertiser: String(it.advertiser || '').slice(0, 120), title: String(it.title || '').slice(0, 300), body: String(it.body || '').slice(0, 2000), image: String(it.image || ''), video: String(it.video || ''), link: String(it.link || it.url || ''), platform: String(it.platform || '').slice(0, 40), savedAt: Date.now() , ...(it.platform === 'creator' && it.creator && typeof it.creator === 'object' ? { creator: it.creator } : {}) });
+      s.ads.push({ key, collectionId: col.id, advertiser: String(it.advertiser || it.page_name || it.pageName || '').slice(0, 120) /* search_meta_ads says page_name (2026-09-14) */, title: String(it.title || '').slice(0, 300), body: String(it.body || '').slice(0, 2000), image: String(it.image || ''), video: String(it.video || ''), link: String(it.link || it.url || ''), platform: String(it.platform || '').slice(0, 40), savedAt: Date.now() , ...(it.platform === 'creator' && it.creator && typeof it.creator === 'object' ? { creator: it.creator } : {}) });
       saved++;
     }
     s.activeId = col.id;
