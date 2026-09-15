@@ -230,6 +230,8 @@ export const MCP_INSTRUCTIONS = [
   '• PAID ADS, LEAD FORMS, CLICK-TO-WHATSAPP, ANALYTICS: not in your starting tool list (size) but one call away — find_tools (search every tool by task) then call_tool (run it by name). enable_tools([\'ads\']) loads the group where the host reloads its list. All created PAUSED and read back. A tool missing from your list never means the feature is missing.',
   '• INSTAGRAM, two connectors, one channel: TWO WAYS AN INSTAGRAM ACCOUNT CONNECTS, SAME FEATURES: through Meta (the account is linked to a Facebook Page and comes with that Page — this is also the only path with ads) or directly through the Instagram connector (the account signs in on instagram.com by itself, no Facebook Page or Meta login — right for people who run several Instagram accounts under different logins). Either way it is one `instagram` channel with publishing, media, post and account insights, comments and Instagram Direct DMs; a Page-linked account is chosen with pageId, a direct account (or one of several) with account = an @handle or id from list_connector_accounts("instagram"). "Not connected to Meta" never means "no Instagram" — check the Instagram connector too.',
   '• ADS, the tool names: create_meta_campaign / _adset / _ad, create_google_ads_campaign / _ad_group / _ad and the TikTok, LinkedIn, Pinterest, Reddit, Microsoft and OpenAI equivalents; meta_insights, google_ads_report and the per-platform reports. Everything is created PAUSED and read back before it is described.',
+  // Sits AFTER the ADS bullet on purpose: the 2 KB head every area must survive is full (tools/mcp-roster-connector-scope-check), and a first-call hint is worth less than a whole area.
+  'NOTHING SET UP YET? research_ads on any domain, or generate_image with useBrand:false, need no brand, account or upload.',
   // ── YOUR ROSTER IS NOT THE PRODUCT (2026-08-26) ──────────────────────────────────────────────────────────────
   // The roster is scoped to the accounts this workspace has connected, because a tool for an unconnected provider
   // can only answer 401. That is a saving, and it has ONE failure mode, which this line exists to prevent: an
@@ -18237,6 +18239,28 @@ function memoryNoteVerdict(text) {
     const fmt = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}K` : String(v);
     if (!(d.creators || []).length) return ok(`${d.summary} Nobody passed the floors — widen the niche, lower minAvgViews / minEngagement, or add platforms.`, d);
     const lines = d.creators.map(c => `• @${c.handle} (${c.platform})${c.name && c.name !== c.handle ? ` — ${c.name}` : ''}: ${c.posts} post${c.posts === 1 ? '' : 's'} in this niche, median ${fmt(c.medianPlays)} views, ${c.engagementRate == null ? 'engagement unknown' : `${(100 * c.engagementRate).toFixed(1)}% engagement`}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}, score ${c.score}${c.top?.link ? ` — top: ${c.top.link}` : ''}${c.profileUrl ? ` — ${c.profileUrl}` : ''}`);
+    return ok(`${d.note}\n${lines.join('\n')}`, d);
+  }));
+  // TOPIC SEARCH (2026-09-15, Dave: "search higgsfield, but not their ads themselves, just posts about them … similarly
+  // just broad things like coffee"): the posts ABOUT a subject from anyone, all three organic platforms in one call.
+  // find_creators is this same search one step later (posts folded into people); the per-platform search_* tools are
+  // it one platform at a time.
+  server.registerTool('search_posts', {
+    title: 'Top posts about any topic, brand or product',
+    description: 'The POSTS people make ABOUT a subject — a brand ("higgsfield"), a product, a hobby ("coffee"), a hashtag ("#homecafe") — from whoever posted them, across organic TikTok, Instagram Reels and YouTube in ONE call, ranked by views. Not the brand\'s own ads (search_meta_ads / research_ads) and not the people (find_creators folds these same posts into creators): use it to see what is actually being posted and watched about a subject, to find clips worth cloning (clone_video), and to read the hooks and angles an audience already responds to. About one credit per platform searched (one query each by default; `queries` adds "best X" / "X review" / #tag variants, each a paid call); repeats inside 20 minutes are free.',
+    inputSchema: {
+      topic: z.string().describe('subject, brand, product or hashtag — "higgsfield", "coffee", "#homecafe"'),
+      platforms: z.array(z.enum(['tiktok', 'instagram', 'youtube'])).optional().describe('default all three'),
+      limit: z.number().optional().describe('posts per platform, 1–60 (default 24)'),
+      queries: z.number().optional().describe('query variants per platform, 1–4 (default 1); each is a paid search call'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/posts/search', a);
+    if (!d.shown) return ok(`${d.summary} Nothing matched — try broader words or add platforms.`, d);
+    const fmt = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}K` : String(v);
+    const lines = [];
+    for (const p of d.platforms) for (const t of (d.byPlatform?.[p] || [])) lines.push(`• [${p}] ${t.handle ? '@' + t.handle : ''}${t.plays ? ` ${fmt(t.plays)} views` : t.likes ? ` ${fmt(t.likes)} likes` : ''}: ${String(t.desc || '').slice(0, 120)}${t.link ? ` — ${t.link}` : ''}`);
     return ok(`${d.note}\n${lines.join('\n')}`, d);
   }));
   server.registerTool('search_tiktok', {

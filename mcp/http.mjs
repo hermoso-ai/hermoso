@@ -106,6 +106,8 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   // past that a GET is answered 503 + Retry-After, which costs the client a reconnect and costs tool calls nothing
   // (they are POSTs and never touch this counter). Pinned by tools/mcp-get-stream-cap-check.mjs.
   const GET_STREAM_MS = Math.max(1000, Number(process.env.MCP_GET_STREAM_MS || 5 * 60e3));
+const MCP_CALL_WALL_MS = Number(process.env.MCP_CALL_WALL_MS) || 10 * 60 * 1000; // a tools/call still open after this is ended, so a ghost cannot pin a deploy or a slot
+const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [body]; return msgs.map(m => m?.method === 'tools/call' ? String(m.params?.name || '?').slice(0, 60) : '').filter(Boolean).join(',') || '?'; };
   const GET_STREAM_MAX = Math.max(1, Number(process.env.MCP_GET_STREAM_MAX || 64));
   let openGetStreams = 0;
   const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS });
@@ -386,7 +388,18 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
     // forgeable value is exactly the hole resolveWs exists to close. The workspace a hosted connector acts in is
     // pinned SERVER-SIDE on the agent key (use_brand → /api/keys/brand, membership-checked) and re-authorized by
     // resolveWs on every request, so it resolves identically here and over stdio without this transport naming it.
-    await mcpCtx.run({ token, remote: true, client: entry.client || '' }, () => entry.transport.handleRequest(req, res, req.body));
+    // A TOOLS/CALL HAS A WALL CLOCK (2026-09-15). A POST /mcp tools/call:search_meta_ads sat "open" for 20 minutes —
+    // long past every upstream timeout in the tool — and blocked deploy-safe-check for as long, because the inflight
+    // row is released only when THIS response finishes. Whatever left it hanging (a client that vanished mid-stream,
+    // a promise that never settled), the response must end. MCP_CALL_WALL_MS ends it; the SDK's own error path has
+    // already had every chance by then, so the client sees a closed stream, which is what it would have concluded
+    // anyway. Never armed for initialize/list, which answer in milliseconds; cleared the moment the call settles.
+    const wall = methodsOf(req.body).includes('tools/call')
+      ? setTimeout(() => { if (res.writableEnded) return; console.error(`[mcp] tools/call open past ${MCP_CALL_WALL_MS}ms — ending the response (${inflightNameOf(req.body)})`); try { res.end(); } catch {} }, MCP_CALL_WALL_MS)
+      : null;
+    if (wall && typeof wall.unref === 'function') wall.unref();
+    try { await mcpCtx.run({ token, remote: true, client: entry.client || '' }, () => entry.transport.handleRequest(req, res, req.body)); }
+    finally { if (wall) clearTimeout(wall); }
   });
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);
