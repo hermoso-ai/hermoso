@@ -102,7 +102,7 @@ export const TOOL_PROVIDER_RULES = [
   [/bluesky/, 'bluesky'],
   [/telegram/, 'telegram'],
   [/^post_to_tiktok$|^tiktok_|_tiktok_/, 'tiktok'],
-  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^block_x_user$|^unblock_x_user$|^list_x_blocks$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
+  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
   [/pinterest/, 'pinterest'],
   [/reddit/, 'reddit'],
   [/snapchat/, 'snapchat'],

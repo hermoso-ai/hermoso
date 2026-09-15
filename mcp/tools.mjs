@@ -5825,29 +5825,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const top = (d.users || []).slice(0, 10).map((u) => `\u2022 ${u.username}${u.name ? ` (${u.name})` : ''}${u.followers != null ? ` \u2014 ${Number(u.followers).toLocaleString()} followers` : ''}`).join('\n');
     return ok(`${d.count} of ${d.account}\u2019s ${d.direction}${d.total != null ? ` (of ${Number(d.total).toLocaleString()})` : ''}:\n${top}${d.nextToken ? '\n\nMore available \u2014 pass paginationToken.' : ''}`, d);
   }));
-  server.registerTool('block_x_user', {
-    title: 'Block an account on X',
-    description: 'BLOCK an account on the connected X account: they can no longer see, reply to, follow or message the brand. Reversible with unblock_x_user, but confirm the exact handle with the user first, X shows the block to the person blocked. NEEDS THE BLOCK PERMISSION: an X connection made before 2026-09-15 does not carry it and must be reconnected once under Settings ▸ Connectors ▸ X (same account, one click); the tool says so if that is the case and changes nothing. Costs credits (X bills per API call).',
-    inputSchema: { username: z.string().describe('the handle to block, with or without the @') },
-    outputSchema: { ok: z.boolean().optional(), account: z.string().optional(), target: z.string().optional(), targetId: z.string().optional(), blocking: z.boolean().optional(), costCredits: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, wrap(async (a) => {
-    const d = await apiPost('/api/x/block', a);
-    return ok(d.blocking ? `Blocked ${d.target} on ${d.account}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm the block of ${d.target}.`, d);
-  }));
-  server.registerTool('unblock_x_user', {
-    title: 'Unblock an account on X',
-    description: 'UNBLOCK an account the connected X account has blocked. Same permission note as block_x_user (a pre-2026-09-15 connection reconnects once). Costs credits (X bills per API call).',
-    inputSchema: { username: z.string().describe('the handle to unblock, with or without the @') },
-    outputSchema: { ok: z.boolean().optional(), account: z.string().optional(), target: z.string().optional(), targetId: z.string().optional(), blocking: z.boolean().optional(), costCredits: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, wrap(async (a) => {
-    const d = await apiPost('/api/x/unblock', a);
-    return ok(d.blocking ? `X still reports ${d.target} as blocked by ${d.account}.` : `Unblocked ${d.target} on ${d.account}. Cost ${d.costCredits ?? '?'} credits.`, d);
-  }));
   server.registerTool('list_x_blocks', {
     title: 'Who the connected X account has blocked',
-    description: 'The accounts the connected X account has BLOCKED, with handle, name, bio and follower count: the read-back after block_x_user / unblock_x_user. Same permission note as block_x_user. Costs credits (X bills per API call).',
+    description: 'The accounts the connected X account has BLOCKED, with handle, name, bio and follower count. READ-ONLY: X refuses the block and unblock WRITE on the access tier Hermoso\'s app runs on (measured 2026-09-15: X\'s own "attached to a Project" refusal with the scope granted), so blocking itself is done on x.com and there is no block tool here. Needs the block.read permission: an X connection made before 2026-09-15 must be reconnected once under Settings ▸ Connectors ▸ X. Costs credits (X bills per API call).',
     inputSchema: { maxResults: z.number().optional().describe('1–1000, default 100'), paginationToken: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => {
