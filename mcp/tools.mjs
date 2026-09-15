@@ -18558,12 +18558,12 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('upscale_video', {
     title: 'Upscale video',
-    description: "Upscale a video to higher resolution (2x) for final delivery. Paid render; returns the served URL.",
-    inputSchema: { video: z.string().describe('the source video URL') },
+    description: "Upscale a video to higher resolution (2x) for final delivery. Paid render; returns the served URL. Two engines: the default (Topaz) is the safe precision upscaler; engine:'flux' is the FLUX 3 video upscaler (1080p/2K/4K) with an optional mode:'creative' detail-enhancement pass — pick it when the user asks for the FLUX upscaler or wants added detail rather than a faithful enlargement.",
+    inputSchema: { video: z.string().describe('the source video URL'), engine: z.enum(['topaz', 'flux']).optional().describe("default topaz. 'flux' = the FLUX 3 video upscaler"), mode: z.enum(['precise', 'creative']).optional().describe("FLUX only — 'creative' turns on its detail-enhancement pass; default precise") },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ video }) => {
-    const r = await renderJob('upscale', { video, factor: 2 }, 'Upscale 2x');
+  }, wrap(async ({ video, engine, mode }) => {
+    const r = await renderJob('upscale', { video, factor: 2, ...(engine ? { engine } : {}), ...(mode ? { mode } : {}) }, engine === 'flux' ? 'Upscale 2x · FLUX' : 'Upscale 2x');
     return okVideo(`Upscaled video: ${r.url}`, r);
   }));
 
