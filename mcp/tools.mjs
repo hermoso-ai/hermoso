@@ -4713,6 +4713,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().optional().describe('the post text. 280 characters without X Premium, up to 25,000 with it \u2014 write the full thing, it is never truncated. Use this OR thread, not both.'),
       thread: z.array(z.string()).optional().describe('a thread: each string is one post, published in order, each replying to the previous. Max 25. Each part follows the same length rule as `text`, and on an X Premium account ONE long post is usually both better reading and cheaper than a thread.'),
       mediaUrl: z.string().optional().describe('a Hermoso render (image or video) to attach to the first post — pass its served URL, or an upload_file url for external media'),
+      // A MEDIA URL DROPPED WITHOUT AN ERROR IS A TEXT-ONLY POST (2026-09-15, hit dogfooding): the in-app agent's schema says
+      // imageUrl/videoUrl and the server reads all three names, but this schema knew only mediaUrl, so a caller passing
+      // videoUrl published text with no media and no warning. Accept the two aliases here; xPost already prefers video.
+      videoUrl: z.string().optional().describe('alias of mediaUrl for a VIDEO — same as passing it as mediaUrl'),
+      imageUrl: z.string().optional().describe('alias of mediaUrl for an IMAGE — same as passing it as mediaUrl'),
       mediaUrls: z.array(z.string()).optional().describe('UP TO FOUR Hermoso-hosted media attached to ONE post — X\u2019s own schema caps media_ids at 4. X renders them as a GRID: every image visible at once, nothing to swipe to. That is NOT a carousel, and a numbered "1/6 \u00b7 SWIPE" slide deck must still not be sent here — it would publish as a grid and the "swipe" instruction would make no sense. Order decides the layout. On a thread the media rides the FIRST post; give each later part its own post to attach more. Mutually exclusive with mediaUrl, and more than 4 is refused before anything is uploaded.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('accessibility description of the attached media, max 1000 characters \u2014 write one whenever you attach a render. Costs a small extra amount: X bills one metadata write PER media. With SEVERAL media, pass an ARRAY aligned to their order \u2014 X attaches alt text per media id, and a single string describes only the FIRST one (X renders up to four media as a GRID, not a carousel, so one sentence would be wrong for the other three).'),
       poll: z.object({
@@ -5819,6 +5824,36 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiGet('/api/x/follows', a);
     const top = (d.users || []).slice(0, 10).map((u) => `\u2022 ${u.username}${u.name ? ` (${u.name})` : ''}${u.followers != null ? ` \u2014 ${Number(u.followers).toLocaleString()} followers` : ''}`).join('\n');
     return ok(`${d.count} of ${d.account}\u2019s ${d.direction}${d.total != null ? ` (of ${Number(d.total).toLocaleString()})` : ''}:\n${top}${d.nextToken ? '\n\nMore available \u2014 pass paginationToken.' : ''}`, d);
+  }));
+  server.registerTool('block_x_user', {
+    title: 'Block an account on X',
+    description: 'BLOCK an account on the connected X account: they can no longer see, reply to, follow or message the brand. Reversible with unblock_x_user, but confirm the exact handle with the user first, X shows the block to the person blocked. NEEDS THE BLOCK PERMISSION: an X connection made before 2026-09-15 does not carry it and must be reconnected once under Settings ▸ Connectors ▸ X (same account, one click); the tool says so if that is the case and changes nothing. Costs credits (X bills per API call).',
+    inputSchema: { username: z.string().describe('the handle to block, with or without the @') },
+    outputSchema: { ok: z.boolean().optional(), account: z.string().optional(), target: z.string().optional(), targetId: z.string().optional(), blocking: z.boolean().optional(), costCredits: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/x/block', a);
+    return ok(d.blocking ? `Blocked ${d.target} on ${d.account}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm the block of ${d.target}.`, d);
+  }));
+  server.registerTool('unblock_x_user', {
+    title: 'Unblock an account on X',
+    description: 'UNBLOCK an account the connected X account has blocked. Same permission note as block_x_user (a pre-2026-09-15 connection reconnects once). Costs credits (X bills per API call).',
+    inputSchema: { username: z.string().describe('the handle to unblock, with or without the @') },
+    outputSchema: { ok: z.boolean().optional(), account: z.string().optional(), target: z.string().optional(), targetId: z.string().optional(), blocking: z.boolean().optional(), costCredits: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/x/unblock', a);
+    return ok(d.blocking ? `X still reports ${d.target} as blocked by ${d.account}.` : `Unblocked ${d.target} on ${d.account}. Cost ${d.costCredits ?? '?'} credits.`, d);
+  }));
+  server.registerTool('list_x_blocks', {
+    title: 'Who the connected X account has blocked',
+    description: 'The accounts the connected X account has BLOCKED, with handle, name, bio and follower count: the read-back after block_x_user / unblock_x_user. Same permission note as block_x_user. Costs credits (X bills per API call).',
+    inputSchema: { maxResults: z.number().optional().describe('1–1000, default 100'), paginationToken: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiGet('/api/x/blocks', a);
+    const top = (d.users || []).slice(0, 20).map((u) => `• ${u.username}${u.name ? ` (${u.name})` : ''}${u.followers != null ? ` — ${Number(u.followers).toLocaleString()} followers` : ''}`).join('\n');
+    return ok(`${d.account} blocks ${d.count} account(s)${d.nextToken ? ' (more available — pass paginationToken)' : ''}:\n${top || '(none)'}`, d);
   }));
   server.registerTool('x_user', {
     title: 'Look up any public X account',
