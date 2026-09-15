@@ -94,6 +94,21 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   const SESSION_MAX = Math.max(2, Number(process.env.MCP_SESSION_MAX || 16));
   const SESSION_IDLE_MS = Math.max(1000, Number(process.env.MCP_SESSION_IDLE_MS || 30 * 60e3)); // 1s floor so the expiry is TESTABLE; a short TTL is merely wasteful now that eviction is recoverable
   const sessions = new Map(); // mcp-session-id -> { transport, server, user, lastSeen }  (insertion-ordered = LRU)
+  // ── A STANDALONE SSE STREAM HOLDS A CLOUD RUN REQUEST SLOT FOR AS LONG AS IT LIVES (2026-09-15) ──────────────
+  // OUTAGE, 13:00–13:22 UTC: every request to the app answered 429 "no available instance" for 22 minutes with the
+  // instance at 1% CPU. Nothing was down and nobody was busy — the instance's 200 concurrent-request slots were all
+  // held by `GET /mcp` notification streams (99 of them from ChatGPT's connector that morning, each held until the
+  // 30-minute session idle), and Cloud Run refuses a request it has no slot for BEFORE the container sees it, so
+  // the app could not even log it. maxScale=1 turns "one host holds too many streams" into a total outage.
+  // The GET stream is optional in the spec (a server may answer 405 or close it at any time; clients reconnect),
+  // and this server sends nothing on it but a one-shot tools/list_changed nudge. So: a stream lives at most
+  // MCP_GET_STREAM_MS (5 min, env-tunable) and the instance holds at most MCP_GET_STREAM_MAX of them at once —
+  // past that a GET is answered 503 + Retry-After, which costs the client a reconnect and costs tool calls nothing
+  // (they are POSTs and never touch this counter). Pinned by tools/mcp-get-stream-cap-check.mjs.
+  const GET_STREAM_MS = Math.max(1000, Number(process.env.MCP_GET_STREAM_MS || 5 * 60e3));
+  const GET_STREAM_MAX = Math.max(1, Number(process.env.MCP_GET_STREAM_MAX || 64));
+  let openGetStreams = 0;
+  const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS });
   // THE 401 IS THE ONLY THING A STUCK AGENT EVER READS, so it carries the way out (2026-09-04). It used to be the
   // three words `Authentication required`, and that is exactly how far a real user got: a Cursor-based client
   // (Grok Bot) registered fine, listed all 160 tools, and then every call 401'd while its own consent card never
@@ -273,6 +288,17 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
       return challenge(res);
     }
 
+    // The stream cap, BEFORE any session work: a reconnect storm must be refused at the door, not after allocating.
+    if (req.method === 'GET') {
+      if (openGetStreams >= GET_STREAM_MAX) {
+        res.set('Retry-After', '30');
+        return res.status(503).json({ error: `This instance already holds ${openGetStreams} open notification streams — retry the stream in 30s. Tool calls (POST) are unaffected.` });
+      }
+      openGetStreams++;
+      const t = setTimeout(() => { try { res.end(); } catch {} }, GET_STREAM_MS); if (t && typeof t.unref === 'function') t.unref();
+      res.once('close', () => { openGetStreams = Math.max(0, openGetStreams - 1); clearTimeout(t); });
+    }
+
     const sid = req.headers['mcp-session-id'];
     let entry = sid ? sessions.get(sid) : null;
 
@@ -364,6 +390,7 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   });
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);
+  app.locals.mcpStreamStats = streamStats; // for the check and the admin read; the return value stays `true` as every caller asserts
   return true;
 }
 

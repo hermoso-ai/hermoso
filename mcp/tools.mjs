@@ -14,7 +14,7 @@ import { wellFormedValue, wellFormedString } from './well-formed.mjs';
 // WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
 // re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
 // twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
-import { toolHeldBackByConnectors, toolProvider, toolUnoffered } from './roster-scope.mjs';
+import { toolHeldBackByConnectors, toolProvider, toolUnoffered, metaAlternativeNote } from './roster-scope.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
@@ -2076,10 +2076,10 @@ let TOOL_CANON = null; // [{ name, group, def, handler, factory }] — the one c
 // readOk:false, which toolHeldBackByConnectors treats as "hold back nothing" ([[failed-read-is-not-empty]]).
 // It also DISABLES, not just enables — moving to a workspace with fewer connectors must narrow the roster too,
 // or a tool that can only answer 401 stays listed.
-async function regateForWorkspace(ctx) {
+async function regateForWorkspace(ctx, pre = null) {
   if (!ctx || !ctx.handleOf) return null;
-  let conn = null;
-  try { conn = await connectedProviders(); } catch { conn = null; }
+  let conn = pre;
+  if (!conn) { try { conn = await connectedProviders(); } catch { conn = null; } }
   ctx.conn = conn;
   let enabled = 0, disabled = 0;
   for (const [name, grp] of Object.entries(ctx.groupOf)) {
@@ -2124,7 +2124,7 @@ export const holdReasonText = (name, why, ctx = null) => {
     const prov = toolProvider(name);
     const isKey = Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, prov);
     const tpl = typeof ctx?.conn?.connectLink === 'string' && ctx.conn.connectLink.includes('{provider}') ? ctx.conn.connectLink : 'https://app.hermoso.ai/?connect={provider}';
-    return `${name} needs the "${prov}" connection and this workspace has not made it. Connect it under Settings ▸ Connectors in the Hermoso app${isKey ? ', or right here with connect_connector if the user prefers' : `, or hand the user this one-click link: ${tpl.replace('{provider}', prov)} (it opens Hermoso on this brand and goes straight to the sign-in)`}, then call again.`;
+    return `${name} needs the "${prov}" connection and this workspace has not made it.${metaAlternativeNote(name)} Connect it under Settings ▸ Connectors in the Hermoso app${isKey ? ', or right here with connect_connector if the user prefers' : `, or hand the user this one-click link: ${tpl.replace('{provider}', prov)} (it opens Hermoso on this brand and goes straight to the sign-in)`}, then call again.`;
   }
   if (why === 'directory') return `${name} is outside what this Claude directory connection may run. Use the Hermoso app, or connect the unscoped server URL.`;
   return null;
@@ -2140,6 +2140,24 @@ export const holdReasonText = (name, why, ctx = null) => {
 // real gate holds. Everything else falls through to the SDK untouched. Installed on both the build and the replay
 // path from ONE function, because a gate answered on one path and not the other is the drift replayTools was
 // written to prevent.
+// A CONNECTION MADE AFTER THIS SESSION WAS BUILT IS INVISIBLE TO ctx.conn (2026-09-14, measured on prod: Meta was
+// reconnected in the app at 22:41 and call_tool on the already-open claude.ai session still answered "this workspace
+// has not made it" for send_messenger_marketing_message, while list_connector_accounts — a live read — listed five
+// ticked accounts on the same brand). The gate is a snapshot; the refusal must not be. Before saying "not connected",
+// re-read the connection set ONCE and re-gate (the same regateForWorkspace use_brand runs); a failed read fails open
+// as everywhere else, so the worst case is the old answer, never a wrong refusal of a connector that exists.
+async function holdReasonRechecked(name, ctx) {
+  let why = holdReasonFor(name, ctx);
+  if (why !== 'not_connected') return why;
+  // The re-read must be a GOOD read before it replaces the snapshot: regateForWorkspace fails OPEN on a failed read
+  // (right for use_brand, wrong here — it would turn "not connected" into "run it and 401"), so a read that did not
+  // succeed keeps the snapshot's answer and the refusal it already earned.
+  let fresh = null;
+  try { fresh = await connectedProviders(); } catch { fresh = null; }
+  if (!fresh || !fresh.readOk) return why;
+  try { await regateForWorkspace(ctx, fresh); } catch { return why; }
+  return holdReasonFor(name, ctx);
+}
 export function installHeldToolCalls(mcp, ctx) {
   try {
     const low = mcp && mcp.server;
@@ -2152,7 +2170,7 @@ export function installHeldToolCalls(mcp, ctx) {
       const h = name && ctx.handleOf[name];
       if (!h && LEGACY_TOOL_NAMES[name]) return legacyToolAnswer(name, request, extra, ctx); // a name only an old snapshot still holds
       if (h && h.enabled === false) {
-        const why = holdReasonFor(name, ctx);
+        const why = await holdReasonRechecked(name, ctx);
         if (why) { const t = holdReasonText(name, why, ctx); reportDeadEnd(why, name, t); return { content: [{ type: 'text', text: t }], isError: true }; }
         // The call itself is the evidence: this host's tool list still names a tool the session holds out on size,
         // i.e. the host is serving a stale roster. Run it (that is the point) and record that it happened.
@@ -2605,6 +2623,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     remove: ['delete'], trash: ['delete'], cancel: ['delete', 'cancel'], pause: ['status'], unpause: ['status'], resume: ['status'], activate: ['status'], deactivate: ['status'], stop: ['status', 'cancel'], start: ['status'], turn: ['status'],
     edit: ['update', 'edit'], change: ['update', 'set'], modify: ['update'], rename: ['update'], adjust: ['update', 'set'],
     campaign: ['campaign', 'ads'], adset: ['adset'], advert: ['ad', 'ads'], advertising: ['ads'], advertise: ['ads', 'campaign'], ppc: ['ads', 'google'], sem: ['google', 'ads'], promote: ['ads', 'campaign', 'promoted'],
+    network: ['network', 'networks'], networks: ['networks', 'network'], display: ['networks', 'display'], partners: ['networks'], partner: ['networks'],
+    targetcontentnetwork: ['networks'], targetsearchnetwork: ['networks'], searchpartners: ['networks'], contentnetwork: ['networks'], gdn: ['networks', 'display'],
     audience: ['audience', 'targeting'], targeting: ['targeting', 'audience'], retarget: ['audience'], lookalike: ['audience'], demographic: ['targeting', 'insights'],
     clip: ['video', 'clip'], reel: ['video', 'instagram'], short: ['video', 'youtube'], film: ['video'], movie: ['video'], footage: ['video'], thumb: ['thumbnail'], cover: ['thumbnail'],
     picture: ['image'], photo: ['image', 'product'], pic: ['image'], creative: ['image', 'video', 'ad', 'render'], banner: ['image'], visual: ['image'], graphic: ['image'], packshot: ['product', 'image'],
@@ -2760,7 +2780,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return { content: [{ type: 'text', text: `No tool named "${n}".${near.length ? ` Did you mean: ${near.join(', ')}?` : ''} find_tools({query}) searches every tool by name or task.` }], isError: true };
     }
     if (n === 'call_tool' || n === 'find_tools' || n === 'enable_tools') return { content: [{ type: 'text', text: `${n} is a roster tool; call it directly.` }], isError: true };
-    const why = toolHoldReason(n, ctx);
+    const why = await holdReasonRechecked(n, ctx);
     // ONE sentence per hold, from holdReasonText. call_tool used to spell its own copies, so the connect link added there
     // never reached claude.ai or ChatGPT, the two hosts that run held tools through here.
     if (why) {
@@ -3100,7 +3120,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const img = (d.options?.image?.models || []).map(m => `${m.id} (${m.label}, ${m.credits}cr${m.refs ? `, ≤${m.refs.max} reference images` : ''}${m.hiRes ? ', 2K' : ''}${m.best ? ', best' : ''})`).join('; ');
     // durations + per-duration credits MATTER: without them agents assume the generic "AI video caps at 8-10s"
     // prior and wrongly steer users to stitching (a real Claude.ai session did exactly that on a 15s ad)
-    const vid = (d.options?.video?.models || []).map(m => `${m.id} (${m.label}: one continuous clip of ${(m.durations || []).map(x => `${x}s=${m.credits?.[x] ?? '?'}cr`).join(' ')}${m.audio ? ', native audio' : ', silent'}${m.refs ? `, ${m.refs.max} reference image${m.refs.max === 1 ? '' : 's'}${m.refs.required ? ' (required — image-to-video only)' : ''}` : ''}${m.resolutions ? `, resolutions ${m.resolutions.join('/')}` : ''}${m.best ? ', best' : ''})`).join('; ');
+    const vid = (d.options?.video?.models || []).map(m => `${m.id} (${m.label}: one continuous clip of ${(m.durations || []).map(x => `${x}s=${m.credits?.[x] ?? '?'}cr`).join(' ')}${m.audio ? ', native audio' : ', silent'}${m.refs ? `, ${m.refs.max} reference image${m.refs.max === 1 ? '' : 's'}${m.refs.required ? ' (required — image-to-video only)' : ''}` : ''}${m.resolutions ? `, resolutions ${m.resolutions.join('/')}` : ''}${Array.isArray(m.cameraMoves) && m.cameraMoves.length ? `, camera moves ${m.cameraMoves.map(c => c.id).join('/')} (generate_video cameraMove, or your own cameraTrajectory keyframes)` : ''}${m.best ? ', best' : ''})`).join('; ');
     // voice engines (generate_voice) + writing models (generate_text) — so the RAW PLAYGROUND is usable from one probe
     const voice = d.options?.voice ? (d.options.voice.engines || []).map(e => `${e.id} (${e.label}: ${(e.voices || []).slice(0, 6).join('/')}${(e.voices || []).length > 6 ? '…' : ''}, ${e.creditsPer1k}cr/1k chars)`).join('; ') : 'unavailable';
     const llm = d.options?.llm ? (d.options.llm.models || []).map(m => `${m.id} (${m.label})`).join('; ') : 'unavailable';
@@ -3741,10 +3761,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
 
   // ── INSTAGRAM LIKE / UNLIKE (2026-09-05): Meta's Like Media and Comments API (changelog 2026-04-22). Facebook-Login
-  // family only; App-Review gated on instagram_manage_engagement. Scoped by description to the brand's own surface.
+  // family only; instagram_manage_engagement was granted Full Access by App Review 2026-09-06. Scoped by description to the brand's own surface.
   server.registerTool('like_instagram', {
     title: 'Like or unlike on Instagram as the brand',
-    description: 'Like (or unlike) an Instagram post, Reel, comment or reply AS the brand’s Instagram account — Meta’s Like Media and Comments API (April 2026). The cheapest engagement a brand does: like the good comments on your own posts and the posts you are tagged in. Pass exactly one of mediaId or commentId; undo:true unlikes. Stories and private accounts cannot be liked. Needs the Meta (Facebook Login) connector — a direct Instagram login has no likes edge. Until Meta’s App Review grants instagram_manage_engagement it works for app-role holders only. Roughly 200 likes per account per hour. Free.',
+    description: 'Like (or unlike) an Instagram post, Reel, comment or reply AS the brand’s Instagram account — Meta’s Like Media and Comments API (April 2026). The cheapest engagement a brand does: like the good comments on your own posts and the posts you are tagged in. Pass exactly one of mediaId or commentId; undo:true unlikes. Stories and private accounts cannot be liked. Needs the Meta (Facebook Login) connector — a direct Instagram login has no likes edge. Roughly 200 likes per account per hour. Free.',
     inputSchema: {
       mediaId: z.string().optional().describe('an IG media id (post or Reel), from list_instagram_media'),
       commentId: z.string().optional().describe('an IG comment or reply id, from list_meta_comments'),
@@ -4997,7 +5017,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/pinterest/pin', a);
     if (d?.idempotentReplay) return ok(`${d.note} (Nothing was pinned a second time.)`, d);
-    return ok(`Pinned to Pinterest${d.carousel ? ` as a ${d.slides}-slide carousel` : ''}${d.url ? ` — ${d.url}` : '.'}`, d);
+    return ok(`Pinned to Pinterest${d.carousel ? ` as a ${d.slides}-slide carousel` : ''}${d.url ? ` — ${d.url}` : '.'}${d.note ? ` ${d.note}` : ''}`, d);
   }));
   // ── OPERATING A PIN AND A BOARD AFTER THEY EXIST (2026-08-05). We could create both and then never touch either
   // again. Everything here is a WIRING gap, not a scope gap — boards:read/write and pins:read/write are all already
@@ -6999,7 +7019,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_messenger_marketing_campaign', {
     title: 'Create a Messenger marketing-message campaign',
-    description: 'The container a paid Messenger marketing message is sent from (Meta act_<AD>/message_campaign). Budgets in USD; Meta bills per DELIVERED message against the campaign budget, and creating it sends and charges nothing. dailyBudgetUsd OR lifetimeBudgetUsd (omit both and Meta sets an estimated daily cap; Meta may spend up to 175% of a daily budget on one day, never more than 7× per week). REGION LAW: Meta lets us serve businesses in 20 countries only — US, Mexico, Brazil, India, Australia, Singapore, UAE, Saudi Arabia, Hong Kong, Taiwan, Thailand, Malaysia, Indonesia, Philippines, Vietnam, New Zealand, Chile, Colombia, Peru, Israel — NOT Canada, the EU or the UK — and cannot deliver to people in the EU, UK, Japan, South Korea or Australia. Political Pages are excluded. dryRun:true shows the exact body.',
+    description: 'The container a paid Messenger marketing message is sent from (Meta act_<AD>/message_campaign). Budgets in USD; Meta bills per DELIVERED message against the campaign budget, and creating it sends and charges nothing. A NEW campaign cannot send for about an hour (61 minutes measured 2026-09-14) while Meta populates and prepares it (2300012 then 2300041, each with remaining_seconds), so create it ahead of time or reuse one from list_messenger_marketing_campaigns. dailyBudgetUsd OR lifetimeBudgetUsd, and Meta refuses either under USD 30 (code 1885272, measured 2026-09-14) (omit both and Meta sets an estimated daily cap; Meta may spend up to 175% of a daily budget on one day, never more than 7× per week). REGION LAW: Meta lets us serve businesses in 20 countries only — US, Mexico, Brazil, India, Australia, Singapore, UAE, Saudi Arabia, Hong Kong, Taiwan, Thailand, Malaysia, Indonesia, Philippines, Vietnam, New Zealand, Chile, Colombia, Peru, Israel — NOT Canada, the EU or the UK — and cannot deliver to people in the EU, UK, Japan, South Korea or Australia. Political Pages are excluded. dryRun:true shows the exact body.',
     inputSchema: {
       adAccountId: z.string().describe('ad account id (act_… or digits)'),
       pageId: z.string().optional().describe('the sending Page; defaults to the brand’s one shared Page'),
@@ -7030,10 +7050,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiGet('/api/meta/marketing-messages/estimate', a); return ok(d.note, d); }));
   server.registerTool('send_messenger_marketing_message', {
     title: 'Send a paid Messenger marketing message',
-    description: 'Send a PAID marketing message on Messenger to opted-in subscribers (Meta act_<AD>/messages). One message per subscriber per 12 hours — Meta’s rule, enforced before dispatch and by Meta. message.type: text | button (text + up to 3 web_url buttons) | generic (a card: title, subtitle, image, tap-through url, up to 3 buttons) | media (imageUrl or videoId + buttons). Give subscriptionTokens (≤200 per call, from list_messenger_subscribers) OR customAudienceId of a MESSENGER_SUBSCRIBER_LIST audience of 100+ people for a bulk send. Meta bills the ad account per delivered message; delivery, read and click events arrive on the Page webhook. dryRun:true previews the wire body and sends nothing. Meta’s frequency caps are silent: a refusal saying the person is capped is Meta protecting them, not a broken send.',
+    description: 'Send a PAID marketing message on Messenger to opted-in subscribers (Meta act_<AD>/messages). A campaign created in the last ~hour answers 2300012 then 2300041 (Meta still preparing it) with the seconds left; prefer an existing campaign from list_messenger_marketing_campaigns. One message per subscriber per 12 hours — Meta’s rule, enforced before dispatch and by Meta. message.type: text | button (text + up to 3 web_url buttons) | generic (a card: title, subtitle, image, tap-through url, up to 3 buttons) | media (imageUrl or videoId + buttons). Give subscriptionTokens (≤200 per call, from list_messenger_subscribers) OR customAudienceId of a MESSENGER_SUBSCRIBER_LIST audience of 100+ people for a bulk send. Meta bills the ad account per delivered message; delivery, read and click events arrive on the Page webhook. dryRun:true previews the wire body and sends nothing. Meta’s frequency caps are silent: a refusal saying the person is capped is Meta protecting them, not a broken send.',
     inputSchema: {
       adAccountId: z.string(),
-      campaignId: z.string().describe('from create_messenger_marketing_campaign'),
+      campaignId: z.string().describe('the message campaign id (from create_messenger_marketing_campaign or list_messenger_marketing_campaigns) — OR the campaign NAME as the user said it: a non-numeric value is resolved against the account\'s own campaigns, so you never need to ask for an id'),
+      campaignName: z.string().optional().describe('the campaign by NAME instead of id (case-insensitive, exactly one match wins; none or several is refused naming the campaigns that exist)'),
       subscriptionTokens: z.array(z.string()).optional(),
       customAudienceId: z.string().optional(),
       message: z.object({
@@ -7537,7 +7558,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('google_ads_report', {
     title: 'Google Ads GAQL report',
-    description: 'Run a GAQL (Google Ads Query Language) report for detailed performance breakdowns — ad groups, ads, keywords, search terms, demographics, geo. Pass customerId + a GAQL query (SELECT … FROM <resource> WHERE segments.date DURING LAST_30_DAYS). Allowed FROM resources: campaign, ad_group, ad_group_ad, keyword_view, campaign_budget, age_range_view, gender_view, geographic_view, search_term_view. cost_micros is micros — divide by 1,000,000 for the account currency. Read-only, free.',
+    description: 'Run a GAQL (Google Ads Query Language) report for detailed performance breakdowns — ad groups, ads, keywords, search terms, demographics, geo. Pass customerId + a GAQL query (SELECT … FROM <resource> WHERE segments.date DURING LAST_30_DAYS). Allowed FROM resources: campaign, ad_group, ad_group_ad, keyword_view, campaign_budget, campaign_criterion, ad_group_criterion, conversion_action, campaign_conversion_goal, search_term_view, age_range_view, gender_view, geographic_view, asset, change_event and every other documented GAQL report resource (the refusal names the full list if one is missing). Campaign network settings (Search partners / Display) are readable here as campaign.network_settings.* and changed with set_google_ads_networks. cost_micros is micros — divide by 1,000,000 for the account currency. Read-only, free.',
     inputSchema: {
       customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
       query: z.string().describe('GAQL, e.g. "SELECT ad_group.name, metrics.clicks, metrics.cost_micros FROM ad_group WHERE segments.date DURING LAST_7_DAYS"'),
@@ -7780,6 +7801,25 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // d.note is written from the READ-BACK and says so when Google reports a status different to the one we asked
     // for — print it rather than re-asserting `a.status`, which would be a claim about the request, not the account.
     return ok(d.note || `${d.level || 'campaign'} → ${d.verifiedStatus || a.status}.`, d);
+  }));
+  server.registerTool('set_google_ads_networks', {
+    title: 'Change where a Google Ads campaign serves (Search partners / Display)',
+    description: 'Change WHERE an existing Google Ads campaign serves: Google Search, Search partners (target_search_network) and the Display Network (target_content_network), each true/false. The classic use is turning Search partners OFF on a Search campaign, or Display off. Current settings are read first and a no-op says so. On a LIVE (ENABLED) campaign this moves real spend on the next auction — show the user the before → after, get an explicit yes, then call again with confirm:true. dryRun:true validates with Google and writes nothing. The result is READ BACK from Google before you are told it took; Google’s own rules (a Display campaign cannot take Google Search on, a Search campaign keeps Google Search on) are relayed by name.',
+    inputSchema: {
+      customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
+      campaignId: z.string().describe('the campaign to change'),
+      googleSearch: z.boolean().optional().describe('serve on Google Search (target_google_search)'),
+      searchPartners: z.boolean().optional().describe('serve on Google search partner sites (target_search_network)'),
+      display: z.boolean().optional().describe('serve on the Google Display Network (target_content_network)'),
+      confirm: z.boolean().optional().describe('REQUIRED true to change a LIVE (ENABLED) campaign'),
+      dryRun: z.boolean().optional().describe('validate with Google, write nothing'),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), changed: z.boolean().optional(), networks: z.object({}).passthrough().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/networks', a);
+    return ok(d.note || `campaign ${a.campaignId} networks updated.`, d);
   }));
   server.registerTool('delete_google_ads_object', {
     title: 'Remove a Google Ads campaign / ad group / ad / keyword / asset link / conversion action',
@@ -16519,7 +16559,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       aspectRatio: z.string().optional().describe("default '9:16'"),
       model: z.string().optional().describe('video model id from hermoso_capabilities; a named model is never swapped without asking. Omit to let the router pick'),
       resolution: z.enum(['480p', '720p', '1080p', '4k']).optional().describe("'1080p' default (what we ship and bill for); '480p'/'720p' = cheaper draft passes, '4k' = premium final delivery (more credits). NOT EVERY MODEL OFFERS EVERY TIER — this enum is what the tool accepts, and each model's OWN `resolutions` list in hermoso_capabilities is what it can actually render. Ask for a tier the chosen model does not list and it is rendered at that model's best available tier instead, with nothing in the reply saying so — so check `resolutions` before promising anyone 1080p or 4k."),
-      cameraMove: z.enum(['orbit', 'orbit_half', 'orbit_full', 'rise', 'push_in', 'pull_back']).optional().describe('H3 Max Multi Angle only: camera move (default orbit)'),
+      cameraMove: z.enum(['orbit', 'orbit_left', 'orbit_half', 'orbit_full', 'rise', 'crane_up', 'push_in', 'pull_back', 'reveal']).optional().describe('A named camera move around the still in refImage — orbit (quarter turn, the default), orbit_left, orbit_half, orbit_full (turntable), rise, crane_up, push_in, pull_back, reveal. Only the camera-controls model renders one (minimax-h3-max-camera, listed with its moves in hermoso_capabilities): pass it with model omitted and that model is picked, or with that model named; any other named model is refused by name with nothing charged. Needs refImage.'),
+      cameraTrajectory: z.array(z.object({
+        time: z.number().min(0).max(1).describe('when this pose is reached, 0 = start of the clip, 1 = end'),
+        azimuth: z.number().describe('horizontal angle around the subject in degrees (0 = where the still was taken; the sign turns the camera the other way; at most 32 full turns of total travel)'),
+        elevation: z.number().min(-90).max(90).describe('vertical angle in degrees, -90 (below) to 90 (straight above)'),
+        distance: z.number().positive().describe('distance from the subject in scene units, 1 = the distance of the still; smaller is closer'),
+      })).min(2).max(12).optional().describe('Your own ordered camera path, 2 to 12 keyframes, for the camera-controls model only (same rule as cameraMove; overrides it). The first pose is held until its time and the last pose is held to the end. A value outside these bounds is refused by name, nothing charged.'),
       ttsScript: z.string().optional().describe('voiceover script to speak'),
       ttsVoice: z.string().optional().describe('voice name, e.g. Rachel / George'),
       musicMood: z.string().optional().describe('WHICH mood the music bed is composed in (upbeat / calm / warm / epic / tense / playful / elegant / hype / chill / dramatic). It does NOT decide WHETHER there is one: a clip that comes back with no audio track — every model hermoso_capabilities lists as "silent", plus any audio model that returned mute — gets a bed composed and CHARGED automatically, at the flat per-track fee hermoso_capabilities reports as explainerMusicCredits, and omitting this field only means the mood defaults to "warm". Pass audio:false for a genuinely silent clip with no bed and no bed charge.'),
@@ -16568,7 +16614,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const refImage = a.refImage ? await toRef(a.refImage) : undefined;
     // an agent that NAMES a model made a deliberate pick — modelExplicit gives it the server-side ask-don't-swap
     // treatment (#310) instead of being treated as a system pick the fallback ladders may silently reroute
-    const r = await renderJob('video', { ...a, refImage, modelExplicit: !!a.model, ...(a.cameraMove ? { cameraTrajectory: a.cameraMove } : {}) }, 'MCP video');
+    const r = await renderJob('video', { ...a, refImage, modelExplicit: !!a.model, ...(a.cameraTrajectory ? { cameraTrajectory: a.cameraTrajectory } : a.cameraMove ? { cameraTrajectory: a.cameraMove } : {}) }, 'MCP video');
     return okVideo(`Video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${switchNote(r)}`, r);
   }));
 

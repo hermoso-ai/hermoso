@@ -143,11 +143,25 @@ export const INSTAGRAM_LOGIN_TOOLS = new Set([
   'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
   'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',
 ]);
+// THE SAME SHAPE FOR WHATSAPP (2026-09-15, Dave: "do we properly explain to users when they need the meta connector vs
+// individuals like instagram or whatsapp? and when they need both?"). Every whatsapp tool maps to 'meta' above because a
+// WhatsApp Business Account the business already administers is a Meta ASSET, ticked on Meta's assets step and reached
+// through the Meta user token. But a brand that onboarded its OWN number through Embedded Signup holds a 'whatsapp'
+// row whose business token `waToken` resolves FIRST, with no Meta connection at all — holding its WhatsApp tools back
+// as "needs meta" would refuse a working connection. Nobody needs BOTH for one account, on either channel.
+export const isWhatsAppTool = (name) => /whatsapp/.test(String(name || ''));
+// The ONE sentence every surface appends when a 'meta'-mapped tool is held and an alternative connection exists.
+export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(name || ''))
+  ? ' For an Instagram account with no Facebook Page, the "instagram" connection alone is enough for this tool; "meta" covers an Instagram account linked to a Page (and ads). One account never needs both.'
+  : isWhatsAppTool(name)
+    ? ' A WhatsApp Business Account the business already manages is ticked on the "meta" connection\'s assets step; the "whatsapp" connection sets up a number the business does not have yet. Either one is enough for this tool.'
+    : '';
 export function toolHeldBackByConnectors(name, conn) {
   if (!conn || !conn.readOk) return false;                       // property 1 — fail OPEN on an unreadable store
   const p = toolProvider(name);
   if (p === null) return false;                                  // property 2 — unmapped is never held back
   const on = conn.connected instanceof Set ? conn.connected : new Set(conn.connected || []);
   if (p === 'meta' && on.has('instagram') && INSTAGRAM_LOGIN_TOOLS.has(name)) return false;
+  if (p === 'meta' && on.has('whatsapp') && isWhatsAppTool(name)) return false;
   return !on.has(p);
 }
