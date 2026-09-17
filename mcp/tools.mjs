@@ -551,6 +551,14 @@ const refWatchedLine = (w) => {
 // never. Declared ONCE and spread into every publish tool's inputSchema — hand-listing the pair at ten seams is
 // exactly how SCHED_ID_FIELDS drifted on four of them.
 const HOOK_ATTR = {
+  // WHICH BRAND THIS POST BELONGS TO, NAMED ON THE CALL (2026-09-16). It rides in HOOK_ATTR because that bundle is
+  // spread into exactly the ten publish/schedule tools and nothing else, so one edit reaches every one of them and a
+  // new publish tool inherits it. First real-user feedback on the connector was that the connection had been pinned
+  // to the WRONG brand at the start — a pin is connection state, set once and then invisible, so everything after it
+  // is silently attributed to it. Naming the brand per call is the fix, and it is the most specific statement of
+  // intent there is, so the server lets it beat the key pin, the workspace header and the active-brand default — for
+  // that one request only, which is what makes a one-off post to a second client safe.
+  brand: z.string().optional().describe('WHICH BRAND this post belongs to — the id or exact name from list_brands (a workspace shared with you: its profile id). Use it whenever the account has more than one brand and you are not certain which one this connection is pinned to: it beats the pin for THIS CALL ONLY and changes nothing about the connection. A name that matches no brand, or two brands, is REFUSED and nothing is posted — never resolved to the pin, which is the account you were guarding against.'),
   hook: z.string().optional().describe('WHAT ANGLE THIS POST IS BUILT ON — the single most valuable field here, and the only moment it can ever be recorded. post_performance groups on it to answer "which hooks work", and it needs 5 posts sharing ONE hook before it will call anything a winner, so REUSE THE SAME WORDING across a campaign instead of rephrasing it every time. Best of all, pass a hook id from list_hooks (e.g. "direct_callout", "mid_problem", "before_after") — those fold onto a stable key however they are spelled, so a whole brand accumulates evidence on one row. Your own wording is fine too; it just only groups when you repeat it exactly. Omitting it means this post can never vote on which hook works.'),
   subject: z.string().optional().describe('WHAT THIS POST IS ABOUT — the product, feature, offer or theme (e.g. "winter coat", "free trial", "founder story"). The second grouping axis in post_performance. Same rule as hook: reuse the exact wording so posts about one subject land in one group.'),
 };
@@ -1831,7 +1839,9 @@ export const TOOL_GROUP_NAMES = ['core', ...Object.keys(TOOL_GROUPS)];
 // the old figure divided in the ratio the two halves actually weigh (32.9% / 67.1%, measured on the wire schema
 // `z.toJSONSchema` emits), rather than re-measured by a different method — every other row here came from the
 // 2026-08-20 run, and mixing methodologies inside one table would make the rows incomparable.
-export const TOOL_GROUP_TOKENS = { core: 4300, research: 5400, create: 19700, channels: 29500, channel_admin: 61700, analytics: 32600, files: 10300, workspace: 7500, ads: 221100 };
+// RE-MEASURED 2026-09-17, every row at once, by tools/tool-group-truth-check.mjs §8's own method (name + description +
+// inputSchema JSON at 4 chars/token, net of core) — `create` had reached 1.32× its row and four more sat past 1.2×.
+export const TOOL_GROUP_TOKENS = { core: 4300, research: 6600, create: 26000, channels: 37100, channel_admin: 66300, analytics: 39100, files: 10600, workspace: 9200, ads: 246700 };
 
 // THE DEFAULT ROSTER IS EVERYTHING EXCEPT `ads` AND `analytics`. Paid-campaign management across eleven platforms
 // is ~236K tokens on its own — more than everything else put together — because each platform carries a full
@@ -2061,6 +2071,7 @@ export function defForHost(name, def, widgetHost) {
 // declares itself with `sessionBound()` and `tools/mcp-tool-canon-check.mjs` fails any handler that reaches for
 // session state without it.
 let TOOL_CANON = null; // [{ name, group, def, handler, factory }] — the one canonical roster, built on first use
+let CANON_HOSTED = false;   // which surface TOOL_CANON was built for — see registerTools
 
 // Declare a handler that MUST be rebuilt per session. `factory(ctx)` receives {enabledGroups, groupOf, handleOf}.
 // ── SWITCHING BRAND MUST RE-GATE THE ROSTER (2026-09-01) ────────────────────────────────────────────────────────
@@ -2426,12 +2437,18 @@ const LI_TARGETING_FACETS = ['LANGUAGE','LOCATION','AUDIENCE','AGE','GENDER','CO
 
 export function registerTools(rawServer, opts = {}) {
   const server = wellFormedServer(rawServer); // the ONE crossing — see above
-  // The RETURN VALUE stays exactly what it was (the raw server on replay, buildTools' own answer on a build): the
-  // proxy is a registration-time device and must never leak out as the thing a caller holds.
+  // THE CACHE HOLDS SCHEMAS, SO A FLAG THAT CHANGES A SCHEMA MUST INVALIDATE IT (2026-09-16). `hosted` decides
+  // whether upload_file offers a local `path` at all, and the canon is built once and replayed for every later
+  // registration — so a canon built on one surface would hand the other surface the wrong schema for the rest of
+  // the process. Today the flag is constant per process (the HTTP server always passes it, the stdio twin never
+  // does), which is exactly the kind of "true for now" that a future per-request flag breaks silently. Rebuild
+  // rather than replay when it differs; `only`/`directory`/`widgetHost` do NOT need this, because they filter and
+  // decorate a roster rather than changing the definitions the canon stores.
+  if (TOOL_CANON && CANON_HOSTED !== !!opts.hosted) TOOL_CANON = null;
   if (TOOL_CANON) { replayTools(server, opts, TOOL_CANON); return rawServer; }
   const sink = [];
   const r = buildTools(server, opts, sink);
-  TOOL_CANON = sink; // published only after a COMPLETE run — a throw mid-build must not cache a truncated roster
+  TOOL_CANON = sink; CANON_HOSTED = !!opts.hosted; // published only after a COMPLETE run — a throw mid-build must not cache a truncated roster
   return r;
 }
 
@@ -2694,6 +2711,19 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const alts = new Set([w, st, ...(TOOL_SYNONYMS[w] || []), ...(TOOL_SYNONYMS[st] || [])]);
     return { w, st, alts: [...alts] };
   };
+  // A FIELD NAME IS AN ASK TOO (2026-09-17, from the defect board). Agents search the parameter they are looking for,
+  // flattened: "primaryforgoal" (create_google_ads_conversion_action's primaryForGoal) and "targetcontentnetwork"
+  // (Google's target_content_network, named in set_google_ads_networks) both filed no_match. Every tool's parameter
+  // names and the snake_case identifiers its description quotes are indexed with case and underscores squashed.
+  const _squashIdx = new WeakMap();
+  const squashedIdentifiers = (h) => {
+    let set = _squashIdx.get(h); if (set) return set;
+    set = new Set();
+    const sq = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
+    try { for (const k of Object.keys(h.inputSchema?.shape || {})) if (k.length >= 6) set.add(sq(k)); } catch {}
+    for (const m of String(h.description || '').matchAll(/\b[a-zA-Z][a-zA-Z0-9]*(?:_[a-zA-Z0-9]+)+\b|\b[a-z]+(?:[A-Z][a-z0-9]+)+\b/g)) if (m[0].length >= 6) set.add(sq(m[0]));
+    _squashIdx.set(h, set); return set;
+  };
   const makeFindToolsHandler = (ctx) => async ({ query = '', group = '', limit = 12 } = {}) => {
     const q = String(query || '').toLowerCase().trim();
     const g = String(group || '').toLowerCase().trim();
@@ -2717,6 +2747,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // update_meta_ad, edit_meta): kept as one literal token it matched nothing and filed a dead end, while its parts
         // (meta + campaigns, update + meta) name real tools. The literal still scores first when it exists.
         const words = q.split(/[\s,]+/).flatMap((r) => (r.includes('_') ? [r, ...r.split('_').filter((p) => p.length >= 2)] : [r])).map(expandQueryWord).filter(Boolean);
+        const _sqIds = squashedIdentifiers(h);
+        const _fieldHits = q.split(/[\s,]+/).map((r) => r.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((r) => r.length >= 6 && _sqIds.has(r)).length;
+        if (_fieldHits) score += 4 * _fieldHits;
         const descLc = desc.toLowerCase();
         const nameTokens = name.split('_');
         let nameHits = 0, covered = 0;
@@ -3996,16 +4029,34 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const EXT_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/mp4' };
   server.registerTool('upload_file', {
     title: 'Upload a local file → durable public URL',
-    description: 'Persist an ARBITRARY user file (image, video, audio, PDF or document, up to 150MB) into Hermoso and get back a durable public URL that EVERY publish, schedule and ad-build tool accepts — post_to_meta / post_to_linkedin / post_to_linkedin_page / post_to_youtube / post_to_tiktok / post_to_pinterest / post_to_x / post_to_google_business / schedule_post / upload_meta_asset / upload_google_ads_asset / create_meta_ad / create_linkedin_ads_creative / set_youtube_thumbnail / save_to_drive / save_to_onedrive. THIS IS THE BRING-YOUR-OWN-CREATIVE PATH: it is for files that have NOTHING to do with a Hermoso render (media on the user\'s desktop, an agency\'s finished ad, a photo they shot), and it means you can publish, schedule and run ads through Hermoso without generating anything here. Provide exactly ONE source — passing two is an error, never a silent preference: `url` (ANY public http(s) link — Hermoso fetches it server-side, so nothing crosses this connection and there is no practical size limit; THIS IS THE ONE THAT ALWAYS WORKS, including on the hosted connector), `path` (a local file — ONLY when Hermoso runs on the user\'s own machine over stdio/CLI; the hosted connector cannot see their disk), or `dataUri` (a base64 data: URI — keep it under ~15MB, since the bytes travel over this connection). If the file is already at a public https URL, the Meta, Reddit and ChatGPT-Ads tools take it directly and re-host it safely — but LinkedIn (posts and ad creatives), Pinterest, the YouTube thumbnail and upload_google_ads_asset upload the BYTES themselves and therefore refuse an external host, so run it through here first and pass the URL this returns. When in doubt, use this: its URL works everywhere. (Calling the underlying HTTP route directly? POST /api/upload takes the file\'s RAW BYTES as the request body with its own content-type — NOT multipart/form-data — or ?url=<link> with no body.) Returns {url, kind, bytes}.',
+    description: 'Persist an ARBITRARY user file (image, video, audio, PDF or document, up to 150MB) into Hermoso and get back a durable public URL that EVERY publish, schedule and ad-build tool accepts — post_to_meta / post_to_linkedin / post_to_linkedin_page / post_to_youtube / post_to_tiktok / post_to_pinterest / post_to_x / post_to_google_business / schedule_post / upload_meta_asset / upload_google_ads_asset / create_meta_ad / create_linkedin_ads_creative / set_youtube_thumbnail / save_to_drive / save_to_onedrive. THIS IS THE BRING-YOUR-OWN-CREATIVE PATH: it is for files that have NOTHING to do with a Hermoso render (media on the user\'s desktop, an agency\'s finished ad, a photo they shot), and it means you can publish, schedule and run ads through Hermoso without generating anything here. Provide exactly ONE source — passing two is an error, never a silent preference: `url` (ANY public http(s) link — Hermoso fetches it server-side, so nothing crosses this connection and there is no practical size limit; THIS IS THE ONE THAT ALWAYS WORKS, including on the hosted connector), ' + (opts.hosted ? '' : '`path` (a local file, ONLY when Hermoso runs on the user\'s own machine over stdio/CLI; the hosted connector cannot see their disk), or ') + '`dataUri` (a base64 data: URI — keep it under ~15MB, since the bytes travel over this connection). If the file is already at a public https URL, the Meta, Reddit and ChatGPT-Ads tools take it directly and re-host it safely — but LinkedIn (posts and ad creatives), Pinterest, the YouTube thumbnail and upload_google_ads_asset upload the BYTES themselves and therefore refuse an external host, so run it through here first and pass the URL this returns. When in doubt, use this: its URL works everywhere. (Calling the underlying HTTP route directly? POST /api/upload takes the file\'s RAW BYTES as the request body with its own content-type — NOT multipart/form-data — or ?url=<link> with no body.) Returns {url, kind, bytes}.',
     inputSchema: {
+      // THE THIRD SOURCE, AND THE ONLY ONE THAT CARRIES BYTES WITHOUT SPENDING THEM AS TOKENS (2026-09-16). Asked
+      // for by the first real user of the connector: `path` cannot work on a hosted surface and a data: URI puts
+      // the whole file through the model's context. This asks for a one-time PUT url instead — the bytes go
+      // straight to Hermoso over ordinary HTTP and never touch this conversation.
+      getUploadUrl: z.boolean().optional().describe('ASK FOR A ONE-TIME UPLOAD URL instead of uploading now — use this whenever the file is on the user\u2019s machine and you can run a shell or an HTTP request. Returns a uploadUrl you PUT the raw bytes to (any HTTP client), which answers with the durable Hermoso url. It beats `dataUri` for anything but a small image: a data: URI spends the whole file as tokens in this conversation. One file per url, and it expires.'),
       url: z.string().optional().describe('a PUBLIC http(s) URL Hermoso fetches server-side (private/internal addresses are refused, and every redirect hop is re-checked). Works on every surface including the hosted connector, and the bytes never cross this connection — prefer this whenever the file is reachable on the web.'),
-      path: z.string().optional().describe('local filesystem path (stdio/CLI only — refused on the hosted connector)'),
+      // NOT OFFERED ON THE HOSTED CONNECTOR (2026-09-16, a customer's agent after scheduling a month of posts: "Hide
+      // the local file path option on the hosted connector. It's advertised in the tool description but always
+      // refused there, which sends the agent down a dead end before it finds the real answer"). The prose said
+      // stdio-only and the PARAMETER was still in the schema, so a model reasonably tried it, got refused, and only
+      // then went looking. A surface that can never honour an argument should not publish it.
+      ...(opts.hosted ? {} : { path: z.string().optional().describe('local filesystem path (stdio/CLI only — refused on the hosted connector)') }),
       dataUri: z.string().optional().describe('base64 data: URI of the file bytes (data:<mime>;base64,<…>) — bytes travel over this connection, so keep it small'),
       name: z.string().optional().describe('original file name — helps pick the right extension'),
     },
-    outputSchema: { url: z.string().optional(), kind: z.string().optional(), bytes: z.number().optional() },
+    outputSchema: { url: z.string().optional(), kind: z.string().optional(), bytes: z.number().optional(), uploadUrl: z.string().optional().describe('the one-time PUT url, when getUploadUrl was asked for'), expiresAt: z.string().optional(), maxBytes: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
+    // THE TICKET BRANCH RUNS FIRST AND ALONE: it is a request for a url, not an upload, so a source passed beside
+    // it is a caller with two different intentions and picking one would upload a file they did not mean to send.
+    if (a.getUploadUrl) {
+      const conflict = ['url', 'path', 'dataUri'].filter(k => String(a[k] || '').trim());
+      if (conflict.length) throw new Error(`\`getUploadUrl\` asks for a link to send bytes to; \`${conflict.join('` and `')}\` is a file to upload right now. Do one or the other.`);
+      const t = await apiPost('/api/upload/ticket', {});
+      return ok(`PUT the file's raw bytes to this url and it answers with the durable Hermoso url:\n\n${t.uploadUrl}\n\n${t.howto}`, { uploadUrl: t.uploadUrl, expiresAt: t.expiresAt, maxBytes: t.maxBytes });
+    }
     // EXACTLY ONE SOURCE. Two is an ERROR: a caller who passes both has two different files in mind, and quietly
     // preferring one of them ingests the wrong file and reports success.
     const given = ['url', 'path', 'dataUri'].filter(k => String(a[k] || '').trim());
@@ -4270,8 +4321,30 @@ function buildTools(rawServer, opts = {}, sink = null) {
       target: z.enum(['facebook', 'instagram', 'threads']).optional().describe('default facebook; instagram → the Page’s linked IG; threads → the brand’s connected Threads account'),
       account: z.string().optional().describe('WHICH Instagram account when target is instagram and the brand has several — Page-linked and Instagram Login accounts alike; an @username or id from list_connector_accounts("instagram"). Several and none named is refused by name; omit when there is one.'),
       scheduleAt: z.string().optional().describe('FACEBOOK ONLY — schedule instead of posting now. ISO timestamp (2026-08-01T09:00:00Z) or unix seconds; must be 10 minutes to 30 days ahead. Facebook holds the post and publishes it at that time, so nothing has to stay running on our side. Instagram and Threads have NO scheduling in Meta’s API — passing this for them is refused rather than silently posted immediately.'),
-      locationId: z.string().optional().describe('Threads only — a place id from search_threads_locations, to geotag the post to a physical location (restaurant, storefront)'),
+      locationId: z.string().optional().describe('TAG A PLACE. THREADS: a place id from search_threads_locations. INSTAGRAM: the NUMERIC ID OF A FACEBOOK PAGE associated with that location, not a place name and not coordinates; a non-numeric value is refused rather than sent.'),
+      // ── THE FACEBOOK PAGE FEED, SAME 2026-09-16 AUDIT ──────────────────────────────────────────────────────────
+      // Meta's /{page-id}/feed table lists ~24 parameters and we sent four. `call_to_action` was the instructive
+      // one: its value builder already existed in this codebase, inside the ADS creative path, and the organic
+      // post next door could not use it.
+      audience: z.object({ countries: z.array(z.string()).optional().describe('two-letter codes, e.g. ["CA","US"]'), regions: z.array(z.string()).optional().describe('Meta location keys for regions/states'), cities: z.array(z.string()).optional().describe('Meta location keys for cities'), minAge: z.union([z.literal(13), z.literal(15), z.literal(18), z.literal(21), z.literal(25)]).optional() }).optional().describe('FACEBOOK PAGE POST ONLY — limit who can see this organic post to people in these places and/or over this age (Facebook allows 13, 15, 18, 21 or 25). Not on Instagram, Threads or a Facebook Reel (a vertical clip becomes a Reel): those are refused. Region and city keys come from the Meta ads location search.'),
+      place: z.string().optional().describe('FACEBOOK — tag a location on the Page post. The NUMERIC ID OF THE FACEBOOK PAGE for that place, not a place name and not coordinates.'),
+      callToAction: z.enum(['BOOK_TRAVEL', 'BUY_NOW', 'CALL_NOW', 'DOWNLOAD', 'GET_DIRECTIONS', 'LEARN_MORE', 'LIKE_PAGE', 'MESSAGE_PAGE', 'NO_BUTTON', 'OPEN_LINK', 'SHOP_NOW', 'SIGN_UP', 'WATCH_MORE']).optional().describe('FACEBOOK — a real call-to-action BUTTON on the Page post. The types that open a destination (SHOP_NOW, LEARN_MORE, SIGN_UP, BUY_NOW, DOWNLOAD, OPEN_LINK, WATCH_MORE, BOOK_TRAVEL) need somewhere to go: the post’s own `link`, or `callToActionLink`. CALL_NOW, MESSAGE_PAGE, LIKE_PAGE and GET_DIRECTIONS act on the Page itself and take none.'),
+      callToActionLink: z.string().optional().describe('FACEBOOK — where the button goes, when that is not the post’s own `link`.'),
+      linkName: z.string().optional().describe('FACEBOOK — override the HEADLINE of the link preview. Without it the post shows whatever Open Graph title the destination carries, which on a bare landing page is often nothing. Needs `link`. MEASURED 2026-09-17: Facebook only honours these when the Page’s business has VERIFIED the domain (Business Manager ▸ Brand safety ▸ Domains) — without that Meta refuses the post outright with “Only owners of the URL…”, so leave them out unless the brand owns and has verified that link’s domain.'),
+      linkDescription: z.string().optional().describe('FACEBOOK — override the DESCRIPTION of the link preview. Needs `link`. MEASURED 2026-09-17: Facebook only honours these when the Page’s business has VERIFIED the domain (Business Manager ▸ Brand safety ▸ Domains) — without that Meta refuses the post outright with “Only owners of the URL…”, so leave them out unless the brand owns and has verified that link’s domain.'),
+      linkPicture: z.string().optional().describe('FACEBOOK — override the IMAGE of the link preview: a public http(s) url Facebook fetches itself. Needs `link`. MEASURED 2026-09-17: Facebook only honours these when the Page’s business has VERIFIED the domain (Business Manager ▸ Brand safety ▸ Domains) — without that Meta refuses the post outright with “Only owners of the URL…”, so leave them out unless the brand owns and has verified that link’s domain.'),
+      // ── THE SEVEN FROM THE 2026-09-16 PARAMETER AUDIT ──────────────────────────────────────────────────────────
+      // Meta's table for POST /{ig-user-id}/media lists 21 parameters; we sent 13 and had never looked at these,
+      // because every sweep we ran diffed PATHS or TOOLS and not one of them is a missing endpoint. Each is refused
+      // BY NAME when it cannot apply (a cover on an image post, any of them on a story) rather than dropped.
+      coverUrl: z.string().optional().describe('INSTAGRAM REEL COVER — a public image url Instagram fetches and uses as the cover in the Reels tab. REELS ONLY, and the alternative to `thumbOffset`: passing both is refused, since they are two answers to the same question. Run a local file through upload_file first.'),
+      thumbOffset: z.number().optional().describe('INSTAGRAM REEL COVER, the other way — which frame becomes the cover, in MILLISECONDS from the start of the video. REELS ONLY. Use it instead of `coverUrl` when the right cover is already a frame of the clip.'),
+      shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — true puts the Reel in the Feed grid as well as the Reels tab. REELS ONLY. Left unset it follows Instagram’s own default; Hermoso does not flip it either way on the user’s behalf.'),
+      audioName: z.string().optional().describe('INSTAGRAM REEL — the name of the Reel’s audio track, which is what viewers tap through to. REELS ONLY.'),
+      paidPartnership: z.boolean().optional().describe('INSTAGRAM — the PAID PARTNERSHIP label. A COMPLIANCE DECLARATION, the same kind Hermoso already carries for TikTok and X: set it whenever the post is sponsored, gifted or otherwise paid for. Opt-in and never inferred — it is the poster’s own statement about their commercial relationship.'),
+      brandedContentSponsorIds: z.array(z.string()).optional().describe('INSTAGRAM — the numeric Instagram USER IDS of the brands behind that label (at most 2, and ids rather than @handles). Naming sponsors IS asking for the label, so setting these with `paidPartnership:false` is refused instead of publishing brand credits with no disclosure.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE']).optional().describe('INSTAGRAM TRIAL REEL \u2014 publish this Reel to NON-FOLLOWERS ONLY at first (Instagram allows trials only on accounts above its follower threshold — about 1,000 followers; an ineligible account is refused by name and nothing is posted), so a hook can be tested on a cold audience without spending it on the people who already follow the brand. Instagram then shows it to followers only if it graduates. MANUAL = the creator graduates it by hand in the Instagram app; SS_PERFORMANCE = Instagram graduates it automatically if it performs well. REELS ONLY and INSTAGRAM ONLY: an image, a carousel, a Facebook post or a Threads post is REFUSED BY NAME rather than quietly published as an ordinary post \u2014 a trial that silently goes to every follower is the exact opposite of what was asked for. Omit it for a normal Reel.'),
+      story: z.boolean().optional().describe('INSTAGRAM STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. A Story carries NO CAPTION (there is nowhere to show one), no collaborators, no product tags and no trialReel \u2014 passing any of those is refused by name and nothing is posted, because a story that silently drops the words is worse than one that never went. INSTAGRAM ONLY: a Facebook Page story is a different upload and is not built, so a Facebook channel with `story` set is refused rather than published to the feed.'),
       aiGenerated: z.boolean().optional().describe('INSTAGRAM / FACEBOOK REEL \u2014 Meta\u2019s is_ai_generated self-disclosure. OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, media that came through upload_file or from an external URL (the user\u2019s own photographs or footage) is NOT \u2014 a real photo must never carry Instagram\u2019s \u201cAI info\u201d label. Pass true or false only to override: false strips the label from something Hermoso would otherwise declare, true declares a render the user uploaded themselves.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('ACCESSIBILITY \u2014 the description screen readers announce, and what the platform otherwise auto-generates badly or not at all. Describe what is actually IN the picture, never the caption. ONE STRING describes the picture; on a CAROUSEL it describes EVERY slide. Pass an ARRAY of strings instead to describe each slide separately, aligned to the slide order \u2014 that is strictly better on a multi-slide post, because one sentence read out over six different pictures is wrong for five of them. More descriptions than pictures is refused rather than dropped. WHERE IT LANDS, per Meta\u2019s own docs: INSTAGRAM image posts and the IMAGE slides of an Instagram carousel (up to 1000 characters; dropped rather than sent on a Reel or a video slide, which Meta do not support); FACEBOOK Page photos including every photo of an album, via alt_text_custom (Meta publish no length for it, so nothing is truncated); THREADS on a single-image or single-video post ONLY \u2014 Meta document no way to attach alt text to a Threads CAROUSEL slide, so a Threads carousel publishes undescribed and the reply says so rather than risking the whole post on a guess. (Meta\u2019s AI disclosure defaults from PROVENANCE: a Hermoso render is declared is_ai_generated; media that came through upload_file or an external URL, i.e. the user\u2019s own photos or footage, is NOT. Pass `aiGenerated` to force it either way.)'),
       pageId: z.string().optional().describe('target Page id (from list_meta_pages); omit = first Page'),
@@ -4301,7 +4374,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE COLLAB LINE IS THE READ-BACK, NEVER THE ASK. `collaboratorNote` is built from what Instagram said
     // about each invite; printing "posted with @x" off the request would tell the user their post is live on
     // an account that has not accepted it — and may never.
-    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL` : ''} to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}`, d);
+    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}`, d);
   }));
   // ── SCHEDULING (2026-07-30). ONE mechanism for every channel — our durable queue, not a per-platform special case.
   // Dave: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
@@ -4382,12 +4455,35 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // reachable when you publish NOW, unreachable when you schedule, and invisible until the parity sweep named it.
       xQuotePostId: z.string().optional().describe('X — the numeric id of an X post this one QUOTES: the last part of its URL. NAMED xQuotePostId, NOT quotePostId, because `quotePostId` on this same schedule belongs to THREADS. Billed at X’s higher LINK rate.'),
       communityId: z.string().optional().describe('X — publish into an X COMMUNITY instead of the main timeline: the number in the community’s own URL (x.com/i/communities/<id>). The connected account must be a MEMBER of it.'),
-      paidPartnership: z.boolean().optional().describe('X — label the post a PAID PARTNERSHIP. OPT-IN ONLY: set it when the post is sponsored, gifted or otherwise paid for, and never assume it on the user’s behalf.'),
+      paidPartnership: z.boolean().optional().describe('INSTAGRAM AND X — the PAID PARTNERSHIP label, a compliance declaration: set it when the post is sponsored, gifted or otherwise paid for. OPT-IN ONLY, never assume it on the user’s behalf. On Instagram, brandedContentSponsorIds names the brands behind it.'),
       // AN X ARTICLE, SCHEDULED (2026-09-12). A mode of the x channel, not a channel: the X text is the markdown body
       // and the image is the cover, so the only new fields are the two the Article itself adds.
       xArticle: z.object({ title: z.string(), headings: z.enum(['blocks', 'text']).optional() }).optional().describe('X: publish the X item as a long-form X ARTICLE. title is its headline, the X text (message or captions.x) its markdown body, the image its cover. Refused now if the markdown has formatting X cannot hold. X allows about 5 Articles a day; one that fires into that cap fails with the reset time and can be retried.'),
       collaborators: z.array(z.string()).optional().describe('INSTAGRAM \u2014 a COLLAB post: up to 3 Instagram usernames invited to CO-AUTHOR it, so it appears on their profile too once they accept, with both handles in the header and the engagement shared. Handles only ("hermosoai"); a leading @ is fine. Instagram must be one of the `channels` \u2014 asking for collaborators on a schedule Instagram is not on is REFUSED now rather than discovered when it fires, and the other channels in a mixed schedule simply publish without co-authors. THE INVITE IS SENT WHEN THE POST FIRES, not when you schedule it, and it is PENDING until the other account accepts in their notifications; check with instagram_collaborators afterwards rather than telling the user it is live on both profiles.'),
+      // ── THE FACEBOOK PAGE FEED, SAME 2026-09-16 AUDIT ──────────────────────────────────────────────────────────
+      // Meta's /{page-id}/feed table lists ~24 parameters and we sent four. `call_to_action` was the instructive
+      // one: its value builder already existed in this codebase, inside the ADS creative path, and the organic
+      // post next door could not use it.
+      audience: z.object({ countries: z.array(z.string()).optional().describe('two-letter codes, e.g. ["CA","US"]'), regions: z.array(z.string()).optional().describe('Meta location keys for regions/states'), cities: z.array(z.string()).optional().describe('Meta location keys for cities'), minAge: z.union([z.literal(13), z.literal(15), z.literal(18), z.literal(21), z.literal(25)]).optional() }).optional().describe('FACEBOOK PAGE POST ONLY — limit who can see this organic post to people in these places and/or over this age (Facebook allows 13, 15, 18, 21 or 25). Not on Instagram, Threads or a Facebook Reel (a vertical clip becomes a Reel): those are refused. Region and city keys come from the Meta ads location search.'),
+      targetAudience: z.object({ geoLocations: z.array(z.string()).optional(), industries: z.array(z.string()).optional(), seniorities: z.array(z.string()).optional(), jobFunctions: z.array(z.string()).optional(), staffCountRanges: z.array(z.enum(['SIZE_1', 'SIZE_2_TO_10', 'SIZE_11_TO_50', 'SIZE_51_TO_200', 'SIZE_201_TO_500', 'SIZE_501_TO_1000', 'SIZE_1001_TO_5000', 'SIZE_5001_TO_10000', 'SIZE_10001_OR_MORE'])).optional(), degrees: z.array(z.string()).optional(), fieldsOfStudy: z.array(z.string()).optional(), organizations: z.array(z.string()).optional() }).optional().describe('LINKEDIN COMPANY PAGE POST ONLY — show the post only to Page followers matching these facets (URNs or bare numeric ids; search_linkedin_ads_targeting finds them). LinkedIn requires the matching audience to be over 300 followers and refuses a smaller one. Personal-profile posts cannot be targeted.'),
+      place: z.string().optional().describe('FACEBOOK — tag a location on the Page post. The NUMERIC ID OF THE FACEBOOK PAGE for that place, not a place name and not coordinates.'),
+      callToAction: z.enum(['BOOK_TRAVEL', 'BUY_NOW', 'CALL_NOW', 'DOWNLOAD', 'GET_DIRECTIONS', 'LEARN_MORE', 'LIKE_PAGE', 'MESSAGE_PAGE', 'NO_BUTTON', 'OPEN_LINK', 'SHOP_NOW', 'SIGN_UP', 'WATCH_MORE']).optional().describe('FACEBOOK — a real call-to-action BUTTON on the Page post. The types that open a destination (SHOP_NOW, LEARN_MORE, SIGN_UP, BUY_NOW, DOWNLOAD, OPEN_LINK, WATCH_MORE, BOOK_TRAVEL) need somewhere to go: the post’s own `link`, or `callToActionLink`. CALL_NOW, MESSAGE_PAGE, LIKE_PAGE and GET_DIRECTIONS act on the Page itself and take none.'),
+      callToActionLink: z.string().optional().describe('FACEBOOK — where the button goes, when that is not the post’s own `link`.'),
+      linkName: z.string().optional().describe('FACEBOOK — override the HEADLINE of the link preview. Without it the post shows whatever Open Graph title the destination carries, which on a bare landing page is often nothing. Needs `link`. MEASURED 2026-09-17: Facebook only honours these when the Page’s business has VERIFIED the domain (Business Manager ▸ Brand safety ▸ Domains) — without that Meta refuses the post outright with “Only owners of the URL…”, so leave them out unless the brand owns and has verified that link’s domain.'),
+      linkDescription: z.string().optional().describe('FACEBOOK — override the DESCRIPTION of the link preview. Needs `link`. MEASURED 2026-09-17: Facebook only honours these when the Page’s business has VERIFIED the domain (Business Manager ▸ Brand safety ▸ Domains) — without that Meta refuses the post outright with “Only owners of the URL…”, so leave them out unless the brand owns and has verified that link’s domain.'),
+      linkPicture: z.string().optional().describe('FACEBOOK — override the IMAGE of the link preview: a public http(s) url Facebook fetches itself. Needs `link`. MEASURED 2026-09-17: Facebook only honours these when the Page’s business has VERIFIED the domain (Business Manager ▸ Brand safety ▸ Domains) — without that Meta refuses the post outright with “Only owners of the URL…”, so leave them out unless the brand owns and has verified that link’s domain.'),
+      // ── THE SEVEN FROM THE 2026-09-16 PARAMETER AUDIT ──────────────────────────────────────────────────────────
+      // Meta's table for POST /{ig-user-id}/media lists 21 parameters; we sent 13 and had never looked at these,
+      // because every sweep we ran diffed PATHS or TOOLS and not one of them is a missing endpoint. Each is refused
+      // BY NAME when it cannot apply (a cover on an image post, any of them on a story) rather than dropped.
+      coverUrl: z.string().optional().describe('INSTAGRAM REEL COVER — a public image url Instagram fetches and uses as the cover in the Reels tab. REELS ONLY, and the alternative to `thumbOffset`: passing both is refused, since they are two answers to the same question. Run a local file through upload_file first.'),
+      thumbOffset: z.number().optional().describe('INSTAGRAM REEL COVER, the other way — which frame becomes the cover, in MILLISECONDS from the start of the video. REELS ONLY. Use it instead of `coverUrl` when the right cover is already a frame of the clip.'),
+      shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — true puts the Reel in the Feed grid as well as the Reels tab. REELS ONLY. Left unset it follows Instagram’s own default; Hermoso does not flip it either way on the user’s behalf.'),
+      audioName: z.string().optional().describe('INSTAGRAM REEL — the name of the Reel’s audio track, which is what viewers tap through to. REELS ONLY.'),
+      instagramLocationId: z.string().optional().describe('INSTAGRAM — tag a place (called locationId on post_to_meta; locationId here is the Google Business listing). It is the NUMERIC ID OF A FACEBOOK PAGE associated with that location, not a place name and not coordinates; a non-numeric value is refused rather than sent.'),
+      brandedContentSponsorIds: z.array(z.string()).optional().describe('INSTAGRAM — the numeric Instagram USER IDS of the brands behind that label (at most 2, and ids rather than @handles). Naming sponsors IS asking for the label, so setting these with `paidPartnership:false` is refused instead of publishing brand credits with no disclosure.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE']).optional().describe('INSTAGRAM TRIAL REEL \u2014 publish this Reel to NON-FOLLOWERS ONLY at first (Instagram allows trials only on accounts above its follower threshold — about 1,000 followers; an ineligible account is refused by name and nothing is posted), so a hook can be tested on a cold audience without spending it on the people who already follow the brand; Instagram shows it to followers only if it graduates. MANUAL = the creator graduates it by hand in the Instagram app; SS_PERFORMANCE = Instagram graduates it automatically if it performs. REELS ONLY and INSTAGRAM ONLY: an image, a carousel, or a Facebook/Threads channel is REFUSED BY NAME rather than quietly published as an ordinary post \u2014 a trial that silently goes to every follower is the exact opposite of what was asked for, so Instagram must be one of the `channels` and the item must carry a video. Omit it for a normal Reel.'),
+      story: z.boolean().optional().describe('INSTAGRAM STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. A Story carries NO CAPTION (there is nowhere to show one), no collaborators, no product tags and no trialReel \u2014 passing any of those is refused by name and nothing is posted, because a story that silently drops the words is worse than one that never went. INSTAGRAM ONLY: a Facebook Page story is a different upload and is not built, so a Facebook channel with `story` set is refused rather than published to the feed.'),
       aiGenerated: z.boolean().optional().describe('INSTAGRAM / FACEBOOK REEL \u2014 Meta\u2019s is_ai_generated self-disclosure. OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, media that came through upload_file or from an external URL (the user\u2019s own photographs or footage) is NOT \u2014 a real photo must never carry Instagram\u2019s \u201cAI info\u201d label. Pass true or false only to override: false strips the label from something Hermoso would otherwise declare, true declares a render the user uploaded themselves.'),
       // ── WHICH ACCOUNT (server-side SCHED_ID_FIELDS). Every one of these is an answer the publish helper REFUSES
       // to guess, so a schedule that cannot carry it can only fail at fire time with nobody watching.
@@ -4410,6 +4506,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'List scheduled and past posts',
     description: 'Show what is queued to post and what already went out. Each fired item reports PER-CHANNEL outcomes, so you can see that (say) Instagram published and TikTok failed on the same item rather than a single misleading verdict. Past items are rebuilt from published-post records, one row per channel; they are not job runs (use list_jobs for those). THE LIST IS COMPACT so it fits in one reply: the next 25 queued and the last 15 fired, captions shortened. Pass `id` for ONE post in full (every caption and setting, which you need before reschedule_post replaces a caption map), `channel` to filter, or `upcoming` / `fired` for more rows. Read-only, 0 credits.',
     inputSchema: {
+      brand: z.string().optional().describe('WHICH BRAND to list — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.'),
       id: z.string().optional().describe('one post id from this list: returns that post in full, every caption and setting included'),
       channel: z.string().optional().describe('only posts that include this channel, e.g. "pinterest" or "x"'),
       upcoming: z.number().optional().describe('how many queued posts to list, soonest first (default 25, max 200)'),
@@ -4420,8 +4517,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       history: z.array(z.object({ id: z.string().optional(), at: z.string().nullable().optional(), channels: z.array(z.string()).optional(), status: z.string().optional(), results: z.array(z.object({ channel: z.string().optional(), ok: z.boolean().optional(), id: z.string().nullable().optional(), url: z.string().nullable().optional(), error: z.string().optional() })).nullable().optional(), error: z.string().nullable().optional() })).optional(),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-  }, wrap(async ({ id, channel, upcoming, fired } = {}) => {
-    const d = await apiGet('/api/schedule', {});
+  }, wrap(async ({ id, channel, upcoming, fired, brand } = {}) => {
+    const d = await apiGet('/api/schedule', brand ? { brandId: brand } : {});
     // ONE POST IN FULL (2026-09-13). The compact list below shortens captions, and reschedule_post's `captions`
     // replaces the WHOLE per-channel map, so an agent changing one caption needs the full row first.
     if (id) {
@@ -4480,6 +4577,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Change a scheduled post',
     description: 'Change a post that is still QUEUED — move it to a different time, rewrite the caption, swap the media, add or drop a channel, or change which board / Page / company Page / listing it goes to. PASS ONLY WHAT CHANGES: an omitted field is left exactly as it was, and an explicit empty string CLEARS one (linkedinOrganizationId:"" moves a company-Page post back to the person\u2019s own profile). The edited item is re-checked against the identical rules its create passed — visibility the channel can honour, per-channel length, media the channel can carry — so an edit can never slip past a refusal that a create would have caught. Get the id from list_scheduled. Something that already went out cannot be changed: a published post is edited or removed with manage_meta_post / manage_linkedin_post / delete_x_post, not rescheduled.',
     inputSchema: {
+      brand: z.string().optional().describe('WHICH BRAND this post is in — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.'),
       id: z.string().describe('the scheduled post id from list_scheduled'),
       at: z.string().optional().describe('the new time — ISO timestamp (2026-08-05T09:00:00Z) or epoch milliseconds. Must be in the future, at most 365 days out.'),
       message: z.string().optional().describe('replace the caption used for every channel that has no override'),
@@ -4528,10 +4626,25 @@ function buildTools(rawServer, opts = {}, sink = null) {
       madeWithAi: z.boolean().optional().describe('X — the AI-media label; false turns it off.'),
       xQuotePostId: z.string().optional().describe('X — the post this one QUOTES; an empty string removes the quote. Named apart from the Threads `quotePostId` on this same schedule.'),
       communityId: z.string().optional().describe('X — the community to publish into; an empty string goes back to the main timeline.'),
-      paidPartnership: z.boolean().optional().describe('X — the paid-partnership label; false turns it off.'),
+      paidPartnership: z.boolean().optional().describe('INSTAGRAM AND X — the paid-partnership label; false turns it off.'),
       xArticle: z.object({ title: z.string().optional(), headings: z.enum(['blocks', 'text']).optional() }).optional().describe('X: replaces the X Article (title, headings); {} makes it an ordinary X post again.'),
       collaborators: z.array(z.string()).optional().describe('INSTAGRAM \u2014 replaces the WHOLE collab list (up to 3 usernames); an explicit [] removes the co-authors and the post goes out as an ordinary single-author post. Only takes effect if the post has not fired yet \u2014 an invite already sent cannot be withdrawn from here.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE', '']).optional().describe('INSTAGRAM \u2014 replaces the trial-reel setting on a queued Reel (MANUAL or SS_PERFORMANCE); an explicit "" turns the trial off and it goes out as an ordinary Reel. Only takes effect while the post is still queued \u2014 a Reel already published cannot be converted into a trial.'),
+      story: z.boolean().optional().describe('INSTAGRAM — true makes it a 24-hour Story, false an ordinary feed post. One image or one video, no carousel.'),
+      coverUrl: z.string().optional().describe('INSTAGRAM REEL — replaces the cover image url; an empty string removes it.'),
+      thumbOffset: z.number().optional().describe('INSTAGRAM REEL — replaces the cover frame, in milliseconds; 0 removes it. Never together with coverUrl.'),
+      shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — whether the Reel also shows in the Feed grid.'),
+      audioName: z.string().optional().describe('INSTAGRAM REEL — replaces the audio track name; an empty string removes it.'),
+      instagramLocationId: z.string().optional().describe('INSTAGRAM — replaces the tagged place (the numeric id of its Facebook Page); an empty string removes it. Not locationId, which is the Google Business listing.'),
+      brandedContentSponsorIds: z.array(z.string()).optional().describe('INSTAGRAM — replaces the sponsor user ids behind the paid-partnership label (at most 2); [] removes them.'),
+      place: z.string().optional().describe('FACEBOOK — replaces the tagged place (the numeric id of its Facebook Page); an empty string removes it.'),
+      callToAction: z.enum(['BOOK_TRAVEL', 'BUY_NOW', 'CALL_NOW', 'DOWNLOAD', 'GET_DIRECTIONS', 'LEARN_MORE', 'LIKE_PAGE', 'MESSAGE_PAGE', 'NO_BUTTON', 'OPEN_LINK', 'SHOP_NOW', 'SIGN_UP', 'WATCH_MORE', '']).optional().describe('FACEBOOK — replaces the button on the Page post; "" removes it.'),
+      callToActionLink: z.string().optional().describe('FACEBOOK — replaces where the button goes; an empty string falls back to the post link.'),
+      linkName: z.string().optional().describe('FACEBOOK — replaces the link preview headline; an empty string removes the override.'),
+      linkDescription: z.string().optional().describe('FACEBOOK — replaces the link preview description; an empty string removes the override.'),
+      linkPicture: z.string().optional().describe('FACEBOOK — replaces the link preview image url; an empty string removes the override.'),
+      audience: z.object({ countries: z.array(z.string()).optional(), regions: z.array(z.string()).optional(), cities: z.array(z.string()).optional(), minAge: z.number().optional() }).optional().describe('FACEBOOK — replaces who can see the Page post {countries, regions, cities, minAge}; {} removes the limit.'),
+      targetAudience: z.object({ geoLocations: z.array(z.string()).optional(), industries: z.array(z.string()).optional(), seniorities: z.array(z.string()).optional(), jobFunctions: z.array(z.string()).optional(), staffCountRanges: z.array(z.string()).optional(), degrees: z.array(z.string()).optional(), fieldsOfStudy: z.array(z.string()).optional(), organizations: z.array(z.string()).optional() }).optional().describe('LINKEDIN COMPANY PAGE — replaces who sees the post; {} removes the limit. The matching audience must be over 300 followers.'),
       aiGenerated: z.boolean().optional().describe('INSTAGRAM / FACEBOOK REEL \u2014 Meta\u2019s is_ai_generated self-disclosure. OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, media that came through upload_file or from an external URL (the user\u2019s own photographs or footage) is NOT \u2014 a real photo must never carry Instagram\u2019s \u201cAI info\u201d label. Pass true or false only to override: false strips the label from something Hermoso would otherwise declare, true declares a render the user uploaded themselves.'),
       boardId: z.string().optional().describe('PINTEREST — move the Pin to a different board (list_pinterest_boards)'),
       chatId: z.string().optional().describe('TELEGRAM — send it to a different chat, group or channel (@username or numeric id). It can be changed but never cleared: telegram cannot publish without one.'),
@@ -4551,11 +4664,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('cancel_scheduled', {
     title: 'Cancel a scheduled post',
     description: 'Remove a queued post before it goes out. Get the id from list_scheduled. Only works while it is still queued — something already published cannot be unsent (use manage_meta_post to delete a Facebook/Instagram post after the fact).',
-    inputSchema: { id: z.string().describe('the scheduled post id from list_scheduled') },
+    // A POST YOU CAN CREATE IN A BRAND MUST BE MANAGEABLE THERE (2026-09-16). Found by hitting it: `brand` on
+    // schedule_post put a post in another brand, and then cancelling it needed use_brand — i.e. changing the whole
+    // connection to undo one call. The wire spelling is `brandId` because these are GET/DELETE calls and `?brand=`
+    // already means a brand NAME on /api/product/find.
+    inputSchema: { id: z.string().describe('the scheduled post id from list_scheduled'), brand: z.string().optional().describe('WHICH BRAND this post is in — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.') },
     outputSchema: { cancelled: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiDelete(`/api/schedule/${encodeURIComponent(a.id)}`);
+    const d = await apiDelete(`/api/schedule/${encodeURIComponent(a.id)}${a.brand ? `?brandId=${encodeURIComponent(a.brand)}` : ''}`);
     return ok(`Cancelled ${d.cancelled}.`, d);
   }));
   // ── RETRY + DUPLICATE (2026-08-05) ────────────────────────────────────────────────────────────────────────────
@@ -4567,6 +4684,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Retry a failed scheduled post',
     description: 'Send a post that FAILED again. A scheduled post fans out across its channels INDEPENDENTLY, so a failure is usually PARTIAL — LinkedIn 401s while Instagram published fine — and this re-fires ONLY the channels that did not succeed by default (list_scheduled reports them as `retryable`). It re-queues the same content as a NEW post that goes out RIGHT AWAY — the queue picks it up on its next pass, within seconds — and the original keeps its failure record so the history still shows what went wrong. Naming a channel that already published is REFUSED rather than quietly posting a second time. Two independent belts stop a double-post: a channel that genuinely published can only REPLAY (nothing is posted), and a channel whose outcome is UNRESOLVED — the platform timed out and may be holding the post — refuses with that reason instead of guessing. Retry after fixing the cause — and you can fix it IN THIS CALL: pass `boardId`, `pageId`, `linkedinOrganizationId`, `locationId`, `message` or `captions` to correct the value that failed, and the corrected post is re-validated exactly like a fresh schedule. That matters because the commonest cause is a field, not an outage: a Pin aimed at the wrong board fails identically however many times it is re-sent. Anything you do not name is copied from the original. To send the same thing again ON PURPOSE, use duplicate_scheduled.',
     inputSchema: {
+      brand: z.string().optional().describe('WHICH BRAND this post is in — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.'),
       id: z.string().describe('the scheduled post id from list_scheduled'),
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).optional().describe('retry only these channels (default: every channel that did not publish)'),
       at: z.string().optional().describe('hold the retry until a later time — ISO timestamp or epoch milliseconds. Leave it out to retry immediately, which is almost always what you want. A time you name here must be at least a minute from now, exactly like any other scheduled post.'),
@@ -4590,6 +4708,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Duplicate a scheduled post',
     description: 'Copy an existing scheduled or already-published post into a NEW queued post — the way to run a creative again, reuse a post that worked as the starting point for the next one, or re-send something after it went out. It copies the caption, media, per-channel captions, title, description, tags and the target board / Page / company Page / listing, and ANY of those can be overridden in the same call. Give a new time in `at`, or useQueue:true to drop it into the brand’s next free posting slot. The copy is INDEPENDENT — editing or cancelling it never touches the original — and it is a genuinely new post rather than a re-send, so it publishes even where the original already did. To re-fire only the channels that FAILED, use retry_scheduled instead.',
     inputSchema: {
+      brand: z.string().optional().describe('WHICH BRAND this post is in — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.'),
       id: z.string().describe('the post to copy, from list_scheduled'),
       at: z.string().optional().describe('when the copy goes out — ISO timestamp or epoch milliseconds (default: an hour from now)'),
       useQueue: z.boolean().optional().describe('instead of naming a time, take the brand’s next free posting slot'),
@@ -10046,7 +10165,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   });
   server.registerTool('list_openai_ads_campaigns', {
     title: 'List ChatGPT Ads account / campaigns / ad groups / ads',
-    description: 'Read the brand’s connected ChatGPT Ads account — the ads that appear below ChatGPT answers. Call with NO ids to get the ad account itself (name, currency, status, review state) plus its campaigns; with campaignId to list that campaign’s ad groups; with adGroupId to list that ad group’s ads, including each ad’s REVIEW status, which is what decides whether it can ever show. Statuses here are active / paused / archived. Read-only, free, zero spend risk. Needs ChatGPT Ads connected (Settings ▸ Connectors ▸ ChatGPT Ads, or connect_connector): the user pastes an Advertiser API key from ChatGPT Ads Manager ▸ Settings — there is no OAuth and no manager account, and one key is scoped to one ad account.',
+    description: 'Read the brand’s connected ChatGPT Ads account — the ads that appear below ChatGPT answers. Every campaign, ad group and ad row carries servingIssues, OpenAI’s own list of what is blocking delivery (payment method, brand review, budget spent, ad in review, landing page not crawlable, country policy…) with a plain meaning each: null means OpenAI was not asked, [] means it reports no blocker, which is still not a promise of impressions. Call with NO ids to get the ad account itself (name, currency, status, review state) plus its campaigns; with campaignId to list that campaign’s ad groups; with adGroupId to list that ad group’s ads, including each ad’s REVIEW status, which is what decides whether it can ever show. Statuses here are active / paused / archived. Read-only, free, zero spend risk. Needs ChatGPT Ads connected (Settings ▸ Connectors ▸ ChatGPT Ads, or connect_connector): the user pastes an Advertiser API key from ChatGPT Ads Manager ▸ Settings — there is no OAuth and no manager account, and one key is scoped to one ad account.',
     inputSchema: {
       campaignId: z.string().optional().describe('list this campaign’s ad groups'),
       adGroupId: z.string().optional().describe('list this ad group’s ads'),
@@ -10057,23 +10176,30 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/campaigns', a);
-    if (d.level === 'ad') return ok(`${d.count} ad(s) in ChatGPT Ads ad group ${d.adGroupId}:\n${(d.ads || []).map(x => `• ${x.title || x.name} (${x.id}) — ${x.status}, review ${x.reviewStatus || 'unknown'}${x.targetUrl ? ` → ${x.targetUrl}` : ''}`).join('\n') || '(none)'}`, d);
-    if (d.level === 'adGroup') return ok(`${d.count} ad group(s) in ChatGPT Ads campaign ${d.campaignId}:\n${(d.adGroups || []).map(g => `• ${g.name} (${g.id}) — ${g.status}, ${g.contextHints} context hint(s)${g.maxBid != null ? `, max bid ${g.maxBid}` : ''}`).join('\n') || '(none)'}`, d);
+    const blk = (x) => (x.servingIssues && x.servingIssues.length ? ` ⚠ not serving: ${x.servingIssues.map(i => i.meaning).join('; ')}` : '');
+    if (d.level === 'ad') return ok(`${d.count} ad(s) in ChatGPT Ads ad group ${d.adGroupId}:\n${(d.ads || []).map(x => `• ${x.title || x.name} (${x.id}) — ${x.status}, review ${x.reviewStatus || 'unknown'}${x.appeal ? `, appeal ${x.appeal.status}` : ''}${x.targetUrl ? ` → ${x.targetUrl}` : ''}${blk(x)}`).join('\n') || '(none)'}`, d);
+    if (d.level === 'adGroup') return ok(`${d.count} ad group(s) in ChatGPT Ads campaign ${d.campaignId}:\n${(d.adGroups || []).map(g => `• ${g.name} (${g.id}) — ${g.status}, ${g.contextHints} context hint(s)${g.maxBid != null ? `, max bid ${g.maxBid}` : ''}${(g.audienceBidMultipliers || []).length ? `, ${g.audienceBidMultipliers.length} audience bid multiplier(s)` : ''}${blk(g)}`).join('\n') || '(none)'}`, d);
     const acc = d.account;
-    return ok(`ChatGPT Ads account${acc ? ` "${acc.name}" (${acc.id})${acc.currency ? `, ${acc.currency}` : ''}${acc.status ? ` · ${acc.status}` : ''}` : ''}\n${d.count} campaign(s):\n${(d.campaigns || []).map(c => `• ${c.name} (${c.id}) — ${c.status}${c.dailyBudget != null ? `, ${c.dailyBudget}/day` : ''}${c.lifetimeBudget != null ? `, ${c.lifetimeBudget} lifetime` : ''}${c.biddingType ? `, ${c.biddingType}` : ''}`).join('\n') || '(none)'}`, d);
+    return ok(`ChatGPT Ads account${acc ? ` "${acc.name}" (${acc.id})${acc.currency ? `, ${acc.currency}` : ''}${acc.status ? ` · ${acc.status}` : ''}` : ''}\n${d.count} campaign(s):\n${(d.campaigns || []).map(c => `• ${c.name} (${c.id}) — ${c.status}${c.dailyBudget != null ? `, ${c.dailyBudget}/day` : ''}${c.lifetimeBudget != null ? `, ${c.lifetimeBudget} lifetime` : ''}${c.biddingType ? `, ${c.biddingType}` : ''}${blk(c)}`).join('\n') || '(none)'}`, d);
   }));
   server.registerTool('openai_ads_report', {
     title: 'ChatGPT Ads performance report',
-    description: 'Performance for ChatGPT Ads — impressions, clicks, spend, CTR, CPC, CPM. The scope follows the id you pass: none = the whole ad account, or campaignId / adGroupId / adId. PRODUCT-FEED CAMPAIGNS serving in the multi-product CAROUSEL unit also report per-card numbers: ask for them in `fields` — carousel_product_card_impressions, carousel_product_card_clicks, product_impressions, product_clicks, product_spend, product_ctr, product_cpc, product_cpm plus product_title / product_price / product_feed_id and the other product_* fields (complete from 2026-08-20 on a rolling 30-day basis). A card impression counts when a product card becomes viewable and is NOT a billable impression, so never add it to spend math. granularity is hourly, daily, monthly or none (default daily); the default window is the last 30 days; segment by country or device for a breakdown, and level rolls the rows up by campaign / ad group / ad. A report with NO rows genuinely means there was NO delivery in that window — say exactly that; never present zeros as measured performance. Read-only and free, so run it FIRST after connecting: it proves the key works with zero spend risk.',
+    description: 'Performance for ChatGPT Ads — impressions, clicks, spend, CTR, CPC, CPM, and CONVERSIONS with CPA, post-click conversion rate and attributed order sales / ROAS, in the ad account currency. OpenAI returns conversions only with granularity none or daily and with no segment or a country/device segment (never platform or product), and CPA, conversion rate and sales only with no segment at all; the report adds every column OpenAI allows for the shape you asked and its note names any it left out, so a missing column is their limit, not a zero. These conversions are CLICK-THROUGH (the ones CPA and bidding use); view-through lives only in openai_ads_conversions and is never added to them. The scope follows the id you pass: none = the whole ad account, or campaignId / adGroupId / adId. PRODUCT-FEED CAMPAIGNS serving in the multi-product CAROUSEL unit also report per-card numbers: ask for them in `fields` — carousel_product_card_impressions, carousel_product_card_clicks, product_impressions, product_clicks, product_spend, product_ctr, product_cpc, product_cpm plus product_title / product_price / product_feed_id and the other product_* fields (complete from 2026-08-20 on a rolling 30-day basis); they come back under each row’s `fields`. A card impression counts when a product card becomes viewable and is NOT a billable impression, so never add it to spend math. granularity is hourly, daily, monthly or none (default daily); the default window is the last 30 days; segment by country or device for a breakdown, and level rolls the rows up by campaign / ad group / ad. A report with NO rows genuinely means there was NO delivery in that window — say exactly that; never present zeros as measured performance. Read-only and free, so run it FIRST after connecting: it proves the key works with zero spend risk.',
     inputSchema: {
       campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(),
       since: z.string().optional().describe('YYYY-MM-DD'), until: z.string().optional().describe('YYYY-MM-DD'),
       granularity: z.enum(['hourly', 'daily', 'monthly', 'none']).optional().describe('default daily'),
       level: z.enum(['ad_account', 'campaign', 'ad_group', 'ad']).optional().describe('roll rows up to this level'),
       segment: z.enum(['product', 'country', 'device', 'platform']).optional().describe('extra group-by dimension (at most one). platform splits rows by ChatGPT app or browser (ios_app, android_app, desktop_web, ios_web, android_web, and web for rows from before 2026-09-10, which OpenAI does not split retroactively); it reports delivery metrics only, not conversions'),
-      limit: z.number().optional(),
+      limit: z.number().optional().describe('rows per page, up to 2000'),
+      filters: z.array(z.object({ field: z.string(), operator: z.enum(['IN', 'GREATER_THAN', 'LESS_THAN']), value: z.any() })).optional().describe('keep only matching rows, e.g. {field:"campaign.status",operator:"IN",value:["active"]} or {field:"ad.clicks",operator:"GREATER_THAN",value:100}'),
+      sort: z.array(z.object({ field: z.string(), direction: z.enum(['asc', 'desc']).optional() })).optional().describe('order rows, e.g. {field:"campaign.spend",direction:"desc"}'),
+      includeZeroImpressions: z.boolean().optional().describe('also list campaigns / ad groups / ads with no impressions (unsegmented reports only)'),
+      after: z.string().optional().describe('nextAfter from the previous page; limit goes up to 2000 rows'),
+      conversions: z.boolean().optional().describe('default true: add conversions, CPA, conversion rate and sales where OpenAI allows them. false leaves them out.'),
+      fields: z.array(z.string()).optional().describe('extra insight fields by name, e.g. product_title, product_price, carousel_product_card_impressions; each row returns them under `fields`'),
     },
-    outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), note: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), currency: z.string().optional(), timezone: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), hasMore: z.boolean().optional(), nextAfter: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/report', a);
@@ -11174,17 +11300,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       name: z.string(),
       eventType: z.string().describe('e.g. order_created, lead_created, registration_completed — the plausible words "purchase", "lead" and "signup" are all REFUSED by ChatGPT Ads'),
-      sourceIds: z.array(z.string()).describe('pixel id(s) this event is measured from — from create_openai_ads_pixel'),
+      sourceIds: z.array(z.string()).describe('exactly ONE source id from create_openai_ads_pixel (ChatGPT Ads takes one source per event; create one event per pixel)'),
       customEventName: z.string().optional().describe('for a non-standard event'),
-      attributionWindowDays: z.number().optional().describe('1-90'),
+      attributionWindowDays: z.number().optional().describe('default 30, which is what OpenAI recommends; 1-90'),
     },
     outputSchema: { conversionEventSettingId: z.string().optional(), name: z.string().optional(), eventType: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/conversion-event', a); return ok(d.note, d); }));
   server.registerTool('list_openai_ads_audiences', {
     title: 'List ChatGPT Ads custom audiences',
-    description: 'List the custom audiences on the connected ChatGPT Ads account. Read-only, free.',
-    inputSchema: { limit: z.number().optional() },
+    description: 'List the custom audiences on the connected ChatGPT Ads account. Pass intendedUse to see only the ones eligible for exclusion, inclusion or a bid multiplier (inclusion and bid multipliers need roughly 25,000 matched users). Read-only, free.',
+    inputSchema: { limit: z.number().optional(), intendedUse: z.enum(['exclusion', 'inclusion', 'bid_multiplier']).optional().describe('only audiences eligible for this use') },
     outputSchema: { count: z.number().optional(), audiences: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
@@ -11193,13 +11319,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_openai_ads_audience', {
     title: 'Create a ChatGPT Ads custom audience',
-    description: 'Create a ChatGPT Ads custom audience from a customer list. Pass plain emails and/or phone numbers: Hermoso NORMALISES AND SHA-256 HASHES THEM LOCALLY and uploads only the digests, so no plaintext personal data leaves Hermoso. MEASURED 2026-08-09: OpenAI’s ads file endpoint only accepts IMAGE mimetypes (gif/jpeg/png/webp) and rejects a customer-list CSV under every upload purpose, so audiences are UI-only for now — this tool reports OpenAI’s verbatim refusal and points the user at ChatGPT Ads Manager, and will start working unchanged the day a data-file path opens. Values that are neither an email nor a phone number are skipped and counted, never silently dropped. An audience is a definition and cannot spend.',
+    description: 'Create a ChatGPT Ads custom audience from a customer list. Pass plain emails and/or phone numbers: Hermoso NORMALISES AND SHA-256 HASHES THEM LOCALLY and uploads only the digests, so no plaintext personal data leaves Hermoso. OR pass fileUrl: a public link to a UTF-8 .csv or .txt customer list (a CSV needs a header naming its column: email, phone_number, email_sha256, phone_number_sha256 or gaid; identifierResolution "auto" reads several columns at once). A file is uploaded to ChatGPT Ads as it is and OpenAI hashes raw emails and phones itself; the members list is hashed here first. Matching is asynchronous, so read the audience back for its matched count. Values that are neither an email nor a phone number are skipped and counted, never silently dropped. An audience is a definition and cannot spend.',
     inputSchema: {
       name: z.string(),
-      members: z.array(z.string()).describe('emails and/or phone numbers (already-SHA256-hashed emails are passed through as-is)'),
+      members: z.array(z.string()).optional().describe('emails and/or phone numbers (already-SHA256-hashed emails are passed through as-is); or use fileUrl'),
+      fileUrl: z.string().optional().describe('public link to a UTF-8 .csv or .txt customer list; upload_file turns a local file into one'),
+      fileName: z.string().optional().describe('the file name with .csv or .txt, when the link hides it'),
+      identifierType: z.enum(['email', 'phone', 'email_sha256', 'phone_number_sha256', 'gaid']).optional().describe('the one identifier the file holds (inferred from a CSV header when omitted)'),
+      identifierResolution: z.enum(['auto']).optional().describe('auto = read every identifier column of a mixed CSV'),
       description: z.string().optional(),
     },
-    outputSchema: { audienceId: z.string().optional(), name: z.string().optional(), membersSent: z.number().optional(), rejected: z.number().optional(), note: z.string().optional() },
+    outputSchema: { audienceId: z.string().optional(), name: z.string().optional(), membersSent: z.number().optional(), rejected: z.number().optional(), status: z.string().optional(), fileId: z.string().optional(), fileBytes: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/audience', a); return ok(d.note, d); }));
   server.registerTool('get_openai_ads_audience', {
@@ -11310,6 +11440,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       bidStrategy: z.enum(['fixed_bid', 'maximize_clicks', 'maximize_conversions']).optional().describe('HOW THIS AD GROUP BIDS — OpenAI’s “Maximize results”. fixed_bid (default) uses your maxBid as a hard cap; maximize_clicks and maximize_conversions let ChatGPT Ads set the bid to get the most of that outcome for the budget, and with either of those maxBid is OPTIONAL. maximize_conversions additionally needs the CAMPAIGN on biddingType "conversions" with a conversion event setting attached.'),
       billingEvent: z.enum(['click', 'impression']).optional().describe('default click'),
       contextHints: z.array(z.string()).optional().describe('up to 2,000, deduplicated server-side'),
+      landingPageQueryTemplate: z.string().optional().describe('query string added to every landing page click, e.g. utm_source=chatgpt&utm_content={ad_id}. Placeholders: {campaign_id} {ad_group_id} {ad_id} {ad_account_id} {oppref}; oppref and olref cannot be parameter names. On an update, an empty string clears it.'),
+      audienceBidMultipliers: z.array(z.object({ customAudienceId: z.string(), multiplier: z.number().describe('0.1 to 10; 2 bids twice as much for this audience') })).optional().describe('bid more or less for people in a custom audience (eligible ids: list_openai_ads_audiences with intendedUse bid_multiplier, about 25,000 matched users). On an update this REPLACES the list; [] removes them all, and a bid change keeps the existing multipliers.'),
       status: z.enum(['active', 'paused']).optional().describe('default paused'),
       confirm: z.boolean().optional().describe('REQUIRED true to create this ACTIVE under a live campaign (real spend)'),
     },
@@ -11325,6 +11457,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       adGroupId: z.string(), name: z.string().optional().describe('internal name — defaults to the title'),
       creative: oaiCreativeShape,
+      landingPageQueryTemplate: z.string().optional().describe('query string added to every landing page click, e.g. utm_source=chatgpt&utm_content={ad_id}. Placeholders: {campaign_id} {ad_group_id} {ad_id} {ad_account_id} {oppref}; oppref and olref cannot be parameter names. On an update, an empty string clears it.'),
       status: z.enum(['active', 'paused']).optional().describe('default paused'),
       confirm: z.boolean().optional().describe('REQUIRED true to create this ACTIVE in a live ad group (real spend)'),
     },
@@ -11384,6 +11517,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       maxBid: z.number().optional(), billingEvent: z.enum(['click', 'impression']).optional().describe('required alongside maxBid — bidding is replaced wholesale'),
       bidStrategy: z.enum(['fixed_bid', 'maximize_clicks', 'maximize_conversions']).optional().describe('CHANGE HOW THIS AD GROUP BIDS (OpenAI’s “Maximize results”). BIDDING IS REPLACED WHOLESALE, so a patch that moves the bid without restating the strategy would DEMOTE a maximize_* ad group to a fixed bid, and one that sets a strategy without restating maxBid DELETES the cap — both are refused by name with what would have been lost.'),
       creative: oaiCreativeShape.optional().describe('REPLACES the ad’s creative (text + image card only)'),
+      landingPageQueryTemplate: z.string().optional().describe('query string added to every landing page click, e.g. utm_source=chatgpt&utm_content={ad_id}. Placeholders: {campaign_id} {ad_group_id} {ad_id} {ad_account_id} {oppref}; oppref and olref cannot be parameter names. On an update, an empty string clears it.'),
+      audienceBidMultipliers: z.array(z.object({ customAudienceId: z.string(), multiplier: z.number().describe('0.1 to 10; 2 bids twice as much for this audience') })).optional().describe('bid more or less for people in a custom audience (eligible ids: list_openai_ads_audiences with intendedUse bid_multiplier, about 25,000 matched users). On an update this REPLACES the list; [] removes them all, and a bid change keeps the existing multipliers.'),
       confirm: z.boolean().optional().describe('REQUIRED true to change budget / bid / creative on a LIVE object'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), object: z.any().optional(), note: z.string().optional() },
@@ -11404,7 +11539,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('openai_ads_conversions', {
     title: 'ChatGPT Ads attributed conversions',
-    description: 'ATTRIBUTED CONVERSIONS for ChatGPT Ads — the number the whole pixel + conversion-event setup exists to produce, and the one openai_ads_report structurally cannot give you (that endpoint family carries impressions, clicks, spend, CTR, CPC and CPM and no conversions at all). Pass entityIds — the campaign / ad group / ad ids to report on — with a matching level; the default window is the last 30 days. NEVER ADD conversions AND viewThroughConversions TOGETHER: OpenAI states that "conversions is always equal to click_through_conversions" and that view-through is "a separate, supplemental metric" NOT added to that total, and that view-through is reporting-only because CPA, post-click CVR, bidding, billing and conversion optimization all remain click-through-based. NO ROWS means no attributed conversion was recorded, not that data is missing — say exactly that, and check that an event setting exists (list_openai_ads_conversion_events) and that its pixel snippet is actually live on the site. RECEIVED EVENTS: pass recentEvents:true (no ids needed) to read a recent SAMPLE of the events OpenAI actually received on the pixel — type, event time, receive time, API channel and the event id — which answers "did OpenAI get the signup at all?" when a conversion is missing. It is a sample, not a complete log, and receiving an event is not the same as attributing it. Read-only, free.',
+    description: 'ATTRIBUTED CONVERSIONS for ChatGPT Ads — the number the whole pixel + conversion-event setup exists to produce, beyond what openai_ads_report shows: that report carries click-through conversions and CPA for the account, a campaign, ad group or ad, while this tool adds VIEW-THROUGH conversions, totals per id across many ids, and the received-event sample. Pass entityIds — the campaign / ad group / ad ids to report on — with a matching level; the default window is the last 30 days. NEVER ADD conversions AND viewThroughConversions TOGETHER: OpenAI states that "conversions is always equal to click_through_conversions" and that view-through is "a separate, supplemental metric" NOT added to that total, and that view-through is reporting-only because CPA, post-click CVR, bidding, billing and conversion optimization all remain click-through-based. NO ROWS means no attributed conversion was recorded, not that data is missing — say exactly that, and check that an event setting exists (list_openai_ads_conversion_events) and that its pixel snippet is actually live on the site. RECEIVED EVENTS: pass recentEvents:true (no ids needed) to read a recent SAMPLE of the events OpenAI actually received on the pixel — type, event time, receive time, API channel and the event id — which answers "did OpenAI get the signup at all?" when a conversion is missing. It is a sample, not a complete log, and receiving an event is not the same as attributing it. Read-only, free.',
     inputSchema: {
       level: z.enum(['ad_account', 'campaign', 'ad_group', 'ad']).optional().describe('inferred from which id you pass — default ad_account'),
       entityIds: z.array(z.string()).optional().describe('the campaign, ad group or ad ids to report on, required below the account level; omit for level ad_account, which sums every campaign'),
@@ -13179,7 +13314,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       scheduleType: z.enum(['SCHEDULE_FROM_NOW', 'SCHEDULE_START_END']),
       scheduleStartTime: z.string().describe('YYYY-MM-DD HH:MM:SS in the advertiser timezone'),
       scheduleEndTime: z.string().optional(),
-      advertiserId: z.string().optional(), budget: z.number().optional(), bid: z.number().optional(),
+      advertiserId: z.string().optional(),
+      budget: z.number().optional().describe('ad group budget in the advertiser currency. Required when the campaign has budgetOptimizeOn false, ignored when CBO is on'),
+      budgetMode: z.enum(['BUDGET_MODE_TOTAL', 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET']).optional().describe('required with budget when the campaign has CBO off'),
+      bid: z.number().optional().describe('the Cost Cap target, required with bidType BID_TYPE_CUSTOM. Sent as bid_price for CLICK and conversion_bid_price for CONVERT, TRAFFIC_LANDING_PAGE_VIEW, INSTALL and IN_APP_EVENT; VALUE takes deepBidType and roasBid instead'),
+      deepBidType: z.enum(['DEFAULT', 'AEO', 'VO_MIN_ROAS', 'VO_HIGHEST_VALUE']).optional().describe('required when optimizationGoal is VALUE'),
+      roasBid: z.number().optional().describe('target ROAS (0.01-1000), required when deepBidType is VO_MIN_ROAS'),
+      pixelId: z.string().optional().describe('required for WEB_CONVERSIONS / LEAD_GENERATION when optimizationGoal is CONVERT or VALUE'),
+      optimizationEvent: z.string().optional().describe('the conversion event, required whenever pixelId is set (e.g. SHOPPING, ON_WEB_ORDER)'),
     },
     outputSchema: { adGroupId: z.string().optional(), summary: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -13190,7 +13332,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Add the creative to a Smart+ ad group. Smart+ combines the materials you give it rather than running one fixed cut, so this is where the videos and copy go. Created PAUSED. If TikTok accepts the request but returns no ad id, the reply says nothing is confirmed to exist rather than claiming success — check Ads Manager before retrying, or a second call can create a twin.',
     inputSchema: {
       adGroupId: z.string().describe('from create_tiktok_smart_ad_group'),
-      creatives: z.array(z.record(z.any())).optional().describe('creative objects — video ids, ad texts, call to action'),
+      name: z.string().optional().describe('ad name; "" lets TikTok name it after the ad id'),
+      creatives: z.array(z.record(z.any())).optional().describe('up to 50 TikTok creative_info objects: {ad_format: "SINGLE_VIDEO" | "CAROUSEL_ADS", video_info: {video_id}, image_info: [{web_uri}], tiktok_item_id, identity_type, identity_id}. Ids come from upload_tiktok_ads_creative and list_tiktok_ads_identities'),
+      adTexts: z.array(z.string()).optional().describe('up to 5 ad texts; required unless every creative is a tiktok_item_id Spark post'),
+      landingPageUrl: z.string().optional().describe('the destination URL'),
+      callToActions: z.array(z.string()).optional().describe('up to 3 TikTok call-to-action enums, e.g. LEARN_MORE, SHOP_NOW'),
+      adConfiguration: z.record(z.any()).optional().describe('TikTok ad_configuration for Spark or catalog ads (identity_type, identity_id, product_set_id, …)'),
       advertiserId: z.string().optional(),
     },
     outputSchema: { adIds: z.array(z.string()).optional(), summary: z.string().optional() },
@@ -13200,7 +13347,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_tiktok_smart_campaigns', {
     title: 'List TikTok Smart+ campaigns',
     description: 'Read the Smart+ campaigns on a TikTok advertiser. TikTok’s reads LAG its writes, so a campaign created seconds ago can be missing here and still exist — the reply says so rather than reporting an empty account.',
-    inputSchema: { advertiserId: z.string().optional(), limit: z.number().optional() },
+    inputSchema: { advertiserId: z.string().optional(), limit: z.number().optional().describe('page size, 1-1000, default 20'), page: z.number().optional().describe('page number, from 1; the reply says when there are more') },
     outputSchema: { count: z.number().optional(), summary: z.string().optional() },
     annotations: { destructiveHint: false, readOnlyHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/tiktok-ads/smart/campaigns', a); return ok(d.summary, d); }));
@@ -13221,12 +13368,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('set_tiktok_smart_status', {
     title: 'Enable, pause or delete a Smart+ object',
-    description: 'THE ONLY SWITCH THAT ARMS REAL MONEY on the Smart+ lane. ENABLE requires confirm:true and starts spend on the next auction; DISABLE and DELETE only ever reduce spend and are never gated. Works at campaign, adgroup or ad level.',
+    description: 'Enable, pause or delete Smart+ campaigns, ad groups or ads (up to 20 ids per call). ENABLE starts REAL SPEND on the next auction and DELETE is permanent (a deleted campaign takes its ad groups and ads with it), so both require confirm:true after the user says yes. DISABLE (pause) is never gated. The reply is read back from TikTok and names any id whose new state it could not confirm.',
     inputSchema: {
       level: z.enum(['campaign', 'adgroup', 'ad']),
       ids: z.union([z.string(), z.array(z.string())]),
       status: z.enum(['ENABLE', 'DISABLE', 'DELETE']),
-      confirm: z.boolean().optional().describe('required for ENABLE — real money'),
+      confirm: z.boolean().optional().describe('required for ENABLE (real money) and DELETE (permanent)'),
       advertiserId: z.string().optional(),
     },
     outputSchema: { summary: z.string().optional() },
@@ -15075,6 +15222,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       captionsSrt: z.string().optional().describe('CLOSED CAPTIONS for a videoUrl post — the SubRip (.srt) CONTENT itself, cue numbers and `00:00:00,000 --> 00:00:02,000` timing lines included, NOT a URL and NOT the plain script (a file with no timings is refused, because LinkedIn would accept it and then silently never show it). Most of LinkedIn is watched with the sound off, so an uncaptioned video is one most of the feed never hears. LinkedIn allows ONE caption file per video and ENGLISH ONLY; it can be attached only WHILE the video is uploaded, never added to a published post; and it is processed asynchronously, so the reply confirms it was UPLOADED and never that it is visible yet. Requires videoUrl — passing it on an image, carousel or link post is refused by name.'),
       videoThumbnailUrl: z.string().optional().describe('the COVER IMAGE for a videoUrl post — a Hermoso-hosted image (a render, or any picture of the user\u2019s via upload_file). Without it LinkedIn adds a system-generated thumbnail, which on an ad is usually whatever the first frame happens to be. Like captions this can only be set WHILE the video is uploaded, never afterwards. Requires videoUrl. This is NOT linkThumbnailUrl, which is the picture on a link-preview card.'),
       visibility: z.enum(['PUBLIC', 'CONNECTIONS']).optional().describe('default PUBLIC'),
+      targetAudience: z.object({ geoLocations: z.array(z.string()).optional(), industries: z.array(z.string()).optional(), seniorities: z.array(z.string()).optional(), jobFunctions: z.array(z.string()).optional(), staffCountRanges: z.array(z.enum(['SIZE_1', 'SIZE_2_TO_10', 'SIZE_11_TO_50', 'SIZE_51_TO_200', 'SIZE_201_TO_500', 'SIZE_501_TO_1000', 'SIZE_1001_TO_5000', 'SIZE_5001_TO_10000', 'SIZE_10001_OR_MORE'])).optional(), degrees: z.array(z.string()).optional(), fieldsOfStudy: z.array(z.string()).optional(), organizations: z.array(z.string()).optional() }).optional().describe('LINKEDIN COMPANY PAGE POST ONLY — show the post only to Page followers matching these facets (URNs or bare numeric ids; search_linkedin_ads_targeting finds them). LinkedIn requires the matching audience to be over 300 followers and refuses a smaller one. Personal-profile posts cannot be targeted.'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional(), organizationId: z.string().optional(), videoExtras: z.object({ captions: z.boolean().optional(), thumbnail: z.boolean().optional() }).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -15615,6 +15763,52 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/drive/save', a);
     return ok(d.note || `Saved ${(d.files || []).length} file(s) to Drive.`, d);
   }));
+  // ── PULL A WHOLE CLOUD FOLDER INTO THE LIBRARY (2026-09-16) ─────────────────────────────────────────────────────
+  // Asked for by the first real user of the connector: "let us import from Google Drive or OneDrive — both are
+  // already connectable; a 'pull this folder into my Library' tool is the practical fix." ONE tool for both clouds
+  // rather than two, because the roster is the billed prefix of every Studio turn and `provider` is one enum value
+  // against a whole second tool's schema and description.
+  //
+  // THE SERVER DOES THE FETCH, and that is the whole reason this could not be assembled from existing tools: a
+  // Drive or OneDrive file is NOT public, so its download needs the customer's connector token, which only the
+  // server holds. The Library write happens HERE, through the same merge-aware store path every other client uses,
+  // so an import lands in the same list the app renders and syncs across devices.
+  server.registerTool('import_from_cloud', {
+    title: 'Import a Drive / OneDrive folder into the Library',
+    description: "Pull the files in a Google Drive or OneDrive FOLDER into this brand's Library, so they can be used like anything rendered here — published, scheduled, cloned, used as a product photo or a reference. Hermoso downloads each file with the user's own connected account (a Drive/OneDrive file is not public, so this is the only way in) and stores a durable Hermoso url for each. Give `folderId` from list_drive_files / list_onedrive_files with onlyFolders — omit it for the root. GOOGLE DRIVE ONLY SHOWS WHAT THE USER HANDED OVER: our Drive scope is `drive.file`, so Hermoso can see the files and folders it created plus the ones the user picked with the Google picker in the app, and NEVER their whole Drive — if a folder comes back empty, that is the answer, and the user picks it in the app once to make it reachable. OneDrive has no such limit. SUBFOLDERS ARE NOT WALKED and Google-native docs (Docs/Sheets/Slides) have no file to download: both are reported back BY NAME rather than silently dropped, along with anything too large or unreadable, so you can tell the user exactly what did and did not come across.",
+    inputSchema: {
+      provider: z.enum(['drive', 'onedrive']).describe('which cloud — `drive` is Google Drive, `onedrive` is Microsoft OneDrive'),
+      folderId: z.string().optional().describe('the folder to import, from list_drive_files / list_onedrive_files (onlyFolders:true). Omit for the root of the drive.'),
+      limit: z.number().optional().describe('how many files to bring across in this call (default 10, max 25). Anything over the limit is listed as skipped so you know what is left.'),
+    },
+    outputSchema: {
+      imported: z.array(z.object({ name: z.string().optional(), url: z.string().optional(), kind: z.string().optional(), bytes: z.number().optional() })).optional(),
+      skipped: z.array(z.object({ name: z.string().optional(), why: z.string().optional() })).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/library/import', { provider: a.provider, folderId: a.folderId || '', limit: a.limit });
+    const imported = d.imported || [], skipped = d.skipped || [];
+    // THE LIBRARY WRITE IS A MERGE, NEVER A REPLACE: the app and other devices write this same key, and an import
+    // that clobbered it would delete renders. Dedup on url, newest first, the same shape and 300-row cap the app's
+    // own Assets store keeps.
+    if (imported.length) {
+      let list = await readStore('heist.assets.v1');
+      if (!Array.isArray(list)) list = [];
+      const have = new Set(list.map((x) => x && x.url).filter(Boolean));
+      const rows = imported.filter((x) => x.url && !have.has(x.url))
+        .map((x) => ({ url: x.url, kind: x.kind || '', model: a.provider === 'drive' ? 'Imported from Google Drive' : 'Imported from OneDrive', name: x.name || '', at: Date.now() }));
+      if (rows.length) await writeStore('heist.assets.v1', [...rows, ...list].slice(0, 300));
+    }
+    if (!imported.length && !skipped.length) return ok('That folder is empty — nothing to import.', { imported: [], skipped: [] });
+    const lines = [
+      imported.length ? `Imported ${imported.length} file${imported.length === 1 ? '' : 's'} into the Library:` : 'Nothing was imported.',
+      ...imported.map((x) => `  • ${x.name || x.url} → ${x.url}`),
+      ...(skipped.length ? ['', `Skipped ${skipped.length}:`, ...skipped.map((x) => `  • ${x.name}: ${x.why}`)] : []),
+    ];
+    return ok(lines.join('\n'), { imported, skipped });
+  }));
+
   server.registerTool('list_drive_files', {
     title: 'List Google Drive files',
     description: 'List the Google Drive files & folders Hermoso can reach — the ones it created, plus any the user handed over with the Google file picker in the app (the drive.file scope exposes nothing else, never their entire Drive). This is how you find the id of a file the user picked. Filter by query (name contains …), folderId (contents of a folder), or onlyFolders:true. Paginate with pageToken. Read-only.',
@@ -16576,7 +16770,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       aspectRatio: z.string().optional().describe("default '9:16'"),
       model: z.string().optional().describe('video model id from hermoso_capabilities; a named model is never swapped without asking. Omit to let the router pick'),
       resolution: z.enum(['480p', '720p', '1080p', '4k']).optional().describe("'1080p' default (what we ship and bill for); '480p'/'720p' = cheaper draft passes, '4k' = premium final delivery (more credits). NOT EVERY MODEL OFFERS EVERY TIER — this enum is what the tool accepts, and each model's OWN `resolutions` list in hermoso_capabilities is what it can actually render. Ask for a tier the chosen model does not list and it is rendered at that model's best available tier instead, with nothing in the reply saying so — so check `resolutions` before promising anyone 1080p or 4k."),
-      cameraMove: z.enum(['orbit', 'orbit_left', 'orbit_half', 'orbit_full', 'rise', 'crane_up', 'push_in', 'pull_back', 'reveal']).optional().describe('A named camera move around the still in refImage — orbit (quarter turn, the default), orbit_left, orbit_half, orbit_full (turntable), rise, crane_up, push_in, pull_back, reveal. Only the camera-controls model renders one (minimax-h3-max-camera, listed with its moves in hermoso_capabilities): pass it with model omitted and that model is picked, or with that model named; any other named model is refused by name with nothing charged. Needs refImage.'),
+      cameraMove: z.enum(['orbit', 'orbit_left', 'orbit_half', 'orbit_full', 'rise', 'crane_up', 'push_in', 'pull_back', 'reveal']).optional().describe('A named camera move around the still in refImage, spelled exactly as the enum gives it: an orbit (a quarter turn, the default), orbiting left, a half turn or a full turntable, a rise, a crane up, a push in, a pull back, or a reveal. Only the camera-controls model renders one (minimax-h3-max-camera, listed with its moves in hermoso_capabilities): pass it with model omitted and that model is picked, or with that model named; any other named model is refused by name with nothing charged. Needs refImage.'),
       cameraTrajectory: z.array(z.object({
         time: z.number().min(0).max(1).describe('when this pose is reached, 0 = start of the clip, 1 = end'),
         azimuth: z.number().describe('horizontal angle around the subject in degrees (0 = where the still was taken; the sign turns the camera the other way; at most 32 full turns of total travel)'),
@@ -16661,7 +16855,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
       voiceover: z.string().optional().describe('full voiceover script spoken across the scenes'),
       voice: z.string().optional().describe('voiceover voice name, e.g. Rachel / George'),
-      resolution: z.string().optional().describe('1080p (default), or 480p/720p for a cheaper draft'),
+      resolution: z.string().optional().describe('720p (default), 1080p for full detail, or 480p for a cheaper draft'),
       model: z.string().optional().describe('video model id from hermoso_capabilities — omit to let the router pick'),
       durationSeconds: z.number().optional().describe('total spot length in seconds (defaults to the sum of the scenes’ seconds)'),
     },

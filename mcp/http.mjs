@@ -260,7 +260,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // scope to and nothing honest to read — and a registry crawler or an agent deciding whether to connect MUST
     // see the real catalog, not a zero-connector one. registerTools treats an absent `connectors` exactly like a
     // failed read: full roster. Do not "fix" this by reading the workspace off the request; it is forgeable.
-    registerTools(server, { only: scope?.groups, directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups, directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) , hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     if (typeof onAnonDiscovery === 'function' && methodsOf(req.body).includes('tools/list')) { try { onAnonDiscovery({ client: clientInfoOf(req.body), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req) }); } catch {} }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
@@ -333,7 +333,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),

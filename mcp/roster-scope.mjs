@@ -64,7 +64,7 @@ export const NEVER_GATE = new Set([
 // the whole ads family they are paying for.
 export const TOOL_PROVIDER_RULES = [
   // ── ads platforms that are their OWN connection (must precede the posting rules below) ──
-  [/_tiktok_ads_|^tiktok_ads_/, 'tiktok_ads'],
+  [/_tiktok_ads_|^tiktok_ads_|_tiktok_smart_|^tiktok_bid_protection$/, 'tiktok_ads'], // Smart+ is the ads connection too (2026-09-17)
   [/_x_ads_|^x_ads_/, 'x_ads'],
   [/_pinterest_ads_|^pinterest_ads_/, 'pinterest_ads'],
   [/_reddit_ads_|^reddit_ads_/, 'reddit_ads'],
