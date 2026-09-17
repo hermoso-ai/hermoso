@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { registerTools, MCP_INSTRUCTIONS, parseToolScope } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, parseToolScope, DEFAULT_TOOL_GROUPS } from './tools.mjs';
 import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
@@ -234,8 +234,11 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // `?tools=research,create` narrows the roster this connection advertises (see registerTools). Read here rather
   // than inside registerTools so BOTH the anonymous discovery handshake and a real session honour the same query,
   // and so an unknown group is refused at the door with the valid list instead of silently serving every group.
-  // ABSENT, the DEFAULT is every group except `ads` and `analytics` (OPT_IN_TOOL_GROUPS) — together ~254k of the
-  // ~365k full roster, so an eagerly-loading client gets ~112k. `?tools=all` restores the full roster.
+  // ABSENT, an AUTHENTICATED session resolves to the CORE-FIRST default (see defaultToolGroups in tools.mjs): the
+  // core tools plus a few that make the connection drivable, with everything else held out of the LIST on size and
+  // reachable through find_tools + call_tool. `?tools=all` restores the full roster for one connection and
+  // `MCP_CORE_FIRST=1` opts this process into the small core-first roster; the default is the full roster. The anonymous discovery path above is
+  // deliberately NOT core-first — see the comment on its registerTools call.
   // The scope fixed here is the STARTING roster, not a cage: `enable_tools` widens it mid-session and the SDK
   // notifies the client. That is deliberate — the old comment's "tools/list must not change under a live client"
   // was the right instinct for a scope the SERVER changes silently, and the wrong one for a change the CLIENT
@@ -260,7 +263,14 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // scope to and nothing honest to read — and a registry crawler or an agent deciding whether to connect MUST
     // see the real catalog, not a zero-connector one. registerTools treats an absent `connectors` exactly like a
     // failed read: full roster. Do not "fix" this by reading the workspace off the request; it is forgeable.
-    registerTools(server, { only: scope?.groups, directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) , hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    // ── AND THE ANONYMOUS ROSTER IS NOT CORE-FIRST, DELIBERATELY (2026-09-17) ──────────────────────────────────
+    // An authenticated session pays for its roster on every turn, which is the whole argument for core-first. This
+    // request pays for nothing and is nobody's turn: it is a registry crawler (registry.modelcontextprotocol.io,
+    // Glama, Smithery), OpenAI's own submission scanner, or an agent deciding whether to connect at all — and for
+    // every one of those the roster IS the product description. Serving them the core set would publish Hermoso as
+    // a 22-tool server on ~430 directory pages. So an UNSTATED scope here resolves to the full pre-core-first
+    // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
+    registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) , hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     if (typeof onAnonDiscovery === 'function' && methodsOf(req.body).includes('tools/list')) { try { onAnonDiscovery({ client: clientInfoOf(req.body), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req) }); } catch {} }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });

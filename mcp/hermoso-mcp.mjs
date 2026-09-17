@@ -17,10 +17,13 @@ const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' }, {
   instructions: MCP_INSTRUCTIONS,
 });
 
-// Roster scoping, same groups as the hosted connector's ?tools= (see registerTools). The DEFAULT is every group
-// except `ads` and `analytics` (OPT_IN_TOOL_GROUPS) — together ~254k of the ~365k full roster, so the default is
-// ~112k. Both are held out on SIZE alone, and nothing is lost: `enable_tools` switches either on mid-session with
-// no reconnect. HERMOSO_TOOLS=all restores the full roster; HERMOSO_TOOLS=create,channels narrows it further.
+// Roster scoping, same groups as the hosted connector's ?tools= (see registerTools). SINCE 2026-09-17 THE DEFAULT
+// IS CORE-FIRST: the `core` group plus the handful of tools that make a connection drivable, measured at ~6K tokens
+// against ~87K for the old default of every group but the opt-in three. Nothing is lost — everything else is held
+// out of the LIST on SIZE alone, and `find_tools` finds it, `call_tool` runs it and a direct tools/call to a name
+// you already know still works. `enable_tools` LISTS a whole group mid-session for a client that re-lists (stdio
+// does). HERMOSO_TOOLS=all restores the full roster; HERMOSO_TOOLS=create,channels narrows it further; and
+// MCP_CORE_FIRST=1 opts this process into the small core-first roster (the default is the full roster: see mcp/tools.mjs).
 // An unknown group EXITS rather than silently serving all of them — a scoped connection you did not get is
 // worse than one you were told you could not have.
 // Both env names are read: HERMOSO_TOOLS is the current prefix, HEIST_TOOLS the pre-rebrand name that is live in
