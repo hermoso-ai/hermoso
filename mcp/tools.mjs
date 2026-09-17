@@ -3152,7 +3152,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     _meta: openaiMeta(CAPABILITIES_URI, 'Loading the model catalog…', 'Model catalog ready'),
   }, wrap(async () => {
     const d = await apiGet('/api/generate/status');
-    const img = (d.options?.image?.models || []).map(m => `${m.id} (${m.label}, ${m.credits}cr${m.refs ? `, ≤${m.refs.max} reference images` : ''}${m.hiRes ? ', 2K' : ''}${m.best ? ', best' : ''})`).join('; ');
+    const img = (d.options?.image?.models || []).map(m => `${m.id} (${m.label}, ${m.credits}cr${m.refs ? `, ≤${m.refs.max} reference images` : ''}${m.creditsBySize && Object.keys(m.creditsBySize).length > 1 ? `, imageSize ${Object.entries(m.creditsBySize).map(([s, c]) => `${s}=${c}cr`).join(' ')}` : m.hiRes ? ', 2K' : ''}${m.best ? ', best' : ''})`).join('; ');
     // durations + per-duration credits MATTER: without them agents assume the generic "AI video caps at 8-10s"
     // prior and wrongly steer users to stitching (a real Claude.ai session did exactly that on a 15s ad)
     const vid = (d.options?.video?.models || []).map(m => `${m.id} (${m.label}: one continuous clip of ${(m.durations || []).map(x => `${x}s=${m.credits?.[x] ?? '?'}cr`).join(' ')}${m.audio ? ', native audio' : ', silent'}${m.refs ? `, ${m.refs.max} reference image${m.refs.max === 1 ? '' : 's'}${m.refs.required ? ' (required — image-to-video only)' : ''}` : ''}${m.resolutions ? `, resolutions ${m.resolutions.join('/')}` : ''}${Array.isArray(m.cameraMoves) && m.cameraMoves.length ? `, camera moves ${m.cameraMoves.map(c => c.id).join('/')} (generate_video cameraMove, or your own cameraTrajectory keyframes)` : ''}${m.best ? ', best' : ''})`).join('; ');
@@ -16330,7 +16330,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: run the caller’s prompt on the named model with no Hermoso adjustments at all — the prompt reaches the provider byte-identical (no hex-to-colour-name rewrite, no prepended fidelity preamble) and NO saved-brand product photos are attached, so the model you name is the model that renders. Use it to drive the raw catalog; leave it off for an on-brand ad. Billing, the durable Library landing and per-model validation are unchanged.'),
       aspectRatio: z.string().optional().describe("e.g. '1:1', '9:16', '16:9'"),
       model: z.string().optional().describe('image model id from hermoso_capabilities'),
-      imageSize: z.string().optional().describe('pixel-size preset for models that support it (e.g. 1K/2K) — omit for the default'),
+      imageSize: z.string().optional().describe('pixel-size preset for models that support it: 1K/2K, and 4K on the models hermoso_capabilities lists with a 4K imageSize price (a 4K ask on any other model is refused, free) — omit for the default'),
     },
     outputSchema: {
       image: z.string().optional().describe('the served absolute URL of the finished image'),
@@ -16344,7 +16344,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // silently turns off the brand pipeline on an on-brand ad (the same rule lib/raw-passthrough.mjs's predicate uses).
     const d = await apiPost('/api/generate/image', { prompt, refImages: refs, useBrand: useBrand !== false, aspectRatio, model, imageSize, ...(raw === true ? { raw: true } : {}) }); // explicit boolean so the server's saved-brand hydration default is unambiguous
     const img = await imageBlock(abs(d.image)); // show the actual creative inline in Claude, not just a URL
-    return { content: [{ type: 'text', text: `Image ready: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}${switchNote({ raw: d })}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
+    return { content: [{ type: 'text', text: `Image ready: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}${switchNote({ raw: d })}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
 
   // ---------- YouTube / social thumbnails + video covers ----------
@@ -16765,7 +16765,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       prompt: z.string().describe('the video prompt / shot description (for a refVideo edit, this is the transformation instruction)'),
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: dispatch this prompt to the model BYTE-IDENTICAL — no appended packaging/label guidance, no negative prompt, no reference-binding lines, no hex-to-colour-name rewrite. Use it when you want the model itself rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence. Billing, durable delivery and per-model validation are unchanged.'),
       refImage: z.string().optional().describe('local path or URL to anchor the first frame'),
-      refVideo: z.string().optional().describe("URL of an existing video to EDIT rather than generate from scratch — the omni engine accepts a raw clip and transforms it per your prompt, inheriting the SOURCE clip’s canvas (aspect ratio) and length (aspectRatio/durationSeconds are ignored for an edit). Omit to generate a fresh clip."),
+      refVideo: z.string().optional().describe("URL of an existing video to EDIT rather than generate from scratch — the clip is transformed per your prompt, inheriting the SOURCE clip’s canvas (aspect ratio) and length (aspectRatio/durationSeconds are ignored for an edit). Omit `model` for the default editor, or name a model whose videoEdit is true in hermoso_capabilities (a named model that cannot edit is refused, nothing charged); refImage rides along as the look of what the edit adds. With extend:true this is instead the clip to EXTEND. Omit to generate a fresh clip."),
+      endImage: z.string().optional().describe('local path or URL of the LAST frame: the clip travels from refImage (required with it) to this image. Only models with endFrame true in hermoso_capabilities take it; any other named model is refused by name, nothing charged.'),
+      loop: z.boolean().optional().describe('true = a seamless loop whose last frame flows back into its first. Only models with loop true in hermoso_capabilities; needs refImage and cannot be combined with endImage.'),
+      shots: z.array(z.object({ prompt: z.string().describe('what happens in this shot'), seconds: z.number().int().min(1).max(15).describe('this shot’s length in whole seconds') })).optional().describe('MULTI-SHOT: one clip cut into these shots, in order. The seconds must add up to a length the model renders; replaces `prompt` (send either). Only models with multiShot true in hermoso_capabilities.'),
+      extend: z.boolean().optional().describe('true = EXTEND refVideo: the same clip continues per your prompt for durationSeconds more (each model’s extend.minSeconds..maxSeconds in hermoso_capabilities), delivered as ONE clip, source then continuation. Needs model named (a model with extend in hermoso_capabilities).'),
+      interactionId: z.string().optional().describe('with extend:true on an Omni model: the interactionId returned by an earlier render on that model — continues it from its own stored context instead of re-uploading refVideo.'),
       durationSeconds: z.number().optional().describe('length of THIS ONE clip in seconds — pick one of the CHOSEN model’s listed durations from hermoso_capabilities (never a generic guess: the lists differ per model, from 4–8s on the short models up to 30s on the longest-clip one). This is a single continuous generation, so it CANNOT exceed that model’s longest clip: a longer ask is REFUSED with nothing rendered and nothing charged (it is never quietly truncated). Past ~15s only the long-clip models qualify, and an unnamed render is routed by the narrower auto-pool — so NAME the model in `model` when you are asking for a long single take. For a spot longer than any one clip, use plan_ad with durationSeconds then render_ad, which stitches acts of at most one model clip each (on a 15s-clip model, 40s = 15+15+10).'),
       aspectRatio: z.string().optional().describe("default '9:16'"),
       model: z.string().optional().describe('video model id from hermoso_capabilities; a named model is never swapped without asking. Omit to let the router pick'),
@@ -16823,10 +16828,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       }
     }
     const refImage = a.refImage ? await toRef(a.refImage) : undefined;
+    if (a.endImage) a = { ...a, endImage: await toRef(a.endImage) };
     // an agent that NAMES a model made a deliberate pick — modelExplicit gives it the server-side ask-don't-swap
     // treatment (#310) instead of being treated as a system pick the fallback ladders may silently reroute
     const r = await renderJob('video', { ...a, refImage, modelExplicit: !!a.model, ...(a.cameraTrajectory ? { cameraTrajectory: a.cameraTrajectory } : a.cameraMove ? { cameraTrajectory: a.cameraMove } : {}) }, 'MCP video');
-    return okVideo(`Video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${switchNote(r)}`, r);
+    const _iid = renderPayload(r)?.interactionId;
+    return okVideo(`Video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${_iid ? `\ninteractionId: ${_iid} (pass it with extend:true on the same model to continue this clip)` : ''}${switchNote(r)}`, r);
   }));
 
   server.registerTool('generate_avatar', {
