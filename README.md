@@ -30,6 +30,51 @@ ad-build tool accepts); build and read campaigns on your own ad accounts with yo
 competitors with no brand drafted and no channel connected; or generate a file with nothing connected at all and
 just download it. Use the one piece you need, or all of it together.
 
+## Install in one command
+
+This repo is a plugin marketplace, a Gemini CLI extension and a skills package at once, so a coding agent takes
+Hermoso in one line. Every install brings the same four skills (`hermoso-research`, `hermoso-generate`,
+`hermoso-ad-from-brand`, `hermoso-product-photoshoot`), and the skills drive the `hermoso` CLI through `npx`. No
+tool list is loaded into your session: a CLI command costs nothing until it runs, and it reaches every tool.
+The first time, your agent runs `npx -y hermoso auth login`, which opens a browser to sign in.
+
+**Claude Code:**
+
+```bash
+claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
+```
+
+Inside a session the same thing is `/plugin marketplace add hermoso-ai/hermoso` then `/plugin install hermoso@hermoso`.
+
+**Codex CLI** (it reads the same marketplace file):
+
+```bash
+codex plugin marketplace add hermoso-ai/hermoso && codex plugin add hermoso@hermoso
+```
+
+**Gemini CLI:**
+
+```bash
+gemini extensions install https://github.com/hermoso-ai/hermoso
+```
+
+**Cursor, OpenCode, GitHub Copilot, Windsurf and about 75 more agents**, through the open skills installer:
+
+```bash
+npx skills add hermoso-ai/hermoso
+```
+
+It asks which agents to install into; `-a opencode` (or `cursor`, `github-copilot`, `windsurf`) picks one, and
+`--skill hermoso-research` installs a single skill. VS Code agent plugins can also take this repo whole: run
+**Chat: Install Plugin From Source** and paste `https://github.com/hermoso-ai/hermoso`.
+
+**ChatGPT and Claude.ai** run in a browser and cannot run a CLI, so they use the hosted connector instead (see
+below). The ChatGPT desktop app and ChatGPT workspace admins can also read this repo's
+`.claude-plugin/marketplace.json`, which installs the skills.
+
+No browser on the machine? Create a key in the app under **MCP & CLI** and run
+`npx -y hermoso auth login --token <key>`.
+
 ## Which surface should your agent use?
 
 Two shapes, and the right one is decided by **what your client can do**, not by which we prefer.
@@ -314,6 +359,8 @@ the package, so they need no key, no network and no sign-in.
 
 `skills/` holds four installable skills: `hermoso-generate`, `hermoso-ad-from-brand`,
 `hermoso-product-photoshoot`, `hermoso-research`.
+
+The quickest way in is the one-command install at the top of this page. From a clone, copying works too:
 
 ```bash
 cp -r skills/* ~/.claude/skills/

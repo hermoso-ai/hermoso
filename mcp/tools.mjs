@@ -3419,7 +3419,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _pickLine = 'NAMING A MODEL IS HOW YOU GET ONE: a render that passes no `model` is routed by the server\'s own auto-pool, which is deliberately NARROWER than this catalog — the `best` flag and the longest-clip row do NOT decide it. If you need a particular model\'s length, resolution, audio or reference-count capability, pass its id in `model`; that is a deliberate pick and the server will not swap it without telling you.';
     // RESOLUTION IS PER MODEL, and asking outside the list is not an error — it is a quiet downgrade.
     const _resLine = 'RESOLUTION: each model\'s `resolutions` list is its REAL enum (and `creditsByRes` prices every tier). Ask for a tier a model does not list and the render is delivered at that model\'s best available tier instead — the reply does not say so — so read `resolutions` here before promising anyone 1080p or 4k.';
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
+    // recast_motion's two tiers, priced off the same live quote the app's costs page reads (toolExamples), never a number here.
+    const _mq = (q) => (q ? Object.entries(q).map(([s, c]) => `${s}s=${c}cr`).join(' ') : null);
+    const _motionLine = _mq(d.toolExamples?.motion) ? `\nRecast motion (recast_motion, billed per output second): tier pro (default) ${_mq(d.toolExamples.motion)}${_mq(d.toolExamples.motionStandard) ? `; tier standard ${_mq(d.toolExamples.motionStandard)}` : ''}` : '';
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}${_motionLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
     return ok(text + connLine, d);
   }));
 
@@ -19152,17 +19155,18 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('recast_motion', {
     title: 'Recast motion',
-    description: "Motion transfer: re-perform a reference video's motion with a different person/character (supply their image). The reference clip drives the movement; the image supplies the identity. Paid render.",
+    description: "Motion transfer: re-perform a reference video's motion with a different person/character (supply their image). The reference clip drives the movement; the image supplies the identity. Paid render, billed per output second (the output is as long as the reference clip, 3-30s); a 5s clip takes about 5 minutes. Runs on the Pro tier by default: 1080p, and the person really handles the object the reference performer handles.",
     inputSchema: {
       image: z.string().describe("the actor/character image URL (who should appear)"),
       video: z.string().describe('the reference video whose motion to re-perform'),
       prompt: z.string().optional().describe('optional scene/style guidance'),
       orientation: z.enum(['video', 'image']).optional().describe("which aspect to keep: the video's (default) or the image's"),
+      tier: z.enum(['pro', 'standard']).optional().describe("'pro' (default): 1080p and real hand-object interaction. 'standard': about 25% fewer credits and faster, but 720p, and it tends to mime a held object with empty hands. hermoso_capabilities lists the exact credits for both"),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ image, video, prompt = '', orientation = 'video' }) => {
-    const r = await renderJob('motion', { image, video, prompt, orientation }, 'Motion recast');
+  }, wrap(async ({ image, video, prompt = '', orientation = 'video', tier }) => {
+    const r = await renderJob('motion', { image, video, prompt, orientation, ...(tier ? { tier } : {}) }, 'Motion recast');
     return okVideo(`Recast video: ${r.url}`, r);
   }));
 
