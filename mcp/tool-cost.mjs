@@ -45,7 +45,7 @@ export const CREATE_FREE_READS = Object.freeze([
   'list_meta_posts', 'list_published_posts', 'post_performance', 'diagnose_posts', 'backfill_posts',
 ]);
 // Reads inside `research`. `find_competitors` says "0 credits" in its own description (it is the discovery model,
-// billed to us, not a ScrapeCreators call); the watch tools only write and read a stored preference — the weekly
+// billed to us, not a paid ad-data call); the watch tools only write and read a stored preference — the weekly
 // run that spends is a job, not this call.
 export const RESEARCH_FREE_READS = Object.freeze(['find_competitors', 'list_watch_findings', 'set_competitor_watch']);
 

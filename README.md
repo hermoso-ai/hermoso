@@ -8,6 +8,13 @@ campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools,
 **841 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
+**Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
+and insights, comments and DMs, connectors, brand profiles and team seats are **free on every plan**, with no
+per-post or per-channel fee and no seat pricing. Credits are spent only on running an AI model (image, video,
+voice, text, planning, post-production) and on Ad Spy research, and posting an ad you already rendered is never a
+second charge. The one exception is X (Twitter), where posting and reads bill a few credits per call because X
+charges per API request.
+
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
 Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in
 Google Merchant Center. Publishing and scheduling — **ten** channels: Facebook, Instagram, Threads, TikTok,
@@ -149,7 +156,7 @@ session, run `/mcp`, find the server and press Authenticate. Measured against Cl
 
 Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
-`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits — same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics are free on every plan (X is the one per-call exception).
+`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits — same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics are free on every plan (posting to X and reading X data are the one per-call exception, managing X ads is free).
 
 ## 1. MCP server (stdio) — Claude Code / Cursor / Codex
 
