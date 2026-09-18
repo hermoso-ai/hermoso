@@ -3,7 +3,7 @@
 Run your whole marketing operation from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
 scripts. Research the ads already winning in a market, generate finished image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
-campaigns behind them — all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
+campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
 **841 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
@@ -81,40 +81,26 @@ Two shapes, and the right one is decided by **what your client can do**, not by 
 
 | Your client | Use | Why |
 | --- | --- | --- |
-| **Runs in a browser** — Claude.ai, ChatGPT, Claude Desktop | the hosted connector `https://app.hermoso.ai/mcp` | It cannot spawn a local process, so a URL is the only shape it has. Nothing to install, no key to paste, and the full toolset arrives with your saved brand context. This is the right answer for these clients, not a lesser one. |
-| **Can run a shell** — Claude Code, Cursor, Codex, Cline, OpenClaw, Hermes, your own scripts | the CLI, `npm install -g hermoso` | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
+| **Runs in a browser**: Claude.ai, ChatGPT, Claude Desktop | the hosted connector `https://app.hermoso.ai/mcp` | It cannot spawn a local process, so a URL is the only shape it has. Nothing to install, no key to paste, and the full toolset arrives with your saved brand context. This is the right answer for these clients, not a lesser one. |
+| **Can run a shell**: Claude Code, Codex, Gemini CLI, Cursor, Cline, OpenClaw, Hermes, your own scripts | the one-command install above, or the CLI itself (`npm install -g hermoso`) | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
 
-**The measured difference** (2026-08-27, counted as real tool definitions rather than estimated from bytes):
-
-| | tools in range | loaded per session |
-| --- | --- | --- |
-| Hosted connector, default roster | 306 | **181,713 tokens** |
-| Hosted connector, `?tools=all` | 718 | **472,062 tokens** |
-| stdio server (`npx -y hermoso mcp`) | 306 | **181,713 tokens** |
-| **CLI** | **all 718** | **0** |
-
-The CLI answers the same questions on demand instead, and only when asked:
+The CLI answers the questions a tool manifest would, on demand and only when asked:
 
 ```bash
-npx -y hermoso tools --search reddit   # every matching tool, name + one line   2,459 tokens
-npx -y hermoso tools plan_ad           # one tool's full argument schema           633 tokens
+npx -y hermoso tools --search reddit   # every matching tool, name + one line
+npx -y hermoso tools plan_ad           # one tool's full argument schema
 npx -y hermoso call plan_ad --json '{"product":"…"}'   # run it
 ```
 
-So a terminal agent reaches its first call in roughly **3.4K tokens with the whole roster in range**, against
-**182K for a fraction of it**. `tools` and `tools <name>` read a registry bundled in the package — no key, no
-network, no sign-in — so an agent can browse the entire product before anyone signs in. Only `call` spends, and
-only that needs `hermoso auth login` once.
+`tools` and `tools <name>` read a registry bundled in the package (no key, no network, no sign-in), so an agent
+can browse the entire product before anyone signs in. Only `call` spends, and only that needs
+`hermoso auth login` once.
 
-**Both at once is fine, and is what we suggest for Claude Code.** One `hermoso auth login` covers the CLI *and*
-lets `claude mcp add hermoso -- npx -y hermoso mcp` pick the key up with no `env` block, so the agent can reach for
-a native tool when it wants structured results and shell out when it wants breadth. If you only want one, take the
-CLI: it covers strictly more.
-
-**When the connector is still the better trade on a shell-capable client:** a session that is going to make many
-calls into one area. `enable_tools({groups:['ads']})` turns campaign management on in a single free call and the
-tools are then native — no shell quoting, structured results. One shell round trip beats loading a 221K-token
-group for a single tool; the reverse is true once a session settles into that area.
+**Want the tools in your coding agent's own list as well?** That is the MCP server, and it is optional. One
+`hermoso auth login` covers the CLI *and* lets `claude mcp add hermoso -- npx -y hermoso mcp` pick the key up with
+no `env` block, so the agent can reach for a native tool when it wants structured results and shell out when it
+wants breadth. It costs context in every session, so add it when a session settles into one area and makes many
+calls there; `enable_tools({groups:['ads']})` then turns campaign management on in a single free call.
 
 ## Your agent can sign itself up
 
@@ -170,50 +156,56 @@ the routes.
 
 Paste **`https://app.hermoso.ai/mcp?src=readme`** into Claude → Settings → Connectors → *Add custom connector*, pick
 **Always required** when Claude asks about authentication (its detector suggests "None" because our discovery
-handshake is open; "None" would leave every tool call unauthenticated), approve with your Hermoso account, done — the full toolset with your saved brand context, billed to your plan.
+handshake is open; "None" would leave every tool call unauthenticated), approve with your Hermoso account, and you are done: the full toolset with your saved brand context, billed to your plan.
 
-## Quickstart for Claude Code (one line)
+## Quickstart for Claude Code (one command)
 
-1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai) — free tier included; plans & credits are the
-   same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid plan
-   with `POST /v1/signup` (above).
-2. **Run one line.** Your browser opens once to sign in. Nothing to paste, and no key lands in `.claude.json`:
+1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai). The free tier is included; plans and credits
+   are the same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid
+   plan with `POST /v1/signup` (above).
+2. **Install the plugin.** It adds the four Hermoso skills, which drive the `hermoso` CLI through `npx`:
+
+```bash
+claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
+```
+
+   Already inside a session? `/plugin marketplace add hermoso-ai/hermoso`, then `/plugin install hermoso@hermoso`.
+   Codex, Gemini CLI and the rest are in [Install in one command](#install-in-one-command).
+3. **Sign in once.** `npx -y hermoso auth login` opens your browser; your agent also runs it by itself the first
+   time it needs Hermoso. On a machine with no browser, use `npx -y hermoso auth login --token hmk_…` with a key
+   from **Settings → Agents & API**.
+4. **Ask for what you want**, in your normal prompts. Claude Code picks the Hermoso skill for the job and runs the
+   commands. You type none of them.
+
+Rather install the CLI by hand? `npm install -g hermoso` puts the same `hermoso` command on your PATH, and the
+skills use it when it is there.
+
+The hosted URL works in Claude Code too, but it is the worse path there and it is worth knowing why:
+`claude mcp add --transport http hermoso "https://app.hermoso.ai/mcp?src=readme"` is accepted, and then `claude mcp list`
+reports `! Needs authentication` because the client will not start the OAuth flow by itself: you have to open a
+session, run `/mcp`, find the server and press Authenticate. Measured against Claude Code 2.1.241 on 2026-08-23.
+
+Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
+learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
+`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits, at the same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics are free on every plan (posting to X and reading X data are the one per-call exception, managing X ads is free).
+
+## 1. MCP server (stdio), optional in a coding agent
+
+`hermoso mcp` runs a stdio MCP server exposing the full toolset, for a client that wants Hermoso's tools in its own
+list. The published `hermoso` package means no clone: `npx -y hermoso mcp` fetches and runs it. Sign in once with
+the CLI and no key goes into any client config, because `hermoso mcp` reads the bearer `hermoso auth login` stored:
 
 ```bash
 npm install -g hermoso && hermoso auth login && claude mcp add hermoso -- npx -y hermoso mcp
 ```
 
-3. **Ask for what you want**, in your normal prompts. Claude Code reaches for a tool, or runs the `hermoso`
-   command in your terminal, whichever the job needs. You type neither.
-
-Ad campaign and analytics tools stay out of the tool list until you switch them on with `enable_tools`, which
-keeps it small. On a machine with no browser, sign in with `hermoso auth login --token hmk_…` using a key from
-**Settings → Agents & API**, or skip the sign-in and pass the key to the client instead:
+On a machine with no browser, skip the sign-in and pass the key to the client instead:
 
 ```bash
 claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso mcp
 ```
 
-The hosted URL works in Claude Code too, but it is the worse path there and it is worth knowing why:
-`claude mcp add --transport http hermoso "https://app.hermoso.ai/mcp?src=readme"` is accepted, and then `claude mcp list`
-reports `! Needs authentication` because the client will not start the OAuth flow by itself — you have to open a
-session, run `/mcp`, find the server and press Authenticate. Measured against Claude Code 2.1.241 on 2026-08-23.
-
-Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
-learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
-`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits — same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics are free on every plan (posting to X and reading X data are the one per-call exception, managing X ads is free).
-
-## 1. MCP server (stdio) — Claude Code / Cursor / Codex
-
-`hermoso mcp` runs a stdio MCP server exposing the full toolset. The published `hermoso` package means no clone —
-`npx -y hermoso mcp` fetches and runs it. Sign in once with the CLI and no key goes into any client config,
-because `hermoso mcp` reads the bearer `hermoso auth login` stored:
-
-```bash
-npm install -g hermoso && hermoso auth login && claude mcp add hermoso -- npx -y hermoso mcp
-```
-
-Cursor / Codex — sign in the same way, then add to `mcp.json` (Codex uses the TOML equivalent). Drop the `env`
+Cursor / Codex: sign in the same way, then add to `mcp.json` (Codex uses the TOML equivalent). Drop the `env`
 block entirely if you signed in above; it is there for CI, where the process cannot read your home directory:
 
 ```json
@@ -323,7 +315,7 @@ consent screen, so the user does it in the app).
 
 Render jobs queue server-side and poll to completion, returning a served URL.
 
-## 2. CLI — the token-cheap path for terminal agents
+## 2. CLI: the context-free path for terminal agents
 
 `bin/hermoso.mjs` exposes the full MCP toolset as subprocess commands, so an agent can shell out instead of carrying a
 fat tool manifest.
@@ -352,21 +344,22 @@ hermoso create_meta_campaign --name "…"                   # same thing, shorte
 ```
 
 `call` goes through the same handler, the same argument validation and the same confirm/spend gates the MCP
-server uses — there is no second implementation to drift. `tools` and `tools <name>` read a registry bundled in
+server uses, so there is no second implementation to drift. `tools` and `tools <name>` read a registry bundled in
 the package, so they need no key, no network and no sign-in.
 
-## 3. Claude skills — slash commands that wrap the CLI
+## 3. Skills: what a coding agent installs
 
 `skills/` holds four installable skills: `hermoso-generate`, `hermoso-ad-from-brand`,
 `hermoso-product-photoshoot`, `hermoso-research`.
 
-The quickest way in is the one-command install at the top of this page. From a clone, copying works too:
+They are what every one-command install at the top of this page adds, in Claude Code, Codex, Gemini CLI and
+through `npx skills add`. From a clone, copying works too:
 
 ```bash
 cp -r skills/* ~/.claude/skills/
 ```
 
-Then invoke `/hermoso-ad-from-brand an ad for yourbrand.com — our hero product`.
+Then invoke `/hermoso-ad-from-brand an ad for yourbrand.com, our hero product`.
 
 ## Configuration
 
