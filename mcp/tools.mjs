@@ -18397,7 +18397,7 @@ function memoryNoteVerdict(text) {
   server.group('research');
   server.registerTool('find_competitors', {
     title: 'Find competitors',
-    description: "Discover a brand's competitor / similar / adjacent brands from its domain (Claude grounded by web search). mode=competitors (default, excludes the searched company), inspiration (best relevant ads incl. it), or company. 0 credits.",
+    description: "Discover a brand's competitor / similar / adjacent brands from its domain (Claude grounded by web search). mode=competitors (default, excludes the searched company), inspiration (best relevant ads incl. it), or company. Costs a few credits for the discovery model (no ad-data charge); free inside a new account's first-brand setup.",
     inputSchema: {
       domain: z.string().describe('the brand domain, e.g. flourish.com'),
       mode: z.enum(['competitors', 'inspiration', 'company']).optional().describe("'competitors' (default, excludes the searched company), 'inspiration' (best relevant ads incl. it), or 'company'"),
