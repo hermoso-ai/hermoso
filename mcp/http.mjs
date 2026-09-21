@@ -130,7 +130,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       how_to_connect: {
         oauth: `Open ${BASE}/oauth/authorize through your client's own connector flow (a browser is required).`,
         no_browser_stdio: `Add Hermoso as a STDIO command instead of a URL: run \`npx -y hermoso mcp\` with the environment variable HERMOSO_TOKEN set to a key from ${BASE}/#developers. THE TOKEN IS NOT OPTIONAL HERE: a sandbox that could not open a browser for OAuth cannot open one for \`hermoso auth login\` either, so plain stdio with no token connects and then has no account to act on. (On your own machine, where a browser exists, \`npx -y hermoso auth login\` once replaces the token.)`,
-        no_browser_header: `Keep this URL and send an \`Authorization: Bearer <key>\` header. Create the key at ${BASE}/#developers (Settings ▸ Agents & API). A key in the URL query does NOT work and is not supported.`,
+        no_browser_header: `Keep this URL and send an \`Authorization: Bearer <key>\` header. Create the key at ${BASE}/#developers (the MCP & CLI tab, under Terminal & API keys). A key in the URL query does NOT work and is not supported.`,
       },
       // Named so an agent can branch on it rather than parsing prose.
       retry_will_not_help: true,

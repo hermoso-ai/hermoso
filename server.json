@@ -3,7 +3,7 @@
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
   "description": "Marketing on autopilot from your agent. 847 tools, usable alone. Publishing and ads cost no credits.",
-  "version": "0.1.262",
+  "version": "0.1.263",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.262",
+      "version": "0.1.263",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -35,7 +35,7 @@
       "environmentVariables": [
         {
           "name": "HERMOSO_TOKEN",
-          "description": "Hermoso agent key (hmk_…) from app.hermoso.ai → Settings → Agents & API. Required against the hosted app.",
+          "description": "Hermoso agent key (hmk_…) from app.hermoso.ai, on the MCP & CLI tab under Terminal & API keys. Required against the hosted app.",
           "isSecret": true,
           "isRequired": false
         },

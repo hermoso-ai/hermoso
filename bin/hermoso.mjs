@@ -77,7 +77,7 @@ async function main() {
     if (isLocal) { await saveConfig({ apiBase, token: '', profile }); return console.log(`✓ Local dev — no auth required. API: ${apiBase}`); }
     if (sub === 'login') { // browser sign-in: spin a loopback server, open the app's /?cliauth page, receive a minted key
       const key = await browserLogin(apiBase);
-      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login", or paste a key: hermoso auth login --token <key>  (create one in the app under Agents & API keys).`);
+      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login", or paste a key: hermoso auth login --token <key>  (create one in the app on the MCP & CLI tab, under Terminal & API keys).`);
       await saveConfig({ apiBase, token: key, profile });
       return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`);
     }

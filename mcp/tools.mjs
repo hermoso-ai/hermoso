@@ -4,7 +4,8 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile } from './client.mjs';
+import { absolutizeAssetUrl, publicOrigin } from './public-url.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -23,7 +24,13 @@ import { recordToolOutcome, toolHealth, healthLabel, healthPenalty } from './too
 import { withHints } from './tool-hints.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
-const abs = (u) => (u && u.startsWith('/') ? API_BASE + u : u); // /generated/x.mp4 → clickable absolute URL
+// /generated/x.mp4 → a URL THE CALLER can open. `API_BASE` is the base this layer CALLS the app on, and on the hosted
+// transport and the `/v1` passthrough that is a loopback self-call — so prefixing it handed a remote caller
+// `http://127.0.0.1:8080/generated/…` (live on /v1 2026-09-20). The rule lives in public-url.mjs, the ONE absolutiser:
+// a local caller keeps the base it shares a machine with, a remote one never receives a loopback or private host.
+// EVERY link this file builds goes through here. Never prefix `API_BASE` onto a path by hand: `list_library` did, which
+// is exactly how the one tool that lists served paths was the one that leaked.
+const abs = (u) => absolutizeAssetUrl(u, { base: API_BASE, remote: isRemote(), env: process.env });
 // Null-valued keys are STRIPPED from structuredContent (2026-07-20): the SDK validates results against outputSchema
 // server-side, and zod .optional() rejects null — a single null field (e.g. editCredits:null on a key-less deploy)
 // bricked the whole tool result with a protocol-level validation error. Every field in our schemas is optional, so
@@ -307,7 +314,12 @@ async function imageBlock(url) {
   // render inherits the behaviour instead of having to remember it. Fails OPEN: an unknown client keeps the block.
   if (hostRendersWidgets()) return null;
   try {
-    const r = await fetch(url); if (!r.ok) return null;
+    // The link the CALLER gets is public (abs()); the bytes WE read to inline it are on this instance. Reading our own
+    // served file back through the public edge would be a round trip out and in for a file on local disk, so a URL
+    // under the public origin is fetched on the base this layer already calls the app on. The link is never rewritten.
+    const own = publicOrigin(process.env) + '/';
+    const src = typeof url === 'string' && url.startsWith(own) && isRemote() ? API_BASE + '/' + url.slice(own.length) : url;
+    const r = await fetch(src); if (!r.ok) return null;
     const ct = (r.headers.get('content-type') || 'image/jpeg').split(';')[0];
     if (!/^image\//.test(ct)) return null;
     const buf = Buffer.from(await r.arrayBuffer());
@@ -478,9 +490,20 @@ const publishWrap = (fn) => {
 // RESUMABLE handle instead of dying (the agent polls get_job, which now attaches the poster on done).
 async function renderJob(type, input, label) {
   const job = await submitJob(type, input, { label });
-  const remote = !!mcpCtx.getStore(); // AsyncLocalStorage ctx only exists on the remote transport
+  const ctx = mcpCtx.getStore(); // AsyncLocalStorage ctx only exists on the remote transport
+  const remote = !!ctx;
+  // THE ONE PLACE A RENDER TOOL WAITS, SO THE ONE PLACE A CALLER'S WAIT IS HONOURED (2026-09-20). `/v1/tools` puts a
+  // caller's `?wait=` on the context as `waitMs`; nothing else sets it, so with it absent this is the same 45s / 10min
+  // it always was. It can only SHORTEN the wait (jobWaitMs caps it at the transport's own maximum), and it is read
+  // AFTER submitJob on purpose: the job is queued through the identical POST /api/jobs — same spend gate, same
+  // pre-queue credit check, same reserve and settle in the worker — whether or not anybody waits for it. Waiting was
+  // never part of what a render costs, so not waiting cannot change it, and there is no second submit path to drift.
+  const waitMs = jobWaitMs(ctx?.waitMs, remote ? 45_000 : JOB_TIMEOUT);
+  // wait=0: answer the moment the job is queued. Not even one poll — pollJob sleeps between reads, and a caller with a
+  // 30s step budget (an automation platform) asked for the handle, not for a status.
+  if (waitMs <= 0) return { jobId: job.id, url: null, stillRendering: true, raw: null };
   try {
-    const { result } = await pollJob(job.id, { timeoutMs: remote ? 45_000 : JOB_TIMEOUT });
+    const { result } = await pollJob(job.id, { timeoutMs: waitMs });
     const url = abs(result?.video || result?.image || result?.url);
     // creditsUsed AND the delivered geometry ride out here deliberately. The widget's own registered
     // description promises "the model that rendered it and credits spent", and the pill only ever appeared
@@ -19123,7 +19146,7 @@ function memoryNoteVerdict(text) {
     const kind = a.kind && a.kind !== 'all' ? a.kind : null;
     const lim = Math.min(60, Math.max(1, +a.limit || 20));
     const assets = list.filter(x => x && x.url && (!kind || x.kind === kind)).slice(0, lim)
-      .map(x => ({ url: /^https?:/.test(x.url) ? x.url : `${API_BASE}${x.url}`, kind: x.kind || '', model: x.model || '', ageHours: x.at ? Math.round((Date.now() - x.at) / 36e5) : undefined }));
+      .map(x => ({ url: abs(x.url), kind: x.kind || '', model: x.model || '', ageHours: x.at ? Math.round((Date.now() - x.at) / 36e5) : undefined }));
     if (!assets.length) return ok('The Library is empty for this workspace — render something first.', { assets: [] });
     return ok(`${assets.length} asset${assets.length === 1 ? '' : 's'} (newest first):\n` + assets.map((x, i) => `  ${i + 1}. [${x.kind || '?'}${x.model ? ' · ' + x.model : ''}${x.ageHours != null ? ' · ' + x.ageHours + 'h ago' : ''}] ${x.url}`).join('\n'), { assets });
   }));
@@ -19139,7 +19162,7 @@ function memoryNoteVerdict(text) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async ({ url, name }) => {
     const absolute = abs(url);
-    const dl = `${API_BASE}/api/download?url=${encodeURIComponent(url)}${name ? `&name=${encodeURIComponent(name)}` : ''}`;
+    const dl = abs(`/api/download?url=${encodeURIComponent(url)}${name ? `&name=${encodeURIComponent(name)}` : ''}`);
     return ok(`Asset: ${absolute}\nDownload: ${dl}`, { url: absolute, downloadUrl: dl });
   }));
 

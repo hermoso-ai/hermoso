@@ -365,6 +365,16 @@ export async function submitJob(type, input, { label = '' } = {}) {
 export async function getJob(id) { return apiGet(`/api/jobs/${encodeURIComponent(id)}`); } // → publicJob
 export function jobResult(job) { const r = job?.result; return r && Object.prototype.hasOwnProperty.call(r, 'data') ? r.data : r; }
 
+// HOW LONG A RENDER TOOL HOLDS ITS CALLER, in ms. `cap` is the transport's own maximum (45s hosted, 10min local) and
+// stays the answer for anything that is not a usable number — absent, negative, NaN — so a garbled ask can never
+// lengthen a wait or turn into "forever". 0 means "do not wait at all". PURE, so a check runs it.
+export function jobWaitMs(requested, cap) {
+  if (requested === undefined || requested === null || requested === '') return cap;
+  const n = Number(requested);
+  if (!Number.isFinite(n) || n < 0) return cap;
+  return Math.min(cap, Math.floor(n));
+}
+
 export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 1000, onTick } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -373,7 +383,10 @@ export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 100
     if (job.status === 'done') return { job, result: jobResult(job) };
     if (job.status === 'error') throw new Error(job.error || 'Render failed');
     if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `hermoso jobs get ' + id + '`'), { jobId: id });
-    await new Promise(r => setTimeout(r, intervalMs));
+    // NEVER SLEEP PAST THE DEADLINE. A 3s interval made every wait 3s-granular: a caller who asked for 1s was held 3s,
+    // and one who asked for 29s was held 30s, which is the whole 30-second step budget the ask exists to stay inside.
+    // The defaults (45s, 10min) are whole multiples of the interval, so they poll exactly as they always have.
+    await new Promise(r => setTimeout(r, Math.min(intervalMs, Math.max(50, deadline - Date.now()))));
   }
 }
 

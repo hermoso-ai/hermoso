@@ -174,7 +174,7 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
    Codex, Gemini CLI and the rest are in [Install in one command](#install-in-one-command).
 3. **Sign in once.** `npx -y hermoso auth login` opens your browser; your agent also runs it by itself the first
    time it needs Hermoso. On a machine with no browser, use `npx -y hermoso auth login --token hmk_…` with a key
-   from **Settings → Agents & API**.
+   from the **MCP & CLI** tab, under **Terminal & API keys**.
 4. **Ask for what you want**, in your normal prompts. Claude Code picks the Hermoso skill for the job and runs the
    commands. You type none of them.
 
