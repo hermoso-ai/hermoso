@@ -243,12 +243,12 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // `?tools=research,create` narrows the roster this connection advertises (see registerTools). Read here rather
   // than inside registerTools so BOTH the anonymous discovery handshake and a real session honour the same query,
   // and so an unknown group is refused at the door with the valid list instead of silently serving every group.
-  // ABSENT, an authenticated session resolves to `defaultToolGroups` in tools.mjs, which is the FULL roster unless
-  // this process sets MCP_CORE_FIRST=1 — and production does not set it (measured 2026-09-20 off the Cloud Run
-  // service env). This comment used to say an authenticated session "resolves to the CORE-FIRST default" in one
-  // sentence and "the default is the full roster" in the next; the second one is the true one. When core-first IS
-  // on, the list is the core tools plus a few that make the connection drivable, with everything else held out of
-  // the LIST on size and reachable through find_tools + call_tool. `?tools=all` restores the full roster for one
+  // ABSENT, an authenticated session resolves to `defaultToolGroups` in tools.mjs: the FULL roster unless this
+  // process sets MCP_CORE_FIRST=1. PRODUCTION SETS IT (since 2026-09-20, read off the Cloud Run service env; for the
+  // three weeks before, this comment claimed core-first was the default while the variable was absent). With it on,
+  // the list is the core tools, the few that make the connection drivable and the headline verb of each area
+  // (CORE_FIRST_HEADLINE), with everything else held out of the LIST on size and reachable through find_tools +
+  // call_tool. `?tools=all` restores the full roster for one
   // connection. The anonymous discovery path above is
   // deliberately NOT core-first — see the comment on its registerTools call.
   // The scope fixed here is the STARTING roster, not a cage: `enable_tools` widens it mid-session and the SDK

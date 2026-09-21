@@ -1936,7 +1936,27 @@ export const coreFirstRoster = (env = process.env) => CORE_FIRST_ENV.some((k) =>
 // every existing caller and every per-group count the site and the docs derive. tools/core-first-roster-check.mjs
 // asserts each name is registered and that NONE of them is connector-gated (one that were would be listed and
 // then answer 401, which is the thing the connector gate exists to prevent).
-export const CORE_FIRST_EXTRA = Object.freeze(['get_brand', 'get_job', 'list_jobs', 'list_connectors', 'list_scheduled']);
+// THE SHORT LIST HAS TO LOOK LIKE THE PRODUCT (2026-09-20, Dave: "we dont want to degrade quality or make it look like
+// there's less capability"). The first core-first list was the `core` group plus the five above, and read live off
+// production it was: enable_tools, find_tools, call_tool, hermoso_capabilities, hermoso_credits, buy_credits,
+// report_bug, request_feature, billing_status, upgrade_plan, set_auto_reload, list_brands, use_brand, create_brand,
+// delete_brand … — a billing utility. Not one listed tool made an ad, researched a competitor or published a post, so
+// a person scanning the connector in Claude, ChatGPT or Cursor saw no marketing product, and a client that does not
+// reliably search (`find_tools` is an instruction, and weaker hosts skip instructions) had no way to discover one.
+// So the HEADLINE VERBS of each area ride in the list: research, create, the variant tools, publish, measure. Every
+// name here is un-gated (listed with nothing connected and never answering 401), and everything else is still one
+// find_tools + call_tool away. The weight this costs is measured in tools/roster-weight-check.mjs.
+export const CORE_FIRST_HEADLINE = Object.freeze([
+  // research
+  'find_competitors', 'pull_competitor_ads', 'competitor_teardown', 'research_ads', 'mine_angles',
+  // create
+  'draft_brand', 'plan_ad', 'render_ad', 'generate_image', 'generate_video', 'clone_video', 'clone_static', 'make_template_ad',
+  // variants of a finished ad
+  'edit_image', 'headline_variants', 'hook_variants', 'multiply_ad',
+  // publish, files, measure
+  'schedule_post', 'list_library', 'upload_file', 'post_performance', 'analyze_campaigns',
+]);
+export const CORE_FIRST_EXTRA = Object.freeze(['get_brand', 'get_job', 'list_jobs', 'list_connectors', 'list_scheduled', ...CORE_FIRST_HEADLINE]);
 export function defaultToolGroups(env = process.env) { return coreFirstRoster(env) ? ['core'] : [...DEFAULT_TOOL_GROUPS]; }
 
 // Parse a `tools=` scope. Returns {groups} or {error} — an unknown name is REFUSED BY NAME rather than dropped,
