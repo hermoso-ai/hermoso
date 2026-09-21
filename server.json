@@ -3,7 +3,7 @@
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
   "description": "Marketing on autopilot from your agent. 847 tools, usable alone. Publishing and ads cost no credits.",
-  "version": "0.1.258",
+  "version": "0.1.259",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.258",
+      "version": "0.1.259",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
