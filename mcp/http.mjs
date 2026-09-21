@@ -355,7 +355,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true, client: entry?.client || rememberedClient(req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),

@@ -1957,6 +1957,9 @@ export const CORE_FIRST_HEADLINE = Object.freeze([
   'schedule_post', 'list_library', 'upload_file', 'post_performance', 'analyze_campaigns',
 ]);
 export const CORE_FIRST_EXTRA = Object.freeze(['get_brand', 'get_job', 'list_jobs', 'list_connectors', 'list_scheduled', ...CORE_FIRST_HEADLINE]);
+// Hosts that have been SEEN to follow find_tools → call_tool. A name that does not match keeps the full roster.
+export const CORE_FIRST_VERIFIED_HOST_RE = /claude|chatgpt|openai-mcp/i;
+export const hostTakesCoreFirst = (client) => CORE_FIRST_VERIFIED_HOST_RE.test(String(client || ''));
 export function defaultToolGroups(env = process.env) { return coreFirstRoster(env) ? ['core'] : [...DEFAULT_TOOL_GROUPS]; }
 
 // Parse a `tools=` scope. Returns {groups} or {error} — an unknown name is REFUSED BY NAME rather than dropped,
@@ -2476,8 +2479,16 @@ function newToolScope(opts) {
   // AN EXPLICIT SCOPE ALWAYS WINS. `only` is what `?tools=`, `HERMOSO_TOOLS` and `/v1` pass; core-first is only
   // what an UNSTATED default resolves to, so a caller who named their groups gets exactly those and nothing here
   // narrows them. `coreFirst` is therefore false for every explicit scope, including `?tools=all`.
-  const coreFirst = !opts.only && coreFirstRoster();
-  const asked = opts.only ? new Set(opts.only) : new Set(defaultToolGroups());
+  // …AND ONLY A HOST WE HAVE SEEN SEARCH GETS THE SHORT LIST (2026-09-20, Dave, asked twice: "will they all be able to
+  // search the other tools and understand that more is available? we dont want to degrade quality or make it seem like
+  // we have less functionality"). The honest answer was "not provably": `find_tools` is an instruction, the ledger keeps
+  // failures and not successful calls, so which hosts follow it could not be read from history. What HAS been seen:
+  // Claude (claude.ai and Claude Code) running find_tools → call_tool on a roster that lacked the tool, and ChatGPT,
+  // whose connector was tested on exactly that route. Cursor, Codex and anything unnamed are unverified, so on the
+  // HOSTED transport they keep the full default roster and nothing can look smaller than it is. The stdio CLI has no
+  // host to ask and stays a plain env opt-in. Widen CORE_FIRST_VERIFIED_HOST_RE on evidence, never on a guess.
+  const coreFirst = !opts.only && coreFirstRoster() && (!opts.hosted || hostTakesCoreFirst(opts.client));
+  const asked = opts.only ? new Set(opts.only) : new Set(coreFirst ? ['core'] : [...DEFAULT_TOOL_GROUPS]);
   asked.add('core'); // discovery/credits/billing/jobs must exist in EVERY roster or the connection is unusable
   // `connectors` is `{connected:Set<provider>, readOk:boolean}` from the transport's own free read, or absent.
   // ABSENT AND `readOk:false` BEHAVE IDENTICALLY, and that is the fail-open law rather than a convenience:
