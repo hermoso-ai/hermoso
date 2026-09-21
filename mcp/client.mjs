@@ -381,7 +381,13 @@ export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 100
     const job = await getJob(id);
     onTick?.(job);
     if (job.status === 'done') return { job, result: jobResult(job) };
-    if (job.status === 'error') throw new Error(job.error || 'Render failed');
+    // A FAILED JOB HAS ALREADY BEEN RECORDED BY THE SERVER (2026-09-21). The job runner files the worker's real error in
+    // the ledger under the job's own type, with its status and markers. A bare Error here carried neither, so the tool
+    // wrapper took it for a failure that never reached the server and reported it a SECOND time with status 0: two
+    // make_template_ad refusals (a 400 the server had classed as the caller's config) sat on the admin board as
+    // "could not tell". `_viaApi` is the marker that says the server has seen it. It deliberately carries NO `jobId`:
+    // the tool layer reads a jobId on an error as "timed out, still rendering", which a failed job is not.
+    if (job.status === 'error') throw Object.assign(new Error(job.error || 'Render failed'), { _viaApi: true });
     if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `hermoso jobs get ' + id + '`'), { jobId: id });
     // NEVER SLEEP PAST THE DEADLINE. A 3s interval made every wait 3s-granular: a caller who asked for 1s was held 3s,
     // and one who asked for 29s was held 30s, which is the whole 30-second step budget the ask exists to stay inside.
