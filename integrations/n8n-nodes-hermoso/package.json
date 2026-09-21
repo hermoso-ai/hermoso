@@ -1,0 +1,63 @@
+{
+  "name": "n8n-nodes-hermoso",
+  "version": "0.1.1",
+  "description": "n8n nodes for Hermoso: create on-brand image and video ads, schedule social posts, and react to new library files and posts.",
+  "license": "MIT",
+  "homepage": "https://hermoso.ai",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "hermoso",
+    "marketing",
+    "social media",
+    "ads",
+    "scheduling"
+  ],
+  "author": {
+    "name": "Hermoso",
+    "email": "hello@hermoso.ai",
+    "url": "https://hermoso.ai"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hermoso-ai/hermoso.git",
+    "directory": "integrations/n8n-nodes-hermoso"
+  },
+  "scripts": {
+    "build": "n8n-node build",
+    "build:watch": "tsc --watch",
+    "dev": "n8n-node dev",
+    "lint": "n8n-node lint",
+    "lint:fix": "n8n-node lint --fix",
+    "release": "n8n-node release",
+    "prepublishOnly": "n8n-node prerelease"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/HermosoApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Hermoso/Hermoso.node.js",
+      "dist/nodes/HermosoTrigger/HermosoTrigger.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "^0.48.6",
+    "eslint": "9.32.0",
+    "prettier": "3.6.2",
+    "release-it": "^19.0.4",
+    "typescript": "5.9.2"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "bugs": {
+    "url": "https://github.com/hermoso-ai/hermoso/issues"
+  }
+}

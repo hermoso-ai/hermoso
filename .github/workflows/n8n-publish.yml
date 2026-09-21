@@ -1,0 +1,36 @@
+# Publishes the n8n community node in integrations/n8n-nodes-hermoso to npm with a provenance statement.
+# n8n verifies community nodes only when they are published from GitHub Actions with npm provenance.
+# Auth is npm trusted publishing (OIDC): no token is stored in this repository.
+# Release: bump "version" in integrations/n8n-nodes-hermoso/package.json, commit, then push a tag n8n-v<version>.
+name: Publish n8n node
+
+on:
+  push:
+    tags:
+      - 'n8n-v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: integrations/n8n-nodes-hermoso
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install
+        run: npm ci
+      - name: Tag matches package.json
+        run: |
+          V="$(node -p "require('./package.json').version")"
+          [ "n8n-v$V" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != n8n-v$V"; exit 1; }
+      - name: Lint and build
+        run: npm run lint && npm run build
+      - name: Publish with provenance
+        run: npm publish --provenance --access public --ignore-scripts

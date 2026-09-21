@@ -1,0 +1,28 @@
+{
+  "name": "Hermoso: generate an image, then collect the file",
+  "nodes": [
+    { "id": "b1", "name": "Start", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+    {
+      "id": "b2", "name": "Generate Image", "type": "n8n-nodes-hermoso.hermoso", "typeVersion": 1, "position": [240, 0],
+      "parameters": {
+        "resource": "image", "operation": "generate",
+        "prompt": "Our product on a sunny picnic blanket, soft natural light",
+        "returnJob": true,
+        "options": { "aspectRatio": "1:1" }
+      }
+    },
+    { "id": "b3", "name": "Wait", "type": "n8n-nodes-base.wait", "typeVersion": 1.1, "position": [480, 0], "parameters": { "amount": 45 } },
+    {
+      "id": "b4", "name": "Get Job", "type": "n8n-nodes-hermoso.hermoso", "typeVersion": 1, "position": [720, 0],
+      "parameters": {
+        "resource": "job", "operation": "get",
+        "jobId": { "__rl": true, "mode": "id", "value": "={{ $('Generate Image').item.json.id }}" }
+      }
+    }
+  ],
+  "connections": {
+    "Start": { "main": [[{ "node": "Generate Image", "type": "main", "index": 0 }]] },
+    "Generate Image": { "main": [[{ "node": "Wait", "type": "main", "index": 0 }]] },
+    "Wait": { "main": [[{ "node": "Get Job", "type": "main", "index": 0 }]] }
+  }
+}

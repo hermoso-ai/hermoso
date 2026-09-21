@@ -1,0 +1,28 @@
+{
+  "name": "Hermoso: schedule a post, then cancel it",
+  "nodes": [
+    { "id": "a1", "name": "Start", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+    {
+      "id": "a2", "name": "Create Post", "type": "n8n-nodes-hermoso.hermoso", "typeVersion": 1, "position": [240, 0],
+      "parameters": {
+        "resource": "post", "operation": "create",
+        "channels": ["threads"],
+        "caption": "Hello from n8n",
+        "timing": "scheduled",
+        "scheduledAt": "={{ $now.plus({ days: 30 }).toISO() }}",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "a3", "name": "Cancel Post", "type": "n8n-nodes-hermoso.hermoso", "typeVersion": 1, "position": [480, 0],
+      "parameters": {
+        "resource": "post", "operation": "cancel",
+        "scheduledPostId": { "__rl": true, "mode": "id", "value": "={{ $json.id }}" }
+      }
+    }
+  ],
+  "connections": {
+    "Start": { "main": [[{ "node": "Create Post", "type": "main", "index": 0 }]] },
+    "Create Post": { "main": [[{ "node": "Cancel Post", "type": "main", "index": 0 }]] }
+  }
+}
