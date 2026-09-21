@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**841 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**847 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
@@ -33,8 +33,9 @@ just download it. Use the one piece you need, or all of it together.
 ## Install in one command
 
 This repo is a plugin marketplace, a Gemini CLI extension and a skills package at once, so a coding agent takes
-Hermoso in one line. Every install brings the same four skills (`hermoso-research`, `hermoso-generate`,
-`hermoso-ad-from-brand`, `hermoso-product-photoshoot`), and the skills drive the `hermoso` CLI through `npx`. No
+Hermoso in one line. Every install brings the same five skills (`hermoso-research`, `hermoso-generate`,
+`hermoso-ad-from-brand`, `hermoso-product-photoshoot`, `hermoso-marketing`), and the skills drive the `hermoso`
+CLI through `npx`. No
 tool list is loaded into your session: a CLI command costs nothing until it runs, and it reaches every tool.
 The first time, your agent runs `npx -y hermoso auth login`, which opens a browser to sign in.
 
@@ -163,7 +164,7 @@ handshake is open; "None" would leave every tool call unauthenticated), approve 
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai). The free tier is included; plans and credits
    are the same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid
    plan with `POST /v1/signup` (above).
-2. **Install the plugin.** It adds the four Hermoso skills, which drive the `hermoso` CLI through `npx`:
+2. **Install the plugin.** It adds the five Hermoso skills, which drive the `hermoso` CLI through `npx`:
 
 ```bash
 claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
@@ -215,7 +216,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 841 tools cover
+### What the 847 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -349,8 +350,15 @@ the package, so they need no key, no network and no sign-in.
 
 ## 3. Skills: what a coding agent installs
 
-`skills/` holds four installable skills: `hermoso-generate`, `hermoso-ad-from-brand`,
-`hermoso-product-photoshoot`, `hermoso-research`.
+`skills/` holds five installable skills:
+
+| Skill | What it does |
+| --- | --- |
+| `hermoso-research` | Find competitors, pull their real running ads, surface the hooks worth copying |
+| `hermoso-generate` | A prompt to a finished image, video, avatar clip or stitched cut |
+| `hermoso-ad-from-brand` | A brand or domain to one finished, on-brand ad, concept and copy included |
+| `hermoso-product-photoshoot` | A real product photo composited into studio, lifestyle or hero scenes |
+| `hermoso-marketing` | The whole loop: research, create, publish and schedule, paid campaigns, measure |
 
 They are what every one-command install at the top of this page adds, in Claude Code, Codex, Gemini CLI and
 through `npx skills add`. From a clone, copying works too:
@@ -360,6 +368,17 @@ cp -r skills/* ~/.claude/skills/
 ```
 
 Then invoke `/hermoso-ad-from-brand an ad for yourbrand.com, our hero product`.
+
+### Ask for it in your own words
+
+The skills pick themselves. These are whole prompts, not commands:
+
+- *Find my top 5 competitors for [product + URL], pull their best Meta and TikTok ads from the last 90 days, and tell me the 3 hooks and 2 formats worth stealing, with the evidence.*
+- *Make this week's ads for [brand]: two hooks in two formats, one UGC and one product visual, 9:16. Score them and policy check them before I ship.*
+- *Here is a competitor ad: [link]. Break down why it works, then rebuild the structure with my product, my branding and a fresh hook.*
+- *Fill my social queue for the next 7 days across Instagram, TikTok, X and LinkedIn, repurposed from my best post, with per-channel captions.*
+- *Take last week's winner and build a $20/day test campaign on Meta and TikTok, three ad sets, one angle each. Leave it paused and read the tree back so I can check it.*
+- *Pull last month's campaign performance across every platform. Which two creatives won, why, and what should next month's brief say?*
 
 ## Configuration
 

@@ -1,7 +1,7 @@
 {
   "name": "hermoso",
-  "version": "1.0.0",
-  "description": "Marketing on autopilot from your coding agent: research the ads already winning, generate on-brand image and video ads, publish and schedule to your own channels, and run the campaigns behind them. Four skills that drive the hermoso CLI, so no tool list is loaded until a command runs.",
+  "version": "1.1.0",
+  "description": "Marketing on autopilot from your coding agent: research the ads already winning, generate on-brand image and video ads, publish and schedule to your own channels, and run the campaigns behind them. Five skills that drive the hermoso CLI, so no tool list is loaded until a command runs.",
   "author": { "name": "Hermoso AI", "email": "hello@hermoso.ai", "url": "https://hermoso.ai" },
   "homepage": "https://hermoso.ai",
   "repository": "https://github.com/hermoso-ai/hermoso",

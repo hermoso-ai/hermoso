@@ -1,7 +1,7 @@
 {
   "name": "hermoso",
   "owner": { "name": "Hermoso AI", "email": "hello@hermoso.ai", "url": "https://hermoso.ai" },
-  "metadata": { "description": "Hermoso for coding agents: four skills that drive the hermoso CLI, in one install." },
+  "metadata": { "description": "Hermoso for coding agents: five skills that drive the hermoso CLI, in one install." },
   "plugins": [
     {
       "name": "hermoso",

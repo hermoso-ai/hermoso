@@ -226,6 +226,15 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // resources are the ChatGPT Apps SDK ui:// widget templates (static HTML, zero spend) — so resources/read is
     // pre-auth too, letting ChatGPT/scanners fetch the templates. tools/call remains strictly bearer-gated.
     'resources/list', 'resources/read', 'resources/templates/list', 'prompts/list', 'triggers/list']);
+  // A HOST THAT DECIDES "NO AUTH" FROM A SUCCESSFUL HANDSHAKE MUST BE CHALLENGED ON IT (2026-09-18, measured).
+  // Grok's custom connectors (grok.com/connectors, client `grok-connectors-manager`) choose OAuth or no-auth when the
+  // connector is ADDED: our open discovery handshake answered 200, so it saved Hermoso as a no-auth connector, and
+  // every tool call after that got our 401 and was never followed to /.well-known/oauth-protected-resource — the
+  // chat said "I'll send a connect card" and none ever came. Its catalog connectors (Stripe, Notion, Vercel) work
+  // because their servers challenge the first request. So that client, and any caller that asks with
+  // `?auth=required`, gets the challenge instead of the anonymous preview; everyone else keeps discovery.
+  const signinUpfront = (req) => /^grok-connectors-manager\b/i.test(String(req.headers['user-agent'] || ''))
+    || String(req.query?.auth || '').toLowerCase() === 'required';
   const isAllPreauth = (body) => {
     const arr = Array.isArray(body) ? body : [body];
     const methods = arr.map((m) => m && m.method).filter((v) => typeof v === 'string');
@@ -234,10 +243,13 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // `?tools=research,create` narrows the roster this connection advertises (see registerTools). Read here rather
   // than inside registerTools so BOTH the anonymous discovery handshake and a real session honour the same query,
   // and so an unknown group is refused at the door with the valid list instead of silently serving every group.
-  // ABSENT, an AUTHENTICATED session resolves to the CORE-FIRST default (see defaultToolGroups in tools.mjs): the
-  // core tools plus a few that make the connection drivable, with everything else held out of the LIST on size and
-  // reachable through find_tools + call_tool. `?tools=all` restores the full roster for one connection and
-  // `MCP_CORE_FIRST=1` opts this process into the small core-first roster; the default is the full roster. The anonymous discovery path above is
+  // ABSENT, an authenticated session resolves to `defaultToolGroups` in tools.mjs, which is the FULL roster unless
+  // this process sets MCP_CORE_FIRST=1 — and production does not set it (measured 2026-09-20 off the Cloud Run
+  // service env). This comment used to say an authenticated session "resolves to the CORE-FIRST default" in one
+  // sentence and "the default is the full roster" in the next; the second one is the true one. When core-first IS
+  // on, the list is the core tools plus a few that make the connection drivable, with everything else held out of
+  // the LIST on size and reachable through find_tools + call_tool. `?tools=all` restores the full roster for one
+  // connection. The anonymous discovery path above is
   // deliberately NOT core-first — see the comment on its registerTools call.
   // The scope fixed here is the STARTING roster, not a cage: `enable_tools` widens it mid-session and the SDK
   // notifies the client. That is deliberate — the old comment's "tools/list must not change under a live client"
@@ -292,7 +304,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     const user = token ? await verifyBearer(token, { stamp: didWork }).catch(() => null) : null;
     if (!user) {
       // No valid bearer: allow ONLY the read-only discovery handshake (POST), fail CLOSED for everything else.
-      if (req.method === 'POST' && isAllPreauth(req.body)) {
+      if (req.method === 'POST' && isAllPreauth(req.body) && !signinUpfront(req)) {
         const scope = scopeFor(req, res);
         if (scope === false) return; // unknown group — already answered 400
         return serveAnonDiscovery(req, res, scope).catch(() => { try { challenge(res); } catch {} });
