@@ -198,7 +198,7 @@ export const CAPABILITY_MAP = [
   'What Hermoso can do — the full agent surface (every tool below runs over this MCP):',
   // SECOND LINE, deliberately: the map below is a menu, and a menu read as a sequence is the whole defect.
   INDEPENDENCE,
-  'A) AD SPY / RESEARCH — spy on the ads already winning in any market, then mine them. find_competitors · competitor_teardown · pull_competitor_ads · research_ads (open brief) · ad libraries search_meta_ads / search_google_ads / search_linkedin_ads · organic social search_tiktok / search_instagram / search_youtube / search_reddit / search_threads · search_instagram_hashtag (LISTENING on the brand’s OWN Meta credentials rather than a scraper: the real public posts carrying a hashtag, with their captions — feed them into mine_angles or write the next post from the language you found. “recent” is the LAST 24 HOURS only, so a huge tag legitimately returns zero on a quiet day; ask again with edge “top” before saying anything about how busy it is) · instagram_profile (any Instagram @handle → the account’s NUMERIC Instagram id from Meta itself, plus its real name, bio, follower and post counts — Meta’s own numbers, not a scraper’s. It is also the ONLY way to get the id manage_meta_partnership_creator’s allowTagging list requires; professional accounts only) · fetch_social_data (any allowlisted endpoint) · mine_angles · analyze_video · check_ad_policy · list_skills / get_skill (teardowns + creative playbooks).',
+  'A) AD SPY / RESEARCH — spy on the ads already winning in any market, then mine them. find_competitors · competitor_teardown · pull_competitor_ads · research_ads (open brief) · ad libraries search_meta_ads / search_google_ads / search_linkedin_ads · organic social search_tiktok / search_instagram / search_youtube / search_reddit / search_threads · search_instagram_hashtag (LISTENING on the brand’s OWN Meta credentials rather than a scraper: the real public posts carrying a hashtag, with their captions — feed them into mine_angles or write the next post from the language you found. “recent” is the LAST 24 HOURS only, so a huge tag legitimately returns zero on a quiet day; ask again with edge “top” before saying anything about how busy it is) · instagram_profile (any Instagram @handle → the account’s NUMERIC Instagram id from Meta itself, plus its real name, bio, follower and post counts — Meta’s own numbers, not a scraper’s. It is also the ONLY way to get the id manage_meta_partnership_creator’s allowTagging list requires; professional accounts only) · find_instagram_marketplace_creators / instagram_marketplace_creator / list_instagram_marketplace_audiences (Instagram’s own creator marketplace searched as the brand, with Meta’s first-party creator insights; find_creators ranks by public posts and takes marketplace:true to add it) · fetch_social_data (any allowlisted endpoint) · mine_angles · analyze_video · check_ad_policy · list_skills / get_skill (teardowns + creative playbooks).',
   'B) CREATE — finished, on-brand image & video ads (real product composited in, copy + CTA baked). draft_brand / get_brand / update_brand (patch single fields without re-onboarding) / use_brand · list_brands / create_brand / delete_brand (one account holds MANY brand workspaces — an agency runs every client through here; each has its own brand, memory, swipefile, Library and connectors, and create_brand → draft_brand onboards a new one end to end) · plan_ad (concept + copy) → render_ad (the Studio quality pipeline) or generate_image / generate_video / generate_avatar (UGC creators + lip-sync) · list_creators / save_creator / delete_creator (the workspace’s REUSABLE CAST — saved creators with their portrait urls, so the SAME person stars in every ad; list them before ever generating a new one, then cast one into the ad with render_ad’s `creator`, which also skips the character-portrait render and so costs LESS than casting a stranger) · make_template_ad (native HTML ad formats) · clone_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / hook_variants / stitch_video · plan_variations + score_ad (fan out + rank).',
   'C) RAW MODEL PLAYGROUND — direct access to the full catalog (30+ image / video / voice / writing models, each with the exact per-render credit cost shown above), no ad framing: generate_image / generate_video (useBrand:false) for plain prompt-only renders, generate_voice for raw text-to-speech against any voice engine, and generate_text for the writing models (Claude / Gemini / GPT / Llama / DeepSeek…) — all against ANY catalog id.',
   'D) ACCOUNT — hermoso_credits (balance) · billing_status (plan + your billing role) · buy_credits (one-click top-up on the saved card, or a first-purchase checkout link) · upgrade_plan / set_auto_reload (admin) · list_jobs / get_job (track async renders) · get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it, over MCP as well as in the app — plus app appearance and the weekly competitor-watch email) · list_team / invite_member / remove_member / set_role (who else can work in this brand).',
@@ -4102,6 +4102,62 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/instagram/engagement', a); return ok(d.note, d); }));
+
+  // ── INSTAGRAM CREATOR MARKETPLACE DISCOVERY (2026-09-21): Meta's own creator directory, searched as the brand's
+  // Instagram account. Rules and refusals: lib/ig-creator-marketplace.mjs. A SOURCE of the creator search, not a rival:
+  // find_creators takes marketplace:true to add it. Free (Graph calls).
+  const mkLine = (c) => { const f = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}K` : String(v); const b = []; if (c.followers != null) b.push(`${f(c.followers)} followers`); if (c.country) b.push(c.country); if (c.badges && c.badges.length) b.push(`badges: ${c.badges.join(', ')}`); if (c.email) b.push(c.email); return `• @${c.handle}${c.verified ? ' (verified)' : ''}${b.length ? `: ${b.join(', ')}` : ''}${c.bio ? `. ${String(c.bio).slice(0, 120)}` : ''}`; };
+  server.registerTool('find_instagram_marketplace_creators', {
+    title: 'Search Instagram’s creator marketplace',
+    description: "SEARCH INSTAGRAM'S CREATOR MARKETPLACE: Meta's own directory of creators who partner with brands, searched AS the brand's Instagram account, so the recommendations are personalised to it. Use it when the user wants creators with first-party data (followers, audience, badges such as Partnership ads / Branded content / Strong hooks / Responsive, marketplace email) or Meta's recommendations. Search by query (keywords), by similarTo (up to 5 handles, not with query), by recommendation (most_relevant_for_me, high_ad_performance, most_ads_experience, similar_brands, similar_audience, interested_in_collaboration), or filters on the creator (countries, states with exactly one country, minFollowers/maxFollowers bands, ageBucket, gender, up to 5 interests, minEngaged/maxEngaged, language, followerGrowth, lastPostWithin, verifiedAccount, hasPortfolio, hasPublicContactEmail, featuredInPaidAds, excludeMessagedCreators) and their audience (audienceCountries, audienceStates, audienceAgeBucket, audienceGender, audienceDevices), or customAudienceId from list_instagram_marketplace_audiences. username looks up one creator (no other filter allowed). find_creators ranks creators by their public posts in a niche and takes marketplace:true to add this source beside it. Needs the Meta (Facebook Login) connector with the Page linked to the brand's Instagram, and Meta's instagram_creator_marketplace_discovery permission; when it cannot run it says exactly why and what fixes it. Free.",
+    inputSchema: {
+      query: z.string().optional().describe('keywords, e.g. "skincare" or "trail running"'),
+      username: z.string().optional().describe('one creator handle; no other filter allowed with it'),
+      similarTo: z.array(z.string()).optional().describe('up to 5 creator handles to find look-alikes of'),
+      recommendation: z.enum(['most_relevant_for_me', 'high_ad_performance', 'most_ads_experience', 'similar_brands', 'similar_audience', 'interested_in_collaboration']).optional(),
+      countries: z.array(z.string()).optional().describe('2-letter ISO codes'),
+      states: z.array(z.string()).optional().describe('state or region codes; needs exactly one country'),
+      minFollowers: z.number().optional().describe('0, 10000, 25000, 50000, 75000, 100000, 250000 or 1000000'),
+      maxFollowers: z.number().optional().describe('10000, 25000, 50000, 75000, 100000, 250000 or 1000000'),
+      ageBucket: z.enum(['18_to_24', '25_to_34', '35_to_44', '45_to_54', '55_to_64', '65_and_above']).optional(), gender: z.enum(['male', 'female']).optional(),
+      interests: z.array(z.string()).optional().describe('up to 5 of Meta’s categories, e.g. BEAUTY, FASHION, FITNESS_AND_WORKOUTS, FOOD_AND_DRINK, TRAVEL_AND_LEISURE_ACTIVITIES'),
+      minEngaged: z.number().optional().describe('0, 2000, 10000, 50000 or 100000'), maxEngaged: z.number().optional().describe('2000, 10000, 50000 or 100000'),
+      audienceCountries: z.array(z.string()).optional(), audienceStates: z.array(z.string()).optional(),
+      audienceAgeBucket: z.enum(['18_to_24', '25_to_34', '35_to_44', '45_to_54', '55_to_64', '65_and_above']).optional(), audienceGender: z.enum(['male', 'female']).optional(),
+      audienceDevices: z.array(z.enum(['ios', 'android'])).optional(),
+      customAudienceId: z.string().optional().describe('from list_instagram_marketplace_audiences'),
+      reelsInteractionRate: z.number().optional(), language: z.string().optional(),
+      followerGrowth: z.enum(['top_10_percent', 'top_30_percent', 'top_50_percent']).optional(),
+      lastPostWithin: z.enum(['last_7_days', 'last_30_days', 'last_90_days']).optional(),
+      verifiedAccount: z.boolean().optional(), hasPortfolio: z.boolean().optional(), hasPublicContactEmail: z.boolean().optional(),
+      featuredInPaidAds: z.boolean().optional(), excludeMessagedCreators: z.boolean().optional(),
+      limit: z.number().optional().describe('1 to 50'), cursor: z.string().optional(),
+      pageId: z.string().optional(), account: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/instagram/marketplace/creators', a);
+    if (d.creator !== undefined) return ok(d.note, d);
+    return ok(`${d.note}${d.cursor ? ` More: pass cursor "${d.cursor}".` : ''}\n${(d.creators || []).map(mkLine).join('\n')}`, d);
+  }));
+  server.registerTool('instagram_marketplace_creator', {
+    title: 'One creator from Instagram’s creator marketplace, in depth',
+    description: "ONE CREATOR FROM INSTAGRAM'S CREATOR MARKETPLACE, IN DEPTH: Meta's first-party insights (total followers, reach, engaged accounts, reels interaction rate, reels hook rate), audience demographics (engaged accounts by gender, age, top countries, top cities), the brands they partnered with in the past year, and their recent posts, branded-content posts and partnership ads with likes, comments, views and shares. Pass username (an Instagram handle, from find_instagram_marketplace_creators or find_creators). demographics:false or media:false skip those parts. A part Meta does not serve for this creator is listed as unavailable rather than failing the lookup. Then: approve them for partnership ads with manage_meta_partnership_creator, or save them to a swipefile collection. Needs the Meta (Facebook Login) connector and Meta's instagram_creator_marketplace_discovery permission; when it cannot run it says why. Free.",
+    inputSchema: {
+      username: z.string().describe('the creator’s Instagram handle'),
+      demographics: z.boolean().optional().describe('default true'), media: z.boolean().optional().describe('default true'),
+      pageId: z.string().optional(), account: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/instagram/marketplace/creator', a); return ok(d.note, d); }));
+  server.registerTool('list_instagram_marketplace_audiences', {
+    title: 'Custom audiences usable as a creator-marketplace filter',
+    description: "The brand's custom audiences that Instagram's creator marketplace accepts as a creator filter (Meta's creator_marketplace_brand_info). Pass an id from here as customAudienceId to find_instagram_marketplace_creators to find creators whose followers overlap that audience. An agency passes businessId (its Business portfolio id) to see audiences from client ad accounts. Needs the Meta connector, ads_management and Meta's instagram_creator_marketplace_discovery permission. Free.",
+    inputSchema: { businessId: z.string().optional().describe('agency Business portfolio id'), pageId: z.string().optional(), account: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/instagram/marketplace/audiences', a); return ok(`${d.note}${(d.audiences || []).length ? '\n' + d.audiences.map(x => `• ${x.name} (id ${x.id})`).join('\n') : ''}`, d); }));
+  // ── INSTAGRAM LIKE / UNLIKE (continued): replying to and moderating comments on the brand's own posts. The creator
+  // marketplace banner above sits between like_instagram and these, so without this banner they were filed as research.
   server.registerTool('reply_to_meta_comment', {
     title: 'Reply to a Facebook/Instagram comment',
     description: 'Post a public reply to a comment on the brand’s Facebook or Instagram post. This is PUBLIC and posted as the brand — show the user the exact wording and get their go-ahead first.',
@@ -6255,6 +6311,89 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiGet('/api/x/blocks', a);
     const top = (d.users || []).slice(0, 20).map((u) => `• ${u.username}${u.name ? ` (${u.name})` : ''}${u.followers != null ? ` — ${Number(u.followers).toLocaleString()} followers` : ''}`).join('\n');
     return ok(`${d.account} blocks ${d.count} account(s)${d.nextToken ? ' (more available — pass paginationToken)' : ''}:\n${top || '(none)'}`, d);
+  }));
+  // X LIVE BROADCASTS (2026-09-21) — 16 operations in X's OpenAPI 2.168 as five tools; gates and payloads live in
+  // lib/x-broadcast.mjs on the server, so every refusal below is the server's own sentence and costs nothing.
+  const XB_SCOPE_NOTE = ' Needs X connected with the broadcast permissions added 2026-09-21: an X connection made before then must be reconnected once under Settings > Connectors > X (the tool says so without calling X). Costs credits (X bills per call).';
+  server.registerTool('list_x_broadcasts', {
+    title: 'List X live broadcasts',
+    description: "The connected X account's LIVE VIDEO broadcasts: past and current ones (title, state, share URL, live and total viewers, start/end) and SCHEDULED ones (start, end, whether it goes live automatically or waits for go_live, recurring series). kind 'all' (default) reads both, 'live' or 'scheduled' one; pass id for a single broadcast. Read-only." + XB_SCOPE_NOTE,
+    inputSchema: {
+      kind: z.enum(['all', 'live', 'scheduled']).optional(),
+      id: z.string().optional().describe('one broadcast id (alphanumeric, up to 13 characters)'),
+      ids: z.string().optional().describe('comma-separated broadcast ids (live kind, up to 100)'),
+      maxResults: z.number().optional().describe('1-100, default 25'),
+      paginationToken: z.string().optional(),
+      oldestStart: z.string().optional().describe('scheduled kind: earliest start, ISO 8601 or epoch ms'),
+      newestStart: z.string().optional().describe('scheduled kind: latest start, ISO 8601 or epoch ms'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiGet('/api/x/broadcasts', a);
+    const live = (d.broadcasts || []).slice(0, 15).map((b) => `- ${b.title || '(untitled)'} [${b.id}] ${b.state || ''}${b.watched != null ? ` - ${b.watched} watched` : ''}${b.shareUrl ? ` - ${b.shareUrl}` : ''}`).join('\n');
+    const sch = (d.scheduled || []).slice(0, 15).map((s) => `- ${s.title || '(untitled)'} [${s.id}] ${s.start || ''}${s.manualPublish ? ' - manual go-live' : ' - auto-publishes'}${s.recurringScheduleId ? ' - recurring' : ''}`).join('\n');
+    return ok([d.broadcasts ? `Broadcasts (${d.broadcasts.length}):\n${live || '(none)'}` : '', d.scheduled ? `Scheduled (${d.scheduled.length}):\n${sch || '(none)'}` : ''].filter(Boolean).join('\n\n') + `\nCost ${d.costCredits ?? '?'} credits.`, d);
+  }));
+  server.registerTool('manage_x_broadcast', {
+    title: 'Schedule, update, go live on or cancel an X broadcast',
+    description: "Schedule, update, go live on, or cancel an X LIVE VIDEO broadcast on the connected account. action 'schedule' needs sourceId (the stream key of the ingest source, from Media Studio > Producer on x.com), startAt, and manualPublish, which is REQUIRED with no default: true = nothing airs until action 'go_live'; false = X puts the brand ON AIR automatically at startAt (needs confirm:true). 'update' changes only the fields you pass (Hermoso re-sends the rest, because X's update replaces the whole schedule). 'go_live' airs a manualPublish schedule NOW, publicly, as the brand (confirm:true). 'cancel' deletes a schedule and cannot be undone (confirm:true; rollForward:true shifts a recurring series instead of leaving a gap). Confirm the exact broadcast, time and stream with the user before passing confirm:true; a refusal is free." + XB_SCOPE_NOTE,
+    inputSchema: {
+      action: z.enum(['schedule', 'update', 'go_live', 'cancel']),
+      id: z.string().optional().describe('broadcast id, for update / go_live / cancel'),
+      sourceId: z.string().optional().describe('stream key of the ingest source (schedule)'),
+      startAt: z.string().optional().describe('ISO 8601 or epoch ms'),
+      endAt: z.string().optional().describe('ISO 8601 or epoch ms; X requires one on update'),
+      manualPublish: z.boolean().optional().describe('required on schedule: true waits for go_live, false auto-publishes at startAt'),
+      title: z.string().optional(), description: z.string().optional(), locale: z.string().optional(),
+      availableForReplay: z.boolean().optional(), isLocked: z.boolean().optional(),
+      chatOption: z.string().optional().describe('X chat permission option (numeric string)'),
+      thumbnailMediaId: z.string().optional().describe('pre-live slate media id'),
+      recurrence: z.object({ frequency: z.enum(['Daily', 'Weekly']), repeats: z.string() }).optional(),
+      rollForward: z.boolean().optional(),
+      confirm: z.boolean().optional().describe('true only after the user approved this exact public or irreversible action'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/x/broadcasts/manage', a);
+    if (d.action === 'cancel') return ok(d.deleted ? `Cancelled the scheduled broadcast ${d.id}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm cancelling ${d.id}.`, d);
+    const s = d.scheduled || {};
+    return ok(`${d.action === 'go_live' ? 'Went live' : d.action === 'update' ? 'Updated' : 'Scheduled'}: ${s.title || '(untitled)'} [${s.id}] start ${s.start || '?'}, state ${s.state || '?'}.${d.note ? ` ${d.note}` : ''} Cost ${d.costCredits ?? '?'} credits.`, d);
+  }));
+  server.registerTool('read_x_broadcast_chat', {
+    title: 'Read an X broadcast chat',
+    description: "The chat on one of the connected X account's live broadcasts, newest first: message id, text, author handle, time and reply-to. Use it to answer viewers or find a message to moderate. Read-only." + XB_SCOPE_NOTE,
+    inputSchema: { broadcastId: z.string(), maxResults: z.number().optional().describe('1-200, default 100'), paginationToken: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet(`/api/x/broadcasts/${encodeURIComponent(a.broadcastId)}/chat`, { maxResults: a.maxResults, paginationToken: a.paginationToken });
+    return ok(`${d.count} chat message(s):\n` + (d.messages || []).slice(0, 30).map((m) => `- [${m.id}] ${m.author || '?'}: ${m.text}`).join('\n') + (d.nextToken ? '\nMore available - pass paginationToken.' : ''), d);
+  }));
+  server.registerTool('send_x_broadcast_chat', {
+    title: 'Send a message to an X broadcast chat',
+    description: "Post ONE chat message, as the brand, into a RUNNING live broadcast on the connected X account (max 140 characters; a longer one is refused, never cut). It is PUBLIC in front of everyone watching: show the user the exact wording, get a yes, then pass confirm:true. replyTo answers one specific message." + XB_SCOPE_NOTE,
+    inputSchema: { broadcastId: z.string(), text: z.string(), replyTo: z.string().optional().describe('chat message id to reply to'), confirm: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost(`/api/x/broadcasts/${encodeURIComponent(a.broadcastId)}/chat`, { text: a.text, replyTo: a.replyTo, confirm: a.confirm });
+    return ok(d.sent ? `Sent to the broadcast chat: "${d.text}". Cost ${d.costCredits ?? '?'} credits.` : 'X did not confirm the chat message.', d);
+  }));
+  server.registerTool('moderate_x_broadcast', {
+    title: 'Moderate an X broadcast chat',
+    description: "Moderate the connected X account's live broadcast chat. action 'remove_message' (broadcastId + messageId; cannot be undone, confirm:true), 'mute' (broadcastId + userId or username; until = when a timeout ends, omit to mute for the broadcast; messageId removes that message while muting), 'unmute', and the account's PERSISTENT chat moderators, which apply to every current and future broadcast: 'list_moderators', 'add_moderator', 'remove_moderator' (userId or username). Only the host or a moderator can moderate, and X says so if not. A username costs one extra lookup." + XB_SCOPE_NOTE,
+    inputSchema: {
+      action: z.enum(['remove_message', 'mute', 'unmute', 'list_moderators', 'add_moderator', 'remove_moderator']),
+      broadcastId: z.string().optional(), messageId: z.string().optional(),
+      userId: z.string().optional().describe('numeric X account id'), username: z.string().optional().describe('X handle, resolved to the id for you'),
+      until: z.string().optional().describe('mute end, ISO 8601 or epoch ms'),
+      confirm: z.boolean().optional().describe('required for remove_message'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/x/broadcasts/moderate', a);
+    if (d.action === 'list_moderators') return ok(`${d.count} chat moderator(s):\n` + (d.moderators || []).map((u) => `- ${u.username} (${u.id})`).join('\n'), d);
+    if (d.action === 'remove_message') return ok(d.removed ? `Removed message ${d.messageId}.` : `X did not confirm removing ${d.messageId}.`, d);
+    if (d.action === 'mute' || d.action === 'unmute') return ok(`${d.username || d.userId} is ${d.muted ? 'muted' : 'not muted'} in broadcast ${d.broadcastId}.`, d);
+    return ok(`Chat moderators now: ${(d.moderatorIds || []).join(', ') || '(none)'}.`, d);
   }));
   server.registerTool('x_user', {
     title: 'Look up any public X account',
@@ -18866,7 +19005,7 @@ function memoryNoteVerdict(text) {
   // already searches. Real people, scored on median views + engagement + consistency; no marketplace scope needed.
   server.registerTool('find_creators', {
     title: 'Find the creators already winning in a niche',
-    description: 'Scan organic TikTok, Instagram Reels and YouTube for a niche across a few query variants, fold the posts into creators, and rank them on median views, engagement rate and how often they show up for that niche; the top rows get follower counts AND public contact info (an Instagram business email / phone / category, the bio link, an email in a TikTok bio) so outreach can start from the result. Real people, not AI actors — for influencer sourcing, UGC casting and partnership prospecting ("who should we send product to?"). About one credit per search call (platforms × queries, default 3 × 3) plus one per enriched profile; repeats inside 20 minutes are free. Then shortlist (save_to_swipefile), check a profile (instagram_profile / fetch_social_data), draft outreach (generate_text), or approve them for Partnership Ads (manage_meta_partnership_creator).',
+    description: 'Scan organic TikTok, Instagram Reels and YouTube for a niche across a few query variants, fold the posts into creators, and rank them on median views, engagement rate and how often they show up for that niche; the top rows get follower counts AND public contact info (an Instagram business email / phone / category, the bio link, an email in a TikTok bio) so outreach can start from the result. Real people, not AI actors — for influencer sourcing, UGC casting and partnership prospecting ("who should we send product to?"). About one credit per search call (platforms × queries, default 3 × 3) plus one per enriched profile; repeats inside 20 minutes are free. Then shortlist (save_to_swipefile), check a profile (instagram_profile / fetch_social_data), draft outreach (generate_text), or approve them for Partnership Ads (manage_meta_partnership_creator). marketplace:true also searches Instagram’s creator marketplace (Meta’s own creator directory: followers, badges, marketplace email) for the same niche and returns those rows beside the ranked list.',
     inputSchema: {
       niche: z.string().describe('product category, topic or hashtag — "calorie tracker app", "matcha", "#cleanbeauty"'),
       platforms: z.array(z.enum(['tiktok', 'instagram', 'youtube'])).optional().describe('default all three'),
@@ -18875,6 +19014,7 @@ function memoryNoteVerdict(text) {
       minAvgViews: z.number().optional(),
       minEngagement: z.number().optional().describe('interactions per view, 0–1 (0.05 = 5%)'),
       enrich: z.boolean().optional().describe('read follower counts for the top 6 (default true, ~1 credit each)'),
+      marketplace: z.boolean().optional().describe('also search Instagram’s creator marketplace (Meta’s own creator directory, free) for the same niche; needs the Meta connector'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
@@ -18882,7 +19022,8 @@ function memoryNoteVerdict(text) {
     const fmt = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}K` : String(v);
     if (!(d.creators || []).length) return ok(`${d.summary} Nobody passed the floors — widen the niche, lower minAvgViews / minEngagement, or add platforms.`, d);
     const lines = d.creators.map(c => `• @${c.handle} (${c.platform})${c.name && c.name !== c.handle ? ` — ${c.name}` : ''}: ${c.posts} post${c.posts === 1 ? '' : 's'} in this niche, median ${fmt(c.medianPlays)} views, ${c.engagementRate == null ? 'engagement unknown' : `${(100 * c.engagementRate).toFixed(1)}% engagement`}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}, score ${c.score}${c.top?.link ? ` — top: ${c.top.link}` : ''}${c.profileUrl ? ` — ${c.profileUrl}` : ''}`);
-    return ok(`${d.note}\n${lines.join('\n')}`, d);
+    const mk = d.marketplace && (d.marketplace.creators || []).length ? `\nInstagram creator marketplace:\n${d.marketplace.creators.map(c => `• @${c.handle}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}${c.country ? `, ${c.country}` : ''}${c.email ? `, ${c.email}` : ''}`).join('\n')}` : '';
+    return ok(`${d.note}\n${lines.join('\n')}${mk}`, d);
   }));
   // TOPIC SEARCH (2026-09-15, Dave: search a named brand, "but not their ads themselves, just posts about them … similarly
   // just broad things like coffee"): the posts ABOUT a subject from anyone, all three organic platforms in one call.
