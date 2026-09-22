@@ -7073,7 +7073,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Subscribe a Facebook Page to real-time events',
     description: 'Have Meta PUSH events to Hermoso instead of Hermoso polling for them. Subscribe a Page to `feed` (comments, posts, likes and shares — this is what makes a new comment ARRIVE rather than be polled for), `mention` (someone mentions the Page), `leadgen` (a lead-ad form submission delivered the moment it happens, which turns "read the leads when asked" into "the leads arrive"), and `messages` (an inbound Messenger or Instagram DM — THE ONLY WAY to be told about one, and Meta’s 24-hour reply window starts the moment it arrives, so being told rather than polling is time on the clock). Read what has arrived with list_meta_webhook_events. THE ANSWER IS READ BACK FROM META, never the 200: Meta can accept a subscription and record FEWER fields than you asked for, and a caller told "subscribed to leadgen" whose leads never arrive has no way to discover why — so any field Meta did not record is named. Fields Hermoso does not consume (message_reactions, messaging_postbacks, message_echoes) are refused by name with the reason, so an agent gets a fact rather than "unsupported". 0 credits.',
     inputSchema: {
-      fields: z.array(z.enum(['feed', 'mention', 'leadgen', 'messages'])).describe('what to be told about. At least one — Meta marks it required, and defaulting it would decide on the brand’s behalf what they hear about.'),
+      fields: z.array(z.enum(['feed', 'mention', 'leadgen', 'messages', 'marketing_messages', 'marketing_message_echoes', 'marketing_message_deliveries', 'marketing_message_reads', 'marketing_message_clicks', 'marketing_message_delivery_failed'])).describe('what to be told about. `marketing_messages` is shorthand for the five marketing_message_* outcome fields (sent / delivered / read / clicked / failed of a paid Messenger marketing message, read with get_messenger_marketing_message_status). Pass every field the Page should keep: Meta does not document whether a subscribe merges or replaces the list, and the read-back shows what it recorded. At least one — Meta marks it required, and defaulting it would decide on the brand’s behalf what they hear about.'),
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { pageId: z.string().optional(), page: z.string().optional(), asked: z.array(z.string()).optional(), subscribed: z.boolean().nullable().optional(), fields: z.array(z.string()).optional(), summary: z.string().optional(), retry: z.string().optional(), callback: z.string().optional() },
@@ -7651,8 +7651,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   // ── MESSENGER MARKETING MESSAGES (2026-09-05). Meta's paid re-engagement channel: messages OUTSIDE the 24-hour
   // window to people who opted in, billed by Meta to the brand's ad account per delivered message. Flow 2 of Meta's
-  // onboarding (user token + marketing_messages_messenger) rides the existing Meta connection. App-Review gated:
-  // until Meta grants the scope it works for app-role holders only, and list_messenger_subscribers says which.
+  // onboarding (user token + marketing_messages_messenger) rides the existing Meta connection. The scope was
+  // APPROVED in App Review round 5 (2026-09-22); list_messenger_subscribers reports whether THIS connection carries it.
   // Every endpoint, limit and error code: lib/messenger-marketing.mjs (read live 2026-09-05).
   // MESSENGER MARKETING MESSAGES ARE A CHANNEL CAPABILITY, NOT PAID ADS (2026-09-07). This block was registered inside
   // the ads section, so it rode the heaviest opt-in group while dispatching to no paid-advertising route — unreachable
@@ -7697,6 +7697,25 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiGet('/api/meta/marketing-messages/campaigns', a);
     return ok(`${d.note}${(d.campaigns || []).length ? `\n${d.campaigns.map(c => `• ${c.name || '(unnamed)'} — ${c.campaignId}${c.dailyBudgetUsd != null ? `, $${c.dailyBudgetUsd}/day` : ''}${c.lifetimeBudgetUsd != null ? `, $${c.lifetimeBudgetUsd} lifetime` : ''}`).join('\n')}` : ''}`, d);
   }));
+  // DID IT LAND? (2026-09-22). The send returns a tracking id meaning ACCEPTED. The outcome arrives only on the
+  // Page webhook; every payload shape and what each one lacks is in lib/messenger-marketing.mjs.
+  server.registerTool('get_messenger_marketing_message_status', {
+    title: 'Did a Messenger marketing message land?',
+    description: 'Whether a paid Messenger marketing message was delivered. send_messenger_marketing_message returns a tracking id, which only means Meta ACCEPTED it; this reads what Meta pushed back on the Page webhook for each tracking id: sent, delivered (the event Meta bills on), read, clicked (with count), or failed (with Meta’s reason). "unknown" means NO event has arrived, never that it failed: events arrive only when the Page is subscribed to the marketing_message_* fields (the reply says whether it is, read back from Meta; fix with subscribe_meta_webhooks fields ["marketing_messages"]) and only for messages sent after Hermoso began recording them on 2026-09-22. A failure carries no tracking id, so it is matched through Hermoso’s own send log. Read-only, 0 credits.',
+    inputSchema: {
+      trackingId: z.string().optional().describe('the marketing_message_tracking_id send_messenger_marketing_message returned'),
+      trackingIds: z.array(z.string()).optional().describe('several at once, ≤200'),
+      campaignId: z.string().optional().describe('instead of ids: every send Hermoso logged from this campaign'),
+      pageId: z.string().optional().describe('the sending Page, for the subscription check; defaults to the brand’s one shared Page'),
+    },
+    outputSchema: { count: z.number().optional(), counts: z.record(z.number()).optional(), results: z.array(z.any()).optional(), pageId: z.string().nullable().optional(), subscribed: z.boolean().nullable().optional(), missingFields: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const q = { ...a, ...(Array.isArray(a.trackingIds) ? { trackingIds: a.trackingIds.join(',') } : {}) };
+    const d = await apiGet('/api/meta/marketing-messages/status', q);
+    const lines = (d.results || []).slice(0, 50).map(r => `• ${r.trackingId}: ${r.state} — ${r.note}`);
+    return ok(`${d.note}${lines.length ? `\n${lines.join('\n')}` : ''}`, d);
+  }));
   server.registerTool('estimate_messenger_marketing_delivery', {
     title: 'Estimate Messenger marketing-message delivery and cost',
     description: 'Meta’s own estimate of how many marketing messages a budget would deliver from a Page and what it would cost, before anything is created. Free. Meta marks the metric “in development”, so treat it as a range.',
@@ -7705,7 +7724,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiGet('/api/meta/marketing-messages/estimate', a); return ok(d.note, d); }));
   server.registerTool('send_messenger_marketing_message', {
     title: 'Send a paid Messenger marketing message',
-    description: 'Send a PAID marketing message on Messenger to opted-in subscribers (Meta act_<AD>/messages). A campaign created in the last ~hour answers 2300012 then 2300041 (Meta still preparing it) with the seconds left; prefer an existing campaign from list_messenger_marketing_campaigns. One message per subscriber per 12 hours — Meta’s rule, enforced before dispatch and by Meta. message.type: text | button (text + up to 3 web_url buttons) | generic (a card: title, subtitle, image, tap-through url, up to 3 buttons) | media (imageUrl or videoId + buttons). Give subscriptionTokens (≤200 per call, from list_messenger_subscribers) OR customAudienceId of a MESSENGER_SUBSCRIBER_LIST audience of 100+ people for a bulk send. Meta bills the ad account per delivered message; delivery, read and click events arrive on the Page webhook. dryRun:true previews the wire body and sends nothing. Meta’s frequency caps are silent: a refusal saying the person is capped is Meta protecting them, not a broken send.',
+    description: 'Send a PAID marketing message on Messenger to opted-in subscribers (Meta act_<AD>/messages). A campaign created in the last ~hour answers 2300012 then 2300041 (Meta still preparing it) with the seconds left; prefer an existing campaign from list_messenger_marketing_campaigns. One message per subscriber per 12 hours — Meta’s rule, enforced before dispatch and by Meta. message.type: text | button (text + up to 3 web_url buttons) | generic (a card: title, subtitle, image, tap-through url, up to 3 buttons) | media (imageUrl or videoId + buttons). Give subscriptionTokens (≤200 per call, from list_messenger_subscribers) OR customAudienceId of a MESSENGER_SUBSCRIBER_LIST audience of 100+ people for a bulk send. Meta bills the ad account per delivered message. A successful send means ACCEPTED, not delivered: read sent / delivered / read / clicked / failed per tracking id with get_messenger_marketing_message_status (Meta pushes them on the Page webhook; the Page must be subscribed with subscribe_meta_webhooks fields ["marketing_messages"]). dryRun:true previews the wire body and sends nothing. Meta’s frequency caps are silent: a refusal saying the person is capped is Meta protecting them, not a broken send.',
     inputSchema: {
       adAccountId: z.string(),
       campaignId: z.string().describe('the message campaign id (from create_messenger_marketing_campaign or list_messenger_marketing_campaigns) — OR the campaign NAME as the user said it: a non-numeric value is resolved against the account\'s own campaigns, so you never need to ask for an id'),
