@@ -2318,9 +2318,14 @@ export const holdReasonText = (name, why, ctx = null) => {
 // ticked accounts on the same brand). The gate is a snapshot; the refusal must not be. Before saying "not connected",
 // re-read the connection set ONCE and re-gate (the same regateForWorkspace use_brand runs); a failed read fails open
 // as everywhere else, so the worst case is the old answer, never a wrong refusal of a connector that exists.
-async function holdReasonRechecked(name, ctx) {
+async function holdReasonRechecked(name, ctx, args = null) {
   let why = holdReasonFor(name, ctx);
   if (why !== 'not_connected') return why;
+  // A PER-CALL BRAND IS NOT THE PIN (2026-09-21). The connection snapshot above is the PINNED brand's; a tool that
+  // takes `brand` runs against the brand the caller NAMED, which may have the connector the pin lacks. Refusing it
+  // here answered "not connected" for an account that was connected. Run it: the route gates the named brand itself
+  // and answers the one "not connected" shape (401 + connector) when it really is missing.
+  if (callNamesOwnBrand(name, ctx, args)) return null;
   // The re-read must be a GOOD read before it replaces the snapshot: regateForWorkspace fails OPEN on a failed read
   // (right for use_brand, wrong here — it would turn "not connected" into "run it and 401"), so a read that did not
   // succeed keeps the snapshot's answer and the refusal it already earned.
@@ -2329,6 +2334,12 @@ async function holdReasonRechecked(name, ctx) {
   if (!fresh || !fresh.readOk) return why;
   try { await regateForWorkspace(ctx, fresh); } catch { return why; }
   return holdReasonFor(name, ctx);
+}
+function callNamesOwnBrand(name, ctx, args) {
+  const b = args && typeof args === 'object' ? args.brand : null;
+  if (typeof b !== 'string' || !b.trim()) return false;
+  const h = ctx && ctx.handleOf && ctx.handleOf[name];
+  try { return !!(h && h.inputSchema && h.inputSchema.shape && Object.prototype.hasOwnProperty.call(h.inputSchema.shape, 'brand')); } catch { return false; }
 }
 // MODULE SCOPE, NOT INSIDE buildTools — and the reason is worth keeping. tools/generation-matrix-check.mjs
 // derives the generation surface by slicing the source between registerTool() calls and asking which
@@ -2376,7 +2387,7 @@ export function installHeldToolCalls(mcp, ctx) {
       const h = name && ctx.handleOf[name];
       if (!h && LEGACY_TOOL_NAMES[name]) return legacyToolAnswer(name, request, extra, ctx); // a name only an old snapshot still holds
       if (h && h.enabled === false) {
-        const why = await holdReasonRechecked(name, ctx);
+        const why = await holdReasonRechecked(name, ctx, request?.params?.arguments);
         if (why) { const t = holdReasonText(name, why, ctx); reportDeadEnd(why, name, t); return withHints({ content: [{ type: 'text', text: t }], isError: true }, holdHints(name, why, ctx)); }
         // The call itself is the evidence: this host's tool list still names a tool the session holds out on size,
         // i.e. the host is serving a stale roster. Run it (that is the point) and record that it happened.
@@ -3103,7 +3114,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return { content: [{ type: 'text', text: `No tool named "${n}".${near.length ? ` Did you mean: ${near.join(', ')}?` : ''} find_tools({query}) searches every tool by name or task.` }], isError: true };
     }
     if (n === 'call_tool' || n === 'find_tools' || n === 'enable_tools') return { content: [{ type: 'text', text: `${n} is a roster tool; call it directly.` }], isError: true };
-    const why = await holdReasonRechecked(n, ctx);
+    const why = await holdReasonRechecked(n, ctx, args);
     // ONE sentence per hold, from holdReasonText. call_tool used to spell its own copies, so the connect link added there
     // never reached claude.ai or ChatGPT, the two hosts that run held tools through here.
     if (why) {
