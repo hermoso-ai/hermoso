@@ -621,6 +621,24 @@ const HOOK_ATTR = {
   hook: z.string().optional().describe('WHAT ANGLE THIS POST IS BUILT ON — the single most valuable field here, and the only moment it can ever be recorded. post_performance groups on it to answer "which hooks work", and it needs 5 posts sharing ONE hook before it will call anything a winner, so REUSE THE SAME WORDING across a campaign instead of rephrasing it every time. Best of all, pass a hook id from list_hooks (e.g. "direct_callout", "mid_problem", "before_after") — those fold onto a stable key however they are spelled, so a whole brand accumulates evidence on one row. Your own wording is fine too; it just only groups when you repeat it exactly. Omitting it means this post can never vote on which hook works.'),
   subject: z.string().optional().describe('WHAT THIS POST IS ABOUT — the product, feature, offer or theme (e.g. "winter coat", "free trial", "founder story"). The second grouping axis in post_performance. Same rule as hook: reuse the exact wording so posts about one subject land in one group.'),
 };
+// A POST YOU CAN CREATE IN A BRAND MUST BE MANAGEABLE THERE (2026-09-21, measured on the hosted MCP). With the
+// connection pinned to a brand that has no X, `post_to_x {brand:'Hermoso'}` posted on Hermoso's X — and then
+// `delete_x_post {id, brand:'Hermoso'}` was refused "needs the x connection", because delete_x_post had no `brand` and
+// was gated and routed on the pin. So every tool that edits, deletes, lists or measures what a publish tool made
+// carries the SAME per-call brand, over the SAME wire the publish tools use: a string `brand` in a POST body, or
+// `?brandId=` on a GET/DELETE (the server belt `brandRefOf` consumes both; `?brand=` is /api/product/find's).
+// tools/brand-per-call-roster-check.mjs derives the tool set by running registerTools and fails on a new one without it.
+const MANAGE_BRAND = {
+  brand: z.string().optional().describe('WHICH BRAND the post lives in — the id or exact name from list_brands (a workspace shared with you: its profile id). Needed when it was published in a brand this connection is not pinned to: a post you can CREATE in a brand is manageable there too, for THIS CALL ONLY, without switching the connection. A name that matches no brand, or two, is REFUSED and nothing is done.'),
+};
+const namedBrand = (a) => (a && typeof a.brand === 'string' && a.brand.trim() ? a.brand.trim() : '');
+// POST body: the belt reads a string `brand` and deletes it before the route sees the body.
+const bodyBrand = (a, body = {}) => (namedBrand(a) ? { ...body, brand: namedBrand(a) } : body);
+// GET params: the query spelling is `brandId` only.
+const queryBrand = (a, q = {}) => (namedBrand(a) ? { ...q, brandId: namedBrand(a) } : q);
+// A DELETE carries its args in the path, so the brand rides as a query SUFFIX — appended inside the path literal so
+// the route stays the first thing in the call (tools/nonads-matrix-check.mjs derives routes from `apiX('/api/…`).
+const brandQs = (a, sep = '?') => (namedBrand(a) ? `${sep}brandId=${encodeURIComponent(namedBrand(a))}` : '');
 // The "Duration to boards" table in one line — fill every act to the model max, remainder LAST, and pull the
 // deficit off the previous act when the remainder would fall under the provider floor (their own 18 -> 14+4). Mirrors
 // hfClipDurations in acts-packing.mjs, which is what actually packs the render; here it only makes the refusal concrete.
@@ -3173,6 +3191,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Publish a post to Bluesky as the connected account. Text up to 300 characters — Bluesky ALSO caps a post at 3000 UTF-8 bytes, so an emoji-heavy post can be under 300 characters and still be refused; Hermoso checks both before spending the round trip and says which limit and by how much. MEDIA: either up to 4 images (imageUrls + altText) OR one MP4 video (videoUrl + videoAlt), never both — a Bluesky post record carries a single embed and images and video are two different embed types. Video is MP4 only, up to 300MB at Bluesky's end (Hermoso can fetch up to 150MB from a URL), with optional WebVTT caption tracks; the aspect ratio is measured from the file. Bluesky requires a CONFIRMED EMAIL on the account before it will process any video — if it is unconfirmed you get a refusal saying so, and reconnecting will not help. Links in the text are made clickable automatically. LINK CARDS: Bluesky does NOT scrape links, so a URL posted bare renders as plain blue text — the client composing the post has to build the card. Hermoso builds one AUTOMATICALLY when the post has a URL and NO media: it fetches the page, uses its title/description and uploads its image as the card thumbnail. Pass linkCard:false to suppress it, or linkCard:{uri,title,description,thumbUrl} to control it (give both title and description and the page is not fetched at all). A POST CARRIES ONE EMBED, so a card and images/video cannot both ride: if you pass linkCard explicitly ALONGSIDE media the call is REFUSED by name rather than silently dropping one, and if the URL was merely in the text the MEDIA WINS and the reply says the card was skipped (the link stays clickable either way). Returns the post's public bsky.app URL. Connect at Settings > Connectors > Bluesky, or here with connect_connector, with a handle and an APP PASSWORD.",
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one bluesky account connected (several and none named is refused by name, never guessed); omit when there is one."),
+      brand: HOOK_ATTR.brand,
       text: z.string().describe('The post, up to 300 characters / 3000 UTF-8 bytes.'),
       imageUrls: z.array(z.string()).optional().describe('Up to 4 public image URLs to attach. Cannot be combined with videoUrl.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('Alt text \u2014 an ARRAY, one per image in the same order, or a single STRING to describe every image with it. WRITE ONE: Bluesky\u2019s own lexicon makes `alt` a REQUIRED property of every image, so a post without it is undescribed by design rather than by omission, and Bluesky users expect it. No maximum length is published, so nothing is truncated.'),
@@ -3199,6 +3218,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Delete a post from the connected Bluesky account',
     description: "PERMANENTLY delete one of the connected Bluesky account's OWN posts. IRREVERSIBLE — the AT Protocol removes the record from the account's repo, there is no trash and no undelete, and the post's likes, reposts, replies and quotes go with it. Call it WITHOUT confirm first: nothing is deleted, and it reports the post's REAL text and its live like / repost / reply / quote counts read back from Bluesky. Show the user that, get an unambiguous yes, then call again with confirm:true — plus, once the post has ANY engagement, confirmText echoing the post's own text (the first 40 characters is enough; any longer leading run works too). confirmText exists because confirming that you meant to delete SOMETHING does not prove you aimed at the right post, and a wrong id must not be confirmable blind. A brand-new post with nothing on it stays a ONE-call delete. Identify the post by its AT-URI or by just its RECORD KEY — the short id at the end of its bsky.app link, e.g. 3mtc4n3fibn2x. Deleting only ever works on the connected account's own posts; another account's URI is refused. 0 credits. Needs Bluesky connected (Settings > Connectors > Bluesky, or connect_connector).",
     inputSchema: {
+      ...MANAGE_BRAND,
       uri: z.string().describe("the post's AT-URI (at://did:plc:…/app.bsky.feed.post/…) as post_to_bluesky returned it, the handle form of the same URI for the CONNECTED account only (at://<its handle>/app.bsky.feed.post/…), or just its record key (3mtc4n3fibn2x)"),
       confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent and cannot be undone'),
       confirmText: z.string().optional().describe("the post's own text as the unconfirmed call reported it — the first 40 characters is enough. Required once the post has any likes, reposts, replies or quotes. A post with no text asks for its cid instead."),
@@ -3208,7 +3228,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // "Delete a repository record, or ensure it doesn't exist" — re-deleting a gone post is a no-op, not an error.
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/bluesky/delete-post', { uri: a.uri, confirm: a.confirm === true, ...(a.confirmText != null ? { confirmText: a.confirmText } : {}) });
+    const d = await apiPost('/api/bluesky/delete-post', bodyBrand(a, { uri: a.uri, confirm: a.confirm === true, ...(a.confirmText != null ? { confirmText: a.confirmText } : {}) }));
     // REPORT THE READ-BACK, never the 2xx — and on this route that is not a nicety: deleteRecord answers 200
     // identically for a record it removed and one that was never there, so `note` is built from re-reading the
     // record afterwards and an accepted delete that did not take says so instead of being narrated as gone.
@@ -3231,6 +3251,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Publish to a Telegram channel, group or chat as the brand's own bot. WHICH CHAT IS ALWAYS REQUIRED AND IS NEVER GUESSED: pass chatId as the public channel's @username (e.g. @hermosoai) or its numeric id (a group is negative; a supergroup or channel starts with -100). There is no default and there cannot be one — the Telegram Bot API publishes no method that lists the chats a bot belongs to, so Hermoso genuinely cannot know them. list_telegram_chats reports the chats that have MESSAGED the bot in the last 24 hours, which is a shortcut for finding an id and is NOT a roster: a chat missing from it can still be posted to. TEXT: up to 4096 characters on a text-only message, but only 1024 the moment ANY photo or video is attached — a caption is not a message, and Hermoso refuses the over-long one before spending the round trip and says which budget applied. MEDIA: one image (imageUrl), one video (videoUrl), or an ALBUM of 2–10 (imageUrls, in order) in which photos and videos may be MIXED — pass a videoUrl alongside imageUrls and it joins the album as one more item. Hermoso uploads the bytes rather than handing Telegram a link, which is what buys the larger ceilings: 10MB per photo and 50MB per video, where a link would be 5MB and 20MB. THE BOT MUST BE IN THE CHAT — an administrator with Post Messages for a channel, an unrestricted member for a group; if it is not, Telegram refuses and the error says to add it rather than to reconnect. Returns the message id and, for a PUBLIC chat, its t.me link — a private group has no public web link, so `url` comes back null rather than as a link that would 404 for whoever you hand it to. 0 credits. Connect at Settings > Connectors > Telegram, or here with connect_connector, by pasting a bot token from @BotFather.",
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one telegram account connected (several and none named is refused by name, never guessed); omit when there is one."),
+      brand: HOOK_ATTR.brand,
       chatId: z.string().describe("REQUIRED — the destination: a public channel's @username, or the numeric chat id. Never guessed; ask the user, or use list_telegram_chats."),
       text: z.string().optional().describe('the message. ≤4096 characters on its own; ≤1024 once any image or video is attached.'),
       imageUrl: z.string().optional().describe('one image (≤10MB after upload)'),
@@ -3295,6 +3316,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Delete a Telegram message',
     description: "PERMANENTLY delete one message the bot posted to a Telegram chat. Call it WITHOUT confirm first: nothing is deleted and you get a sentence to show the user. There is deliberately NO preview of the message — the Bot API has no method that reads one message back, so anything shown would be invented, and for the same reason the result after deleting is Telegram’s own success answer rather than a verified read-back. TWO VENDOR LIMITS, both Telegram’s and neither ours: \"A message can only be deleted if it was sent less than 48 hours ago\", and in a CHANNEL the bot needs the Post Messages right to remove even its own posts. Takes the same chatId as post_to_telegram plus the messageId post_to_telegram returned. 0 credits. Needs Telegram connected (Settings > Connectors > Telegram, or connect_connector).",
     inputSchema: {
+      ...MANAGE_BRAND,
       chatId: z.string().describe("the chat the message is in — the same @username or numeric id it was posted with"),
       messageId: z.number().describe('the message id post_to_telegram returned (also the number at the end of a t.me link)'),
       confirm: z.boolean().optional().describe('REQUIRED true — Telegram has no trash and no undelete'),
@@ -3302,7 +3324,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), deleted: z.boolean().optional(), needsConfirm: z.boolean().optional(), chatId: z.string().optional(), messageId: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/telegram/delete-message', { chatId: a.chatId, messageId: a.messageId, confirm: a.confirm === true });
+    const d = await apiPost('/api/telegram/delete-message', bodyBrand(a, { chatId: a.chatId, messageId: a.messageId, confirm: a.confirm === true }));
     return ok(d.note, d);
   }));
 
@@ -3910,6 +3932,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Insights for one Facebook/Instagram post',
     description: 'Performance for a single organic post — on Facebook views/reach (post_media_view, post_total_media_view_unique — Meta’s own replacements for the retired impressions family), clicks, reactions and video watch time; on Instagram views, reach, likes, comments, saves, shares, total interactions and (where the media type has them) follows, profile visits, story navigation and reel watch time. Use it to find which organic posts earned their reach before turning one into a paid ad. A metric Meta returns no value for is reported by name as MISSING — never read it as zero.',
     inputSchema: {
+      ...MANAGE_BRAND,
       postId: z.string().describe('post/media id returned by post_to_meta'),
       target: z.enum(['facebook', 'instagram']).optional().describe('which metric set to ask for (default facebook)'),
       account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
@@ -3918,7 +3941,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { postId: z.string().optional(), metrics: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/meta/post-insights', { postId: a.postId, target: a.target, account: a.account, pageId: a.pageId });
+    const d = await apiGet('/api/meta/post-insights', queryBrand(a, { postId: a.postId, target: a.target, account: a.account, pageId: a.pageId }));
     return ok(`${d.target} post ${d.postId}:\n${(d.metrics || []).map(m => `• ${m.name}: ${m.value ?? '— (no value returned — MISSING, not zero)'}`).join('\n') || '(no metrics)'}${d.note ? `\n${d.note}` : ''}`, d);
   }));
 
@@ -3950,6 +3973,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'List the brand’s Instagram posts',
     description: 'The connected Instagram Business account’s own recent media — id, caption, media type (feed / reel / story-era), permalink, timestamp, like and comment counts. This is where the media id every other Instagram tool needs comes from: resolve “my latest reel” yourself instead of asking the user for a link, then pass the id to meta_post_insights. Read-only, 0 credits.',
     inputSchema: {
+      ...MANAGE_BRAND,
       limit: z.number().optional().describe('how many (1–50, default 15)'),
       account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
@@ -3957,7 +3981,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { instagramId: z.string().optional(), count: z.number().optional(), media: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/instagram/media', { limit: a.limit, account: a.account, pageId: a.pageId });
+    const d = await apiGet('/api/instagram/media', queryBrand(a, { limit: a.limit, account: a.account, pageId: a.pageId }));
     return ok(`${d.count} Instagram post(s):\n${(d.media || []).map(m => `• [${m.media_product_type || m.media_type}] ${String(m.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 90)} — ${m.like_count ?? '—'} likes, ${m.comments_count ?? '—'} comments · ${m.timestamp || ''}\n  id ${m.id}${m.permalink ? ` · ${m.permalink}` : ''}`).join('\n') || '  (none)'}`, d);
   }));
 
@@ -4039,6 +4063,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Posts this account co-authors',
     description: 'Every collaborative post this Instagram account is a co-author on — who posted it, and the COMBINED engagement across all co-authors (total likes and comments, plus saves, shares and reposts where Instagram provides them). Read-only, free.',
     inputSchema: {
+      ...MANAGE_BRAND,
       limit: z.number().optional().describe('1–100, default 25'),
       after: z.string().optional().describe('cursor from a previous page'),
       account: z.string().optional().describe('which Instagram account — @handle or id; omit for the one Page-linked account'),
@@ -4047,7 +4072,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { instagramId: z.string().optional(), count: z.number().optional(), media: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/instagram/collab-media', { limit: a.limit, after: a.after, account: a.account, pageId: a.pageId });
+    const d = await apiGet('/api/instagram/collab-media', queryBrand(a, { limit: a.limit, after: a.after, account: a.account, pageId: a.pageId }));
     if (!d.count) return ok('This Instagram account is not a co-author on any collaborative post.', d);
     return ok(`${d.count} collaborative post(s):\n${d.media.map(m => `• [${m.mediaKind}] with @${m.by || '?'} — ${String(m.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 70)} — ${m.totalLikes ?? m.likes ?? '—'} likes, ${m.totalComments ?? m.comments ?? '—'} comments${m.saves != null ? `, ${m.saves} saves` : ''}${m.shares != null ? `, ${m.shares} shares` : ''} · ${m.url || m.id}`).join('\n')}`, d);
   }));
@@ -4208,11 +4233,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_threads_posts', {
     title: 'List your Threads posts',
     description: 'List recent posts on the brand’s connected Threads account (id, text, media, permalink, timestamp). Use it to find a post id for threads_insights, list_threads_replies, reply_to_thread or delete_thread.',
-    inputSchema: { limit: z.number().optional().describe('how many posts (1–50, default 15)') },
+    inputSchema: { ...MANAGE_BRAND, limit: z.number().optional().describe('how many posts (1–50, default 15)') },
     outputSchema: { username: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/threads/posts', { limit: a.limit });
+    const d = await apiGet('/api/threads/posts', queryBrand(a, { limit: a.limit }));
     const lines = (d.posts || []).map(p => `• ${String(p.text || '(no text)').replace(/\s+/g, ' ').slice(0, 80)} — ${p.id} · ${String(p.timestamp || '').slice(0, 10)} · ${p.permalink || ''}`);
     return ok(`@${d.username} — ${d.count} post(s):\n${lines.join('\n') || '(none)'}`, d);
   }));
@@ -4287,6 +4312,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Delete a Threads post',
     description: 'PERMANENTLY delete one of the brand’s Threads posts. IRREVERSIBLE — Threads has no undelete. Call it WITHOUT confirm first: nothing is deleted, and it answers with the post’s real text plus its views, likes, replies and reposts read back from Threads. Show the user that, get an unambiguous yes, then call again with confirm:true — plus confirmName (the post’s exact text as it was reported) once anyone has engaged with it. confirmName exists because confirming that you meant to delete SOMETHING does not prove you aimed at the right post, and a wrong id must not be confirmable blind. Threads allows only 100 deletions per account per rolling 24 hours; threads_publishing_limit says how many are left, and a quota refusal otherwise reads like a broken connection. Note Meta documents nothing about what a delete does to the replies underneath a post, so do not promise the conversation survives. 0 credits.',
     inputSchema: {
+      ...MANAGE_BRAND,
       postId: z.string().describe('post id from list_threads_posts'),
       confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent; only set it after the user has explicitly agreed'),
       confirmName: z.string().optional().describe('the post’s exact text as the unconfirmed call reported it — required once it has any likes, replies or reposts'),
@@ -4294,7 +4320,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), deleted: z.boolean().optional(), verdict: z.string().optional(), permalink: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/threads/delete', { postId: a.postId, confirm: a.confirm === true, ...(a.confirmName != null ? { confirmName: a.confirmName } : {}) });
+    const d = await apiPost('/api/threads/delete', bodyBrand(a, { postId: a.postId, confirm: a.confirm === true, ...(a.confirmName != null ? { confirmName: a.confirmName } : {}) }));
     // REPORT THE READ-BACK, never the `{"success":true}` — `note` is built from re-reading the id on the server.
     return ok(d.note, d);
   }));
@@ -4496,13 +4522,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Read a public Threads account\u2019s posts',
     description: 'The recent PUBLIC posts of any Threads account \u2014 the raw material for a teardown, for mine_angles, and for ad copy in the language the market actually uses. Use it after threads_profile, or on its own when you already know the handle, and then USE what it returns: draft the brand\u2019s next post or plan_ad off the angles you found. AN EMPTY LIST IS NEVER PROOF THEY HAVE NOT POSTED \u2014 Meta returns nothing for a private account, for any account under 100 followers, and when the Threads connection predates the `threads_profile_discovery` permission (approved for the app 2026-09-05; reconnect Threads to grant it); the note says which of those applies. Read-only, 0 credits. Needs Threads connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       username: z.string().describe('the Threads handle \u2014 "nike", "@nike", or a threads.net profile link'),
       limit: z.number().optional().describe('how many posts (1\u201350, default 25)'),
     },
     outputSchema: { username: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional(), followers: z.number().nullable().optional(), note: z.string().optional(), rateNote: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/threads/profile-posts', { username: a.username, limit: a.limit });
+    const d = await apiGet('/api/threads/profile-posts', queryBrand(a, { username: a.username, limit: a.limit }));
     const lines = (d.posts || []).map(p => `\u2022 ${String(p.text || '(no text)').replace(/\s+/g, ' ').slice(0, 120)} \u2014 ${p.permalink || p.id} \u00b7 ${String(p.at || '').slice(0, 10)}`);
     if (!lines.length) return ok(`\u26a0 ${d.note || `No public posts came back for @${d.username}.`}`, d);
     return ok(`${d.note ? `\u26a0 ${d.note}\n\n` : ''}${d.count} public post(s) from @${d.username}:\n${lines.join('\n')}`, d);
@@ -5254,6 +5281,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Edit a post on X',
     description: 'EDIT the text of one of the connected account’s own posts on X. Three things about X’s edit model change how you must use this and none is guessable: (1) X REPLACES THE WHOLE TEXT — there is no partial patch, so pass the complete new post; (2) an edit MINTS A NEW POST ID, and the old id keeps resolving and keeps showing the OLD text, so always hand the user the NEW url afterwards or they will circulate a link to the version they just corrected; (3) X’s window is ONE HOUR from the ORIGINAL post and DOES NOT RESTART when a post is edited, and each post has a limited number of edits. Pass whichever id the user has — Hermoso reads X’s edit chain and aims at the newest id, which is the only one X accepts (an edit aimed at the id the user was originally given is refused by X once the post has been edited once). A published ARTICLE can never be edited whatever the subscription, and this says so rather than trying. Editing needs X Premium on the POSTING account; Hermoso attempts it and reports X’s own refusal rather than pre-refusing on a guess about the plan. Everything knowable for free — window closed, edits used up, post ineligible — is refused before anything is billed. Costs credits. Needs X connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       postId: z.string().describe('the numeric X post id — the last part of the post URL. Any id in the post’s edit chain works; Hermoso resolves the newest one.'),
       text: z.string().describe('the FULL new text of the post. It replaces the old text entirely. Same length rule as a new post: 280 characters, or up to 25,000 on an X Premium account.'),
     },
@@ -5266,7 +5294,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('delete_x_post', {
     title: 'Delete a post on X',
     description: 'Permanently delete one of the connected account’s posts on X. This CANNOT be undone — confirm the exact post with the user first. Costs credits (X bills per API call). Needs X connected.',
-    inputSchema: { id: z.string().describe('the numeric X post id — the last part of the post URL') },
+    inputSchema: { ...MANAGE_BRAND, id: z.string().describe('the numeric X post id — the last part of the post URL') },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), deleted: z.boolean().optional(), costCredits: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
@@ -5277,13 +5305,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Read performance of a post on X',
     description: "THE X ANALYTICS TOOL THAT WORKS — impressions, likes, reposts, replies, quotes and bookmarks for any post, PLUS the advertiser numbers (link clicks, profile clicks, engagements) for YOUR OWN posts published in the last 30 days. X serves those private metrics on this same lookup with the user-context connection you already have; that is X's own design, not a workaround. Prefer this over x_post_insights, whose endpoint family X has retired. If a post is deleted, protected or suspended, X answers with no data at all and this says so — that is MISSING DATA, never zero engagement, and must never be reported as a measured zero. Costs a small number of credits (X bills per API read). Needs X connected.",
     inputSchema: {
+      ...MANAGE_BRAND,
       id: z.string().describe('the numeric X post id — the last part of the post URL'),
       publishedAt: z.number().optional().describe('epoch ms the post went out, if known — lets the private owned-post metrics be requested only inside X\'s 30-day window instead of costing a refused call'),
     },
     outputSchema: { id: z.string().optional(), found: z.boolean().optional(), note: z.string().optional(), text: z.string().optional(), postedAt: z.string().nullable().optional(), url: z.string().optional(), impressions: z.number().nullable().optional(), likes: z.number().nullable().optional(), reposts: z.number().nullable().optional(), replies: z.number().nullable().optional(), quotes: z.number().nullable().optional(), bookmarks: z.number().nullable().optional(), urlClicks: z.number().nullable().optional(), profileClicks: z.number().nullable().optional(), engagements: z.number().nullable().optional(), organicImpressions: z.number().nullable().optional(), organicLikes: z.number().nullable().optional(), privateMetrics: z.boolean().optional(), costCredits: z.number().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/x/metrics', { id: a.id, publishedAt: a.publishedAt });
+    const d = await apiGet('/api/x/metrics', queryBrand(a, { id: a.id, publishedAt: a.publishedAt }));
     // The private half is reported only when X actually served it — an absent link-click count means "outside the
     // 30-day window or not your post", which is not zero clicks and must not be printed as a number.
     const priv = d.privateMetrics
@@ -5295,13 +5324,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Advertiser analytics for your own posts on X',
     description: 'Advertiser-grade analytics for the connected account’s OWN posts on X — impressions, engagements, LINK CLICKS, profile visits, video views and video completion quartiles. This is the read that answers “did the creative work”, which x_post_metrics cannot: public metrics show likes and reposts, never clicks or video retention. Takes up to 25 post ids in one call. COSTS CREDITS PER POST READ, so ask about the posts that matter rather than everything. If X returns no rows, say so — that is missing data, not zero performance. Needs X connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       ids: z.array(z.string()).describe('numeric X post ids (max 25) — the last part of each post URL'),
       granularity: z.enum(['Total', 'Daily', 'Hourly', 'Weekly']).optional().describe('default Total'),
     },
     outputSchema: { granularity: z.string().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), metrics: z.record(z.number()).optional() })).optional(), errors: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/x/insights', { ids: (a.ids || []).join(','), granularity: a.granularity });
+    const d = await apiGet('/api/x/insights', queryBrand(a, { ids: (a.ids || []).join(','), granularity: a.granularity }));
     const rows = d.posts || [];
     if (!rows.length) return ok('X returned no insight rows for those posts — that is missing data, not zero performance.', d);
     const lines = rows.map(p => {
@@ -5319,6 +5349,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Advertiser analytics for your own X posts, over any date range',
     description: 'The same advertiser-grade X analytics as x_post_insights — impressions, engagements, LINK CLICKS, profile visits, video views and video completion quartiles — over ANY date range instead of only the last 28 hours. This is the one to use for “how did last week’s post do”, “compare these three posts over the month”, or any retrospective: x_post_insights physically cannot see past yesterday, so asking it about an older post returns nothing and that is not zero performance. Takes up to 25 post ids at once; the window defaults to the last 28 days when you name none, and the window actually queried is reported back. COSTS CREDITS PER POST READ — X bills us per API call — so say the cost before pulling a big batch and ask about the posts that matter. Needs X connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       ids: z.array(z.string()).describe('numeric X post ids (max 25) — the last part of each post URL'),
       startDate: z.string().optional().describe('YYYY-MM-DD or a UTC timestamp; defaults to 28 days before the end'),
       endDate: z.string().optional().describe('YYYY-MM-DD or a UTC timestamp; defaults to now'),
@@ -5327,7 +5358,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { granularity: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), metrics: z.record(z.number()).optional() })).optional(), errors: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/x/insights-historical', { ids: (a.ids || []).join(','), startTime: a.startDate, endTime: a.endDate, granularity: a.granularity });
+    const d = await apiGet('/api/x/insights-historical', queryBrand(a, { ids: (a.ids || []).join(','), startTime: a.startDate, endTime: a.endDate, granularity: a.granularity }));
     const rows = d.posts || [];
     const win = `${String(d.startTime || '').slice(0, 10)} → ${String(d.endTime || '').slice(0, 10)}`;
     if (!rows.length) return ok(`X returned no insight rows for those posts between ${win} — that is missing data, not zero performance. Cost ${d.costCredits ?? '?'} credits.`, d);
@@ -5521,6 +5552,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'List Pins on a Pinterest board',
     description: 'The Pins on one of the account’s boards — or, with no boardId, the account’s own Pins across all of them. Each row carries the Pin id, title, description, destination link, alt text, board, creation date, and whether it HAS BEEN PROMOTED in an ad. THIS IS WHERE THE pinId EVERY OTHER PIN TOOL NEEDS COMES FROM: post_to_pinterest returns an id only at the instant it pins, so an agent that did not itself just pin had no way to name a Pin. Prefer passing a boardId — Pinterest’s own spec warns the account-wide listing has known timeouts. Read-only, 0 credits. Needs Pinterest connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       boardId: z.string().optional().describe('numeric board id from list_pinterest_boards — omit for the account’s own Pins across all boards'),
       limit: z.number().optional().describe('1–100, default 25'),
       cursor: z.string().optional().describe('the cursor a previous call returned'),
@@ -5528,7 +5560,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { boardId: z.string().nullable().optional(), count: z.number().optional(), pins: z.array(z.any()).optional(), cursor: z.string().nullable().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/pinterest/pins', { ...(a.boardId ? { boardId: a.boardId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}) });
+    const d = await apiGet('/api/pinterest/pins', queryBrand(a, { ...(a.boardId ? { boardId: a.boardId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}) }));
     if (!d.pins?.length) return ok(d.boardId ? 'That Pinterest board has no Pins on it.' : 'This Pinterest account has no Pins yet.', d);
     return ok(`${d.count} Pin(s)${d.boardId ? ` on board ${d.boardId}` : ''}:\n${d.pins.map(p => `• ${p.title || '(untitled)'} (id ${p.id})${p.promoted ? ' — HAS BEEN PROMOTED in an ad' : ''}${p.link ? ` → ${p.link}` : ''}`).join('\n')}${d.cursor ? '\n(more available — pass cursor)' : ''}`, d);
   }));
@@ -5542,6 +5574,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Edit a published Pin',
     description: 'Edit a published Pin — its title, description, destination link, alt text, or which board it sits on. Only send the fields that should change. TWO LIMITS TO STATE BEFORE OFFERING THIS. (1) Pinterest marks its Update Pin endpoint "currently in beta and not available to all apps" in its own API description, so it may be refused outright whatever the account’s scopes or access tier — reconnecting cannot change that. If it is refused, save_pinterest_pin gets the Pin onto another board (generally available) and changing the wording means deleting and re-pinning. (2) A published Pin’s IMAGE or VIDEO can never be changed by anyone: Pinterest’s update model has no media field at all, so swapping the creative means delete and re-pin, which loses the Pin’s accumulated saves. The values reported back are what Pinterest STORED, not what was sent. 0 credits. Needs Pinterest connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       pinId: z.string().describe('numeric Pin id from list_pinterest_pins'),
       title: z.string().optional().describe('max 100 characters'),
       description: z.string().optional().describe('max 800 characters — the text Pinterest search reads'),
@@ -5574,6 +5607,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Delete a Pin',
     description: 'PERMANENTLY delete a Pin. Pinterest has no undelete and no archive for one. Call it WITHOUT confirm first: nothing is deleted, and it answers with the Pin’s real title, its lifetime saves and impressions, and whether it HAS BEEN PROMOTED in an ad — all read back from Pinterest. Show the user that, get an unambiguous yes, then call again with confirm:true plus confirmName (its exact title) once it has saves or has been promoted, because confirming that you meant to delete SOMETHING does not prove you aimed at the right Pin. DELETING A PIN THAT AN AD PROMOTES pulls the creative out from under that ad, so check the promoted flag before agreeing. The verdict is read back from Pinterest, never taken from its 2xx. 0 credits. Needs Pinterest connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       pinId: z.string().describe('numeric Pin id from list_pinterest_pins'),
       confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent'),
       confirmName: z.string().optional().describe('the Pin’s EXACT title as the unconfirmed call reported it — required once it has saves or has been promoted'),
@@ -5581,7 +5615,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), pinId: z.string().optional(), title: z.string().optional(), deleted: z.boolean().optional(), verdict: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/pinterest/pin/delete', { pinId: a.pinId, confirm: a.confirm === true, ...(a.confirmName != null ? { confirmName: a.confirmName } : {}) });
+    const d = await apiPost('/api/pinterest/pin/delete', bodyBrand(a, { pinId: a.pinId, confirm: a.confirm === true, ...(a.confirmName != null ? { confirmName: a.confirmName } : {}) }));
     return ok(d.note, d);
   }));
   server.registerTool('update_pinterest_board', {
@@ -5734,22 +5768,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_google_business_posts', {
     title: 'List Google Business Profile Posts',
     description: 'List the Posts currently on the brand’s Google Business Profile listing — text, topic type, state (LIVE / PROCESSING / REJECTED / SCHEDULED / RECURRING), button and timestamps. Use it to see what is already showing before writing another, or to get the id of one to remove. Read-only, 0 credits. Needs Google Business Profile connected.',
-    inputSchema: { locationId: z.string().optional().describe('which listing, from list_business_locations — only needed when there is more than one'), limit: z.number().optional().describe('how many to return, max 100 (default 20)') },
+    inputSchema: { ...MANAGE_BRAND, locationId: z.string().optional().describe('which listing, from list_business_locations — only needed when there is more than one'), limit: z.number().optional().describe('how many to return, max 100 (default 20)') },
     outputSchema: { count: z.number().optional(), location: z.string().optional(), locationId: z.string().optional(), posts: z.array(z.object({ id: z.string().optional(), summary: z.string().optional(), topicType: z.string().optional(), state: z.string().nullable().optional(), url: z.string().nullable().optional(), cta: z.string().nullable().optional(), ctaUrl: z.string().nullable().optional(), createdAt: z.string().nullable().optional(), updatedAt: z.string().nullable().optional() })).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/google-business/posts', { ...(a.locationId ? { locationId: a.locationId } : {}), ...(a.limit ? { limit: a.limit } : {}) });
+    const d = await apiGet('/api/google-business/posts', queryBrand(a, { ...(a.locationId ? { locationId: a.locationId } : {}), ...(a.limit ? { limit: a.limit } : {}) }));
     if (!d.count) return ok(`No Posts on the “${d.location}” listing right now.`, d);
     return ok(`${d.count} Post${d.count === 1 ? '' : 's'} on “${d.location}”: ${(d.posts || []).map(p => `[${p.state || '?'}] ${String(p.summary || '(no text)').slice(0, 60)}`).join(' · ')}`, d);
   }));
   server.registerTool('delete_google_business_post', {
     title: 'Delete a Google Business Profile Post',
     description: 'Remove a Post from the brand’s Google Business Profile listing. This takes it off Google Search and Maps immediately and CANNOT be undone — confirm with the user first. Pass the full post name from list_google_business_posts. Needs Google Business Profile connected.',
-    inputSchema: { postId: z.string().describe('the full post name from list_google_business_posts (accounts/…/locations/…/localPosts/…)') },
+    inputSchema: { ...MANAGE_BRAND, postId: z.string().describe('the full post name from list_google_business_posts (accounts/…/locations/…/localPosts/…)') },
     outputSchema: { ok: z.boolean().optional(), deleted: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiDelete(`/api/google-business/post?postId=${encodeURIComponent(a.postId)}`);
+    const d = await apiDelete(`/api/google-business/post?postId=${encodeURIComponent(a.postId)}${brandQs(a, '&')}`);
     return ok('Deleted that Post — it is no longer showing on Search or Maps.', d);
   }));
   // GOOGLE BUSINESS PROFILE REVIEWS + Q&A (2026-08-04). Reviews were never migrated off Google's legacy v4 API and
@@ -5923,22 +5957,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_youtube_videos', {
     title: 'List the brand’s own YouTube uploads',
     description: 'List the connected channel’s OWN recent uploads — video id, title, publish date and privacy — so you can resolve a video WITHOUT asking the user for a link. Call this whenever the user names a video loosely ("my latest", "the shorts one", part of a title) and match it yourself; only ask them when two titles are genuinely ambiguous. This is the tool that gets you the videoId every other YouTube tool needs — youtube_channel returns counts only, and search_youtube searches the PUBLIC index, not your uploads. Includes UNLISTED and PRIVATE videos, which are invisible to any public search. Read-only, 0 credits. Needs a connected YouTube channel.',
-    inputSchema: { limit: z.number().optional().describe('how many recent uploads to return (default 25, max 50)') },
+    inputSchema: { ...MANAGE_BRAND, limit: z.number().optional().describe('how many recent uploads to return (default 25, max 50)') },
     outputSchema: { videos: z.array(z.object({ videoId: z.string().optional(), title: z.string().optional(), publishedAt: z.string().optional(), privacy: z.string().optional(), url: z.string().optional() })).optional(), count: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/youtube/videos', { ...(a.limit ? { limit: a.limit } : {}) });
+    const d = await apiGet('/api/youtube/videos', queryBrand(a, { ...(a.limit ? { limit: a.limit } : {}) }));
     const rows = (d.videos || []).map(v => `• ${v.title || '(untitled)'} — ${v.videoId}${v.publishedAt ? ` · ${String(v.publishedAt).slice(0, 10)}` : ''}${v.privacy ? ` · ${v.privacy}` : ''}`);
     return ok(rows.length ? `${rows.length} video(s) on the channel:\n${rows.join('\n')}` : (d.note || 'No videos on that channel yet.'), d);
   }));
   server.registerTool('youtube_video_insights', {
     title: 'Performance of one of your YouTube videos',
     description: 'Per-VIDEO performance for a video on the connected channel — views, estimated minutes watched, average view duration, average view PERCENTAGE (the retention number that tells you whether the hook held), likes, comments, shares and subscribers gained. Use it for "how did that video do", "which upload performed best", or to judge an ad before spending more behind it. youtube_channel only returns channel-wide totals and cannot answer this. Defaults to the last 28 days; pass startDate/endDate (YYYY-MM-DD) for another window. Read-only, 0 credits. Needs a connected YouTube channel.',
-    inputSchema: { videoId: z.string().describe('the YouTube video id (the v= part of the watch URL, or the videoId returned by post_to_youtube)'), startDate: z.string().optional().describe('YYYY-MM-DD, default 28 days ago'), endDate: z.string().optional().describe('YYYY-MM-DD, default today') },
+    inputSchema: { ...MANAGE_BRAND, videoId: z.string().describe('the YouTube video id (the v= part of the watch URL, or the videoId returned by post_to_youtube)'), startDate: z.string().optional().describe('YYYY-MM-DD, default 28 days ago'), endDate: z.string().optional().describe('YYYY-MM-DD, default today') },
     outputSchema: { videoId: z.string().optional(), startDate: z.string().optional(), endDate: z.string().optional(), views: z.number().optional(), estimatedMinutesWatched: z.number().optional(), averageViewDuration: z.number().optional(), averageViewPercentage: z.number().optional(), likes: z.number().optional(), comments: z.number().optional(), shares: z.number().optional(), subscribersGained: z.number().optional(), url: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/youtube/video-insights', { videoId: a.videoId, ...(a.startDate ? { startDate: a.startDate } : {}), ...(a.endDate ? { endDate: a.endDate } : {}) });
+    const d = await apiGet('/api/youtube/video-insights', queryBrand(a, { videoId: a.videoId, ...(a.startDate ? { startDate: a.startDate } : {}), ...(a.endDate ? { endDate: a.endDate } : {}) }));
     return ok(`${d.views ?? 0} views, ${d.averageViewPercentage ?? 0}% average retention, ${d.estimatedMinutesWatched ?? 0} minutes watched (${d.startDate} → ${d.endDate}).`, d);
   }));
   // DIMENSIONED YOUTUBE ANALYTICS (2026-08-04). `yt-analytics.readonly` is already granted by every connected
@@ -6003,7 +6037,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('update_youtube_video', {
     title: 'Update a YouTube video’s title, description, tags or privacy',
     description: 'Edit an existing video on the connected channel: title, description, tags, and/or privacy (unlisted | public | private). THIS IS HOW YOU FLIP AN UNLISTED UPLOAD PUBLIC — post_to_youtube defaults to UNLISTED, and without this there was no way to publish it afterwards. Making a video PUBLIC puts it on the channel where anyone can find it, so show the user exactly what will change and get an explicit yes before calling with privacy:"public". Fields you omit are left untouched. Needs a connected YouTube channel.',
-    inputSchema: { videoId: z.string().describe('the YouTube video id'), title: z.string().optional().describe('≤100 chars'), description: z.string().optional().describe('≤5000 chars'), tags: z.array(z.string()).optional(), privacy: z.enum(['unlisted', 'public', 'private']).optional().describe('public = live on the channel; confirm with the user first') },
+    inputSchema: { ...MANAGE_BRAND, videoId: z.string().describe('the YouTube video id'), title: z.string().optional().describe('≤100 chars'), description: z.string().optional().describe('≤5000 chars'), tags: z.array(z.string()).optional(), privacy: z.enum(['unlisted', 'public', 'private']).optional().describe('public = live on the channel; confirm with the user first') },
     outputSchema: { videoId: z.string().optional(), title: z.string().optional(), privacy: z.string().optional(), url: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
@@ -6021,6 +6055,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Delete a video from the connected YouTube channel',
     description: 'PERMANENTLY delete a video from the connected YouTube channel. IRREVERSIBLE — YouTube has no trash and no undelete, and the video\'s views, comments and every link or embed pointing at it go with it. Call it WITHOUT confirm first: nothing is deleted, and it reports the video\'s REAL title, privacy, view count and comment count read back from YouTube. Show the user that, get an unambiguous yes, then call again with confirm:true — plus, once the video is public or has any views or comments, confirmTitle set to its exact title. confirmTitle exists because confirming that you meant to delete SOMETHING does not prove you aimed at the right video, and a wrong id must not be confirmable blind. If the user only wants it out of public view, use update_youtube_video(privacy:"private") instead — that is reversible and this is not. Get the videoId from list_youtube_videos. 0 credits. Needs a connected YouTube channel.',
     inputSchema: {
+      ...MANAGE_BRAND,
       videoId: z.string().describe('the YouTube video id (from list_youtube_videos)'),
       confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent and cannot be undone'),
       confirmTitle: z.string().optional().describe('the video\'s EXACT title as the unconfirmed call reported it — required once the video is public or has any views or comments'),
@@ -6028,7 +6063,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), videoId: z.string().optional(), title: z.string().optional(), deleted: z.boolean().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/youtube/delete-video', { videoId: a.videoId, confirm: a.confirm === true, ...(a.confirmTitle != null ? { confirmTitle: a.confirmTitle } : {}) });
+    const d = await apiPost('/api/youtube/delete-video', bodyBrand(a, { videoId: a.videoId, confirm: a.confirm === true, ...(a.confirmTitle != null ? { confirmTitle: a.confirmTitle } : {}) }));
     // REPORT THE READ-BACK, never the 204: `note` is built from re-reading the id on the server, so an accepted
     // delete that did not take says so instead of being narrated as gone.
     return ok(d.note, d);
@@ -6084,20 +6119,21 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Batch YouTube video stats',
     description: "Views, likes and comment counts for up to 50 YouTube videos IN ONE CALL, which is how to answer \"how are my last twenty uploads doing\" without one youtube_video_insights per video. Pass videoIds from list_youtube_videos. IT CARRIES NO TITLES, and that is the resource rather than a bug: VideoStatsSnippet publishes only publishTime, so join on videoId with list_youtube_videos when a name is needed. YouTube calls this endpoint \"intentionally not atomic\", so a short answer is normal: a video that is private, deleted, or not visible to the connected account simply does not come back, and this tool names the missing ids. Never report a missing id as zero views. Read-only, free.",
     inputSchema: {
+      ...MANAGE_BRAND,
       videoIds: z.array(z.string()).describe('up to 50 video ids, from list_youtube_videos'),
       part: z.array(z.enum(['snippet', 'statistics', 'contentDetails'])).optional().describe('defaults to snippet + statistics. An unknown part 400s the whole call, so it is refused here'),
     },
     outputSchema: { count: z.number().optional(), asked: z.number().optional(), missing: z.array(z.string()).optional(), parts: z.array(z.string()).optional(), videos: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/youtube/video-stats', { videoIds: (a.videoIds || []).join(','), part: (a.part || []).join(',') });
+    const d = await apiGet('/api/youtube/video-stats', queryBrand(a, { videoIds: (a.videoIds || []).join(','), part: (a.part || []).join(',') }));
     const rows = (d?.videos || []).map(v => `${v.title || '(untitled)'} (${v.videoId}) — ${v.viewCount == null ? 'views n/a' : `${v.viewCount} views`}${v.likeCount == null ? '' : `, ${v.likeCount} likes`}${v.commentCount == null ? '' : `, ${v.commentCount} comments`}`);
     return ok([d?.note, ...rows].filter(Boolean).join('\n'), d);
   }));
   server.registerTool('set_youtube_thumbnail', {
     title: 'Set the custom thumbnail on a YouTube video',
     description: 'Set the CUSTOM THUMBNAIL on a video already on the connected channel, using a Hermoso image — a make_thumbnail render, a generated image, or a frame. The thumbnail is the single biggest lever on YouTube click-through and YouTube otherwise auto-picks a frame, so a published video without one is leaving reach on the table. It changes ONLY the thumbnail — video, title and privacy are untouched — but it is public and immediate, so show the user which image is going on which video and get a yes first. Custom thumbnails require a VERIFIED YouTube channel (a phone number at youtube.com/verify); without it YouTube refuses and the error says so. Images over YouTube’s 2MB cap are compressed automatically. The image must be Hermoso-HOSTED, which is not the same as Hermoso-GENERATED: the user’s own artwork works, put it through upload_file first and pass the URL that returns. An arbitrary external host is refused. 0 credits. Needs a connected YouTube channel.',
-    inputSchema: { videoId: z.string().describe('the YouTube video id (what post_to_youtube returned)'), imageUrl: z.string().describe('a Hermoso-hosted image URL — a make_thumbnail / list_library render, OR any image of the user’s own passed through upload_file first. An arbitrary external host is refused.') },
+    inputSchema: { ...MANAGE_BRAND, videoId: z.string().describe('the YouTube video id (what post_to_youtube returned)'), imageUrl: z.string().describe('a Hermoso-hosted image URL — a make_thumbnail / list_library render, OR any image of the user’s own passed through upload_file first. An arbitrary external host is refused.') },
     outputSchema: { ok: z.boolean().optional(), videoId: z.string().optional(), thumbnailUrl: z.string().nullable().optional(), bytes: z.number().optional(), url: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
@@ -6252,6 +6288,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: "List the brand's own Bluesky posts",
     description: "The brand's OWN recent Bluesky posts, newest first — and THIS is where the at:// AT-URI every other Bluesky tool needs comes from. bluesky_post_metrics and delete_bluesky_post both address a post by AT-URI, so without this the only way to hold one was to have just published it in the same conversation; an agent reviewing past work had no way to name anything. Each row carries the text, when it went out, its web URL, its live like/repost/reply/quote/bookmark counts, and whether it is a REPOST of someone else's post or a reply — a repost is not the brand's own creative and must not be reported as its performance. Optional filter: posts_no_replies, posts_with_media, posts_with_replies, posts_and_author_threads (an unknown one is refused by name). Bluesky publishes NO impression or view count in any lexicon, so these are counts with no denominator and no engagement rate can be computed from them. Read-only, 0 credits.",
     inputSchema: {
+      ...MANAGE_BRAND,
       limit: z.number().optional().describe('how many posts, 1–100 (default 25). 100 is Bluesky\'s own maximum.'),
       cursor: z.string().optional().describe('nextCursor from a previous call — a short page is NOT end-of-feed'),
       filter: z.string().optional().describe('posts_no_replies | posts_with_media | posts_with_replies | posts_and_author_threads'),
@@ -6259,7 +6296,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { handle: z.string().optional(), did: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional(), nextCursor: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/bluesky/my-posts', { limit: a.limit, cursor: a.cursor, filter: a.filter });
+    const d = await apiGet('/api/bluesky/my-posts', queryBrand(a, { limit: a.limit, cursor: a.cursor, filter: a.filter }));
     const lines = (d.posts || []).map(p => `• ${p.isRepost ? '[REPOST] ' : ''}${p.isReply ? '[reply] ' : ''}${(p.text || '').slice(0, 90)} — ${p.uri}`).join('\n');
     return ok(`${d.note}\n${lines}`, d);
   }));
@@ -6429,6 +6466,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Edit a Telegram post',
     description: 'Change the TEXT or CAPTION of a message already posted to a Telegram channel, group or chat \u2014 the fix for a typo that would otherwise cost the post AND its accumulated views, since deleting and reposting starts from zero. Pass `text` for a plain post or `caption` for one carrying media; Telegram refuses the wrong one and its error names the other. Free, reversible, and 0 credits \u2014 use this instead of delete_telegram_message wherever the post can be salvaged. Needs Telegram connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       chatId: z.string().describe('the channel\u2019s @username or numeric chat id'),
       messageId: z.number().describe('from post_to_telegram, or the number at the end of a t.me link'),
       text: z.string().optional().describe('the new text, for a post with no media'),
@@ -6444,6 +6482,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Pin or unpin a Telegram message',
     description: 'Pin a message to the top of a Telegram channel or group, or unpin one. A channel\u2019s pinned message is its most valuable real estate and its de-facto call to action. Pinning is SILENT by default (no member notification) \u2014 pass notify:true to ping. To unpin, pass unpin:true; omitting messageId then unpins the most recently pinned message, which is what \u201cunpin\u201d usually means. The bot must be an administrator with pin rights. Free, 0 credits. Needs Telegram connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       chatId: z.string().describe('the channel\u2019s @username or numeric chat id'),
       messageId: z.number().optional().describe('required to PIN; optional when unpinning'),
       unpin: z.boolean().optional().describe('true to unpin instead of pin'),
@@ -6603,11 +6642,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('bluesky_post_metrics', {
     title: 'Read likes, reposts, replies and quotes on your Bluesky posts',
     description: 'Read live engagement for up to 25 of the connected account’s Bluesky posts — likes, reposts, replies, quotes and bookmarks. Address a post by its AT-URI (the `at://…` value post_to_bluesky returns), not its web URL. Bluesky publishes NO impression or view count in any AT Protocol lexicon, so these are COUNTS with no denominator and no engagement rate can be computed from them — do not present one. A uri Bluesky returns nothing for is reported as MISSING (deleted, or not on the connected account), never as zero engagement. Read-only, 0 credits. Needs Bluesky connected.',
-    inputSchema: { uris: z.array(z.string()).describe('AT-URIs of the posts, at most 25 (Bluesky’s own maximum for one call)') },
+    inputSchema: { ...MANAGE_BRAND, uris: z.array(z.string()).describe('AT-URIs of the posts, at most 25 (Bluesky’s own maximum for one call)') },
     outputSchema: { handle: z.string().optional(), count: z.number().optional(), found: z.number().optional(), missing: z.number().optional(), posts: z.array(z.object({ uri: z.string().optional(), found: z.boolean().optional(), handle: z.string().optional(), text: z.string().optional(), url: z.string().optional(), indexedAt: z.string().optional(), metrics: z.record(z.number()).optional(), absent: z.record(z.string()).optional() })).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/bluesky/post-metrics', { uris: (a.uris || []).join(',') });
+    const d = await apiGet('/api/bluesky/post-metrics', queryBrand(a, { uris: (a.uris || []).join(',') }));
     const rows = (d.posts || []).map(p => p.found
       ? `  • ${p.text ? `“${p.text.slice(0, 80)}${p.text.length > 80 ? '…' : ''}”` : p.uri} — ${Object.entries(p.metrics || {}).map(([k, v]) => `${v} ${k}`).join(', ') || 'no counts returned'}`
       : `  • ${p.uri} — MISSING (deleted, or not on this account) — not zero engagement`);
@@ -6778,6 +6817,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // 2026-08-05). An agent asked to take a TikTok down must be able to say so without a failed round trip.
     description: 'The connected account’s own TikTok posts with per-video stats — views, likes, comments, shares, duration, cover image and link. TWO WAYS TO ASK: with no arguments it lists the most recent (newest first, up to 20 a page); with videoIds it reads THOSE posts directly however old they are, which is how you answer "how did that specific video do" without paging back through the account. Any id TikTok does not return comes back under `unresolved` — meaning it is not on this account or no longer exists, which TikTok does not distinguish — never as a zero. Only ever the connected user’s OWN videos. Warning: TIKTOK OFFERS NO WAY TO DELETE OR EDIT A PUBLISHED POST through its API — not the caption, not the privacy level, not the comment/duet/stitch settings, not the cover. Every one of those is fixed at the moment of publishing. If the user wants a TikTok changed or taken down, tell them plainly that it has to be done in the TikTok app; do not look for a tool for it. Read-only, 0 credits. Needs TikTok connected.',
     inputSchema: {
+      ...MANAGE_BRAND,
       limit: z.number().optional().describe('1-20, default 10 (ignored when videoIds is given)'),
       videoIds: z.array(z.string()).optional().describe('read these specific TikTok video ids instead of listing recent ones — up to 20 per call'),
     },
@@ -6785,7 +6825,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const ids = (a.videoIds || []).filter(Boolean);
-    const d = await apiGet('/api/tiktok/videos', ids.length ? { videoIds: ids.join(',') } : (a.limit ? { limit: a.limit } : {}));
+    const d = await apiGet('/api/tiktok/videos', queryBrand(a, ids.length ? { videoIds: ids.join(',') } : (a.limit ? { limit: a.limit } : {})));
     const rows = (d.videos || []).map((v, i) => `${i + 1}. ${(v.title || '(no caption)').slice(0, 70)} — ${v.views ?? '?'} views, ${v.likes ?? '?'} likes${v.url ? ` — ${v.url}` : ''}`);
     // An id TikTok did not return is STATED, never silently dropped — otherwise a short list reads as the whole answer.
     const missing = (d.unresolved || []).length ? `\nNOT RETURNED by TikTok (not on this account, or gone): ${d.unresolved.join(', ')}` : '';
@@ -13652,6 +13692,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Posts carrying the brand’s hashtags on TikTok',
     description: "Public posts whose captions carry one of the brand hashtags this account has enabled. It is the hashtag half of brand monitoring, where list_tiktok_mentions covers @-mentions. Omit `hashtag` for the top posts across every enabled tag; pass one to narrow to it. TWO TIKTOK BEHAVIOURS THAT READ AS BUGS IF NOBODY SAYS THEM: the hashtag filter is CASE-SENSITIVE and must exactly match an enabled tag, and filtering to one tag makes matched_hashtags come back EMPTY on every row. NOTHING IS RETURNED UNTIL HASHTAGS ARE ENABLED. That is a setup step rather than a result: use list_tiktok_brand_hashtags and manage_tiktok_brand_hashtags first, and allow 24 hours after enabling. Capped at the top 1,000 posts of the last 90 days. NEEDS THE TIKTOK ACCOUNT AUTHORIZATION with the brand-insights permission. Read-only, free.",
     inputSchema: {
+      ...MANAGE_BRAND,
       hashtag: z.string().optional().describe('one ENABLED tag, spelled exactly as enabled. The match is case-sensitive'),
       days: z.number().optional().describe('1 to 90. Default 90'),
       regions: z.array(z.string()).optional(),
@@ -13664,7 +13705,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { hashtag: z.string().nullable().optional(), posts: z.array(z.any()).optional(), cursor: z.number().nullable().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/tiktok-account/brand-hashtag-posts', a);
+    const d = await apiGet('/api/tiktok-account/brand-hashtag-posts', (({ brand: _b, ...q }) => queryBrand(a, q))(a));
     const list = d.posts || [];
     return ok(list.length
       ? `${list.length} post(s) carrying ${d.hashtag ? '#' + d.hashtag : 'this brand’s hashtags'}:\n` + list.map(p => `· ${p.itemId} · ${p.likes ?? '?'} likes, ${p.comments ?? '?'} comments${(p.matchedHashtags || []).length ? ` · ${p.matchedHashtags.map(h => '#' + h).join(' ')}` : ''} · ${(p.caption || '(no caption)').slice(0, 80)}`).join('\n') + `\n${d.note || ''}`
@@ -15758,6 +15799,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Edit or delete a LinkedIn post',
     description: 'Edit or delete a published LinkedIn post — personal profile or company Page. Pass postUrn, the full urn returned when it was published. action:"edit" changes ONLY THE COPY: LinkedIn does not allow the image or video of a published post to be replaced, so a new visual means a NEW post — tell the user that instead of promising a swap. action:"delete" is immediate and public and requires confirm:true.',
     inputSchema: {
+      ...MANAGE_BRAND,
       postUrn: z.string().describe('the full LinkedIn post urn returned by publishing'),
       action: z.enum(['edit', 'delete']),
       text: z.string().optional().describe('the new copy, for action:"edit"'),
@@ -16207,6 +16249,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Edit or delete a published post',
     description: 'Edit the text of, or delete, a published post. target:"facebook" -> edit the message (action:"edit", message:…) OR delete (action:"delete"); target:"threads" -> delete only (Threads has no edit API); target:"instagram" -> DELETE ONLY — Meta lets you change nothing on a published Instagram post except whether comments are enabled, so a caption cannot be fixed; deleting covers ordinary posts, Stories, Reels and ENTIRE carousel albums (Instagram cannot remove one card out of an album — pass the album’s own media id, from list_instagram_media). Deleting is permanent. FOR INSTAGRAM, CALL IT WITHOUT confirm FIRST: nothing is deleted and you get back the post’s real caption, its likes and comments and how many carousel cards go with it — show the user exactly that, then call again with confirm:true plus confirmName (and confirmChildren for an album) if the refusal asks for them. A post nobody has liked or commented on yet stays a one-call delete. INSTAGRAM DELETE NEEDS A RECONNECT ON AN OLD CONNECTION: the `instagram_manage_contents` permission joined Hermoso’s Meta grant on 2026-08-05, so any Meta connection made before then must be reconnected (Settings > Connectors > Meta) before Instagram will accept a delete. Call the tool rather than pre-refusing — every refusal it can raise names the one thing that fixes it.',
     inputSchema: {
+      ...MANAGE_BRAND,
       postId: z.string().describe('the post id returned by post_to_meta — for Instagram, the media id from list_instagram_media'),
       action: z.enum(['edit', 'delete']).describe('edit the text (FB only) or delete the post'),
       target: z.enum(['facebook', 'threads', 'instagram']).optional().describe('default facebook'),
@@ -19826,6 +19869,7 @@ function memoryNoteVerdict(text) {
     title: 'List the Page’s / Instagram account’s own posts',
     description: "List the connected Facebook Page's or Instagram account's OWN existing posts — id, caption, permalink, publish date and format. THIS IS THE TOOL THAT GETS YOU THE postId every other Meta read needs: meta_post_insights, list_meta_comments and manage_meta_post all require one, and until now the only way to have a postId was to have just published it yourself with post_to_meta. Use it for \"how did our last few posts do\", to find a post the user describes loosely, or before backfill_posts. Pass target:'instagram' for the linked IG account (Stories are excluded — Meta's media edge does not return them); Facebook hides unpublished drafts unless you ask for them. Only ever reads a Page the brand has connected. Read-only, 0 credits.",
     inputSchema: {
+      ...MANAGE_BRAND,
       target: z.enum(['facebook', 'instagram']).optional().describe("default facebook; 'instagram' reads the Page's linked IG business account"),
       account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('which connected Page — omit when the brand has only one'),
@@ -19836,7 +19880,7 @@ function memoryNoteVerdict(text) {
     outputSchema: { target: z.string().optional(), account: z.string().nullable().optional(), pageId: z.string().optional(), posts: z.array(z.any()).optional(), cursor: z.string().nullable().optional(), note: z.string().optional(), sizeNote: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/meta/posts', { ...(a.target ? { target: a.target } : {}), ...(a.account ? { account: a.account } : {}), ...(a.pageId ? { pageId: a.pageId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}), ...(a.includeUnpublished ? { includeUnpublished: 'true' } : {}) });
+    const d = await apiGet('/api/meta/posts', queryBrand(a, { ...(a.target ? { target: a.target } : {}), ...(a.account ? { account: a.account } : {}), ...(a.pageId ? { pageId: a.pageId } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}), ...(a.includeUnpublished ? { includeUnpublished: 'true' } : {}) }));
     const rows = (d.posts || []).map(p => `• ${String(p.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 80)} — ${p.id}${p.publishedAt ? ` · ${String(p.publishedAt).slice(0, 10)}` : ''} · ${p.mediaKind}${p.url ? `  ${p.url}` : ''}`);
     // A SHORTENED PAGE HAS TO SAY SO ON THE SURFACE PEOPLE USE (2026-09-17). `sizeNote` is how the server reports
     // that Meta refused the full page and it asked for fewer rows — and it was produced by the route and read by
@@ -19851,13 +19895,14 @@ function memoryNoteVerdict(text) {
     title: 'List what this brand has published',
     description: "List every post Hermoso has recorded publishing for this brand — channel, permalink, caption, format, the HOOK and SUBJECT it was written to, and its measured engagement. This is the brand's own publishing history across all nine channels in one place, and it is the memory that makes 'which hook worked?' answerable at all. Each row says how it was recorded: 'captured' (written at publish time — the hook is what the author actually intended) or 'backfilled' (reconstructed from the platform afterwards, where the hook is only known if the post matched a Hermoso creation). A dash for engagement means the platform reported no number — that is NOT zero engagement. Read-only, 0 credits.",
     inputSchema: {
+      ...MANAGE_BRAND,
       channel: z.string().optional().describe('filter to one channel: facebook, instagram, threads, x, linkedin, youtube, tiktok, reddit, pinterest, google_business'),
       limit: z.number().optional().describe('max posts (default 50, max 200), newest first'),
     },
     outputSchema: { posts: z.array(z.any()).optional(), total: z.number().optional(), windows: z.array(z.string()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/posts', { ...(a.channel ? { channel: a.channel } : {}), ...(a.limit ? { limit: a.limit } : {}) });
+    const d = await apiGet('/api/posts', queryBrand(a, { ...(a.channel ? { channel: a.channel } : {}), ...(a.limit ? { limit: a.limit } : {}) }));
     const posts = d.posts || [];
     if (!posts.length) return ok('No published posts recorded for this brand yet. Everything published from now on is recorded automatically; to import history, call backfill_posts for a channel.', d);
     const rows = posts.map(p => {
@@ -19907,13 +19952,14 @@ function memoryNoteVerdict(text) {
     title: 'Which hooks and subjects are getting traction',
     description: "Aggregate this brand's published posts to answer WHICH HOOKS AND SUBJECTS WORK. Groups by hook (default), subject, format (recipe), channel, media format or posting hour, reports the engagement RATE within each channel, and ranks the best and worst POSTS in each channel. Describe a post by the creative it carried (what it shows, its format, its link), not by its caption — the caption is the least important part of a post. THREE THINGS IT DELIBERATELY WILL NOT DO, and you should repeat them rather than paper over them: (1) it never sums metrics across channels — a LinkedIn impression and a TikTok view are different units, so every comparison is within one channel; (2) it SUPPRESSES a verdict below 5 measured posts and says so, because a confident recommendation from 3 posts is worse than none; (3) a post with no recorded hook (published outside Hermoso, or backfilled without a creation match) counts toward channel and format totals but never votes on which hook works. Present the `finding` verbatim if there is one, and the reason if there is not. Read-only, 0 credits.",
     inputSchema: {
+      ...MANAGE_BRAND,
       axis: z.enum(['hook', 'subject', 'recipe', 'channel', 'media', 'hour']).optional().describe('what to group by — default hook; recipe = the format of the creative'),
       channel: z.string().optional().describe('restrict to one channel'),
     },
     outputSchema: { axis: z.string().optional(), groups: z.array(z.any()).optional(), finding: z.any().optional(), excludedUnattributed: z.number().optional(), minN: z.number().optional(), totalPosts: z.number().optional(), trend: z.any().optional(), leaderboard: z.any().optional(), health: z.any().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/posts/performance', { ...(a.axis ? { axis: a.axis } : {}), ...(a.channel ? { channel: a.channel } : {}) });
+    const d = await apiGet('/api/posts/performance', queryBrand(a, { ...(a.axis ? { axis: a.axis } : {}), ...(a.channel ? { channel: a.channel } : {}) }));
     const gs = d.groups || [];
     // OVER TIME + MEASUREMENT HEALTH (2026-09-11): week-by-week medians per channel and why unmeasured posts have no
     // numbers. Printed even when no hook comparison exists yet — "is it getting better" does not need five hooks.
@@ -19956,6 +20002,7 @@ function memoryNoteVerdict(text) {
     title: 'Read how the recorded posts performed',
     description: "Fetch fresh performance numbers for this brand's recorded posts and store them as a time-series. Metrics ACCRUE, so a post is read at ~24 hours and again at ~7 days; this collects whichever readings are due and skips the ones already taken. A channel that cannot report a metric records it as ABSENT with the reason — never as zero — and a read that fails is recorded as 'could not tell', which contributes to nothing. X IS SKIPPED BY DEFAULT because X bills us per API call: pass includeMetered:true to include it, and tell the user it costs credits BEFORE you do. The skip is always reported so a channel missing from the numbers is never mistaken for one that performed badly. Free except for X.",
     inputSchema: {
+      ...MANAGE_BRAND,
       includeMetered: z.boolean().optional().describe('also read X, which BILLS CREDITS per post read — ask the user first'),
       max: z.number().optional().describe('cap how many posts to read in this run (default 40)'),
       remeasure: z.boolean().optional().describe('ALSO re-read posts older than 7 days whose every reading came back empty or failed — use after post_performance reports posts "read but empty", or once a channel\'s reader has been fixed. Otherwise those windows stay closed.'),
@@ -19963,7 +20010,7 @@ function memoryNoteVerdict(text) {
     outputSchema: { collected: z.number().optional(), due: z.number().optional(), remaining: z.number().optional(), couldNotTell: z.number().optional(), skippedMetered: z.number().optional(), meteredNote: z.string().optional(), windows: z.array(z.any()).optional(), remeasured: z.number().optional(), remeasuredWithNumbers: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/posts/collect', { ...(a.includeMetered ? { includeMetered: true } : {}), ...(a.max ? { max: a.max } : {}), ...(a.remeasure ? { remeasure: true } : {}) });
+    const d = await apiPost('/api/posts/collect', bodyBrand(a, { ...(a.includeMetered ? { includeMetered: true } : {}), ...(a.max ? { max: a.max } : {}), ...(a.remeasure ? { remeasure: true } : {}) }));
     if (a.remeasure) return ok(`Re-read ${d.remeasured || 0} old post(s) whose earlier readings were empty or failed; ${d.remeasuredWithNumbers || 0} now have numbers. Read ${d.collected} post(s) in total${d.remaining ? `, ${d.remaining} still waiting — run it again to continue` : ''}.${d.meteredNote ? ` ${d.meteredNote}` : ''}`, d);
     const bits = [`Read ${d.collected} post(s)`, d.couldNotTell ? `${d.couldNotTell} could NOT be read (that is "could not tell", not zero engagement)` : null, d.gone ? `${d.gone} no longer exist at the platform (deleted or taken down) and will not be read again` : null, d.remaining ? `${d.remaining} still due — call again` : null, d.meteredNote || null].filter(Boolean);
     return ok(`${bits.join('. ')}.${d.collected ? ' Ask post_performance which hooks are winning.' : ''}`, d);
