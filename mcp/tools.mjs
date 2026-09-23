@@ -628,6 +628,23 @@ const HOOK_ATTR = {
   brand: z.string().optional().describe('WHICH BRAND this post belongs to — the id or exact name from list_brands (a workspace shared with you: its profile id). Use it whenever the account has more than one brand and you are not certain which one this connection is pinned to: it beats the pin for THIS CALL ONLY and changes nothing about the connection. A name that matches no brand, or two brands, is REFUSED and nothing is posted — never resolved to the pin, which is the account you were guarding against.'),
   hook: z.string().optional().describe('WHAT ANGLE THIS POST IS BUILT ON — the single most valuable field here, and the only moment it can ever be recorded. post_performance groups on it to answer "which hooks work", and it needs 5 posts sharing ONE hook before it will call anything a winner, so REUSE THE SAME WORDING across a campaign instead of rephrasing it every time. Best of all, pass a hook id from list_hooks (e.g. "direct_callout", "mid_problem", "before_after") — those fold onto a stable key however they are spelled, so a whole brand accumulates evidence on one row. Your own wording is fine too; it just only groups when you repeat it exactly. Omitting it means this post can never vote on which hook works.'),
   subject: z.string().optional().describe('WHAT THIS POST IS ABOUT — the product, feature, offer or theme (e.g. "winter coat", "free trial", "founder story"). The second grouping axis in post_performance. Same rule as hook: reuse the exact wording so posts about one subject land in one group.'),
+  // THE FORMAT AND THE IDEA (2026-09-23). The server's publish seam has recorded `recipe` since 2026-09-11, and no
+  // agent surface could send it, so every post published over MCP or the CLI said nothing about its format and
+  // post_performance's recipe axis returned no groups at all. Same spread, so every publish and schedule tool gains both.
+  recipe: z.string().optional().describe('the post\'s FORMAT id, e.g. "slideshow" or "imessage_chat" — post_performance groups by it, so reuse one id per format'),
+  ideaId: z.string().optional().describe('short id of the content-plan idea this post came from'),
+};
+// The format and idea WITHOUT `brand`, for the tools that already carry their own brand field (reschedule, duplicate):
+// editing or copying a queued post can set or change them.
+const POST_INTENT = { recipe: HOOK_ATTR.recipe, ideaId: HOOK_ATTR.ideaId };
+// Bluesky and Telegram publish tools had no attribution fields at all; they get the short forms (the roster is re-sent
+// on every request, so the long hook guidance is carried once per tool family, not per tool).
+const INTENT_SHORT = { hook: z.string().optional().describe('the post\'s angle — a list_hooks id or your own wording, reused exactly'), subject: z.string().optional().describe('what the post is about'), ...POST_INTENT };
+// Publish-safety pair for the two channels whose tools did not declare it (2026-09-23): their routes now go through the
+// one publish seam, which replays an identical post rather than sending it twice unless the caller says otherwise.
+const PUBLISH_SAFETY = {
+  idempotencyKey: z.string().optional().describe('any stable string: a repeat within 24h returns the original post instead of posting again'),
+  allowDuplicate: z.boolean().optional().describe('post it even though an identical post was just made'),
 };
 // A POST YOU CAN CREATE IN A BRAND MUST BE MANAGEABLE THERE (2026-09-21, measured on the hosted MCP). With the
 // connection pinned to a brand that has no X, `post_to_x {brand:'Hermoso'}` posted on Hermoso's X — and then
@@ -3200,6 +3217,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one bluesky account connected (several and none named is refused by name, never guessed); omit when there is one."),
       brand: HOOK_ATTR.brand,
+      ...INTENT_SHORT,
+      ...PUBLISH_SAFETY,
       text: z.string().describe('The post, up to 300 characters / 3000 UTF-8 bytes.'),
       imageUrls: z.array(z.string()).optional().describe('Up to 4 public image URLs to attach. Cannot be combined with videoUrl.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('Alt text \u2014 an ARRAY, one per image in the same order, or a single STRING to describe every image with it. WRITE ONE: Bluesky\u2019s own lexicon makes `alt` a REQUIRED property of every image, so a post without it is undescribed by design rather than by omission, and Bluesky users expect it. No maximum length is published, so nothing is truncated.'),
@@ -3260,6 +3279,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the brand has more than one telegram account connected (several and none named is refused by name, never guessed); omit when there is one."),
       brand: HOOK_ATTR.brand,
+      ...INTENT_SHORT,
+      ...PUBLISH_SAFETY,
       chatId: z.string().describe("REQUIRED — the destination: a public channel's @username, or the numeric chat id. Never guessed; ask the user, or use list_telegram_chats."),
       text: z.string().optional().describe('the message. ≤4096 characters on its own; ≤1024 once any image or video is attached.'),
       imageUrl: z.string().optional().describe('one image (≤10MB after upload)'),
@@ -4976,6 +4997,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Change a post that is still QUEUED — move it to a different time, rewrite the caption, swap the media, add or drop a channel, or change which board / Page / company Page / listing it goes to. PASS ONLY WHAT CHANGES: an omitted field is left exactly as it was, and an explicit empty string CLEARS one (linkedinOrganizationId:"" moves a company-Page post back to the person\u2019s own profile). The edited item is re-checked against the identical rules its create passed — visibility the channel can honour, per-channel length, media the channel can carry — so an edit can never slip past a refusal that a create would have caught. Get the id from list_scheduled. Something that already went out cannot be changed: a published post is edited or removed with manage_meta_post / manage_linkedin_post / delete_x_post, not rescheduled.',
     inputSchema: {
       brand: z.string().optional().describe('WHICH BRAND this post is in — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.'),
+      ...POST_INTENT,
       id: z.string().describe('the scheduled post id from list_scheduled'),
       at: z.string().optional().describe('the new time — ISO timestamp (2026-08-05T09:00:00Z) or epoch milliseconds. Must be in the future, at most 365 days out.'),
       message: z.string().optional().describe('replace the caption used for every channel that has no override'),
@@ -5109,6 +5131,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       brand: z.string().optional().describe('WHICH BRAND this post is in — the id or exact name from list_brands. Needed when the post lives in a brand this connection is not pinned to: a post you can CREATE in a brand must be manageable there too, without switching the whole connection. A name that matches no brand, or two, is REFUSED.'),
       id: z.string().describe('the post to copy, from list_scheduled'),
+      ...POST_INTENT, // the copy inherits the original's format and idea (and hook and subject); pass either to change it
       at: z.string().optional().describe('when the copy goes out — ISO timestamp or epoch milliseconds (default: an hour from now)'),
       useQueue: z.boolean().optional().describe('instead of naming a time, take the brand’s next free posting slot'),
       timezone: z.string().optional().describe('IANA zone for the queue, e.g. "America/New_York"'),
@@ -20014,11 +20037,12 @@ function memoryNoteVerdict(text) {
       ...MANAGE_BRAND,
       axis: z.enum(['hook', 'subject', 'recipe', 'channel', 'media', 'hour']).optional().describe('what to group by — default hook; recipe = the format of the creative'),
       channel: z.string().optional().describe('restrict to one channel'),
+      days: z.number().optional().describe('look back N days (1-730), archived posts included; omit for the recent posts only'),
     },
-    outputSchema: { axis: z.string().optional(), groups: z.array(z.any()).optional(), finding: z.any().optional(), excludedUnattributed: z.number().optional(), minN: z.number().optional(), totalPosts: z.number().optional(), trend: z.any().optional(), leaderboard: z.any().optional(), health: z.any().optional() },
+    outputSchema: { axis: z.string().optional(), groups: z.array(z.any()).optional(), finding: z.any().optional(), excludedUnattributed: z.number().optional(), minN: z.number().optional(), totalPosts: z.number().optional(), trend: z.any().optional(), leaderboard: z.any().optional(), health: z.any().optional(), followers: z.any().optional(), archive: z.any().optional(), days: z.number().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/posts/performance', queryBrand(a, { ...(a.axis ? { axis: a.axis } : {}), ...(a.channel ? { channel: a.channel } : {}) }));
+    const d = await apiGet('/api/posts/performance', queryBrand(a, { ...(a.axis ? { axis: a.axis } : {}), ...(a.channel ? { channel: a.channel } : {}), ...(a.days ? { days: a.days } : {}) }));
     const gs = d.groups || [];
     // OVER TIME + MEASUREMENT HEALTH (2026-09-11): week-by-week medians per channel and why unmeasured posts have no
     // numbers. Printed even when no hook comparison exists yet — "is it getting better" does not need five hooks.
@@ -20033,7 +20057,11 @@ function memoryNoteVerdict(text) {
     // (what it shows, its format, its link) — the caption is only the fallback label (2026-09-11, Dave).
     const cap = (p) => `${p.subject || p.recipe ? String(p.subject || p.recipe).slice(0, 80) : `"${String(p.caption || '(no caption)').slice(0, 60)}"`}${p.media ? ` [${p.media}${p.recipe && p.subject ? `, ${p.recipe}` : ''}]` : ''}${p.url ? ` ${p.url}` : ''} (${fmtN(p.score)})`;
     const boardTxt = (d.leaderboard || []).filter(b => b.measured >= 2).slice(0, 10).map(b => `• ${b.channel} by ${b.rankedBy}: best ${cap(b.best[0])}${b.allEqual ? ' — every measured post scored the same' : (b.worst[0] ? `; worst ${cap(b.worst[0])}` : '')} · ${b.measured} measured`);
-    const overTime = `${boardTxt.length ? `\n\nBEST AND WORST POSTS (last 30 days):\n${boardTxt.join('\n')}` : ''}${trendTxt.length ? `\n\nOVER TIME (last ${d.trend.weeks.length} weeks, 7-day readings where they exist):\n${trendTxt.join('\n')}` : ''}${healthTxt.length ? `\n\nMEASUREMENT GAPS:\n${healthTxt.join('\n')}` : ''}`;
+    // FOLLOWERS OVER TIME (2026-09-23): one count per account per day from the nightly snapshot; a count that could not be
+    // read is printed as unknown WITH its reason — never as 0.
+    const folTxt = Array.isArray(d.followers) ? d.followers.slice(0, 12).map(f => `• ${f.channel}${f.label ? ` ${f.label}` : ''}: ${f.last ? `${fmtN(f.last.followers)} on ${f.last.day}${f.change != null && f.first && f.first.day !== f.last.day ? ` (${f.change >= 0 ? '+' : ''}${fmtN(f.change)} since ${f.first.day})` : ''}` : 'unknown'}${f.lastWhy ? ` — latest read unknown: ${f.lastWhy.why}` : ''}`) : [];
+    const archTxt = d.archive?.used ? `\n\nIncludes ${d.archive.rows} older post(s) from the brand's archive (the live record keeps the most recent 500).` : (d.archive?.unreadable ? `\n\n⚠ ${d.archive.why}` : '');
+    const overTime = `${boardTxt.length ? `\n\nBEST AND WORST POSTS (last ${d.days || 30} days):\n${boardTxt.join('\n')}` : ''}${trendTxt.length ? `\n\nOVER TIME (last ${d.trend.weeks.length} weeks, 7-day readings where they exist):\n${trendTxt.join('\n')}` : ''}${healthTxt.length ? `\n\nMEASUREMENT GAPS:\n${healthTxt.join('\n')}` : ''}${folTxt.length ? `\n\nFOLLOWERS (daily snapshot):\n${folTxt.join('\n')}` : (d.followers?.unreadable ? `\n\nFOLLOWERS: ${d.followers.why}` : '')}${archTxt}`;
     if (!gs.length) return ok(`Nothing to compare on "${d.axis}" yet. ${d.finding?.why || ''}`.trim() + overTime, d);
     const rows = gs.map(g => `• "${g.key}" · ${g.channel} — ${g.meanRate == null ? (g.meanEngagement == null ? 'no measurable engagement' : `${g.meanEngagement.toFixed(1)} engagements (no reach denominator on this channel, so no rate)`) : `${(g.meanRate * 100).toFixed(2)}% engagement`} · ${g.n} post(s), ${g.nRated} measured${g.verdict === 'ready' ? '' : ` — ${g.suppressed}`}`);
     const head = d.finding?.finding ? `FINDING: ${d.finding.finding}` : `NO FINDING YET: ${d.finding?.why || 'not enough measured posts'}`;
@@ -20072,7 +20100,7 @@ function memoryNoteVerdict(text) {
     const d = await apiPost('/api/posts/collect', bodyBrand(a, { ...(a.includeMetered ? { includeMetered: true } : {}), ...(a.max ? { max: a.max } : {}), ...(a.remeasure ? { remeasure: true } : {}) }));
     if (a.remeasure) return ok(`Re-read ${d.remeasured || 0} old post(s) whose earlier readings were empty or failed; ${d.remeasuredWithNumbers || 0} now have numbers. Read ${d.collected} post(s) in total${d.remaining ? `, ${d.remaining} still waiting — run it again to continue` : ''}.${d.meteredNote ? ` ${d.meteredNote}` : ''}`, d);
     const bits = [`Read ${d.collected} post(s)`, d.couldNotTell ? `${d.couldNotTell} could NOT be read (that is "could not tell", not zero engagement)` : null, d.gone ? `${d.gone} no longer exist at the platform (deleted or taken down) and will not be read again` : null, d.remaining ? `${d.remaining} still due — call again` : null, d.meteredNote || null].filter(Boolean);
-    return ok(`${bits.join('. ')}.${d.collected ? ' Ask post_performance which hooks are winning.' : ''}`, d);
+    return ok(`${bits.join('. ')}.${d.xOwn?.note ? ` ${d.xOwn.note}` : ''}${d.collected ? ' Ask post_performance which hooks are winning.' : ''}`, d);
   }));
 
   server.registerTool('backfill_posts', {
