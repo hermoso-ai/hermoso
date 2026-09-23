@@ -107,7 +107,7 @@ async function unwrap(res) {
     // ledger with the tool name off x-hermoso-tool. wrap() reports ONLY the errors that lack this marker — a local
     // throw, a schema rejection, a socket reset — which is what stops the twins double-counting every 4xx.
     // `connectUrl` rides a not-connected 401 with the brand already in it, so a hint never rebuilds the link.
-    throw Object.assign(new Error(msg), { status: res.status, _viaApi: true, ...(body?.connector ? { connector: body.connector } : {}), ...(typeof body?.connectUrl === 'string' ? { connectUrl: body.connectUrl } : {}) });
+    throw Object.assign(new Error(msg), { status: res.status, _viaApi: true, ...(body?.connector ? { connector: body.connector } : {}), ...(typeof body?.connectUrl === 'string' ? { connectUrl: body.connectUrl } : {}), ...(body?.meta?.videoChoice && typeof body.meta.videoChoice === 'object' ? { videoChoice: body.meta.videoChoice } : {}), ...(body?.metaAuthHold === true ? { metaAuthHold: true } : {}) }); // `videoChoice` rides a 402 for a video the caller expects and cannot afford (server videoChoiceFor) — wrap() spells its options out instead of a bare top-up line
   }
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
 }
@@ -316,11 +316,46 @@ export async function connectedProviders() {
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so
 // the server reads the raw body. Lets an agent post ARBITRARY user files (not just Hermoso renders).
+// A FILE BIGGER THAN ONE REQUEST GOES UP IN PARTS (2026-09-22). The hosted server sits behind Google's front door,
+// which refuses any request body over 32 MiB before Hermoso sees it (measured: 30MB reached the app, 40MB was a
+// 413). So above UPLOAD_SINGLE_MAX the bytes go through an upload ticket in parts, each a PUT with ?offset=&total=,
+// and the last part answers the same {url, kind, bytes} a single POST does. The ticket carries the credential, so
+// the part PUTs need no auth header. A 409 answers with `received`, which is where the next part starts.
+const UPLOAD_SINGLE_MAX = 24 * 1024 * 1024, UPLOAD_PART = 8 * 1024 * 1024;
 export async function apiUpload(p, buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {
+  if (buf && buf.length > UPLOAD_SINGLE_MAX && p === '/api/upload') return apiUploadInParts(buf, { contentType, fileName });
   const h = headers({ 'Content-Type': contentType });
   if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
   const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: h, body: buf });
   return unwrap(res);
+}
+export async function apiUploadInParts(buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {
+  const t = await apiPost('/api/upload/ticket', {});
+  if (!t || !t.uploadUrl) throw new Error('Hermoso did not hand back an upload link — try again.');
+  let path0; try { path0 = new URL(t.uploadUrl).pathname; } catch { path0 = String(t.uploadUrl); }
+  const part = Math.min(UPLOAD_PART, Number(t.partMaxBytes) || UPLOAD_PART);
+  const total = buf.length; let offset = 0, last = null;
+  while (offset < total) {
+    const end = Math.min(total, offset + part);
+    const h = { 'Content-Type': contentType }; if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
+    let res, body, tries = 0;
+    for (;;) {
+      // A part IS safe to resend, unlike the writes fetchWrite refuses to retry: the server acknowledges a part it
+      // already holds (`duplicate`) and never appends it twice, so a transport drop here is retried.
+      try { res = await fetchWrite(`${API_BASE}${path0}?offset=${offset}&total=${total}`, { method: 'PUT', headers: h, body: buf.subarray(offset, end) }); body = await res.json().catch(() => ({})); if (res.status < 500) break; }
+      catch (e) { if (!e?._transport || ++tries >= 4) throw e; await new Promise((r) => setTimeout(r, 800 * tries)); continue; }
+      if (++tries >= 4) break;
+      await new Promise((r) => setTimeout(r, 800 * tries));
+    }
+    if (res.status === 409 && Number.isFinite(body.received)) { offset = body.received; continue; }
+    if (!res.ok) throw Object.assign(new Error((body && body.error) || `HTTP ${res.status}`), { status: res.status, _viaApi: true });
+    // A server that predates parts ingests the first part AS the file and answers a url with no `received` — never
+    // report that truncated file as the upload.
+    if (!Number.isFinite(body.received)) throw new Error('This Hermoso server does not take uploads in parts yet, so a file this large cannot be sent to it — pass a public `url` instead.');
+    last = body; offset = body.received;
+  }
+  if (!last || !last.url) throw new Error('The upload finished without a file URL — try again.');
+  return last;
 }
 // Ingest by URL: the SERVER fetches the bytes (SSRF-guarded on every redirect hop) so nothing has to cross this
 // transport. Deliberately no body — /api/upload treats "a body AND a url" as an error rather than picking one.
@@ -387,7 +422,7 @@ export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 100
     // make_template_ad refusals (a 400 the server had classed as the caller's config) sat on the admin board as
     // "could not tell". `_viaApi` is the marker that says the server has seen it. It deliberately carries NO `jobId`:
     // the tool layer reads a jobId on an error as "timed out, still rendering", which a failed job is not.
-    if (job.status === 'error') throw Object.assign(new Error(job.error || 'Render failed'), { _viaApi: true });
+    if (job.status === 'error') throw Object.assign(new Error(job.error || 'Render failed'), { _viaApi: true, ...(job.errorMeta?.videoChoice && typeof job.errorMeta.videoChoice === 'object' ? { videoChoice: job.errorMeta.videoChoice, status: 402 } : {}) }); // a queued video the balance could not cover refuses at the reserve with its options (errorMeta.videoChoice) — carry them so wrap() spells the choice
     if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `hermoso jobs get ' + id + '`'), { jobId: id });
     // NEVER SLEEP PAST THE DEADLINE. A 3s interval made every wait 3s-granular: a caller who asked for 1s was held 3s,
     // and one who asked for 29s was held 30s, which is the whole 30-second step budget the ask exists to stay inside.

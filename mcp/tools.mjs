@@ -21,7 +21,7 @@ import { toolHeldBackByConnectors, toolProvider, toolUnoffered, metaAlternativeN
 import { toolCostClass, costLabel, costKindOf, creditRangeFrom } from './tool-cost.mjs';
 import { recordToolOutcome, toolHealth, healthLabel, healthPenalty } from './tool-health.mjs';
 // THE NEXT STEP, NAMED. The prose we already write stays; this is the same advice as an addressable field.
-import { withHints } from './tool-hints.mjs';
+import { withHints, videoChoiceText, videoChoiceHints } from './tool-hints.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 // /generated/x.mp4 → a URL THE CALLER can open. `API_BASE` is the base this layer CALLS the app on, and on the hosted
@@ -65,6 +65,7 @@ const creatorLine = (c) => {
   const bits = [c.source === 'generated' ? 'AI creator' : c.source === 'social' ? 'from a social profile' : c.source === 'upload' ? 'uploaded photo' : c.source];
   if (c.source !== 'generated') bits.push(c.consented ? 'likeness consented' : 'NO likeness consent on file');
   if (c.poses) bits.push(`${c.poses} pose plate${c.poses === 1 ? '' : 's'}`);
+  if (c.lowQualityRef && !c.refAccepted) bits.push('PHOTO TOO UNCLEAR TO CAST — not cast by default; replace it with save_creator (same name, a better photo url) or accept it with save_creator(name, useAnyway: true)');
   if (c.voiceClone) bits.push('cloned voice');
   else if (c.voice) bits.push(`voice ${c.voice}`);
   return `  • ${c.name} — ${bits.join(', ')}${c.id ? `  [${c.id}]` : ''}\n    ${c.image || '(portrait stored in-app as an uploaded photo — cast them by NAME; there is no url to hand a render tool)'}`;
@@ -233,7 +234,7 @@ export const MCP_INSTRUCTIONS = [
   // ACT-DO-NOT-SURVEY last and the 2,048-byte cut landed inside it — 'DO NOT SURVE' — so the rule that exists to
   // stop an agent answering a render request with a model catalog was itself the thing truncated. Whatever gets
   // clipped from the tail must cost tool NAMES, which the roster still carries, never a rule, which it does not.
-  'Hermoso is an AI ad studio you drive over MCP. FIVE INDEPENDENT AREAS — none is a step in a pipeline and no tool needs you to have used another one first:',
+  'Hermoso is marketing on autopilot, driven over MCP. FIVE INDEPENDENT AREAS — none is a step in a pipeline and no tool needs you to have used another one first:',
   'ACT ON THE REQUEST, DO NOT SURVEY IT: asked to make something, make it. render_ad, generate_image and generate_video all run with `model` omitted and go to a sound default. hermoso_capabilities (free) is for a specific model id, an exact credit cost or a live duration — never the answer to a request to create something.',
   '• RESEARCH the ads already winning: find_competitors, competitor_teardown, pull_competitor_ads, research_ads, search_meta_ads, search_google_ads, search_linkedin_ads, search_tiktok, search_instagram, search_youtube, search_reddit, search_threads, mine_angles, analyze_video, check_ad_policy.',
   '• CREATE finished on-brand ads: render_ad, generate_image, generate_video, generate_avatar, make_template_ad, make_thumbnail, make_explainer, plan_ad, plan_variations; get_brand / draft_brand / update_brand; list_creators / save_creator; edit_video, dub_video, clip_video, reframe_video, upscale_video, stitch_video.',
@@ -437,12 +438,19 @@ const wrap = (fn) => {
     // BOTH phrasings. The gates say "You're out of credits" while the reserve path says "Not enough credits";
     // matching only the latter meant research, X posting and the competitor watch hit a 402 and told the agent
     // nothing about how to fix it, so the top-up path this whole flow depends on was unreachable from those tools.
-    if (/not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) _hints.push({ do: 'buy_credits({})', why: 'this account cannot cover the call; buy_credits quotes on a saved card or returns a checkout link, and billing_status shows the balance and the billing role' }), msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes (quoteToken included) then one-click charges on confirm:true + quote_token; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
+    // A VIDEO THE CALLER EXPECTED AND CANNOT AFFORD IS A CHOICE (2026-09-22): the server refused before planning or
+    // reserving and sent the options (image priced, top-up, a light draft that fits) — spell them out, never a silent
+    // format swap and never just "top up". Read from the STRUCTURED field, exactly like the connector marker below.
+    if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice); _hints.push(...videoChoiceHints(_tool, e.videoChoice)); }
+    else if (/not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) _hints.push({ do: 'buy_credits({})', why: 'this account cannot cover the call; buy_credits quotes on a saved card or returns a checkout link, and billing_status shows the balance and the billing role' }), msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes (quoteToken included) then one-click charges on confirm:true + quote_token; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
     // connector not connected → hand the human a ONE-CLICK connect link (OAuth needs a browser, so it can't happen
     // in-agent) — Dave 2026-07-23. Detected from the STRUCTURED signal, never from the prose (see notConnectedHint).
     else {
       msg += notConnectedHint(e, msg);
       // Read from the STRUCTURED signal, exactly as the sentence above is — never from the prose.
+      // META'S SECURITY HOLD (code 31/3858385): the server's sentence already carries the steps; this names the move
+      // so an agent relays it instead of retrying or telling the user to reconnect. Read from the STRUCTURED field.
+      if (e?.metaAuthHold === true) _hints.push({ do: 'stop retrying; ask the user to clear Meta\u2019s security hold: as the Facebook profile that connected Hermoso, turn on two-factor authentication, then in Ads Manager open Billing and payments and click Start authentication (or facebook.com/accountquality if there is no button), then run the same call again', why: 'Meta refuses new or edited ads from that profile until it re-authenticates; the connection and permissions are fine and reconnecting with the same profile does not clear it' });
       if (Number(e?.status) === 401 && e?.connector) _hints.push({ do: `have the user connect "${e.connector}" (Settings \u25b8 Connectors, or the one-click link in this message)`, why: `${e.connector} is not connected in this workspace, so this tool can only answer 401 until it is` });
     }
       // ── THE STRUCTURED ERROR MARKER (2026-08-26) ──────────────────────────────────────────────────────────
@@ -454,7 +462,7 @@ const wrap = (fn) => {
       // `_meta` is MCP's own sanctioned extension point (spec: any result MAY carry it), so every MCP client
       // sees an ordinary error result and ignores a key it does not recognise. `publishWrap` spreads the result,
       // so its ambiguous-publish advice keeps the marker rather than dropping it.
-      return withHints({ content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, connector: e?.connector ? String(e.connector) : '' } } }, _hints);
+      return withHints({ content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, connector: e?.connector ? String(e.connector) : '', ...(e?.videoChoice?.options && typeof e.videoChoice.options === 'object' ? { options: e.videoChoice.options } : {}) } } }, _hints); // `options` = the video choice's three ways forward, structured, so /v1 answers its 402 with them
     }
   };
   return outer;
@@ -4433,7 +4441,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dataUri: z.string().optional().describe('base64 data: URI of the file bytes (data:<mime>;base64,<…>) — bytes travel over this connection, so keep it small'),
       name: z.string().optional().describe('original file name — helps pick the right extension'),
     },
-    outputSchema: { url: z.string().optional(), kind: z.string().optional(), bytes: z.number().optional(), uploadUrl: z.string().optional().describe('the one-time PUT url, when getUploadUrl was asked for'), expiresAt: z.string().optional(), maxBytes: z.number().optional() },
+    outputSchema: { url: z.string().optional(), kind: z.string().optional(), bytes: z.number().optional(), uploadUrl: z.string().optional().describe('the one-time PUT url, when getUploadUrl was asked for'), expiresAt: z.string().optional(), maxBytes: z.number().optional(), partMaxBytes: z.number().optional().describe('the largest single PUT the link takes; a bigger file goes in parts with ?offset=&total= (see the howto)') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     // THE TICKET BRANCH RUNS FIRST AND ALONE: it is a request for a url, not an upload, so a source passed beside
@@ -4442,7 +4450,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const conflict = ['url', 'path', 'dataUri'].filter(k => String(a[k] || '').trim());
       if (conflict.length) throw new Error(`\`getUploadUrl\` asks for a link to send bytes to; \`${conflict.join('` and `')}\` is a file to upload right now. Do one or the other.`);
       const t = await apiPost('/api/upload/ticket', {});
-      return ok(`PUT the file's raw bytes to this url and it answers with the durable Hermoso url:\n\n${t.uploadUrl}\n\n${t.howto}`, { uploadUrl: t.uploadUrl, expiresAt: t.expiresAt, maxBytes: t.maxBytes });
+      return ok(`PUT the file's raw bytes to this url and it answers with the durable Hermoso url:\n\n${t.uploadUrl}\n\n${t.howto}`, { uploadUrl: t.uploadUrl, expiresAt: t.expiresAt, maxBytes: t.maxBytes, ...(t.partMaxBytes ? { partMaxBytes: t.partMaxBytes } : {}) });
     }
     // EXACTLY ONE SOURCE. Two is an ERROR: a caller who passes both has two different files in mind, and quietly
     // preferring one of them ingests the wrong file and reports success.
@@ -16748,10 +16756,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       recipe: z.string().optional().describe('a recipe id from hermoso_capabilities to force an archetype'),
       reference: z.string().optional().describe('a reference to clone: an ad-library link (Facebook Ad Library, LinkedIn Ad Library, Google Ads Transparency — its real copy/advertiser are fetched) OR a VIDEO link — a TikTok, Instagram Reel, Facebook video, X post, YouTube Short/video or a direct video file — which is WATCHED first (frames + voiceover/on-screen-text transcript) so the concept keeps its hook, structure and pacing. To remake one video for this brand at its own length, clone_video is the direct tool'),
       language: z.string().optional().describe('output language for the ad copy (e.g. Spanish) — default English'),
+      draft: z.object({ model: z.string(), durationSeconds: z.number() }).optional().describe("ONLY after a video refusal that offered a light draft: the {model, durationSeconds} it named. The plan is then authored to that length and priced on that model. Never invent one — a video the account cannot cover is refused BEFORE planning with the three options (image / add credits / this draft when one fits), and the user chooses."),
     },
     outputSchema: {
       format: z.string().optional().describe("the resolved creative format — 'image' or 'video'"),
       concept: z.string().optional().describe('the one-line creative concept'),
+      format_note: z.string().optional().describe("the plan's own read-back when it chose an IMAGE on an open format because the balance could not cover the default video — states the video's real credit price"),
+      budget_pick: z.any().optional().describe('{format, reason, videoCredits, balance, seconds} when format_note is set'),
+      concept_count: z.number().optional().describe('how many distinct concepts the brief asked for; the plan builds out the first and sets variants to it'),
       recipe: z.string().optional().describe('the resolved recipe id'),
       recipe_label: z.string().optional().describe('the resolved recipe display name'),
       copy: z.array(z.any()).optional().describe('copy variants ({headline, primary, cta})'),
@@ -16763,7 +16775,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       brand: z.any().optional().describe('the brand grounding embedded in the creative (name, logo, palette, productImages)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language, durationSeconds, hook, setting }) => {
+  }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language, durationSeconds, hook, setting, draft }) => {
     // LENGTH SOVEREIGNTY over MCP (found live 2026-07-31: a 40-second brief came back as render_plan.duration_seconds
     // 15, structure single_clip, scenes summing to 15 — the 40 was silently dropped because this tool declared no
     // duration at all). /api/create has honored `durationSeconds` all along (it becomes the planner's "Target video
@@ -16782,7 +16794,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const _n = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
       try { const cur = await apiGet('/api/brand/current'); if (cur?.hasBrand && cur.brand && _n(cur.brand.name) && _n(cur.brand.name) === _n(brand)) brandObj = cur.brand; } catch {}
     }
-    const d = await apiPost('/api/create', { brand: brandObj, product, format, recipe: recipe || '', reference: reference ? { url: reference } : null, language: language || '', ...(_len ? { durationSeconds: _len } : {}), hook: hook || '', setting: setting || '', userAsk: String(product || '') });
+    const _draft = (draft && typeof draft === 'object' && String(draft.model || '').trim()) ? { model: String(draft.model).trim(), durationSeconds: Math.round(+draft.durationSeconds || 0) } : null; // the accepted light draft rides as itself; its length is the plan's length
+    const d = await apiPost('/api/create', { brand: brandObj, product, format: _draft ? 'video' : format, recipe: recipe || '', reference: reference ? { url: reference } : null, language: language || '', ...(_draft ? { draft: _draft, durationSeconds: _draft.durationSeconds || _len || undefined } : (_len ? { durationSeconds: _len } : {})), hook: hook || '', setting: setting || '', userAsk: String(product || '') });
     const c = d.creative || d;
     // EMBED THE PLAN'S OWN BRAND in the creative (2026-07-17: a multi-brand caller planned Fly By Jing but render_ad
     // grounded on the account's SAVED brand — the video shipped with the WRONG brand's packshots and end lockup).
@@ -16807,7 +16820,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         + (_askedLen && _askedLen !== _len ? ` — you asked for ${_askedLen}s, which is outside the supported 4–180s range, so it was clamped to ${_len}s` : '')
         + (_len && _planned && Math.abs(_planned - _len) > 1 ? ` — ⚠ this does NOT match the ${_len}s you asked for; tell the user before rendering, or re-plan` : '');
     }
-    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"${refWatchedLine(c.reference_watched)}${_lenLine}${_hookLine}\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a storyboard that fits ONE clip of the render model renders as a single continuous pass, a longer plan renders as stitched acts automatically — never hand-stitch)' : 'generate_image with the image_concept.prompt'}.`;
+    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"${c.format_note ? '\n' + c.format_note : ''}${c.concept_count > 1 ? `\nYou asked for ${c.concept_count} concepts: the concept line names each; this plan builds out the first (variants = ${c.variants || c.concept_count}). Call plan_ad again with a different angle for the others, or render_ad with variants for takes of this one.` : ''}${refWatchedLine(c.reference_watched)}${_lenLine}${_hookLine}\nHeadline: ${c.copy?.[0]?.headline || ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a storyboard that fits ONE clip of the render model renders as a single continuous pass, a longer plan renders as stitched acts automatically — never hand-stitch)' : 'generate_image with the image_concept.prompt'}.`;
     return ok(text, c);
   }));
 
@@ -17102,7 +17115,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), licensed music bed, real product references. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
-      creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if the plan has nobody on camera, or if they are a REAL person with no likeness consent on file.'),
+      creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default on any plan with a person on camera, and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if an explicitly named creator is cast on a plan with nobody on camera, or if they are a REAL person with no likeness consent on file.'),
       model: z.string().optional().describe('video model id from hermoso_capabilities (default: the plan’s pick). Naming one is a DELIBERATE pick — the server asks before ever swapping it (no silent fallback)'),
       durationSeconds: z.number().optional().describe('total ad length in seconds (supported range 4–180; outside that it is clamped). Omit to honor the plan’s own duration — that is almost always right. This only RE-TIMES an already-authored board (its scenes are scaled to fit), it does NOT re-write it, so to change the length of the ad the user asked for, re-run plan_ad with durationSeconds instead. A length that fits ONE clip of the render model renders as one continuous pass; longer is stitched from acts filled to that model’s clip maximum with the remainder last — the maximum is 15s on most models and 30s on the longest-clip one, so use dryRun:true to see the exact act split for free before spending.'),
       aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
@@ -17146,12 +17159,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _len = _askedLen ? clampAdSeconds(_askedLen) : 0;
     if (_len) a = { ...a, durationSeconds: _len };
     const _clampNote = (_askedLen && _askedLen !== _len) ? `\n(${_askedLen}s is outside the supported 4–180s range — rendered at ${_len}s.)` : '';
-    const { input, jobType, notes, needsProductPhoto, creator } = await apiPost('/api/render/assemble', a); // a passes wholesale — creator/resolution/captions/endCard/music/lockup/ttsVoice ride the body
+    const { input, jobType, notes, needsProductPhoto, creator, ownRefNotice } = await apiPost('/api/render/assemble', a); // a passes wholesale — creator/resolution/captions/endCard/music/lockup/ttsVoice ride the body
     // THE CAST IS THE READ-BACK, NEVER THE ASK. `creator` is the row the SERVER resolved out of this workspace's own
     // roster; a half-remembered name that matched nobody, matched two people, or belongs to an unconsented real
     // person never reaches here at all (the assemble route refuses, free, before a job exists). So this line names
     // who is actually in the ad, and it names them from the resolution — the same law the ads tree follows.
-    const _castLine = creator ? `\nCast: ${creator.name} (${creator.id}) — ${creator.source === 'generated' ? 'AI creator' : creator.source === 'social' ? 'from a social profile' : 'uploaded photo'}${creator.source !== 'generated' ? (creator.consented ? ', likeness consent on file' : '') : ''}.` : '';
+    const _castLine = (creator ? `\nCast: ${creator.name} (${creator.id}) — ${creator.source === 'generated' ? 'AI creator' : creator.source === 'social' ? 'from a social profile' : 'uploaded photo'}${creator.source !== 'generated' ? (creator.consented ? ', likeness consent on file' : '') : ''}.` : '') + (ownRefNotice ? `\n⚠ ${ownRefNotice.text} ${ownRefNotice.fix}` : ''); // a creator's own photo too poor to cast is never cast silently (lowQualityRef) — say so and name the fix
     // LAW 8: render_ad honors render_plan.structure/duration — a >single-clip creative assembles as stitched ACTS
     // (jobType 'stitch': the server packs the scenes into the fewest balanced ≤model-max acts via the shared
     // acts-packing.mjs) instead of the old silent clamp that time-compressed a 30s board into one 15s clip.
@@ -18001,17 +18014,37 @@ function memoryNoteVerdict(text) {
     description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s + > Pick a creator > save. Pass the portrait’s public url (a generate_image render of a person, a headshot, any public photo) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS — `source` says what the portrait IS: leave it "generated" for an AI-made person, and use "upload"/"social" ONLY for a REAL person. Pass consented:true only when the user has told you that person agreed to their likeness being used; never assert that on their behalf.',
     inputSchema: {
       name: z.string().describe('what to call this creator (e.g. “Sarah”) — list_creators and the app’s picker match on it'),
-      image: z.string().describe('public https url of the portrait (an existing render’s url, or any public photo). Not a local file path — upload it with upload_file first and save the url that returns'),
+      image: z.string().optional().describe('REQUIRED except with useAnyway. public https url of the portrait (an existing render’s url, or any public photo). Not a local file path — upload it with upload_file first and save the url that returns'),
       source: z.enum(['generated', 'upload', 'social']).optional().describe('"generated" (default) = an AI-made person; "upload" / "social" = a REAL person'),
       consented: z.boolean().optional().describe('REAL people only: the user has confirmed that person consented to their likeness being used in ads'),
       voice: z.string().optional().describe('a default voice name for this persona (engines + voices are in hermoso_capabilities)'),
       poses: z.array(z.string()).optional().describe('up to 4 extra full-body / angle plates of the SAME person (public urls) — they make a wider shot hold the identity'),
       look: z.string().optional().describe('their canonical wardrobe/appearance in words — reused to hold the look steady across ads'),
+      useAnyway: z.boolean().optional().describe('only for a creator whose saved photo was flagged too unclear to cast (render_ad says so): true casts the current photo as it is, no new image needed'),
     },
-    outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), creator: z.any().optional() },
+    outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), creator: z.any().optional(), refQuality: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const name = String(a.name || '').trim(), image = String(a.image || '').trim();
+    // A PHOTO FLAGGED TOO UNCLEAR TO CAST (lowQualityRef, 2026-09-22) is REPLACED in place by a new portrait under the
+    // same name — scored by the same rule the onboarding used — or accepted as it is with useAnyway. A twin row would
+    // make the creator's own cast ambiguous (two rows named as the brand → nobody is cast).
+    if (name) {
+      let _l = await readStore('heist.avatars.v1'); if (!Array.isArray(_l)) _l = [];
+      const low = _l.find(x => x && x.lowQualityRef && !x.refAccepted && String(x.name || '').trim().toLowerCase() === name.toLowerCase());
+      if (low && a.useAnyway === true && !image) {
+        low.refAccepted = true; await writeStore('heist.avatars.v1', _l);
+        return ok(`“${low.name}” will be cast with the current photo as it is.`, { ok: true, id: low.id, creator: { id: low.id, name: low.name, image: abs(low.image), source: low.source } });
+      }
+      if (low && image) {
+        if (!/^https?:\/\//i.test(image) && !image.startsWith('/generated/')) return { content: [{ type: 'text', text: 'The new photo must be a public https url — upload the file with upload_file first, then pass the url it returns.' }], isError: true };
+        const r = await apiPost('/api/creator/ref', { image, name: low.name });
+        low.image = r?.image || image; low.refQuality = r?.refQuality || null; low.lowQualityRef = !!r?.lowQualityRef; delete low.refAccepted; low.poses = [];
+        await writeStore('heist.avatars.v1', _l);
+        const q = r?.refQuality?.score != null ? ` (photo quality ${r.refQuality.score}/100)` : '';
+        return ok(r?.lowQualityRef ? `Replaced “${low.name}”’s photo${q}, but this one is still too unclear to cast well — try a sharper, front-facing, well-lit photo, or save_creator(name: "${low.name}", useAnyway: true).` : `Replaced “${low.name}”’s photo${q} — renders now cast them from it.`, { ok: true, id: low.id, creator: { id: low.id, name: low.name, image: abs(low.image), source: low.source }, refQuality: r?.refQuality || null });
+      }
+    }
     if (!name || !image) return { content: [{ type: 'text', text: 'A creator needs both a name and a portrait url.' }], isError: true };
     // The portrait must be FETCHABLE by every render lane that will consume it. A data: blob or a local path is a
     // reference nothing downstream can resolve, so refuse here with the fix rather than saving a dead entry that
@@ -19281,13 +19314,20 @@ function memoryNoteVerdict(text) {
       hasBrand: z.boolean().optional().describe('whether a brand is saved for this workspace'),
       brand: z.any().optional().describe('the saved brand profile (name, domain, category, products, palette, …) or null'),
       memoryCount: z.number().optional().describe('how many learned memory notes the workspace holds'),
+      persona: z.string().nullable().optional().describe("who the user said they are at onboarding: creator | business | agency | marketer | explorer, or null when they never said. The same resolver the web Studio steers by."),
+      personaNote: z.string().optional().describe('how to work for that kind of user (a creator wants organic content for their own feed, not ads by default; an explorer came to play with the models and needs no brand). Empty when persona is null.'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/brand/current');
+    // WHO IS ASKING (2026-09-22): a creator's saved "brand" is their personal brand and an explorer has none on purpose,
+    // so the text says so before it says what the create tools do with the profile — the same note the web Studio reads.
+    const who = d?.personaNote ? `\n${d.personaNote}` : '';
     const text = d?.hasBrand
-      ? `Saved brand: ${d.brand.name || d.brand.domain}${d.brand.category ? ' · ' + d.brand.category : ''} · ${d.memoryCount} learned memory notes. plan_ad / plan_variations / create use it automatically when you omit brand.`
-      : 'No saved brand for this workspace yet — onboard one with draft_brand (it saves automatically), or the user can onboard in the web Studio.';
+      ? `Saved brand: ${d.brand.name || d.brand.domain}${d.brand.category ? ' · ' + d.brand.category : ''} · ${d.memoryCount} learned memory notes. plan_ad / plan_variations / create use it automatically when you omit brand.${who}`
+      : (d?.persona === 'explorer'
+        ? `No saved brand for this workspace, and that is the user's choice: they picked "Just exploring". Make what they ask with no brand at all; a brand is optional (draft_brand, or the web Studio) and only worth mentioning if THEY ask for something about their own business.${who}`
+        : `No saved brand for this workspace yet — onboard one with draft_brand (it saves automatically), or the user can onboard in the web Studio. Not a precondition: every tool works from what the user tells you.${who}`);
     return ok(text, d);
   }));
 

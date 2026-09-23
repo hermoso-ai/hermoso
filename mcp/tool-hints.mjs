@@ -55,3 +55,46 @@ export function withHints(result, hints) {
 
 /** Read them back — the shape a check and a client both use, so neither has to know the key. */
 export const hintsOf = (result) => (result && result._meta && Array.isArray(result._meta[HINTS_KEY])) ? result._meta[HINTS_KEY] : [];
+
+
+// ── A VIDEO THE CALLER EXPECTS AND CANNOT AFFORD IS A CHOICE, NOT A SWAP (2026-09-22, Dave) ─────────────────────
+// The server refuses BEFORE planning or reserving — nothing billed — and the refusal carries `videoChoice`
+// (server.js videoChoiceFor): the video's price against the balance, the image alternative priced, a top-up, and,
+// only when one fits the balance together with the plan, a light draft. The text spells the same three options so
+// a model can act on them; the hints are those options keyed as {do, why}, so an agent can branch instead of parsing.
+// Which call makes the image depends on the tool that refused: plan_ad plans again with format image, render_ad goes
+// back to plan_ad for an image plan, generate_video becomes generate_image. Pure, no imports — the twin rule above.
+export function videoChoiceImageCall(tool) {
+  const t = String(tool || '');
+  if (t === 'generate_video') return 'generate_image({prompt: the same prompt})';
+  if (t === 'render_ad') return "plan_ad({…the same brief, format: 'image'}) then generate_image with its image_concept.prompt";
+  if (t === 'clone_video') return "plan_ad({reference: the same link, format: 'image'}) then generate_image";
+  return `${t || 'the same call'}({…the same arguments, format: 'image'})`;
+}
+export function videoChoiceDraftCall(tool, d) {
+  const t = String(tool || '');
+  const m = String(d?.model || ''), s = Math.round(Number(d?.durationSeconds) || 0);
+  if (t === 'plan_ad' || t === 'clone_video') return `${t}({…the same arguments, format: 'video', draft: {model: '${m}', durationSeconds: ${s}}})`;
+  return `${t || 'the same call'}({…the same arguments, model: '${m}', durationSeconds: ${s}})`;
+}
+export function videoChoiceHints(tool, choice) {
+  const c = choice && typeof choice === 'object' ? choice : {}, o = c.options || {};
+  const out = [
+    { do: videoChoiceImageCall(tool), why: `the image version is ~${o.image?.credits ?? '?'} credits against a balance of ${c.balance ?? '?'}; the video needs ~${c.videoCredits ?? '?'}` },
+    { do: 'buy_credits({})', why: `${c.short ?? '?'} credits short of the video; a pack or a plan covers it, then the same call plans the video` },
+  ];
+  if (o.draft && o.draft.model) out.push({ do: videoChoiceDraftCall(tool, o.draft), why: `a light draft on ${o.draft.label || o.draft.model} (${o.draft.durationSeconds}s) is ~${(Number(o.draft.credits) || 0) + (Number(o.draft.planCredits) || 0)} credits and fits the balance; render the premium version after topping up` });
+  return out;
+}
+export function videoChoiceText(tool, choice) {
+  const c = choice && typeof choice === 'object' ? choice : {}, o = c.options || {};
+  const d = o.draft && o.draft.model ? o.draft : null;
+  const lines = [
+    `${c.seconds ? `A ${c.seconds}s video` : 'This video'} would cost about ${c.videoCredits ?? '?'} credits and the account has ${c.balance ?? '?'} (${c.short ?? '?'} short). Nothing was planned, rendered or charged. Tell the user and let them choose — never switch the format for them:`,
+    `  1. Make it as an image instead (~${o.image?.credits ?? '?'} credits): ${videoChoiceImageCall(tool)}.`,
+    `  2. Add credits: buy_credits({}) quotes a pack on a saved card or returns a checkout link${o.topup?.url ? ` (or ${o.topup.url})` : ''}; then repeat the same call and the video goes ahead as asked.`,
+  ];
+  if (d) lines.push(`  3. Render the video anyway as a light draft on ${d.label || d.model} (${d.durationSeconds}s, ~${(Number(d.credits) || 0) + (Number(d.planCredits) || 0)} credits): ${videoChoiceDraftCall(tool, d)}. Premium models once they top up.`);
+  else lines.push(`  (No light-model draft fits this balance, so there is no "render anyway" option here.)`);
+  return lines.join('\n');
+}
