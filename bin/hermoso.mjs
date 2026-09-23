@@ -109,7 +109,7 @@ async function main() {
       case 'capabilities': case 'caps': {
         const d = await api.apiGet('/api/generate/status');
         if (flags.json) return console.log(JSON.stringify(d, null, 2));
-        console.log('IMAGE models:'); (d.options?.image?.models || []).forEach(m => console.log(`  ${m.id.padEnd(18)} ${m.label} · ${m.credits}cr${m.best ? ' ★best' : ''}`));
+        console.log('IMAGE models:'); (d.options?.image?.models || []).forEach(m => console.log(`  ${m.id.padEnd(18)} ${m.label} · ${m.credits}cr${m.best ? ' ★best' : ''}${m.aspectRatios?.length ? ` · aspect ${m.aspectRatios.join(' ')}` : ''}`));
         console.log('VIDEO models:'); (d.options?.video?.models || []).forEach(m => console.log(`  ${m.id.padEnd(18)} ${m.label} · ${(m.durations || []).join('/')}s`));
         console.log(`flags: canEdit=${d.canEdit} canAvatar=${d.canAvatar} canPublish=${d.canPublish}`);
         console.log(`recipes: ${(d.recipes || []).map(r => r.id).join(', ')}`);
