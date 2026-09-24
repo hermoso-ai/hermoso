@@ -113,6 +113,10 @@ const channelOutcomeLine = (res) => {
 const stillMsg = (r, widget = hostRendersWidgets()) => widget
   ? `NOT FINISHED. Job ${r.jobId} is still rendering and there is no video yet. The Hermoso card above is already polling and will show the finished video in place the moment it lands, so do NOT call get_job and do NOT re-render. Reply with ONE short line saying it is rendering and will appear in the card above. Do NOT say it is done, ready, rendered or finished, and do NOT describe the video — you have not seen it.`
   : `Still rendering — job ${r.jobId}. This is NORMAL: video renders take 1–3 minutes and each get_job call waits up to ~45s, so it can take several calls. Keep calling get_job with this id until status is done or error — do NOT ask the user whether to keep waiting, and do NOT re-fire the render on another model (that double-charges). Only surface a problem after ~6 minutes of polling. Until get_job reports done you have NO video: do NOT say it is finished and do NOT describe it.`;
+// A TIMELINE EDIT'S SELF-CRITIQUE, one sentence for both places it can arrive: edit_timeline's own reply when the render
+// finished inside the wait, and get_job's when it did not (a prod timeline takes ~3 minutes, past the hosted 45 s wait,
+// so on a hosted MCP the review ONLY ever arrives through get_job). Empty for every other job.
+const timelineReviewText = (rv) => rv ? `\nREVIEW (${rv.verdict || 'unread'}${rv.score != null ? `, ${rv.score}/10` : ''}${rv.linked === false ? ', NOT LINKED: the two clips read as unrelated; say so and offer a follow clip made for the hook (a brief they record, or one generated with the cost quoted first)' : rv.linked ? ', linked' : ''}): ${(rv.issues || []).map((x) => `seam ${x.seam}: ${x.problem} → ${x.fix}`).join(' | ') || 'no issues'}. ${rv.verdict === 'amateur' || rv.verdict === 'ok' ? 'Fix what it names and re-run with the same sources (twice at most) before presenting it.' : 'Look at the seam frames too before presenting it.'}` : '';
 const okVideo = async (text, r) => {
   if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; const t = text + geoLine(r) + qaLine(r); return { content: [{ type: 'text', text: p ? t + '\n(first frame attached — open the URL for the full video)' : t }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
 
@@ -17343,7 +17347,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.applied) ? `  (${r.raw.applied.join(', ')})` : ''}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : ''}  [job ${r.jobId}]`, r);
   }));
 
-  // THE OPEN EDIT PRIMITIVE (2026-09-24). Dave: "I hate being rigid, the whole point of this is being able to do basically
+  // THE OPEN EDIT PRIMITIVE (2026-09-24). The owner: "I hate being rigid, the whole point of this is being able to do basically
   // anything they want", and: "their super smart AI agent should have hermoso, access all our tools and be able to make
   // what it thinks is best for the user". So there is no list of named transitions: the caller COMPOSES any edit from
   // segments + keyframes + overlay HTML, and the server (lib/timeline.mjs) validates every value and compiles the
@@ -17404,10 +17408,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE SELF-CRITIQUE comes back WITH the render: the verdict, the fixes, and the seam frames the reviewer saw, inline,
     // so the calling agent can see its own transition before it shows the user anything.
     const rv = r?.raw?.review;
-    const rvText = rv ? `\nREVIEW (${rv.verdict || 'unread'}${rv.score != null ? `, ${rv.score}/10` : ''}${rv.linked === false ? ', NOT LINKED: the two clips read as unrelated; say so and offer a follow clip made for the hook (a brief they record, or one generated with the cost quoted first)' : rv.linked ? ', linked' : ''}): ${(rv.issues || []).map((x) => `seam ${x.seam}: ${x.problem} → ${x.fix}`).join(' | ') || 'no issues'}. ${rv.verdict === 'amateur' || rv.verdict === 'ok' ? 'Fix what it names and re-run with the same sources (twice at most) before presenting it.' : 'Look at the seam frames too before presenting it.'}` : '';
+    // STILL RENDERING AFTER THE WAIT (a prod timeline takes ~3 minutes; the hosted wait is 45 s): the job id and the
+    // polling instruction, plus where the self-critique will arrive, so the caller neither re-renders nor presents blind.
+    if (r?.stillRendering && !hostRendersWidgets()) return ok(`${stillMsg(r)} A timeline edit usually takes about 3 minutes. When get_job(${r.jobId}) reports done, its answer carries the SEAM REVIEW and the seam frames: read them before you present the edit, and fix + re-run (same sources) if it says ok or amateur.`, r);
+    const rvText = timelineReviewText(rv);
     const res = await okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : ''}${tl ? `\nRESOLVED: ${tl.segments.map((sg) => `[${sg.i}] ${sg.in != null ? `${sg.in}-${sg.out}s` : `${sg.seconds}s`} @${sg.at}s`).join(', ')} (${tl.seconds}s)` : ''}${gen}${rvText}  [job ${r.jobId}]`, r);
     const sheet = rv?.seamSheets?.[0]?.url ? await imageBlock(abs(rv.seamSheets[0].url)) : null;
-    if (sheet && Array.isArray(res.content)) res.content.push({ type: 'text', text: `Seam 1 frames (${rv.seamSheets[0].at}s, 15 fps, left to right):` }, sheet);
+    if (sheet && Array.isArray(res.content)) res.content.push({ type: 'text', text: `Seam 1 frames (${rv.seamSheets[0].at}s${rv.seamSheets[0].end > rv.seamSheets[0].at ? `-${rv.seamSheets[0].end}s` : ''}, ${rv.seamSheets[0].fps || 15} fps, left to right):` }, sheet);
     return res;
   }));
 
@@ -17784,6 +17791,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const wireText = `${text}\n${JSON.stringify({ id: j.id, status: j.status, progress: j.progress ?? null, url: url || null, error: j.error || null,
       model: j.model || rawJ.model || null, poster: abs(rawJ.poster) || null, creditsUsed: j.creditsUsed ?? null,
       deliveredWidth: rawJ.deliveredWidth ?? null, deliveredHeight: rawJ.deliveredHeight ?? null })}`;
+    if (j.status === 'done' && res?.video && res?.review) { // a finished TIMELINE edit: its seam review + frames, as edit_timeline would have shown them
+      const out = await okVideo(`${wireText}${timelineReviewText(res.review)}`, { ...j, url });
+      const sheet = res.review?.seamSheets?.[0]?.url ? await imageBlock(abs(res.review.seamSheets[0].url)) : null;
+      if (sheet && Array.isArray(out.content)) out.content.push({ type: 'text', text: `Seam 1 frames (${res.review.seamSheets[0].at}s${res.review.seamSheets[0].end > res.review.seamSheets[0].at ? `-${res.review.seamSheets[0].end}s` : ''}, ${res.review.seamSheets[0].fps || 15} fps, left to right):` }, sheet);
+      return out;
+    }
     if (j.status === 'done' && res?.video) return okVideo(wireText, { ...j, url }); // resumed video → same inline poster as a direct return
     if (j.status === 'done' && res?.image) { const img = await imageBlock(url); return { content: [{ type: 'text', text: wireText }, ...(img ? [img] : [])], structuredContent: { ...j, url } }; }
     return ok(wireText, { ...j, url });
