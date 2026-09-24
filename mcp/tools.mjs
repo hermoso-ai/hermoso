@@ -18613,22 +18613,33 @@ function memoryNoteVerdict(text) {
   }));
   server.registerTool('remove_member', {
     title: 'Remove a teammate',
-    description: 'Remove a member from this brand workspace by email — they lose access (you can re-invite them later). Confirm the exact person with the user, then call with confirm:true.',
+    description: 'Remove a member from this brand workspace by email — they lose access (you can re-invite them later), AND every connection THEY made on this brand is disconnected with them: their own X, LinkedIn, TikTok, YouTube, Pinterest, Threads… connections (on a channel holding several accounts, only the accounts they added), and any extra login or authorization they added. Connections the owner or anyone else made are never touched, and one with no record of who connected it is treated as the owner\'s. Queued posts that would publish through their accounts, or that they scheduled themselves, will not go out. The unconfirmed call reports exactly which connections and how many scheduled posts — relay that to the user, then call with confirm:true.',
     inputSchema: {
       email: z.string().describe('the member’s email'),
       confirm: z.boolean().optional().describe('REQUIRED true'),
     },
-    outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional(), email: z.string().optional(), members: z.array(z.any()).optional() },
+    outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional(), email: z.string().optional(), members: z.array(z.any()).optional(), connectionsDisconnected: z.array(z.any()).optional(), scheduledPostsNotGoingOut: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    if (a.confirm !== true) return ok(`This will remove ${a.email || '(no email)'} from the workspace. Confirm with the user, then call again with confirm:true.`, { ok: false });
+    // THE CONFIRM NAMES WHAT GOES WITH THEM (2026-09-24): removing a teammate disconnects the connections they made,
+    // so the sentence the user approves must say which, from the same plan the removal runs. A 404 (not a member)
+    // surfaces as the error it is; a preview that could not be read is said, never rendered as "nothing".
+    if (a.confirm !== true) {
+      let pv = null;
+      try { pv = await apiGet('/api/team/remove-preview', { email: a.email || '' }); }
+      catch (e) { if (e?.status === 404 || e?.status === 403) throw e; }
+      return ok(pv?.message
+        ? `${pv.message} Confirm with the user, then call again with confirm:true.`
+        : `This will remove ${a.email || '(no email)'} from the workspace and disconnect any connections they made on this brand. I could not read which ones just now — check Settings ▸ Connectors before confirming. Confirm with the user, then call again with confirm:true.`,
+        { ok: false, ...(pv ? { connectionsDisconnected: pv.connectionsDisconnected || [], scheduledPostsNotGoingOut: pv.scheduledPostsNotGoingOut || 0 } : {}) });
+    }
     // The route 404s BY NAME when the address is not a member (a typo, a stale address, the wrong brand) — that error
     // surfaces through wrap(). What reaches here is a real change or an honest no-op, and the sentence comes from the
     // server's READ-BACK of the members list, never from what we asked for.
     const d = await apiPost('/api/team/remove', { email: a.email });
     if (d.alreadyRemoved) return ok(d.message || `${a.email} already had no access to this workspace — nothing changed.`, { ok: false, removed: false, alreadyRemoved: true, email: a.email });
     const left = (d.members || []).map(m => `  \u2022 ${m.email} \u2014 ${m.role || 'member'}`);
-    return ok(`${d.message || `${a.email} no longer has access to this workspace.`}${left.length ? `\nStill on this workspace:\n${left.join('\n')}` : ''}`, { ok: true, removed: !!d.removed, email: d.email || a.email, members: d.members });
+    return ok(`${d.message || `${a.email} no longer has access to this workspace.`}${left.length ? `\nStill on this workspace:\n${left.join('\n')}` : ''}`, { ok: true, removed: !!d.removed, email: d.email || a.email, members: d.members, connectionsDisconnected: d.connectionsDisconnected || [], scheduledPostsNotGoingOut: d.scheduledPostsNotGoingOut || 0 });
   }));
   server.registerTool('set_role', {
     title: 'Change a teammate’s role',
