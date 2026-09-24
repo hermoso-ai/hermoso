@@ -92,7 +92,11 @@ function headers(extra = {}) {
   // their own activity, which is why this decides bookkeeping and nothing else.
   if (ctx) h['x-hermoso-inproc'] = '1';
   if (process.env.EDGE_SECRET) h['x-edge-auth'] = process.env.EDGE_SECRET; // belt: in-process self-calls satisfy the edge shield even if the loopback exemption ever changes
-  const tok = ctx?.token || TOKEN;
+  // THE SAME RULE FOR THE BEARER (2026-09-23). This read `ctx?.token || TOKEN`, so a hosted request whose ctx carried
+  // no token would have been sent with the SERVER process's own HERMOSO_TOKEN — an operator credential standing in for
+  // a customer's missing one, the exact class lib/operator-credentials.mjs exists to end. A remote ctx carries its own
+  // bearer or none; only stdio / the CLI, where the process IS the caller, reads the environment.
+  const tok = ctx ? (ctx.token || '') : TOKEN;
   if (tok) h.Authorization = `Bearer ${tok}`;
   return h;
 }
