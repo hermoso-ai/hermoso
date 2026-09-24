@@ -57,7 +57,7 @@ export function withHints(result, hints) {
 export const hintsOf = (result) => (result && result._meta && Array.isArray(result._meta[HINTS_KEY])) ? result._meta[HINTS_KEY] : [];
 
 
-// ── A VIDEO THE CALLER EXPECTS AND CANNOT AFFORD IS A CHOICE, NOT A SWAP (2026-09-22, Dave) ─────────────────────
+// ── A VIDEO THE CALLER EXPECTS AND CANNOT AFFORD IS A CHOICE, NOT A SWAP (2026-09-22) ─────────────────────
 // The server refuses BEFORE planning or reserving — nothing billed — and the refusal carries `videoChoice`
 // (server.js videoChoiceFor): the video's price against the balance, the image alternative priced, a top-up, and,
 // only when one fits the balance together with the plan, a light draft. The text spells the same three options so

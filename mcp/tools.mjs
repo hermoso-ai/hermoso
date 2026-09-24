@@ -92,7 +92,7 @@ const channelOutcomeLine = (res) => {
   return ` — published to ${chs.length - failed.length}/${chs.length} channel${chs.length === 1 ? '' : 's'}` +
     (failed.length ? `. FAILED: ${failed.map(f => `${f.channel} (${f.error || 'failed'})`).join('; ')}` : '');
 };
-// A JOB THAT IS STILL RUNNING MUST NOT BE NARRATED AS FINISHED (2026-08-24, Dave: the card read "Rendering — job
+// A JOB THAT IS STILL RUNNING MUST NOT BE NARRATED AS FINISHED (2026-08-24: the card read "Rendering — job
 // …" while the sentence under it read "Done — I rendered the 4-second 9:16 vertical coffee ad"). The old text
 // told the model to keep polling and never told it not to CLAIM the result, so it narrated an unfinished job as a
 // delivered one — the render-side twin of get_job's `done (100%)` printed over posted:0.
@@ -107,7 +107,7 @@ const stillMsg = (r, widget = hostRendersWidgets()) => widget
 const okVideo = async (text, r) => {
   if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; const t = text + geoLine(r) + qaLine(r); return { content: [{ type: 'text', text: p ? t + '\n(first frame attached — open the URL for the full video)' : t }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
 
-// ── INDEPENDENT AREAS, NOT A PIPELINE (Dave, 2026-08-04) ────────────────────────────────────────────────────────
+// ── INDEPENDENT AREAS, NOT A PIPELINE (2026-08-04) ────────────────────────────────────────────────────────
 // "the app isnt all or nothing, you dont need to use our content generation, you dont need to use our scheduled
 // posting or ads management, you can pick and choose individual features and use whatever specifically you need,
 // or all of it together."
@@ -135,7 +135,7 @@ const okVideo = async (text, r) => {
 export const INDEPENDENCE = 'INDEPENDENT AREAS, NOT A PIPELINE — research, creation, publishing/scheduling and ads management each work ON THEIR OWN, and NO tool requires that you used another one first: publish or schedule media the user already has and generate nothing here (upload_file turns any local or external file into a URL the publish, schedule and ad-build tools accept), build and read campaigns on their OWN ad accounts with their OWN creative across all eleven ad platforms, research competitors with no brand drafted and no channel connected, or generate a file with nothing connected at all and simply hand back the URL. Use one area, several, or all of it together — never tell a user they have to start somewhere else first.';
 
 // ── PASTE-A-KEY CONNECTORS AN AGENT MAY CONNECT ITSELF (2026-09-12) ──────────────────────────────────────────────────
-// Dave: "AI agents should be able to connect key based accounts, we should offer both and its up to users what they
+// Product feedback: "AI agents should be able to connect key based accounts, we should offer both and its up to users what they
 // prefer." An OAuth account needs its provider's consent screen, which only a browser can show. A paste-a-key account
 // needs a value the user already holds, and the app's own route checks that value live with the vendor before it saves
 // anything. So connect_connector posts to the SAME route the Connectors page posts to (server validation, workspace
@@ -307,7 +307,7 @@ async function videoPosterBlock(videoUrl) {
     const f = (d.frames || [])[0]; if (!f || !/^data:image\//.test(f)) return null;
     const [head, b64] = f.split(',');
     return { type: 'image', data: b64, mimeType: head.slice(5).split(';')[0] };
-  } catch (e) { console.error('[mcp] video poster failed:', String(e?.message || e).slice(0, 160)); return null; } // silent-null keeps the link usable; log so a missing poster is diagnosable (Dave hit this on Claude.ai)
+  } catch (e) { console.error('[mcp] video poster failed:', String(e?.message || e).slice(0, 160)); return null; } // silent-null keeps the link usable; log so a missing poster is diagnosable (the owner hit this on Claude.ai)
 }
 async function imageBlock(url) {
   // A HOST WITH A WIDGET DOES NOT NEED A MEGABYTE OF BASE64, AND IS HARMED BY IT (2026-08-23).
@@ -444,7 +444,7 @@ const wrap = (fn) => {
     if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice); _hints.push(...videoChoiceHints(_tool, e.videoChoice)); }
     else if (/not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) _hints.push({ do: 'buy_credits({})', why: 'this account cannot cover the call; buy_credits quotes on a saved card or returns a checkout link, and billing_status shows the balance and the billing role' }), msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes (quoteToken included) then one-click charges on confirm:true + quote_token; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
     // connector not connected → hand the human a ONE-CLICK connect link (OAuth needs a browser, so it can't happen
-    // in-agent) — Dave 2026-07-23. Detected from the STRUCTURED signal, never from the prose (see notConnectedHint).
+    // in-agent) — 2026-07-23. Detected from the STRUCTURED signal, never from the prose (see notConnectedHint).
     else {
       msg += notConnectedHint(e, msg);
       // Read from the STRUCTURED signal, exactly as the sentence above is — never from the prose.
@@ -488,7 +488,7 @@ const publishWrap = (fn) => {
   };
   // The registry tags the function it REGISTERS, which here is this outer one — forward the name down to the wrap()
   // that actually reads it, or every publish tool would report its errors with an empty op. (Without this the whole
-  // publishing surface — the exact area Dave named — is the one part of the ledger with no tool names in it.)
+  // publishing surface — the exact area the owner named — is the one part of the ledger with no tool names in it.)
   Object.defineProperty(outer, '_hermosoTool', { set(v) { inner._hermosoTool = v; }, get() { return inner._hermosoTool; }, configurable: true });
   return outer;
 };
@@ -735,7 +735,7 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
   #root { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; color: #16181c; }
   @media (prefers-color-scheme: dark) { #root { color: #ececf1; } }
   /* FILL THE BUBBLE. A fixed 520px left the card occupying about two thirds of ChatGPT's much wider container
-     with dead space beside it (Dave, 2026-08-24). The host already bounds the width; we should not bound it
+     with dead space beside it (2026-08-24). The host already bounds the width; we should not bound it
      again and smaller. Media still has its own max-height, so a tall 9:16 clip cannot run away. */
   .card { width: 100%; border: 1px solid rgba(128,128,128,.28); border-radius: 14px; overflow: hidden; background: rgba(128,128,128,.05); }
   /* A VERTICAL AD MUST RENDER VERTICAL (2026-08-24). width:100% forced a 1080x1920 clip to the full card width,
@@ -830,7 +830,7 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
     }
     return null;
   }
-  // NOTHING TO SHOW IS NOT A CARD (2026-08-23). Driving Hermoso inside ChatGPT, Dave's conversation filled up with
+  // NOTHING TO SHOW IS NOT A CARD (2026-08-23). Driving Hermoso inside ChatGPT, the owner's conversation filled up with
   // empty Hermoso cards reading "No media in this result yet." — a full-height bordered box with a wordmark and no
   // content, sometimes three or four in a row. Every widget-bound tool draws this card on EVERY call, and several
   // of their results legitimately carry no media at all: render_ad's dryRun and its needsProductPhoto ask,
@@ -898,7 +898,7 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
     // MEDIA BEATS A STALE STATUS, and an error only counts when nothing was delivered.
     v.pending = !v.media && !v.error && !v.notFound && (!!out.stillRendering || v.status === 'queued' || v.status === 'running' || (!!v.jobId && v.status !== 'done' && v.status !== 'error'));
     // AND A CARD THAT HAS STOPPED CHECKING IS NOT "RENDERING". The give-up limits used to stop the TIMER and leave
-    // the spinner and the word "Rendering" on screen, which is a lie about what the product is doing — Dave watched
+    // the spinner and the word "Rendering" on screen, which is a lie about what the product is doing — the owner watched
     // exactly that for ten minutes after the job had already failed. "stalled" is a pending render this card can no
     // longer follow: it still names the job id, it just stops pretending to watch it.
     // A HOST WITH NO BRIDGE IS NOT A STALL: the model's own get_job loop still runs and set_globals still lands
@@ -915,7 +915,7 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
   // callTool with an ENVELOPE, so the envelope itself was taken as the payload. An envelope has a truthy result
   // key, so the "is this usable?" test passed, missed was reset to 0 on every attempt, and the card sat in pending
   // claiming it updates itself. A card that gives up at least says so; this one could not reach either terminal
-  // state, which is exactly what Dave watched: "the video is taking very long to render, not sure if it ever will".
+  // state, which is exactly what the owner watched: "the video is taking very long to render, not sure if it ever will".
   //
   // So unwrap, and DECIDE BY SHAPE rather than by which key the host happened to use. A job payload is the object
   // carrying status / url / result.data; an envelope carries content and structuredContent. Candidates are walked
@@ -1232,7 +1232,7 @@ const CAPABILITIES_HTML = String.raw`<div id="root"></div>
 
 // ── THE AD-SPY CARD — RESEARCH RESULTS SHOW THE CREATIVE (2026-08-24) ─────────────────────────────────────────
 // "Using Hermoso, show me the ads Liquid Death is running right now" came back in ChatGPT as a wall of text with
-// numbered "View Liquid Death ad #…" links and ZERO images (Dave: "shouldnt it show images natively?"). The cause
+// numbered "View Liquid Death ad #…" links and ZERO images ("shouldnt it show images natively?"). The cause
 // is a gate that is right for the tools it was written for and wrong here: imageBlock() returns null on a widget
 // host, because a 1.03MB inline base64 block once made ChatGPT drop structuredContent entirely — and the RENDER
 // tools it was written for have the ad-result card to show the media instead. The RESEARCH tools had no card, so
@@ -1279,7 +1279,7 @@ const AD_SPY_HTML = String.raw`<div id="root"></div>
   .noshot { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 4 / 5; font-size: 11px; opacity: .5; color: #ececf1; }
   /* A SEARCH AD IS TEXT, AND TEXT IS ITS CREATIVE — not a picture that failed to load. Google's ad library returns
      format:'text' rows with no image by design, and painting the grey "no creative" plate over them made a whole
-     row of real, live search ads read as broken (Dave, 2026-08-24). The headline gets the slot instead, set like
+     row of real, live search ads read as broken (2026-08-24). The headline gets the slot instead, set like
      the ad it is: a search result. */
   .textad { display: flex; align-items: center; width: 100%; aspect-ratio: 4 / 5; padding: 14px 12px; color: #ececf1;
             background: linear-gradient(160deg, rgba(120,140,255,.10), rgba(0,0,0,.55)); }
@@ -1377,7 +1377,7 @@ const AD_SPY_HTML = String.raw`<div id="root"></div>
   // A CALL THAT HAS NOT ANSWERED IS NOT A CALL THAT FOUND NOTHING. The host mounts this component as soon as the
   // tool is invoked, so for the whole length of a research call (a minute is normal) toolOutput is simply absent
   // and the old code took that for "nothing found" and painted an empty box — a blank region under the prompt
-  // with no sign anything was happening (Dave, 2026-08-24). Absent output means PENDING; output that arrived
+  // with no sign anything was happening (2026-08-24). Absent output means PENDING; output that arrived
   // carrying no cards is the real empty case and still collapses to nothing.
   // The FIRST attempt at this read toolResponseMetadata's mere PRESENCE as "answered", which is wrong in the
   // expensive direction: that object exists DURING the call, because it is what carries the status. So every
@@ -1502,7 +1502,7 @@ export function adSpyCard(row, platform = '') {
   // A TILE MUST SHOW SOMETHING A HUMAN CAN USE: a picture, or copy to read. The old guard also accepted an
   // ADVERTISER NAME or a bare link, and that is how a Google pull filled half the grid with identical dead tiles
   // reading "no creative / Liquid Death GOOGLE" — the advertiser is the same on every tile in the grid, so it
-  // carries no information at all, and there was nothing to click through to (Dave, 2026-08-24: "if there's
+  // carries no information at all, and there was nothing to click through to (2026-08-24: "if there's
   // actually no creative, why would we even show them, you cant click or see more details so its completely
   // useless"). Google's basic ad-library tier returns exactly this shape: an advertiser and nothing else.
   // A LINK still counts: a video ad whose poster is missing shows no picture but is genuinely clickable, and
@@ -1983,7 +1983,7 @@ export const DEFAULT_TOOL_GROUPS = TOOL_GROUP_NAMES.filter((g) => !OPT_IN_TOOL_G
 //   • `MCP_CORE_FIRST=1` in the environment turns the small roster on for the whole process, and
 //   • `?tools=core` turns it on for one connection; any explicit `tools=` scope or `enable_tools({groups:[…]})`
 //     mid-session decides the roster outright. An explicit scope ALWAYS wins.
-// 🚨 CORE-FIRST IS OPT-IN, NOT THE DEFAULT (2026-09-17, Dave: "can chatgpt, cursor etc and other mcps properly use that
+// 🚨 CORE-FIRST IS OPT-IN, NOT THE DEFAULT (2026-09-17: "can chatgpt, cursor etc and other mcps properly use that
 // to access all our tools or will they think we're missing a lot of functionality? We DO NOT want to hurt quality or
 // make it seem like we have less functionality"). `find_tools` is OUR tool, not a host feature, so a client only reaches
 // the other 800 tools if its model READS the instructions that say so — and ChatGPT's connector truncates server
@@ -2005,7 +2005,7 @@ export const coreFirstRoster = (env = process.env) => CORE_FIRST_ENV.some((k) =>
 // every existing caller and every per-group count the site and the docs derive. tools/core-first-roster-check.mjs
 // asserts each name is registered and that NONE of them is connector-gated (one that were would be listed and
 // then answer 401, which is the thing the connector gate exists to prevent).
-// THE SHORT LIST HAS TO LOOK LIKE THE PRODUCT (2026-09-20, Dave: "we dont want to degrade quality or make it look like
+// THE SHORT LIST HAS TO LOOK LIKE THE PRODUCT (2026-09-20: "we dont want to degrade quality or make it look like
 // there's less capability"). The first core-first list was the `core` group plus the five above, and read live off
 // production it was: enable_tools, find_tools, call_tool, hermoso_capabilities, hermoso_credits, buy_credits,
 // report_bug, request_feature, billing_status, upgrade_plan, set_auto_reload, list_brands, use_brand, create_brand,
@@ -2129,7 +2129,7 @@ export async function legacyToolAnswer(name, request, extra, ctx) {
 // audio content" (design aids excepted) and software that "executes financial transactions on behalf of users".
 // Hermoso as a whole does both, so the Claude Connectors Directory listing is a SCOPED server: the `create` group
 // is out, every tool that calls a generative image/video/audio model is out wherever it lives, and the three tools
-// that move money are out (the same three ChatGPT is denied). Dave, 2026-09-02: "We're way more than ad generation,
+// that move money are out (the same three ChatGPT is denied). Product feedback (2026-09-02): "We're way more than ad generation,
 // we can focus on all the other huge benefits like our organic posting, ads management, analytics, dms, etc."
 // It is a CAGE, deliberately, unlike every other scope: enable_tools may not widen it into `create` or `all`,
 // because the listing's compliance acknowledgments are only honest if no path on the connection reaches a
@@ -2146,7 +2146,7 @@ export const WITHHELD_FROM_DIRECTORY = new Set([
   'upscale_video', 'reframe_video', 'multiply_ad', 'clone_static', 'remix_static', 'stitch_video', 'fix_beat',
   'hook_variants',
 ]);
-// TWO DIRECTORY MODES (Dave, 2026-09-02, after the directory turned out to list Tofu Ads — an AI ad-image generator
+// TWO DIRECTORY MODES (2026-09-02, after the directory turned out to list Tofu Ads — an AI ad-image generator
 // — under the policy's design-asset carve-out): `directory` is the fully scoped cage above; `directory-full` keeps
 // generation (an ad-creation workflow with the brand's own product and copy, the carve-out's shape) and withholds
 // ONLY the three tools that move money, which is the listing that was actually submitted. Both are cages for what
@@ -2161,7 +2161,7 @@ export const toolHeldBackByDirectory = (name, group, ctx) => {
 // ── A REFERENCE LOOKUP MUST NOT BE AN APP SURFACE (2026-08-24) ─────────────────────────────────────────────────
 // MEASURED IN CHATGPT, not theorised: "make a 4 second vertical video ad for a coffee roaster" produced a
 // full-height scrolling MODEL CATALOG card ahead of the ad, and the catalog is ~70 rows, so the thing the user
-// asked for sat below a scroll-trap they had to get past. Dave, watching it: "why are there all these boxes ...
+// asked for sat below a scroll-trap they had to get past. The owner, watching it: "why are there all these boxes ...
 // why does it all look kind of weird."
 //
 // THE CAUSE IS THE WIDGET, NOT THE WORDING. `hermoso_capabilities` carried an `openai/outputTemplate`, and in the
@@ -2559,7 +2559,7 @@ function newToolScope(opts) {
   // AN EXPLICIT SCOPE ALWAYS WINS. `only` is what `?tools=`, `HERMOSO_TOOLS` and `/v1` pass; core-first is only
   // what an UNSTATED default resolves to, so a caller who named their groups gets exactly those and nothing here
   // narrows them. `coreFirst` is therefore false for every explicit scope, including `?tools=all`.
-  // …AND ONLY A HOST WE HAVE SEEN SEARCH GETS THE SHORT LIST (2026-09-20, Dave, asked twice: "will they all be able to
+  // …AND ONLY A HOST WE HAVE SEEN SEARCH GETS THE SHORT LIST (2026-09-20, asked twice: "will they all be able to
   // search the other tools and understand that more is available? we dont want to degrade quality or make it seem like
   // we have less functionality"). The honest answer was "not provably": `find_tools` is an instruction, the ledger keeps
   // failures and not successful calls, so which hosts follow it could not be read from history. What HAS been seen:
@@ -2820,7 +2820,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // exactly that. The same policy explicitly ALLOWS a user to "sign in to an existing paid account and access
         // features already included in their subscription", which is why nothing else here is affected.
         // Deliberately NOT a group: all three live in `core`, which every roster force-adds, and moving them would
-        // take them away from Claude, Cursor and the CLI too. Dave's position is that a customer controls their own
+        // take them away from Claude, Cursor and the CLI too. The owner's position is that a customer controls their own
         // billing wherever they use Hermoso; this is OpenAI's constraint on OpenAI's surface, nothing wider.
         //
         // `set_auto_reload` JOINED THEM 2026-08-24, and it is the strongest of the three, not the weakest — found by
@@ -3636,7 +3636,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // billing_status (full picture + your role) → upgrade_plan / set_auto_reload (admin-only, pay-on-Stripe / in-app).
 
   // ── FEEDBACK: let the AGENT report a bug or ask for a capability we don't have ────────────────────────────────
-  // Dave 2026-07-26: someone driving Hermoso from OpenClaw/Claude/Cursor hits a bug or a missing capability mid-task.
+  // Product decision (2026-07-26): someone driving Hermoso from OpenClaw/Claude/Cursor hits a bug or a missing capability mid-task.
   // Today that feedback dies in their terminal. These two tools turn the agent itself into the reporter — it already
   // has the exact context (what it tried, what came back), which is better than anything a human would retype later.
   // Both just email the team. Free, no credits.
@@ -3688,7 +3688,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async () => {
     const d = await apiGet('/api/billing/status');
     const ar = d.autoReload || {};
-    // A MEMBER of a shared workspace gets plan + balance and nothing about the owner's card (Dave, 2026-08-02:
+    // A MEMBER of a shared workspace gets plan + balance and nothing about the owner's card (2026-08-02:
     // "members dont need to see the owners payment card"). `null` is deliberately distinguished from `false` on
     // both lines below — rendering "Card on file: no" at somebody whose owner definitely has a card is a
     // well-formed lie, which is the whole class this sweep exists to remove.
@@ -4795,7 +4795,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}`, d);
   }));
   // ── SCHEDULING (2026-07-30). ONE mechanism for every channel — our durable queue, not a per-platform special case.
-  // Dave: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
+  // Product feedback: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
   // no need for one edge case just for Facebook."
   server.registerTool('schedule_post', {
     title: 'Schedule a post for later',
@@ -5418,7 +5418,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
 
   // ── X DIRECT MESSAGES (2026-08-25) ──────────────────────────────────────────────────────────────────────────
-  // ON DEMAND, NEVER PUSHED. Dave's framing is the design: *"users check their messages by asking, not us sending
+  // ON DEMAND, NEVER PUSHED. The owner's framing is the design: *"users check their messages by asking, not us sending
   // them notifications. Users already get notifications from all these DMs directly."* So there is no watcher and
   // no schedule here — a person asks their agent, the agent reads. Every rule is cited in lib/x-dm.mjs.
   //
@@ -7561,7 +7561,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // this year, when Meta renamed Standard -> LIMITED and Advanced -> FULL on 2026-05-05 — and a moving state
   // written into a tool description goes stale the day it changes, at which point an agent reads it and REFUSES a
   // capability we ship ([[prompt-rosters-go-stale]]). The tier belongs in the runtime refusal, which is computed;
-  // see lib/meta-access.mjs. Dave 2026-08-23: "advertise itself as having access to those meta scopes".
+  // see lib/meta-access.mjs. Product feedback (2026-08-23): "advertise itself as having access to those meta scopes".
   server.registerTool('list_meta_pixels', {
     title: 'List Meta Pixels on an ad account',
     description: 'List the META PIXELS on one of the brand’s ad accounts — id, name, when it was created, and WHEN IT LAST FIRED. This is where the pixelId every conversion tool needs comes from: create_meta_ad takes it (with conversionEvent) to optimise an ad set for OFFSITE_CONVERSIONS instead of link clicks, and create_meta_audience needs it to build a website retargeting audience. Without this tool that id could only be read off a screen in Events Manager. READ lastFiredAt BEFORE YOU TRUST A PIXEL: one that has NEVER FIRED is not installed on the site, so an ad optimising against it will spend and never learn. Pass includeCode:true to get the <script> snippet for installation (it is long, so it is off by default). Read-only, free.',
@@ -8565,7 +8565,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/google-ads/asset', a);
     return ok(`Uploaded ${d.kind} asset to Google Ads (${d.assetResourceName}).`, d);
   }));
-  // ---------- Google Ads breadth (Dave 2026-07-31): the four holes the connector audit found.
+  // ---------- Google Ads breadth (2026-07-31): the four holes the connector audit found.
   //            1. CONVERSION ACTIONS. We offered TARGET_CPA / TARGET_ROAS / MAXIMIZE_CONVERSIONS with no way to
   //               configure the tracking they depend on — offerable and undeliverable in the same product. Now
   //               creatable + listable, and a conversion-bidding campaign on an account with none is REFUSED.
@@ -9238,7 +9238,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Staged trigger "${d.trigger?.name}" [${d.trigger?.type}], id ${d.trigger?.triggerId}. ${d.note}`, d);
   }));
   // ---------- PUBLISHING (2026-08-20) — the one Tag Manager call that reaches the live site ----------
-  //            Held back on 2026-08-19 and reversed by Dave on 2026-08-20; lib/tag-manager.mjs
+  //            Held back on 2026-08-19 and reversed by the owner on 2026-08-20; lib/tag-manager.mjs
   //            GTM_SCOPES_REVERSED carries the decision with the prior refusal preserved verbatim. The shape
   //            follows this repo's destructive-tool law: the gate is a PURE function so it can be RUN rather
   //            than read, the unconfirmed call is a free READ that publishes nothing, and the ANSWER is the
@@ -14776,7 +14776,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // ══ AUTOMATED RULES (2026-08-19) ══════════════════════════════════════════════════════════════════════════════
   // Held since the 2026-08-19 approval and recorded as DELIBERATELY unbuilt — "a rule is standing permission to
   // move money with no human in the loop, and every spend switch in this product is confirm-gated for exactly
-  // that reason" — until Dave asked for it. The safety architecture was extended rather than weakened, because
+  // that reason" — until the owner asked for it. The safety architecture was extended rather than weakened, because
   // the existing one genuinely does not transfer: set_tiktok_ads_status gates ONE act on objects the caller
   // NAMED at ONE moment, and a rule fires repeatedly, later, unattended, over a set TikTok re-resolves each run.
   //
@@ -17192,7 +17192,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // (jobType 'stitch': the server packs the scenes into the fewest balanced ≤model-max acts via the shared
     // acts-packing.mjs) instead of the old silent clamp that time-compressed a 30s board into one 15s clip.
     if (a.dryRun) return ok(`DRY RUN — routing decision (no job submitted, nothing charged): jobType=${jobType || 'video'}, model=${input.model}, durationSeconds=${input.durationSeconds}${Array.isArray(input.scenes) ? `, acts=[${input.scenes.map(s => Math.round(s.seconds * 10) / 10).join(', ')}]s` : ' (single pass)'}${input.modelExplicit ? ', modelExplicit (ask-don’t-swap)' : ''}.${_clampNote}${_castLine}\n${notes || ''}`, { dryRun: true, jobType: jobType || 'video', ...(creator ? { creator } : {}), input });
-    // ASK BEFORE SPENDING (Dave 2026-07-28: "ask the user BEFORE the render is dispatched — never after money is
+    // ASK BEFORE SPENDING (2026-07-28: "ask the user BEFORE the render is dispatched — never after money is
     // spent"). `notes` alone was not enough here: on the real path it only reaches the model AFTER renderJob has
     // polled to completion, i.e. after the credits are gone. So when the ad features a product this brand has no
     // photo of, STOP and say so — the same honesty contract as templateGapMessage: nothing was rendered, nothing was
@@ -17340,7 +17340,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   // ADD SUBTITLES TO ANY VIDEO (2026-09-12). A plain comment, not a "── SECTION ──" header: build-docs groups tools by
   // those headers, and this tool belongs to the section clip_video is in.
-  // Dave: "Do we have functionality to add subtitles to our videos or others? … it should be possible to customize the
+  // Product feedback: "Do we have functionality to add subtitles to our videos or others? … it should be possible to customize the
   // style of them as well". Burned subtitles existed only INSIDE clip_video and make_explainer; a finished render, an
   // upload or someone else's video had no way to get them. The look is the same textStyle vocabulary render_ad speaks.
   server.registerTool('add_subtitles', {
@@ -17566,7 +17566,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    // HARD GUARD (Dave watched an agent stitch a 15s ad into 4 separate renders): a spot that fits ONE Seedance
+    // HARD GUARD (the owner watched an agent stitch a 15s ad into 4 separate renders): a spot that fits ONE Seedance
     // clip renders single-pass through the Studio assembly instead — no seams, exact multi-beat arc, ~1/4 the cost.
     // The agent's scene list becomes the storyboard; its voiceover lines ride the same exactness rails.
     const total = +a.durationSeconds || (a.scenes || []).reduce((s, x) => s + (+x.seconds || 4), 0);
@@ -17913,7 +17913,7 @@ function memoryNoteVerdict(text) {
   }));
 
 
-  // ── SAVED CREATORS: outreach status + notes (2026-09-05, Dave: "parity with dedicated tools"). A creator saved by
+  // ── SAVED CREATORS: outreach status + notes (2026-09-05: "parity with dedicated tools"). A creator saved by
   // find_creators → save_to_swipefile carries `creator`; this writes the OUTREACH state onto that row so the whole
   // team — web and agent — sees who has been contacted, who replied, who is booked. One row, one field, never a
   // second store: the swipefile is already synced, tombstoned and union-merged.
@@ -18688,7 +18688,7 @@ function memoryNoteVerdict(text) {
     const gs = d.groups || [];
     if (!gs.length) return ok(`No errors recorded${a?.kind || a?.surface ? ' matching that filter' : ''}. (This is a real empty result — a read that FAILED would have raised an error, not returned an empty list.)`, d);
     // A DORMANT GROUP SAYS SO, IN THE LINE ITSELF. Rows live 30 days, so a defect fixed weeks ago still appears
-    // here; without the marker it reads exactly like a live bug and gets re-diagnosed (Dave 2026-09-03, after an
+    // here; without the marker it reads exactly like a live bug and gets re-diagnosed (2026-09-03, after an
     // hour went into a Meta 500 from 08-11 that had been fixed the same day). The server ranks these last; this
     // is the half a reader sees. "Dormant" and not "fixed": no hits for N days is strong evidence, not proof.
     const lines = gs.slice(0, 25).map(g => `[${g.kind === 'ours' ? 'OURS' : g.kind}] ${g.surface}·${g.op} ${g.status || '—'} ×${g.count} — ${g.errorClass}: ${String(g.message).slice(0, 110)}${g.stale ? `  ⏸ DORMANT ${g.daysQuiet}d — likely already fixed, check before working it` : ''}  ·fp ${g.fp}`).join('\n');
@@ -18755,7 +18755,7 @@ function memoryNoteVerdict(text) {
     // this one is named and described as the fast single-brand path. The platform list is now decided HERE and the
     // spread cannot reach it.
     const d = await apiPost('/api/inspire/fanout', { country: 'US', limit: Math.min(12, a.limit || 8), sort: 'longest_running', ...a, platforms: ['facebook'] });
-    // SURFACE THE ACTUAL ADS (Dave 2026-07-21: ChatGPT got only "Pulled ads for X" — the structured data never
+    // SURFACE THE ACTUAL ADS (2026-07-21: ChatGPT got only "Pulled ads for X" — the structured data never
     // reached the user). Flatten each platform's ads into compact rows + image blocks, like the search_* tools.
     const platforms = ['facebook', 'google', 'linkedin'];
     const rows = [], urls = [];
@@ -18771,12 +18771,12 @@ function memoryNoteVerdict(text) {
         // AND `media` MUST NEVER FALL BACK TO A LINK. It is the creative field, and adSpyCard uses it as the
         // tile's picture when no explicit thumb exists — so falling through to adUrl/link_url handed the card an
         // HTML PAGE as an <img> src, which paints the browser's broken-image glyph. That is what two tiles in an
-        // eight-ad grid were showing (Dave, 2026-08-24): not a missing creative, a page URL in an image slot.
+        // eight-ad grid were showing (2026-08-24): not a missing creative, a page URL in an image slot.
         // The link still reaches the tile through `link` below, which is where a page URL belongs.
         const media = s.videos?.[0]?.video_sd_url || s.cards?.[0]?.video_sd_url || img || null;
         // A GOOGLE TEXT AD HAS NO PICTURE AND THAT IS NORMAL — its headline IS the creative, and it lives under
         // variations[]. Reading only the top-level fields left those rows with no copy and no image, so the grid
-        // filled with identical blank tiles reading "no creative / Liquid Death GOOGLE" (Dave, 2026-08-24).
+        // filled with identical blank tiles reading "no creative / Liquid Death GOOGLE" (2026-08-24).
         // Measured on a real pull: every Google row came back format:'text', imageUrl null, adUrl null, and a real
         // headline in variations[0]. The ad was there all along; we were not reading it.
         const gv = Array.isArray(ad.variations) ? ad.variations[0] : null;
@@ -18784,7 +18784,7 @@ function memoryNoteVerdict(text) {
           || (gv && (gv.headline || gv.description)) || '';
         // THE TILE LINKS TO THE AD, NOT TO THE SHOP. Clicking a competitor's ad card used to open its DESTINATION
         // — walmart.com for a Liquid Death ad — which is the one place that tells you nothing about the ad. Someone
-        // clicking a video tile wants to WATCH THE AD (Dave, 2026-08-24). The library page plays the video, shows
+        // clicking a video tile wants to WATCH THE AD (2026-08-24). The library page plays the video, shows
         // the full copy, every placement, the run dates AND where it points, so it strictly contains the
         // destination rather than replacing it. Meta hands us that page as `ad.url`; Google as `adUrl`. The
         // destination survives only as the last resort, for a row that carries no library page at all.
@@ -18955,7 +18955,7 @@ function memoryNoteVerdict(text) {
     const d = await apiSSE('/api/explore/chat', { messages: [{ role: 'user', content: query }], brand: brandObj });
     const res = d.results || [];
     // pull a still image URL out of each normalized card (ad OR tiktok/social shapes) so ChatGPT/Claude SHOW the
-    // creatives inline (Dave 2026-07-21: research_ads was returning text only, no images)
+    // creatives inline (2026-07-21: research_ads was returning text only, no images)
     const imgUrl = (r) => { const a = r?.ad?.snapshot || {}; return r?.image || r?.thumb || r?.cover || r?.tiktok?.cover || r?.social?.image || a.images?.[0]?.resized_image_url || a.videos?.[0]?.video_preview_image_url || a.cards?.[0]?.resized_image_url || r?.ad?.imageUrl || null; };
     const urls = [...new Set(res.map(imgUrl).filter((u) => typeof u === 'string' && /^https?:\/\//.test(u)))].slice(0, 4);
     const widget = hostRendersWidgets();
@@ -18997,7 +18997,7 @@ function memoryNoteVerdict(text) {
   const trunc = (s, n = 200) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
   const nAds = (n) => Math.min(25, Math.max(1, Math.round(+n) || 8));
   // Compact JSON summary + REAL MCP image blocks of the top creatives (2026-07-21: ChatGPT does NOT render
-  // markdown-image links out of tool text — Dave got a text-only reply; attached image CONTENT BLOCKS display in
+  // markdown-image links out of tool text — the owner got a text-only reply; attached image CONTENT BLOCKS display in
   // both ChatGPT and Claude). Plus an explicit creative-URL list so the model can hand the user clickable links
   // (videos especially), and a parent-brand nudge on zero results (SuperBelly is advertised by Blume — a name
   // miss must trigger resolution, not a shrug).
@@ -19161,7 +19161,7 @@ function memoryNoteVerdict(text) {
     const mk = d.marketplace && (d.marketplace.creators || []).length ? `\nInstagram creator marketplace:\n${d.marketplace.creators.map(c => `• @${c.handle}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}${c.country ? `, ${c.country}` : ''}${c.email ? `, ${c.email}` : ''}`).join('\n')}` : '';
     return ok(`${d.note}\n${lines.join('\n')}${mk}`, d);
   }));
-  // TOPIC SEARCH (2026-09-15, Dave: search a named brand, "but not their ads themselves, just posts about them … similarly
+  // TOPIC SEARCH (2026-09-15: search a named brand, "but not their ads themselves, just posts about them … similarly
   // just broad things like coffee"): the posts ABOUT a subject from anyone, all three organic platforms in one call.
   // find_creators is this same search one step later (posts folded into people); the per-platform search_* tools are
   // it one platform at a time.
@@ -19386,7 +19386,7 @@ function memoryNoteVerdict(text) {
   }, wrap(async ({ save, ...a }) => {
     const d = await apiPost('/api/brand/draft', a);
     const p = d.profile || d;
-    // ALWAYS TRY THE WEBSITE (Dave 2026-07-28). /api/brand/draft returns the PROFILE only — it never fetched a single
+    // ALWAYS TRY THE WEBSITE (2026-07-28). /api/brand/draft returns the PROFILE only — it never fetched a single
     // product photo, so an MCP-onboarded brand was structurally photo-less even with a perfectly good domain, and every
     // later plan_ad/render_ad on it invented the packaging. This tool's own outputSchema has advertised `logo`,
     // `products` and `productImages` since it shipped; nothing ever filled them. Pull them from the SAME endpoint the
@@ -19775,7 +19775,7 @@ function memoryNoteVerdict(text) {
     return ok(text, d);
   }));
 
-  // CLONE IS THE NAME, AND THE OLD ONE STAYS CALLABLE (2026-09-12, Dave: "Is remix and clone merged on other surfaces as
+  // CLONE IS THE NAME, AND THE OLD ONE STAYS CALLABLE (2026-09-12: "Is remix and clone merged on other surfaces as
   // well? ... You can change it as long as you do it very carefully and dont lock us out"). The web app calls this Clone;
   // clone_static is the canonical name, and remix_static is kept, registered with the SAME handler, because an agent or a
   // host that cached the old roster calls tools by name and a missing name is a hard failure for that caller.
@@ -20062,7 +20062,7 @@ function memoryNoteVerdict(text) {
     const healthTxt = (d.health || []).filter(h => h.coverage == null || h.coverage < 0.8 || h.failed || h.neverRead).slice(0, 10).map(h => `• ${h.channel}: ${h.measured}/${h.posts} measured${h.coverage == null ? '' : ` (${Math.round(h.coverage * 100)}% of what could be)`}${h.neverRead ? ` · ${h.neverRead} never read` : ''}${h.empty ? ` · ${h.empty} read but empty${h.topEmpty ? ` (${h.topEmpty.message})` : ''}` : ''}${h.failed ? ` · ${h.failed} failed${h.topError ? ` — ${h.topError.message}` : ''}` : ''}${h.pending ? ` · ${h.pending} too new` : ''}`);
     // THE POSTS THEMSELVES, ranked inside each channel — answers "which of our posts did best" even when every post
     // was written to the same hook, which the hook comparison above cannot. A post is named by the CREATIVE it carried
-    // (what it shows, its format, its link) — the caption is only the fallback label (2026-09-11, Dave).
+    // (what it shows, its format, its link) — the caption is only the fallback label (2026-09-11).
     const cap = (p) => `${p.subject || p.recipe ? String(p.subject || p.recipe).slice(0, 80) : `"${String(p.caption || '(no caption)').slice(0, 60)}"`}${p.media ? ` [${p.media}${p.recipe && p.subject ? `, ${p.recipe}` : ''}]` : ''}${p.url ? ` ${p.url}` : ''} (${fmtN(p.score)})`;
     const boardTxt = (d.leaderboard || []).filter(b => b.measured >= 2).slice(0, 10).map(b => `• ${b.channel} by ${b.rankedBy}: best ${cap(b.best[0])}${b.allEqual ? ' — every measured post scored the same' : (b.worst[0] ? `; worst ${cap(b.worst[0])}` : '')} · ${b.measured} measured`);
     // FOLLOWERS OVER TIME (2026-09-23): one count per account per day from the nightly snapshot; a count that could not be

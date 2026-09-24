@@ -184,7 +184,7 @@ jobs:
   #     tools from July while npm, the mirror and the MCP registry were all on 0.1.160 / 716.
   #
   # WHY IT RUNS HERE AND NOT FROM A LAPTOP: a Release records its actor PUBLICLY. `gh` on the dev box
-  # is authenticated as Dave's personal GitHub account, and nothing public may carry a personal handle
+  # is authenticated as a personal GitHub account, and nothing public may carry a personal handle
   # (see cli/PUBLISHING.md § IDENTITY). Running it in Actions makes the actor `github-actions[bot]`,
   # which is correct and attributable to no person. That is the whole reason this is automated.
   #

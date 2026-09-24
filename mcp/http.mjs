@@ -296,7 +296,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // A HANDSHAKE IS NOT USE. `verifyBearer` stamps the key's last_used_at, and the admin dashboard's "last
     // active" takes the max of that, the billed ledger and the user's last_seen — so an agent that merely holds a
     // connection open (initialize, tools/list, ping, a notification) kept reporting the account as ACTIVE while
-    // nobody had done anything with the product (Dave 2026-09-03: "many users are being shown active who arent
+    // nobody had done anything with the product (2026-09-03: "many users are being shown active who arent
     // actually using the app ... they may just be using an AI agent which has our mcp connected, but not actually
     // doing anything"). Only a tools/call is somebody doing something, so only a tools/call stamps. Auth itself is
     // unchanged in both branches: this decides bookkeeping, never access.

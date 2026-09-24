@@ -109,7 +109,7 @@ export const TOOL_PROVIDER_RULES = [
 ];
 
 // The provider a tool needs, or null when this module cannot attribute it. null ⇒ NEVER dropped (property 2).
-// ── PROVIDERS HERMOSO DOES NOT OFFER, AND AS OF NOW WILL NOT (Dave, 2026-09-03) ────────────────────────────────
+// ── PROVIDERS HERMOSO DOES NOT OFFER, AND AS OF NOW WILL NOT (2026-09-03) ────────────────────────────────
 // "make sure posting to reddit or snapchat are never offered, never described, never wasting context in a tools
 // list". Reddit organic posting needs Reddit's API approval we do not have; Snapchat posting is not even built. Both
 // have ADS connectors that are live and are NOT in this set (`reddit_ads`, `snapchat_ads`). A tool whose provider
@@ -143,7 +143,7 @@ export const INSTAGRAM_LOGIN_TOOLS = new Set([
   'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
   'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',
 ]);
-// THE SAME SHAPE FOR WHATSAPP (2026-09-15, Dave: "do we properly explain to users when they need the meta connector vs
+// THE SAME SHAPE FOR WHATSAPP (2026-09-15: "do we properly explain to users when they need the meta connector vs
 // individuals like instagram or whatsapp? and when they need both?"). Every whatsapp tool maps to 'meta' above because a
 // WhatsApp Business Account the business already administers is a Meta ASSET, ticked on Meta's assets step and reached
 // through the Meta user token. But a brand that onboarded its OWN number through Embedded Signup holds a 'whatsapp'
