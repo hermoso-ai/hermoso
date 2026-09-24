@@ -1,8 +1,8 @@
 {
   "name": "hermoso",
-  "version": "0.1.285",
+  "version": "0.1.292",
   "mcpName": "io.github.hermoso-ai/hermoso",
-  "description": "Marketing on autopilot, run from your own AI agent. 856 tools. Publishing, scheduling, ad campaign management, comments, DMs and analytics cost no credits on every plan; credits are only for generating creative and for Ad Spy research. AD PLATFORMS: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in Google Merchant Center. PUBLISHING AND SCHEDULING: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. AD RESEARCH: the Meta, Google and LinkedIn ad libraries plus organic TikTok, Instagram, YouTube, Threads and Reddit. ANALYTICS: Google Analytics 4, Google Search Console and every connected platform's own post and campaign insights. Also brand onboarding, 50+ image and video generation models, ad scoring, competitor teardowns, Google Drive and OneDrive, a CLI and installable Claude skills.",
+  "description": "Marketing on autopilot, run from your own AI agent. 863 tools. Publishing, scheduling, ad campaign management, comments, DMs and analytics cost no credits on every plan; credits are only for generating creative and for Ad Spy research. AD PLATFORMS: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in Google Merchant Center. PUBLISHING AND SCHEDULING: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. AD RESEARCH: the Meta, Google and LinkedIn ad libraries plus organic TikTok, Instagram, YouTube, Threads and Reddit. ANALYTICS: Google Analytics 4, Google Search Console and every connected platform's own post and campaign insights. Also brand onboarding, 50+ image and video generation models, ad scoring, competitor teardowns, Google Drive and OneDrive, a CLI and installable Claude skills.",
   "type": "module",
   "bin": {
     "hermoso": "bin/hermoso.mjs"

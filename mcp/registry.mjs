@@ -17,7 +17,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { registerTools, MCP_INSTRUCTIONS, TOOL_GROUP_NAMES, TOOL_GROUPS } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, TOOL_GROUP_NAMES, TOOL_GROUPS, canonToolGroups } from './tools.mjs';
 
 export { TOOL_GROUP_NAMES, TOOL_GROUPS };
 
@@ -89,13 +89,19 @@ export const groupLabel = (g) => (g === undefined || g === null ? '?' : g);
 /**
  * The whole inventory in one pass-set: every registered name, its group, its title/description.
  *
- * ONE registration per group plus one for the full roster — 8 passes, ~0.9s, and every number in it is measured
- * rather than declared.
+ * ONE registration of the full roster; each tool's group is the server.group() marker that registration recorded,
+ * so every number in it is measured rather than declared.
  */
 export function inventory() {
   const full = rosterFor(ALL_GROUPS);
+  // THE MARKER THE TOOL WAS WRITTEN UNDER, as the build recorded it (2026-09-24). Asking "which single-group roster
+  // lists it" was a proxy for that, and it broke on ON_DEMAND_TOOLS: held out of every roster short of all groups,
+  // they came back `?` although each sits under server.group('create'). Falls back to the per-group passes only if
+  // the canon is somehow absent, so a missing read can never file a tool under the wrong group.
+  const recorded = canonToolGroups();
   const groupOf = Object.create(null);
-  for (const g of ALL_GROUPS) {
+  if (recorded) Object.assign(groupOf, recorded);
+  else for (const g of ALL_GROUPS) {
     for (const [name, h] of rosterFor([g])) {
       // `core` rides in every scoped roster (a roster without discovery is undriveable), so the FIRST group that
       // claims a tool wins and core is asked first — otherwise every core tool would be relabelled by the last

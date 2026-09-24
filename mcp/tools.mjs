@@ -70,6 +70,15 @@ const creatorLine = (c) => {
   else if (c.voice) bits.push(`voice ${c.voice}`);
   return `  • ${c.name} — ${bits.join(', ')}${c.id ? `  [${c.id}]` : ''}\n    ${c.image || '(portrait stored in-app as an uploaded photo — cast them by NAME; there is no url to hand a render tool)'}`;
 };
+// LIKENESS CONSENT OVER MCP / API / CLI IS IMPLIED BY THE CALL (product decision 2026-09-24). There is no consent flag
+// and nothing is refused for a missing one: the Terms say that using a real person's photo through these tools IS the
+// caller's confirmation that they have that person's consent, and each tool that takes one says so in one sentence.
+// What we DO is record it: one `likeness_consent` row in the server's durable ledger (via 'api-implied'), stamped
+// there with the account, user, brand and time from the caller's own bearer. Best effort by design, never awaited
+// into a failure: a lost audit row must not fail a render the user asked for.
+function recordImpliedLikeness(lane, meta = {}) {
+  try { Promise.resolve(apiPost('/api/signal', { type: 'likeness_consent', meta: { via: 'api-implied', lane, ...meta } })).catch(() => {}); } catch {}
+}
 function rowLines(rows, max = 40) {
   const all = Array.isArray(rows) ? rows : [];
   if (!all.length) return '  (no rows)';
@@ -1943,7 +1952,10 @@ export const TOOL_GROUP_NAMES = ['core', ...Object.keys(TOOL_GROUPS)];
 // 2026-08-20 run, and mixing methodologies inside one table would make the rows incomparable.
 // RE-MEASURED 2026-09-17, every row at once, by tools/tool-group-truth-check.mjs §8's own method (name + description +
 // inputSchema JSON at 4 chars/token, net of core) — `create` had reached 1.32× its row and four more sat past 1.2×.
-export const TOOL_GROUP_TOKENS = { core: 4300, research: 6600, create: 26000, channels: 37100, channel_admin: 66300, analytics: 39100, files: 10600, workspace: 9200, ads: 246700 };
+// create RE-MEASURED 2026-09-24 (26000 → 42000): edit_timeline (the open edit primitive, 11,026 by this method, about
+// 2,500 on the wire) and video_frames joined it. Both are on-demand (ON_DEMAND_TOOLS), so they only cost a session that
+// names `create` (or all); this figure is what that session pays.
+export const TOOL_GROUP_TOKENS = { core: 4300, research: 6600, create: 42000, channels: 37100, channel_admin: 66300, analytics: 39100, files: 10600, workspace: 9200, ads: 246700 };
 
 // THE DEFAULT ROSTER IS EVERYTHING EXCEPT `ads` AND `analytics`. Paid-campaign management across eleven platforms
 // is ~236K tokens on its own — more than everything else put together — because each platform carries a full
@@ -2056,6 +2068,11 @@ export function parseToolScope(raw) {
 // Tools an Apps-SDK host (ChatGPT) must not be offered. See the seam in registerTools for why, and note this is
 // a HOST rule, not a capability we removed: every other surface still offers both.
 export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload']);
+// HELD OUT OF THE DEFAULT LIST ON SIZE, ALWAYS CALLABLE (2026-09-24): the open edit primitive carries a full
+// self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
+// direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
+// edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
+export const ON_DEMAND_TOOLS = new Set(['edit_timeline', 'video_frames', 'recast_hook', 'face_check']); // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -2264,6 +2281,12 @@ export function defForHost(name, def, widgetHost) {
 // session state without it.
 let TOOL_CANON = null; // [{ name, group, def, handler, factory }] — the one canonical roster, built on first use
 let CANON_HOSTED = false;   // which surface TOOL_CANON was built for — see registerTools
+// THE GROUP EACH TOOL WAS WRITTEN UNDER, read off the canon the last complete build recorded (2026-09-24). The CLI
+// inventory used to infer it by registering one group at a time and asking which tools came back ENABLED, which
+// labelled every ON_DEMAND_TOOLS entry `?`: those are held out of every roster short of all groups, so no single-group
+// pass ever listed them although each sits under server.group('create'). Reading the recorded marker answers the
+// question actually asked, and a tool registered above the first marker still reads null (reported as `?`).
+export const canonToolGroups = () => (TOOL_CANON ? Object.fromEntries(TOOL_CANON.map((e) => [e.name, e.group ?? null])) : null);
 
 // Declare a handler that MUST be rebuilt per session. `factory(ctx)` receives {enabledGroups, groupOf, handleOf}.
 // ── SWITCHING BRAND MUST RE-GATE THE ROSTER (2026-09-01) ────────────────────────────────────────────────────────
@@ -2493,6 +2516,14 @@ const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
       try { h.enable(); n++; enabledNames.push(name); } catch {}
     }
   }
+  // ON-DEMAND TOOLS (ON_DEMAND_TOOLS): held out of the list on size even inside a group that is already on, so asking
+  // for their group BY NAME (or for 'all') lists them, whether or not the group was on before; ?tools=all lists them
+  // too, so the two routes to "everything" agree.
+  for (const [name, grp] of Object.entries(groupOf)) {
+    if (!ON_DEMAND_TOOLS.has(name) || !(want.includes(grp) || want.includes('all')) || enabledNames.includes(name)) continue;
+    const h = handles[name]; if (!h || h.enabled) continue;
+    try { h.enable(); n++; enabledNames.push(name); } catch {}
+  }
   const enabled = TOOL_GROUP_NAMES.filter((g) => active.has(g));
   // ── "CALLABLE NOW" IS A CLAIM ABOUT THE CLIENT, NOT ABOUT US (2026-08-24) ────────────────────────────────────
   // Server-side this genuinely works: the SDK handles are enabled and the very next tools/list on this session
@@ -2600,6 +2631,7 @@ export const listedInCoreFirst = (name, group, ctx) => ctx.enabledGroups.has(gro
 function applyToolGates(h, name, group, ctx, opts) {
   if (!h) return;
   if (!listedInCoreFirst(name, group, ctx)) { try { h.disable(); } catch {} }
+  if (ON_DEMAND_TOOLS.has(name) && !TOOL_GROUP_NAMES.every((g) => ctx.enabledGroups.has(g))) { try { h.disable(); } catch {} } // (5) listed on demand only (an explicit 'all' is a demand) — see ON_DEMAND_TOOLS
   if (WITHHELD_FROM_WIDGET_HOSTS.has(name) && opts.widgetHost) { try { h.disable(); } catch {} }
   if (toolHeldBackByConnectors(name, ctx.conn)) { try { h.disable(); } catch {} }
   if (toolHeldBackByDirectory(name, group, ctx)) { try { h.disable(); } catch {} } // (4) the directory cage — see DIRECTORY_GROUPS
@@ -2715,6 +2747,21 @@ function accountLine(label, handle, d) {
 
 const LI_TARGETING_FACETS = ['LANGUAGE','LOCATION','AUDIENCE','AGE','GENDER','COMPANY','EDUCATION','JOB','INTERESTS','TRAITS'];
 
+// THE LOOK OF TEXT ON A VIDEO, OPEN (2026-09-24, the rigidity audit). The six presets and five faces are shortcuts;
+// the look can also be written in WORDS (translated server-side) or given as raw fields — any CSS colour, any Google
+// Fonts family, a pixel size. The server validates every field and refuses a bad one by name, free.
+const TEXT_STYLE_Z = z.union([
+  z.string(),
+  z.object({
+    preset: z.string().optional(), describe: z.string().optional().describe('the look in words'),
+    font: z.string().optional().describe('sans|serif|elegant|condensed|hand or any Google Fonts family'), subFont: z.string().optional(),
+    weight: z.number().optional(), size: z.union([z.string(), z.number()]).optional().describe("s|m|l|xl, '120px', or a 0.015-0.15 frame fraction"),
+    color: z.string().optional().describe('any CSS colour'), outlineColor: z.string().optional(), background: z.string().optional().describe('none|pill|a colour'),
+    position: z.union([z.string(), z.number()]).optional().describe('top|center|lower|bottom or 0.05-0.95 from the top'), textCase: z.enum(['as-is', 'upper', 'lower', 'title']).optional(),
+    italic: z.boolean().optional(), subItalic: z.boolean().optional(), outline: z.boolean().optional(), shadow: z.boolean().optional(),
+    tilt: z.number().optional().describe('degrees, ±45'), cardColor: z.string().optional(),
+  }),
+]);
 export function registerTools(rawServer, opts = {}) {
   const server = wellFormedServer(rawServer); // the ONE crossing — see above
   // THE CACHE HOLDS SCHEMAS, SO A FLAG THAT CHANGES A SCHEMA MUST INVALIDATE IT (2026-09-16). `hosted` decides
@@ -16903,7 +16950,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Render a finished ad IMAGE and return its served URL. refImages (local paths or URLs) force product-accurate compositing (drops a real product into the scene). MULTI-BRAND CAUTION: useBrand hydration pulls the SAVED workspace brand — when working a brand that is NOT the saved one (a fresh draft_brand), pass that brand\'s own productImages/logo as refImages (and useBrand:false) or the output composites the WRONG brand\'s product. NOTE that the saved-brand hydration also decides the ENGINE: attaching product photos routes the render to the compositing model, so a `model` you named is only honoured when no references ride — pass raw:true (or useBrand:false) to render on exactly the model you asked for. model = a catalog id from hermoso_capabilities (omit for the default). PUTTING A REAL PRODUCT IN A REAL PERSON’S HANDS, or a garment on them, is a DIFFERENT KIND OF ROW and you must name it: the ids marked `needsRefs` with a `refsMax` in hermoso_capabilities take a person photo first and up to three product/garment photos after it, and they EDIT THE PHOTOGRAPH rather than compositing — THE PERSON IS RE-POSED to hold or wear the thing, so their stance and hands change while their face, clothing, setting and lighting are kept. That is not an object swap in a fixed frame; if you needed the rest of the photograph untouched, this is the wrong tool. Every finished render says which way it went. RAW MODEL ACCESS: ' + RAW_TOOL_NOTE + ' Fast (seconds). Spends credits.',
     inputSchema: {
       prompt: z.string().describe('the full image prompt — subject, composition, lighting, and any on-image ad text. ON A POSE MODEL (product-in-hand / try-on) THIS IS EXTRA DIRECTION AND IT IS OPTIONAL — leave it out and the pose is built for you. If you do write one, DESCRIBE THE POSE ("she holds the bottle upright in her right hand at chest height, label to camera"); do NOT phrase it as a swap ("replace the mug with the bottle"), which is REFUSED for free, because the product then comes out the size of whatever it replaced — a 30ml bottle rendered mug-sized in testing.'),
-      refImages: z.array(z.string()).optional().describe('local file paths or URLs of product/logo references to composite in. ON THE POSE MODELS — any row hermoso_capabilities marks `needsRefs` with a `refsMax`, such as putting your product in someone’s hands or a virtual try-on — THE ORDER IS THE CONTRACT AND IT IS NOT A COMPOSITE: refImages[0] is the PERSON photo, and the rest (up to `refsMax` minus one) are the product or garment photos. Reversed, you get the product wearing the person. A 4th product is dropped and the reply says so.'),
+      refImages: z.array(z.string()).optional().describe('local file paths or URLs of product/logo references to composite in. ON THE POSE MODELS — any row hermoso_capabilities marks `needsRefs` with a `refsMax`, such as putting your product in someone’s hands or a virtual try-on — THE ORDER IS THE CONTRACT AND IT IS NOT A COMPOSITE: refImages[0] is the PERSON photo, and the rest (up to `refsMax` minus one) are the product or garment photos. Reversed, you get the product wearing the person. A 4th product is dropped and the reply says so. A real person’s photo confirms their likeness consent.'),
       useBrand: z.boolean().optional().describe('default true: with no refImages, the server hydrates the SAVED brand’s product/logo references so the output lands on-brand; pass false for a pure prompt-only render'),
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: run the caller’s prompt on the named model with no Hermoso adjustments at all — the prompt reaches the provider byte-identical (no hex-to-colour-name rewrite, no prepended fidelity preamble) and NO saved-brand product photos are attached, so the model you name is the model that renders. Use it to drive the raw catalog; leave it off for an on-brand ad. Billing, the durable Library landing and per-model validation are unchanged.'),
       aspectRatio: z.string().optional().describe("e.g. '1:1', '9:16', '16:9', '4:5'. Each model draws its own list (hermoso_capabilities prints it per model, e.g. Nano Banana 2 goes to 1:8 and 8:1); a ratio the chosen model cannot draw is refused before anything is charged"),
@@ -17026,7 +17073,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Make video thumbnail',
     description: "Render a click-driving YOUTUBE / Shorts / Instagram THUMBNAIL or video cover — the full production pipeline (concept framework -> casting -> scene -> render -> surgical tweaks -> text), not a bare image prompt. Use this for any \"thumbnail\", \"video cover\", \"video preview\" or MrBeast-style packaging ask INSTEAD of generate_image. About 9 credits per variant; the headline overlay is free.\n\nCONCEPT — every thumbnail must open an INFORMATION GAP (the image raises a question the title answers) while staying truthful to the video. Brainstorm ≥5 concepts across the 16 frameworks before you pick, and feel free to combine two. Frameworks (pass as `framework`): before_after · social_ui · three_step · screenshot · posed_portrait (the default) · posed_action · specific_day · graphical · landscape · map_aerial · product · adding_text · repetition · size_difference · news_clip · amplified_reality. Call hermoso_capabilities for each one's full 'realize it with' note plus the emotion, overlay-style, font and rim-colour catalogs.\n\nTHREE GATES, all BEFORE you render:\n1. WHO IS IN FRAME — never assume and never silently substitute a stranger. If the framework puts a person in frame and no face photo is attached, the tool refuses (nothing rendered, nothing charged) and tells you to ask the user once: themselves (send a face photo -> the identity gets locked), a generated person (`castGenericPerson:true`), or a people-free framework.\n2. TEXT — the default is a CLEAN render with the headline TYPESET OVER THE TOP afterwards (free, always legible, correctly spelled). Just pass `headline`. Only set `bakeText:true` if the user explicitly asks for the words painted INTO the image — verified live, that renders the asked-for words correctly but leaks garbled invented text across the rest of the frame. Never infer text intent from the topic or the framework.\n3. HOW MANY — ask once whether they want one thumbnail or a SET (offer 4: the same concept at different emotions and/or camera takes). Default is 1; `variants` caps at 16.\n\nIDENTITY LOCK is automatic for every attached face photo. `emotion` is the single biggest CTR lever on a face: shock · hype · fear · confusion · determination · smug · charisma · disgust · awe · rage · laugh (or your own phrase). Finished thumbnail needs a fix? Re-call with `tweak` + `sourceImage` for a surgical, pixel-faithful edit (emotion / background / background_color / rim_light) instead of re-rendering — tweaks chain. ALWAYS check the returned postRenderCheck against the image before you present it.\n\nPROMPT LANGUAGE — write every DESCRIPTIVE field in ENGLISH (`sceneBrief`, `keyElements`, `location`, `composition`, `background`, `topic`, each person's `describe`, and every `reference` field), translating the user's wording where needed: the image models are trained on English and a non-English scene description renders noticeably worse. Text that gets BAKED OR TYPESET stays verbatim in the user's own language — `headline`, `headlineLines` and `bakedUiText` are never translated.",
     inputSchema: {
-      framework: z.string().optional().describe("concept framework id (default 'posed_portrait'); see the list in this description / hermoso_capabilities"),
+      framework: z.string().optional().describe("concept framework id (default 'posed_portrait'), or your own concept in words"),
       frameworkRequested: z.boolean().optional().describe('true ONLY when the USER named this framework — it is what authorizes a text-carrying framework (social_ui / news_clip / specific_day / map_aerial) to bake its short UI label'),
       sceneBrief: z.string().optional().describe('what the thumbnail depicts — the concept in one dense sentence, rendered exactly'),
       topic: z.string().optional().describe("the video's topic — used to pick the hero object when you don't name keyElements"),
@@ -17034,9 +17081,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       headlineLines: z.array(z.string()).optional().describe('explicit headline lines (up to 3) — overrides splitting `headline` on newlines'),
       bakeText: z.boolean().optional().describe('default false. true paints the headline INTO the generation — only on an explicit user ask; it leaks garbled text elsewhere in the frame'),
       bakedUiText: z.string().optional().describe('short label for a text-carrying framework (a chat bubble, a DAY N badge, a news lower-third, a map callout) — needs frameworkRequested:true'),
-      overlayStyle: z.string().optional().describe("headline style: 'beast' (default, white + heavy black stroke) / 'fire' / 'neon-lime' / 'clean-glass' / 'marker'"),
-      font: z.string().optional().describe("headline font (default Anton). Alternatives incl. Bebas Neue, Oswald, Archivo Black, Montserrat, Inter, Playfair Display"),
-      headlinePlace: z.enum(['bottom', 'top', 'center']).optional().describe("where the headline sits — never over the face (default 'bottom')"),
+      overlayStyle: z.string().optional().describe("headline style: beast (default), fire, neon-lime, clean-glass, marker, or your own CSS declarations"),
+      font: z.string().optional().describe("headline font: Anton (default) or any Google Fonts family"),
+      headlinePlace: z.string().optional().describe("bottom (default), top, center, or a 0-1 fraction from the top; never over the face"),
       faceImages: z.array(z.string()).optional().describe('up to 3 face photos (URLs or local paths) — each becomes a locked CHARACTER identity, in order'),
       people: z.array(z.object({ describe: z.string() }).passthrough()).optional().describe('people described in prose instead of by photo (each still gets the chosen expression)'),
       castGenericPerson: z.boolean().optional().describe('pass true only after the user has explicitly chosen a generated stranger over their own face'),
@@ -17055,7 +17102,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       logo3d: z.boolean().optional().describe('first turn the flat logo into a volumetric 3D render (one extra billed image), then composite that'),
       split: z.object({ mode: z.enum(['plain', 'before_after', 'versus', 'custom']), panels: z.array(z.string()).optional() }).passthrough().optional().describe('split/panel LAYOUT — only when the user asks for one ("split", "before/after", "versus screen"). "X vs Y" as a SCENE stays one unified frame'),
       reference: z.object({}).passthrough().optional().describe("fields YOU extracted by eye from a reference thumbnail. Extract ALL of: brief (one dense sentence on the concept), subject (pose/action generically, NEVER a specific identity), elements, location, composition, background, split (boolean), split_count, person_count (0-3), emotion (one of the 11 presets or 'other'), emotion_detail (one vivid sentence covering eyes, brows, mouth, head angle). emotion + emotion_detail carry the reference's actual facial performance, which is the single biggest CTR lever on a face; split/split_count reproduce its panel structure. The reference image itself is never sent to the model"),
-      tweak: z.object({ kind: z.enum(['emotion', 'background', 'background_color', 'rim_light']), value: z.string() }).describe('surgical pixel-faithful edit of a FINISHED thumbnail — needs sourceImage').optional(),
+      tweak: z.object({ kind: z.string(), value: z.string() }).describe('surgical pixel-faithful edit of a FINISHED thumbnail (needs sourceImage): kind emotion / background / background_color / rim_light, or any other kind with the edit in words as value').optional(),
       sourceImage: z.string().optional().describe('the finished thumbnail URL a `tweak` edits; tweaks chain, so feed each accepted output into the next'),
       forceGenerate: z.boolean().optional().describe("render the 'screenshot' framework anyway (it is normally a real video frame, not a generation)"),
     },
@@ -17112,6 +17159,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Voice clip ready — ${d.voice || 'the engine’s own voice'}${d.model ? ` · ${d.model}` : ''}: ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}`, { ...d, audio: abs(d.audio) });
   }));
 
+  server.registerTool('generate_music', {
+    title: 'Generate music',
+    description: "RAW music: describe it (genre, mood, instruments, tempo), get an instrumental MP3. Flat fee: explainerMusicCredits in hermoso_capabilities.",
+    inputSchema: { prompt: z.string().describe("the music in words, e.g. 'lo-fi jazz, brushed drums, 80 bpm'") },
+    outputSchema: { audio: z.string().optional(), durationSeconds: z.number().nullable().optional(), creditsUsed: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async ({ prompt }) => {
+    const d = await apiPost('/api/generate/music', { prompt });
+    return ok(`Music ready${d.durationSeconds ? ` (${d.durationSeconds}s)` : ''}: ${abs(d.audio)}`, { ...d, audio: abs(d.audio) });
+  }));
+
   server.registerTool('generate_text', {
     title: 'Generate text',
     description: "Text generation against the writing-model catalog (Claude, Gemini, GPT, Llama, DeepSeek…) — ad copy, hooks, scripts, rewrites, brainstorms. Prompt-only, no ad assembly (for a finished on-brand creative use plan_ad -> render_ad). BY DEFAULT the model answers as a marketing copywriter (a short house system prompt is applied, which is what you want for ad copy); pass raw:true for a plain, unstyled answer from the model itself with NO system prompt at all. model = a writing-model id from hermoso_capabilities (omit for the default Claude orchestrator). Paid (a credit or two by length).",
@@ -17138,28 +17196,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), licensed music bed, real product references. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
-      creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default on any plan with a person on camera, and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if an explicitly named creator is cast on a plan with nobody on camera, or if they are a REAL person with no likeness consent on file.'),
+      creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default on any plan with a person on camera, and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, or if an explicitly named creator is cast on a plan with nobody on camera. Casting a REAL person confirms their likeness consent.'),
       model: z.string().optional().describe('video model id from hermoso_capabilities (default: the plan’s pick). Naming one is a DELIBERATE pick — the server asks before ever swapping it (no silent fallback)'),
       durationSeconds: z.number().optional().describe('total ad length in seconds (supported range 4–180; outside that it is clamped). Omit to honor the plan’s own duration — that is almost always right. This only RE-TIMES an already-authored board (its scenes are scaled to fit), it does NOT re-write it, so to change the length of the ad the user asked for, re-run plan_ad with durationSeconds instead. A length that fits ONE clip of the render model renders as one continuous pass; longer is stitched from acts filled to that model’s clip maximum with the remainder last — the maximum is 15s on most models and 30s on the longest-clip one, so use dryRun:true to see the exact act split for free before spending.'),
       aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
       resolution: z.enum(['480p', '720p', '1080p', '4k']).optional().describe("'1080p' default (what we ship and bill for); '480p'/'720p' = cheaper draft passes, '4k' = premium final delivery (more credits). NOT EVERY MODEL OFFERS EVERY TIER — this enum is what the tool accepts, and each model's OWN `resolutions` list in hermoso_capabilities is what it can actually render (the longest-clip 30s model, for one, tops out at 720p). Ask for a tier the chosen model does not list and it is rendered at that model's best available tier instead, with nothing in the reply saying so — so check `resolutions` before promising anyone 1080p or 4k."),
       captions: z.boolean().optional().describe('burn the plan\'s per-scene on-screen words as caption pills. DEFAULT FALSE on every recipe — set true ONLY when the user asks for on-screen text or captions; no recipe turns them on by itself'),
       endCard: z.boolean().optional().describe('append the branded end card. DEFAULT FALSE on every recipe — set true ONLY when the user asks for an end card (a clone of a video that had none should not grow one)'),
-      music: z.boolean().optional().describe('licensed music bed on/off (default on)'),
+      music: z.union([z.boolean(), z.string()]).optional().describe("music bed: on (default), false, or the bed described in words ('lo-fi jazz, brushed drums')"),
       lockup: z.boolean().optional().describe('brand wordmark + tagline composited over the closing seconds. DEFAULT FALSE — set true ONLY when the user asks for branding on the close'),
-      textStyle: z.union([
-        z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']),
-        z.object({
-          preset: z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']).optional(),
-          font: z.enum(['sans', 'serif', 'elegant', 'condensed', 'hand']).optional(),
-          subFont: z.enum(['sans', 'serif', 'elegant', 'condensed', 'hand']).optional(),
-          weight: z.number().optional(), size: z.union([z.enum(['s', 'm', 'l', 'xl']), z.number()]).optional(),
-          color: z.string().optional().describe('#hex'), background: z.string().optional().describe('"none", "pill", or a #hex box'),
-          position: z.enum(['top', 'center', 'lower', 'bottom']).optional(), textCase: z.enum(['as-is', 'upper', 'lower', 'title']).optional(),
-          italic: z.boolean().optional(), subItalic: z.boolean().optional(), outline: z.boolean().optional(), shadow: z.boolean().optional(),
-          tilt: z.number().optional().describe('degrees, ±12'), cardColor: z.string().optional().describe('#hex end card background'),
-        }),
-      ]).optional().describe('THE LOOK of captions and the end card — only meaningful with captions:true or endCard:true, and only when the user described a look. Presets: editorial (a large elegant serif title mid-frame with a small italic line under it, no box), bold (tall condensed caps with a black outline), minimal (small lowercase near the bottom), handwritten (tilted marker), boxed (dark words on a white box), pill (the plain default). Pass a preset name, or an object with a preset plus overrides. A caption written "TITLE · small line" puts the part after the middle dot on a second line. An invalid field is refused by name before anything renders.'),
+      textStyle: TEXT_STYLE_Z.optional().describe('THE LOOK of captions and the end card, only with captions or endCard and only when the user described one: the look in WORDS ("chunky yellow comic letters, purple outline"), a preset (editorial: big serif title + small italic line; bold: condensed caps, outline; minimal; handwritten; boxed; pill, the default), or fields. "TITLE · small line" puts the part after the dot on a second line.'),
       ttsVoice: z.string().optional().describe('voiceover voice name (e.g. Rachel / George) when the plan voices over'),
       dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) WITHOUT submitting a render — free, nothing charged'),
       allowGenericProduct: z.boolean().optional().describe('proceed even though this brand has NO product photo on file and the ad features a product — the packaging will be INVENTED. Only pass true after telling the user that and hearing they are fine with a generic stand-in'),
@@ -17187,7 +17233,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // roster; a half-remembered name that matched nobody, matched two people, or belongs to an unconsented real
     // person never reaches here at all (the assemble route refuses, free, before a job exists). So this line names
     // who is actually in the ad, and it names them from the resolution — the same law the ads tree follows.
-    const _castLine = (creator ? `\nCast: ${creator.name} (${creator.id}) — ${creator.source === 'generated' ? 'AI creator' : creator.source === 'social' ? 'from a social profile' : 'uploaded photo'}${creator.source !== 'generated' ? (creator.consented ? ', likeness consent on file' : '') : ''}.` : '') + (ownRefNotice ? `\n⚠ ${ownRefNotice.text} ${ownRefNotice.fix}` : ''); // a creator's own photo too poor to cast is never cast silently (lowQualityRef) — say so and name the fix
+    const _castLine = (creator ? `\nCast: ${creator.name} (${creator.id}) — ${creator.source === 'generated' ? 'AI creator' : creator.source === 'social' ? 'from a social profile' : 'uploaded photo'}${creator.source !== 'generated' ? (creator.consentVia === 'api-implied' ? ', likeness consent confirmed by this call and recorded' : creator.consented ? ', likeness consent on file' : '') : ''}.` : '') + (ownRefNotice ? `\n⚠ ${ownRefNotice.text} ${ownRefNotice.fix}` : ''); // a creator's own photo too poor to cast is never cast silently (lowQualityRef) — say so and name the fix
     // LAW 8: render_ad honors render_plan.structure/duration — a >single-clip creative assembles as stitched ACTS
     // (jobType 'stitch': the server packs the scenes into the fewest balanced ≤model-max acts via the shared
     // acts-packing.mjs) instead of the old silent clamp that time-compressed a 30s board into one 15s clip.
@@ -17209,15 +17255,19 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('make_template_ad', {
     title: 'Make template ad',
-    description: "Render a NATIVE-STYLE TEMPLATE ad or organic post from pure HTML: no AI model, about 30 seconds, a couple of credits. YOU author the copy: short, casual, believable, never marketing-speak, every line a finished phrase within its budget. Pass config.template plus its fields. 'slideshow' (IMAGES: a native photo slideshow for TikTok photo mode / Reels at 1080x1920, or feed carousels with size:'4:5' at 1080x1350; no branding, no end card): { slides:[{text, sub?, image?, blur?, background?:'#hex', position?}] (2-35; slide 1 is the hook, then one point per slide; the words are never rewritten), style?:'tiktok-classic'|'clean-minimal'|'note-style', textStyle? (add_subtitles' vocabulary), video?:true (also an MP4, about 2.5s a slide, for Shorts / X) }; returns images[] (+video) that post_to_tiktok imageUrls and post_to_meta carousels take as-is; 2 credits, +1 per slide past 5, +2 for the MP4. 'imessage-chat' (VIDEO ~15s): { thread:{contactName, messages:[{from:'them'|'me', text?, product?:{image,title,domain}}]}, theme?, endCard }, 4-6 short lowercase bubbles, the product card from 'me' mid-thread. 'chatgpt-chat' (VIDEO): { question, answer (may **bold** the brand), productImage?, endCard }. 'apple-notes' (VIDEO): { title, lines[], theme?, endCard }. 'value-prop' (VIDEO ~17s): { hook (≤40ch), claims[3-5 finished phrases ≤34ch], productImages[2-3 distinct], palette[], endCard }. 'static-mockup' (IMAGE): { style:'imessage'|'notes'|'card', size?:{w,h}, ...style fields }. 'airdrop-carousel' (VIDEO ~10s): { brandName, products:[{image, title?}] (3-16 real photos), contactLine?, endCard }. 'app-ui-tour' (VIDEO, app brands): { hook?, appName, iconImage?, beats:[{screenImage, caption}] (2-6), endCard }. 'imessage-cascade' (VIDEO ~12s): { notifications:[{sender, text}] (4-8), backgroundImage?, endCard }. 'photo-grid' (VIDEO ~8s): { title?, photos:[{image, label?}] (4-9), endCard }. 'vignette' (VIDEO ~12s): { hook, lines[2-4 ≤40ch], heroImage, endCard }. 'kinetic-type' (VIDEO 9-15s, no voiceover, its own SFX): { phrases[3-6 ≤34ch, one idea each], productImages?[≤4], endCard }, pure typography when there are no photos. 'myth-vs-fact' (VIDEO 15-26s with a real VOICEOVER and word karaoke): { pairs:[{myth ≤50ch, fact ≤60ch, [brackets] accent the payoff}] (2-4), endCard }, real product truths only, never invented stats, plus a small voiceover charge. 'carousel' (IMAGES: 5-10 branded 1080x1080 PNGs): { cover:{hook?, title}, slides:[{headline ≤8 words, support? ≤16 words, stat?:{value, label}}] (3-8; a stat is a real user number), cta:{headline, cta?, domain?}, productImage?, logo? }. endCard = { headline, cta, domain?, logo?, color? }; palette and fontStack are optional everywhere. Every VIDEO format except myth-vs-fact gets a mood-matched bed from the curated library when one is on file (free, never a generated track; config.music:'off' or a mood name). Image URLs may be any public URL.",
+    description: "An ad or post rendered from HTML: no AI model, ~30s, a couple of credits. Presets are SHORTCUTS; 'custom' is YOUR OWN design as config.html (+ css), so no layout, type, colour or motion is 'unsupported'. custom: { html, css?, size? ('9:16' default | '4:5' | '1:1' | '16:9' | any 'W:H' | {w,h} px), durationSeconds? (1-60 = VIDEO; CSS/SVG animation and <video> are frame-stepped, scripts stripped), slides?:[{html, css?}] (2-35 = carousel) }; {{logo}} {{brandName}} {{domain}} {{accent}} fill from the brand; images and fonts load by https URL; notes[] lists what failed to load. YOU author preset copy: short, casual, believable, finished phrases within budget. 'slideshow' (IMAGES, TikTok photo mode / Reels 1080x1920, or size:'4:5' feed carousels; no branding): { slides:[{text, sub?, image?, blur?, background?, position?}] (2-35; words never rewritten), style? ('tiktok-classic'|'clean-minimal'|'note-style' or a look in words), textStyle?, video?:true (+ an MP4) }; 2 credits, +1 per slide past 5, +2 for the MP4. 'imessage-chat' (VIDEO ~15s): { thread:{contactName, messages:[{from:'them'|'me', text?, product?:{image,title,domain}}]}, theme?, endCard }. 'chatgpt-chat' (VIDEO): { question, answer (may **bold** the brand), productImage?, endCard }. 'apple-notes' (VIDEO): { title, lines[], theme?, endCard }. 'value-prop' (VIDEO ~17s): { hook ≤40ch, claims[3-5 ≤34ch], productImages[2-3], palette[], endCard }. 'static-mockup' (IMAGE): { style:'imessage'|'notes'|'card', size?:{w,h}, ...fields }. 'airdrop-carousel' (VIDEO): { brandName, products:[{image, title?}] (3-16), endCard }. 'app-ui-tour' (VIDEO): { hook?, appName, iconImage?, beats:[{screenImage, caption}] (2-6), endCard }. 'imessage-cascade' (VIDEO): { notifications:[{sender, text}] (4-8), backgroundImage?, endCard }. 'photo-grid' (VIDEO): { title?, photos:[{image, label?}] (4-9), endCard }. 'vignette' (VIDEO): { hook, lines[2-4 ≤40ch], heroImage, endCard }. 'kinetic-type' (VIDEO, own SFX): { phrases[3-6 ≤34ch], productImages?[≤4], endCard }. 'myth-vs-fact' (VIDEO with a real VOICEOVER, small extra charge): { pairs:[{myth ≤50ch, fact ≤60ch}] (2-4; [brackets] accent), endCard }, real truths only. 'carousel' (IMAGES, 5-10 branded 1080x1080): { cover:{hook?, title}, slides:[{headline, support?, stat?:{value, label}}] (3-8), cta:{headline, cta?, domain?}, productImage?, logo? }. endCard = { headline, cta, domain?, logo?, color? }; palette and fontStack optional. config.music on a VIDEO: omit for the format's free library bed, 'off' for silence, or any words (a mood or a description) to compose a bed to them (a flat music fee, in hermoso_capabilities). Image URLs may be any public URL.",
     inputSchema: {
-      config: z.object({}).passthrough().describe("the template config — MUST include config.template (one of the template ids above) plus that template's fields"),
+      config: z.object({}).passthrough().describe("MUST include config.template: 'custom' or a preset id above, plus its fields"),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     _meta: openaiMeta(AD_RESULT_URI, 'Building your template ad…', 'Template ad ready'),
   }, wrap(async (a) => {
-    const r = await renderJob('templatead', { config: a.config }, 'MCP template ad');
+    // A custom design fills {{logo}} {{brandName}} {{domain}} {{accent}} from the workspace brand, the same record the web
+    // client sends; presets keep their explicit config fields (endCard etc.) exactly as before.
+    let _brand;
+    if (String(a.config?.template || '') === 'custom') { let b = await readStore('heist.brand.v1').catch(() => null); if (!b || typeof b !== 'object') b = {}; const pal = (Array.isArray(b.palette) ? b.palette : []).filter((c) => /^#[0-9a-f]{6}$/i.test(String(c || ''))); _brand = { name: b.name || '', domain: b.domain || '', logo: b.logo || '', accent: pal[0] || '' }; }
+    const r = await renderJob('templatead', { config: a.config, ...(_brand ? { brand: _brand } : {}) }, 'MCP template ad');
     if (Array.isArray(r?.raw?.images) && r.raw.images.length) { // carousel: one PNG per slide → list every URL + inline the first slide
       const urls = r.raw.images.map((u) => abs(u));
       const first = await imageBlock(urls[0]).catch(() => null);
@@ -17225,8 +17275,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const notes = Array.isArray(r.raw.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : '';
       return { content: [{ type: 'text', text: `${String(a.config?.template || '') === 'slideshow' ? 'Slideshow' : 'Carousel'} ready — ${urls.length} slides:\n${urls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}${vid}${notes}  [job ${r.jobId}]` }, ...(first ? [first] : [])], structuredContent: r ?? {} };
     }
-    if (r?.raw?.image || /\.png($|\?)/.test(r?.url || '')) { const img = r?.url ? await imageBlock(r.url) : null; return { content: [{ type: 'text', text: `Template ad ready: ${r.url}  [job ${r.jobId}]` }, ...(img ? [img] : [])], structuredContent: r ?? {} }; }
-    return okVideo(`Template ad ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]`, r);
+    // notes = what the render could not honour (a custom design's resource that did not load); music = the bed that
+    // actually landed, or that it did not — both READ BACK off the result, so the agent can judge its own design
+    const _tn = Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : '';
+    const _tm = r?.raw?.music ? (r.raw.music.landed === false ? `\nMusic: no bed landed for "${r.raw.music.mood}" (nothing charged for it).` : `\nMusic: ${r.raw.music.source} bed, "${r.raw.music.mood}".`) : '';
+    if (r?.raw?.image || /\.png($|\?)/.test(r?.url || '')) { const img = r?.url ? await imageBlock(r.url) : null; return { content: [{ type: 'text', text: `Template ad ready: ${r.url}  [job ${r.jobId}]${_tn}` }, ...(img ? [img] : [])], structuredContent: r ?? {} }; }
+    return okVideo(`Template ad ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${_tm}${_tn}`, r);
   }));
 
   server.registerTool('finish_video', {
@@ -17251,7 +17305,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('post_edit', {
     title: 'Post-production edit',
-    description: "MECHANICAL post-production on an EXISTING video (its URL): an ordered plan of whitelisted primitives run by ffmpeg (+ Chrome for type) in seconds for ~2 credits flat, NO AI model, the original untouched (returns a NEW video). Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, watermark (corner logo), grain (anti-AI), text (timed words over the clip in a native look, no branding: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle, position, start/end), join (this video FOLLOWED BY clips[], each a Library URL, a direct file or a public TikTok / Reel / Facebook / X / YouTube post link, as one 1080x1920 video with matched loudness; transition 'cut' or 'crossfade'). Up to 6 ops, in order. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound taken FROM THE HOOK ITSELF: its own audio carries across the cut, else a sound generated from its frames (then up to 8 credits), else a neutral impact (sound 'auto' default | 'own' never a model | 'impact' | 'whoosh' | 'none'). {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: best, make our clip's host say the connecting line. matchCut = where our clip starts. NEVER use generate_video/render_ad for these.",
+    description: "MECHANICAL post-production on an EXISTING video (its URL): an ordered plan of whitelisted primitives run by ffmpeg (+ Chrome) in seconds for ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, watermark (corner logo), grain (anti-AI), text (timed words over the clip in a native look, no branding: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle, position, start/end), join (this video FOLLOWED BY clips[], each a Library URL, a direct file or a public TikTok / Reel / Facebook / X / YouTube post link, as one 1080x1920 video with matched loudness; transition 'cut' or 'crossfade'). Up to 6 ops, in order. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound taken FROM THE HOOK ITSELF: its own audio carries across the cut, else a sound generated from its frames (then up to 8 credits), else a neutral impact (sound 'auto' default | 'own' never a model | 'impact' | 'whoosh' | 'none'). {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: best, make our clip's host say the connecting line. matchCut = where our clip starts. Other edits, transitions: edit_timeline. NEVER generate_video/render_ad for these.",
     inputSchema: {
       videoUrl: z.string().describe('the video to edit: a render / Library URL, a direct file, or a public post link'),
       ops: z.array(z.object({
@@ -17261,6 +17315,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         text: z.string().optional().describe('text: the words, verbatim'),
         position: z.enum(['top', 'center', 'lower', 'bottom']).optional().describe('text: where'),
         style: z.union([z.string(), z.object({}).passthrough()]).optional().describe('text: a look name or a textStyle'),
+        textStyle: z.union([z.string(), z.object({}).passthrough()]).optional(),
         clips: z.array(z.object({ url: z.string(), start: z.number().optional(), end: z.number().optional() })).optional().describe('join: the clips after this video'),
         transition: z.enum(['cut', 'crossfade']).optional().describe('join'),
         bridge: z.object({ kind: z.enum(['impact', 'text']), cutAt: z.number().optional().describe('omit: found from the footage'), matchCut: z.number().optional(), sound: z.enum(['auto', 'own', 'impact', 'whoosh', 'none']).optional(), flash: z.boolean().optional(), shake: z.boolean().optional(), text: z.string().optional(), then: z.string().optional() }).optional().describe('join: connects the hook to the first clip'),
@@ -17286,6 +17341,93 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const pal = (Array.isArray(b.palette) ? b.palette : []).filter(c => /^#[0-9a-f]{6}$/i.test(String(c || '')));
     const r = await renderJob('postedit', { videoUrl: a.videoUrl, ops: (a.ops || []).slice(0, 6), brandName: a.brandName || b.name || '', domain: a.domain || b.domain || '', logo: b.logo || '', accent: a.accent || pal[0] || '' }, 'MCP post edit');
     return okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.applied) ? `  (${r.raw.applied.join(', ')})` : ''}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : ''}  [job ${r.jobId}]`, r);
+  }));
+
+  // THE OPEN EDIT PRIMITIVE (2026-09-24). Dave: "I hate being rigid, the whole point of this is being able to do basically
+  // anything they want", and: "their super smart AI agent should have hermoso, access all our tools and be able to make
+  // what it thinks is best for the user". So there is no list of named transitions: the caller COMPOSES any edit from
+  // segments + keyframes + overlay HTML, and the server (lib/timeline.mjs) validates every value and compiles the
+  // filtergraph itself. It rides the same postedit job as post_edit (same flat price, same source guards). Held out of
+  // the default LIST on size (ON_DEMAND_TOOLS): find_tools finds it, call_tool and a direct call run it.
+  // a constant, or keyframes [{t | src, v, ease}] (shape spelled out on `segments`: one description beats thirteen copies)
+  const KF = z.union([z.number(), z.array(z.any())]);
+  server.registerTool('edit_timeline', {
+    title: 'Compose an edit (timeline)',
+    description: "Compose ANY edit or transition yourself; there is no preset list. Segments on an output timeline (later ones drawn on top; overlapping ones ARE the transition), each animated by keyframes, plus your own HTML overlays and masks, compiled server-side into one render. Whip pan, zoom through, push, spin, speed ramp, slow motion, freeze frame, reverse, flash, J-cut / L-cut, circle or shape wipe, split screen, picture in picture: all composed from the fields below. Local render, the flat post_edit price (~2 credits, overlays included); a `generate` segment (a paid generated transition shot) only when the user explicitly asks for one. "
+      + "LOOK FIRST AND AFTER: video_frames(url, start, end, fps) shows exact frames free, so find the moment (the second the egg tips) before you cut, and check the seam of what you rendered before you call it done. "
+      + "SOURCES: src is 'this' (videoUrl) or any Library / render URL, direct file or PUBLIC TikTok / Reel / Facebook / X / YouTube post link (a viral hook's link works as is). in/out are SOURCE seconds; out:'payoff' cuts just before the hook's payoff, found from its motion. "
+      + "AUDIO: audio.tail:'payoff' carries the hook's OWN payoff sound across the cut (the egg's real splat over our clip); tail seconds = an L-cut; lead = a J-cut; gain dB or keys; mute. "
+      + "A VIRAL HOOK + THEIR PRODUCT: start from the hook. A clip matched to an unrelated hook never reads as one video, so write the clip AFTER the hook for it: a linking script + shot brief (the first line answers the hook, e.g. 'still waiting for the egg to land... anyway, come check out our restaurant'; what to film so it follows on; 5-15 s; then the pitch). The user records it, or you generate it (render_ad / generate_video, cost quoted first, on their OK); then join here: the hook with out:'payoff' and audio.tail:'payoff', then their clip. Match an existing unrelated clip only if they insist. A {generate:{prompt, seconds 3-8}} segment (a generated transition-only shot, paid, postEditTimeline) is never suggested; build it only when they explicitly ask for one. "
+      + "LINK FIRST: an effect alone never connects two unrelated clips; the link comes from what is in the frames. (1) Match cut, the default: video_frames (with its MOTION readout) on the hook's last second and across the other clip; pick the out-point AND the in-point (in: seconds, not always 0) where a motion direction, a screen position or size, a shape, a surface, a gesture or a gaze carries across, then ride the effect on that shared motion. (2) Its host names the hook in the first line. If the two share nothing, say so and offer the follow clip made for the hook. "
+      + "PRO, NOT IMOVIE: ease every curve (never linear on a move); keep the picture filling the frame through a move (scale up while it moves: two frames sliding side by side with a seam is the amateur tell); hide the handoff under the fastest, blurriest frames; carry direction into the next shot; cut on motion; end every effect cleanly; 0.2-0.6 s in total; a sound whose peak lands on the handoff (sfx whoosh at handoff minus 0.45 s, or the hook's own payoff sound). Moving segments get a real shutter blur automatically (motionBlur). "
+      + "RECIPES (c = the cut second, adapt freely): whip pan: A over its last 0.22 s x 0 to -0.22, scale 1 to 1.35, mblur 0 to 220, all ease in; B overlap 0.08, opacity 0 to 1 over 0.08, x 0.22 to 0, scale 1.35 to 1, mblur 220 to 0, all ease out over 0.3 s; whoosh at c-0.45. Zoom through: A over its last 0.35 s scale 1 to 3 ease in anchored on the object, blur 0 to 10; B overlap 0.12, opacity 0 to 1, scale 1.5 to 1 and blur 10 to 0 ease out over 0.4 s. Cut on action: A out ON the motion, B scale 1.08 to 1 ease out over 0.25 s, audio.lead 0.2. Speed ramp: speed [{src:t0,v:1},{src:t0+0.25,v:0.3}] then [{src:t1,v:0.3},{src:t1+0.1,v:2}] into the cut. Circle wipe: B overlap 0.5 + overlays [{mode:'mask', segment:1, start, end, html: a white div whose clip-path circle grows via @keyframes}]. "
+      + "SELF-CRITIQUE: the reply carries a vision REVIEW of each seam (pro / ok / amateur, linked or not, with fixes; about 2 credits, review:false skips it) and the seam frames. When it says ok or amateur, fix what it names and re-run the same sources (twice at most) before presenting; on a re-run give a generated segment {src: its URL, between: true} so it is not paid for twice. "
+      + "FOLLOW-UPS ('cut earlier', 'no splat', 'whip pan instead', 'use the second hook') re-run this with the SAME sources and the one change; the result echoes the resolved timeline (e.g. the found payoff cut) to edit from. Refusals are free and name the field.",
+    inputSchema: {
+      videoUrl: z.string().optional().describe("the video 'this' refers to (optional when every segment names its own src)"),
+      segments: z.array(z.object({
+        src: z.string().optional().describe("'this' or a video URL / public post link"),
+        image: z.string().optional().describe('a still instead (URL), with seconds'),
+        generate: z.object({ prompt: z.string(), seconds: z.number().optional().describe('3-8'), model: z.string().optional().describe('a model id that takes start AND end frames') }).optional().describe('PAID: a new shot between its neighbours'),
+        in: z.number().optional().describe('source second to start from (default 0)'),
+        out: z.union([z.number(), z.literal('payoff')]).optional().describe("source second to stop at, or 'payoff' (default: the end)"),
+        at: z.number().optional().describe('output second it starts (default: right after the previous)'),
+        overlap: z.number().optional().describe('seconds it starts before the previous ends: the transition window'),
+        seconds: z.number().optional().describe('image segments: how long'),
+        fit: z.enum(['auto', 'fill', 'contain', 'blur']).optional(),
+        crop: z.union([z.literal('auto'), z.object({ x: z.number().optional(), y: z.number().optional(), w: z.number().optional(), h: z.number().optional() })]).optional().describe("fractions of the source frame, or 'auto': the picture only, without letterbox bars and their caption"),
+        anchor: z.object({ x: z.number(), y: z.number() }).optional().describe('canvas point (0-1) that stays put while it scales'),
+        speed: z.union([z.number(), z.array(z.object({ src: z.number(), v: z.number(), ease: z.enum(['linear', 'hold']).optional() }))]).optional().describe('0.05-8, or a ramp over source seconds'),
+        hold: z.array(z.object({ src: z.number(), seconds: z.number() })).optional().describe('freeze frames'),
+        reverse: z.boolean().optional(),
+        between: z.boolean().optional().describe('a bridge clip between its neighbours (a re-used generated shot): trimmed and graded to them automatically'),
+        slowmo: z.enum(['blend', 'hold', 'flow']).optional().describe('how slow motion fills frames (flow = motion-interpolated)'),
+        scale: KF.optional(), x: KF.optional().describe('canvas widths'), y: KF.optional().describe('canvas heights'), rotate: KF.optional().describe('degrees'),
+        opacity: KF.optional(), blur: KF.optional(), mblur: KF.optional().describe('directional motion blur px'), mblurAngle: z.number().optional(),
+        brightness: KF.optional().describe('-1..1, a flash'), exposure: KF.optional().describe('× the light, 1 = as shot (a fine grade)'), contrast: KF.optional(), saturation: KF.optional(),
+        audio: z.object({ mute: z.boolean().optional(), gain: KF.optional().describe('dB'), lead: z.number().optional(), tail: z.union([z.number(), z.literal('payoff')]).optional(), fadeIn: z.number().optional(), fadeOut: z.number().optional(), level: z.enum(['match', 'keep']).optional() }).optional(),
+      })).describe("the clips on the output, max 12, later ones on top. Every animated field (scale x y rotate opacity exposure blur mblur brightness contrast saturation, audio.gain) is a constant or keyframes [{t: seconds into this segment | src: a second of the source, v, ease: linear|in|out|inout|hold}]; x and y are in canvas widths / heights, rotate in degrees, mblur in px along mblurAngle"),
+      overlays: z.array(z.object({ html: z.string().describe('HTML/CSS animated with @keyframes; no script, no network (images as data: URIs)'), start: z.number(), end: z.number(), mode: z.enum(['over', 'mask']).optional().describe("'mask': its opaque pixels are where `segment` shows"), segment: z.number().optional() })).optional(),
+      sfx: z.array(z.object({ sound: z.enum(['whoosh', 'impact', 'payoff']), at: z.number(), gain: z.number().optional(), segment: z.number().optional().describe("payoff: the segment whose OWN payoff sound (the egg's real splat) lands at `at`") })).optional(),
+      size: z.enum(['9:16', '1:1', '4:5', '16:9']).optional(),
+      fps: z.number().optional(),
+      motionBlur: z.boolean().optional().describe('default true: anything that moves gets a real shutter blur along its path'),
+      review: z.boolean().optional().describe('default true: a vision read of each seam (about 2 credits) comes back with the render, with the seam frames'),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const op = { op: 'timeline', segments: a.segments, ...(a.overlays ? { overlays: a.overlays } : {}), ...(a.sfx ? { sfx: a.sfx } : {}), ...(a.size ? { size: a.size } : {}), ...(a.fps ? { fps: a.fps } : {}), ...(a.motionBlur != null ? { motionBlur: a.motionBlur } : {}), ...(a.review != null ? { review: a.review } : {}) };
+    const r = await renderJob('postedit', { ...(a.videoUrl ? { videoUrl: a.videoUrl } : {}), ops: [op] }, 'MCP timeline');
+    const tl = r?.raw?.timeline;
+    const gen = Array.isArray(r?.raw?.generatedShots) && r.raw.generatedShots.length ? `\nGENERATED SHOT: ${r.raw.generatedShots.map((g) => `${g.model} ${g.seconds}s ${abs(g.video)}`).join('; ')} (billed as its own render)` : '';
+    // THE SELF-CRITIQUE comes back WITH the render: the verdict, the fixes, and the seam frames the reviewer saw, inline,
+    // so the calling agent can see its own transition before it shows the user anything.
+    const rv = r?.raw?.review;
+    const rvText = rv ? `\nREVIEW (${rv.verdict || 'unread'}${rv.score != null ? `, ${rv.score}/10` : ''}${rv.linked === false ? ', NOT LINKED: the two clips read as unrelated; say so and offer a follow clip made for the hook (a brief they record, or one generated with the cost quoted first)' : rv.linked ? ', linked' : ''}): ${(rv.issues || []).map((x) => `seam ${x.seam}: ${x.problem} → ${x.fix}`).join(' | ') || 'no issues'}. ${rv.verdict === 'amateur' || rv.verdict === 'ok' ? 'Fix what it names and re-run with the same sources (twice at most) before presenting it.' : 'Look at the seam frames too before presenting it.'}` : '';
+    const res = await okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : ''}${tl ? `\nRESOLVED: ${tl.segments.map((sg) => `[${sg.i}] ${sg.in != null ? `${sg.in}-${sg.out}s` : `${sg.seconds}s`} @${sg.at}s`).join(', ')} (${tl.seconds}s)` : ''}${gen}${rvText}  [job ${r.jobId}]`, r);
+    const sheet = rv?.seamSheets?.[0]?.url ? await imageBlock(abs(rv.seamSheets[0].url)) : null;
+    if (sheet && Array.isArray(res.content)) res.content.push({ type: 'text', text: `Seam 1 frames (${rv.seamSheets[0].at}s, 15 fps, left to right):` }, sheet);
+    return res;
+  }));
+
+  // THE EYES (2026-09-24): exact frames as one contact sheet, free. Pairs with edit_timeline: look, cut, render, look.
+  server.registerTool('video_frames', {
+    title: 'Look at video frames',
+    description: "LOOK at a video's exact frames, free: one contact-sheet image of the frames from start to end at fps (e.g. a seam, 3.0-3.8 s at 10 fps) or at the listed times, tiles in reading order with each tile's second listed. Use it to find a moment before an edit and to check a render's seam after it. Takes a Library / render URL, a direct file or a public post link.",
+    inputSchema: {
+      url: z.string().describe('the video'),
+      start: z.number().optional(), end: z.number().optional(),
+      fps: z.number().optional().describe('frames per second in the window (default ~16 frames across it)'),
+      times: z.array(z.number()).optional().describe('exact seconds instead of a window (max 48)'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/video/sheet', { url: a.url, ...(a.start != null ? { start: a.start } : {}), ...(a.end != null ? { end: a.end } : {}), ...(a.fps != null ? { fps: a.fps } : {}), ...(Array.isArray(a.times) && a.times.length ? { times: a.times.join(',') } : {}) });
+    const [head, b64] = String(d.image || '').split(',');
+    const mv = (d.motion || []).filter(Boolean).map((m) => `${m.t.toFixed(2)}s ${m.region ? `subject at (${m.region.x}, ${m.region.y})${m.heading ? ` moving ${m.heading}` : ''}` : 'no moving subject'}${m.camera !== 'still' ? `, camera ${m.camera}` : ''}`).join('; ');
+    const text = `${d.times.length} frames, ${d.columns} per row (left to right, top to bottom) at: ${d.times.map((t) => t.toFixed(2) + 's').join(', ')}. Video length ${d.durationSeconds}s.${mv ? `\nMOTION (x,y are 0-1 of the frame): ${mv}` : ''}`;
+    return { content: [{ type: 'text', text }, ...(b64 ? [{ type: 'image', data: b64, mimeType: head.slice(5).split(';')[0] || 'image/jpeg' }] : [])], structuredContent: { times: d.times, columns: d.columns, rows: d.rows, durationSeconds: d.durationSeconds, motion: d.motion || [] } };
   }));
 
   server.registerTool('fix_beat', {
@@ -17318,7 +17460,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       video: z.string().describe('the long video to clip — a YouTube/Vimeo/Loom/Dailymotion/Streamable/Rumble/Wistia/Twitch/TED watch URL, a direct https .mp4/.mov/.webm, or a Hermoso /generated/ URL'),
       count: z.number().optional().describe('how many clips to cut, 1-8 (default 4)'),
-      aspectRatio: z.enum(['9:16', '1:1', '16:9', 'keep']).optional().describe("clip shape — '9:16' (default) vertical for Reels/Shorts/TikTok; 'keep' leaves the source framing untouched"),
+      aspectRatio: z.string().optional().describe("clip shape: '9:16' (default), '1:1', '16:9', any 'W:H', or 'keep' for the source framing"),
       captions: z.boolean().optional().describe('burn subtitles into every clip. DEFAULT TRUE — a clip cut from a podcast or a talk is watched on mute, and the words are the product. Set false for clean footage. A clip whose window carries no readable speech is delivered bare rather than captioned with a guess, and the result says which.'),
     },
     outputSchema: { ...JOB_OUT },
@@ -17346,32 +17488,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // upload or someone else's video had no way to get them. The look is the same textStyle vocabulary render_ad speaks.
   server.registerTool('add_subtitles', {
     title: 'Add subtitles to a video',
-    description: "Burn subtitles into ANY existing video and get the .srt too. It transcribes the speech and burns short readable lines onto the whole video; nothing is cut or re-rendered. Set textStyle only when the user describes a look; with none, white sentence-case text with a thin outline sits in the bottom safe band. Timing is approximate (per spoken sentence), not word-level sync. burn:false returns only the .srt. Takes a /generated/ URL, a direct .mp4/.mov/.webm, or a YouTube/Vimeo/Loom-style link; not TikTok, Instagram or Facebook. No speech is refused and refunded. Runs in the background and lands in the Library.",
+    description: "Burn subtitles into ANY video and get the .srt too; nothing is cut or re-rendered. Set textStyle only when the user describes a look (default: white sentence case, thin outline, bottom). Timed per sentence, or auto:'words' for phrases on their spoken words. Or pass cues to burn your own lines exactly, untranscribed (reel-style phrases, *stage directions*). burn:false returns only the .srt. Takes a video file or URL, a YouTube/Vimeo-style page, or a TikTok / Reel / X post link. No speech is refused and refunded. Runs in the background and lands in the Library.",
     inputSchema: {
       video: z.string().describe('the video to subtitle'),
-      textStyle: z.union([
-        z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']),
-        z.object({
-          preset: z.enum(['pill', 'editorial', 'bold', 'minimal', 'handwritten', 'boxed']).optional(),
-          font: z.enum(['sans', 'serif', 'elegant', 'condensed', 'hand']).optional(),
-          weight: z.number().optional(), size: z.union([z.enum(['s', 'm', 'l', 'xl']), z.number()]).optional(),
-          color: z.string().optional().describe('#hex'), background: z.string().optional().describe('none | pill | #hex box'),
-          position: z.enum(['top', 'center', 'lower', 'bottom']).optional(), textCase: z.enum(['as-is', 'upper', 'lower', 'title']).optional(),
-          italic: z.boolean().optional(), outline: z.boolean().optional(), shadow: z.boolean().optional(),
-          tilt: z.number().optional().describe('degrees, ±12'),
-        }),
-      ]).optional().describe('the look: a preset or overrides; omit for the default'),
+      textStyle: TEXT_STYLE_Z.optional().describe('the look: words, a preset or fields; omit for the default'),
       burn: z.boolean().optional().describe('false = only the .srt'),
+      auto: z.enum(['sentences', 'words']).optional(), wordsPerCue: z.number().optional(),
+      cues: z.array(z.object({ text: z.string(), start: z.number(), end: z.number() })).max(400).optional()
+        .describe('your own lines in seconds, no overlap, max 90 chars, no emoji'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const r = await renderJob('subtitles', { video: a.video, textStyle: a.textStyle, burn: a.burn }, 'MCP subtitles');
+    const r = await renderJob('subtitles', { video: a.video, textStyle: a.textStyle, burn: a.burn, ...(a.cues ? { cues: a.cues } : {}), ...(a.auto ? { auto: a.auto } : {}), ...(a.wordsPerCue != null ? { wordsPerCue: a.wordsPerCue } : {}) }, 'MCP subtitles');
     if (r.stillRendering) return okVideo('', r); // resumable handle — get_job carries the result when it lands
     const raw = r?.raw || {};
     // THE HEADLINE IS THE READ-BACK: "burned" only when the returned file really carries the subtitles.
     const head = raw.captionsBurned && raw.video
-      ? `Subtitles burned in (${raw.captionStyle || 'default'} look, approximate per-sentence timing, not word-level sync): ${abs(raw.video)}`
+      ? `Subtitles burned in (${raw.captionStyle || 'default'} look, ${raw.source === 'your cues' ? 'your own lines and times, exactly as written' : raw.source === 'word timings' ? 'word-timed phrases' : 'approximate per-sentence timing, not word-level sync'}): ${abs(raw.video)}`
       : 'No subtitled video came back — the subtitle file is below.';
     const note = raw.captionNote ? `\nNOTE: ${raw.captionNote}` : '';
     const trunc = raw.truncated ? `\nNOTE: only the first ${Math.round((raw.analyzedSeconds || 0) / 60)} min of ${Math.round((raw.sourceDuration || 0) / 60)} min was transcribed, so the subtitles stop there.` : '';
@@ -17388,12 +17522,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       durationSeconds: z.number().optional().describe('target length 20-120s (default 60); drives the section count — ~10s of narration each, 3-8 sections'),
       frameDensity: z.enum(['standard', 'lean', 'minimal']).optional().describe("how many pictures per second of narration, and therefore what it costs. 'standard' (default) is a frame about every 1.5s — the density a stills film needs to read as a film rather than a slideshow; 'lean' is one about every 2.5s (the longest hold that still reads as a film, ~40% of the frames and ~40% of the cost); 'minimal' is ONE picture per narration section, which is cheapest and is frankly a slideshow. Only drop below the default if the user asked for something cheaper."),
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:5', '3:4']).optional().describe("'9:16' default"),
-      style: z.enum(['cinematic', 'editorial_collage', 'flat_vector', 'stickman', 'whiteboard', 'ink_marker', 'silhouette', 'storybook', 'paper_diorama', 'isometric', 'claymation', 'pixel_art', 'watercolor', 'fluffy_toy', 'low_poly', 'stylized_3d', 'studio_3d', 'mannequin']).optional().describe("visual style. 'cinematic' (default) is photoreal; the rest are non-photoreal styled looks — editorial_collage (halftone cutouts + marker accents), flat_vector, stickman, whiteboard, ink_marker, silhouette, storybook (gouache), paper_diorama, isometric, claymation, pixel_art, watercolor, fluffy_toy (felted plush), low_poly, stylized_3d (matte clay render), studio_3d (preschool toy 3D on a white sweep — the Kids default), mannequin (clay-render reenactment figures — a History alternate). Ask the user which they want rather than picking silently; a styled pick costs more (see the cost note)."),
+      style: z.string().optional().describe("visual style: 'cinematic' (default, photoreal); styled shortcuts editorial_collage, flat_vector, stickman, whiteboard, ink_marker, silhouette, storybook, paper_diorama, isometric, claymation, pixel_art, watercolor, fluffy_toy, low_poly, stylized_3d, studio_3d (the Kids default), mannequin; or ANY look described in words ('80s anime cel animation'), locked across every frame. Ask rather than pick silently; a styled look costs more."),
       channel: z.enum(['explainer', 'history', 'kids', 'fairytale']).optional().describe("the CHANNEL TYPE — it sets the pacing, the narration register and the default look, and is orthogonal to `style` (a named style always wins): explainer (casual second-person, fast cuts), history (witty chronological retelling / documentary), kids (fastest, question-first, warm teacher), fairytale (slow, atmospheric myth or folklore). Default 'explainer'."),
       voice: z.string().optional().describe('narration voice name — omit for the default warm read'),
       captions: z.boolean().optional().describe('turn ON-SCREEN TEXT on. DEFAULT FALSE, and leave it false unless the user asks — the narration already says the point and the pictures carry it, so the clean film is the better default. `captions:true` on its own burns SUBTITLES (see below), because that is what a caption is for: showing what is being said when the phone is on mute. Slim white CAPS, thin black outline, bottom safe band, no plate, no box.'),
       subtitles: z.boolean().optional().describe('which on-screen text, once `captions` is on. LEAVE IT UNSET (or true) for SUBTITLES — every spoken word, in order, timed to the narration; free, no extra render, no extra credits, and there is NO cue limit, so the whole film is subtitled however long it runs (at most 5 words / 32 characters a line). Set it FALSE only if the user explicitly wants section HEADINGS instead: one short summary label held over each ~7-15s section. That is NOT what is being said — it is a label about it — so it is the wrong answer to "add captions" and to anyone watching on mute. `subtitles:true` also implies `captions:true`. TIMING: each cue is anchored to that section’s REAL measured narration length and distributed inside the section by character count — exact at every section boundary, approximate to a few tenths of a second within one. It is not a word-level speech clock, so never promise frame-accurate sync.'),
-      music: z.string().optional().describe("music bed under the narration, measured to sit about 14 dB under the voice and sidechain-ducked beneath it. Omit and the KIDS and FAIRYTALE channels get their recommended bed COMPOSED for this film — those two are the only channels a bed is due on unasked, and it costs a small flat fee; every other channel ships dry. 'off' forces silence. 'library' takes a free curated track only, and ships dry when none is on file. NAME A MOOD — upbeat / calm / warm / epic / tense / playful / elegant / hype / chill / dramatic — to compose one on ANY channel, at the same fee. hermoso_capabilities reports the exact figure as explainerMusicCredits; quote it before you turn a bed on or pick a mood."),
+      music: z.string().optional().describe("music bed under the narration, measured to sit about 14 dB under the voice and sidechain-ducked beneath it. Omit and the KIDS and FAIRYTALE channels get their recommended bed COMPOSED for this film — those two are the only channels a bed is due on unasked, and it costs a small flat fee; every other channel ships dry. 'off' forces silence. 'library' takes a free curated track only, and ships dry when none is on file. NAME A MOOD (upbeat / calm / warm / epic / tense / playful / elegant / hype / chill / dramatic) or DESCRIBE it in words to compose one on ANY channel, at the same fee. hermoso_capabilities reports the exact figure as explainerMusicCredits; quote it before you turn a bed on or pick a mood."),
       upscale: z.number().optional().describe("optional FINAL upscale — 2 doubles each side, 4 quadruples. Captions and the end card are burned BEFORE it so they upscale with the frame. It is priced BY LENGTH and it is the expensive part — several times the cost of rendering the film itself. hermoso_capabilities reports the exact figures per length as explainerUpscaleCredits. Never turn it on unasked: quote the number and let the user choose."),
       endCard: z.boolean().optional().describe('append the branded end card. DEFAULT FALSE — set true ONLY when the user asks for one'),
       brandName: z.string().optional().describe('brand name for the end card — omit to leave it unbranded'),
@@ -17445,7 +17579,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       prompt: z.string().describe('the video prompt / shot description (for a refVideo edit, this is the transformation instruction)'),
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: dispatch this prompt to the model BYTE-IDENTICAL — no appended packaging/label guidance, no negative prompt, no reference-binding lines, no hex-to-colour-name rewrite. Use it when you want the model itself rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence. Billing, durable delivery and per-model validation are unchanged.'),
-      refImage: z.string().optional().describe('local path or URL to anchor the first frame'),
+      refImage: z.string().optional().describe('local path or URL to anchor the first frame; a real person’s photo here or in refImages confirms their likeness consent'),
       refImages: z.array(z.string()).optional().describe('SEVERAL reference images (local paths or URLs) — a person, products, a place — that must all appear in the clip. Only models whose `refs.max` in hermoso_capabilities is above 1 use more than one, and each uses at most that many; with `refs.promptAddressed` true, name them in your prompt as Image 1, Image 2… in this order. minimax-h3-max-ref takes up to 9 and keeps each one as a reference rather than a first frame. On a model that takes one image, only the first is used.'),
       refVideo: z.string().optional().describe("URL of an existing video to EDIT rather than generate from scratch — the clip is transformed per your prompt, inheriting the SOURCE clip’s canvas (aspect ratio) and, on every model hermoso_capabilities marks `sourceLength`, its LENGTH too: those endpoints have no duration parameter, their listed `durations` are the per-second price ladder, and a durationSeconds you send is reported back as unused rather than silently dropped. Trim the source to change the length. Omit `model` for the default editor, or name a model whose videoEdit is true in hermoso_capabilities (a named model that cannot edit is refused, nothing charged); refImage rides along as the look of what the edit adds. With extend:true this is instead the clip to EXTEND. Omit to generate a fresh clip."),
       endImage: z.string().optional().describe('local path or URL of the LAST frame: the clip travels from refImage (required with it) to this image. Only models with endFrame true in hermoso_capabilities take it; any other named model is refused by name, nothing charged.'),
@@ -17538,7 +17672,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Generate talking avatar',
     description: 'Render a TALKING-AVATAR / creator lip-sync clip from a portrait image + a script. Blocks until done (1–3 min). Requires the avatar capability (canAvatar in hermoso_capabilities). Spends credits.',
     inputSchema: {
-      image: z.string().describe('local path or URL of the presenter portrait'),
+      image: z.string().describe('local path or URL of the presenter portrait; a real person’s photo confirms their likeness consent'),
       script: z.string().describe('the words the avatar speaks'),
       voice: z.string().optional().describe('voice name (Rachel/Sarah/George/Adam)'),
       resolution: z.string().optional().describe("'1080p' (default) or '480p'/'720p' draft"),
@@ -17548,6 +17682,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your avatar clip…', 'Avatar clip ready'),
   }, wrap(async (a) => {
     const image = await toRef(a.image);
+    recordImpliedLikeness('generate_avatar');
     const r = await renderJob('avatar', { ...a, image }, 'MCP avatar');
     return okVideo(`Avatar clip ready: ${r.url}  [job ${r.jobId}]`, r);
   }));
@@ -18042,12 +18177,11 @@ function memoryNoteVerdict(text) {
   }));
   server.registerTool('save_creator', {
     title: 'Save a creator',
-    description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s + > Pick a creator > save. Pass the portrait’s public url (a generate_image render of a person, a headshot, any public photo) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS — `source` says what the portrait IS: leave it "generated" for an AI-made person, and use "upload"/"social" ONLY for a REAL person. Pass consented:true only when the user has told you that person agreed to their likeness being used; never assert that on their behalf.',
+    description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s + > Pick a creator > save. Pass the portrait’s public url (a generate_image render of a person, a headshot, any public photo) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS: leave `source` "generated" for an AI-made person and use "upload"/"social" for a REAL person. Saving a real person confirms you have their consent to use their likeness (or are them).',
     inputSchema: {
       name: z.string().describe('what to call this creator (e.g. “Sarah”) — list_creators and the app’s picker match on it'),
       image: z.string().optional().describe('REQUIRED except with useAnyway. public https url of the portrait (an existing render’s url, or any public photo). Not a local file path — upload it with upload_file first and save the url that returns'),
       source: z.enum(['generated', 'upload', 'social']).optional().describe('"generated" (default) = an AI-made person; "upload" / "social" = a REAL person'),
-      consented: z.boolean().optional().describe('REAL people only: the user has confirmed that person consented to their likeness being used in ads'),
       voice: z.string().optional().describe('a default voice name for this persona (engines + voices are in hermoso_capabilities)'),
       poses: z.array(z.string()).optional().describe('up to 4 extra full-body / angle plates of the SAME person (public urls) — they make a wider shot hold the identity'),
       look: z.string().optional().describe('their canonical wardrobe/appearance in words — reused to hold the look steady across ads'),
@@ -18071,6 +18205,7 @@ function memoryNoteVerdict(text) {
         if (!/^https?:\/\//i.test(image) && !image.startsWith('/generated/')) return { content: [{ type: 'text', text: 'The new photo must be a public https url — upload the file with upload_file first, then pass the url it returns.' }], isError: true };
         const r = await apiPost('/api/creator/ref', { image, name: low.name });
         low.image = r?.image || image; low.refQuality = r?.refQuality || null; low.lowQualityRef = !!r?.lowQualityRef; delete low.refAccepted; low.poses = [];
+        if (low.source === 'upload' || low.source === 'social') { low.consentAt = Date.now(); low.consentVia = 'api-implied'; recordImpliedLikeness('save_creator', { creatorId: low.id, source: low.source }); }
         await writeStore('heist.avatars.v1', _l);
         const q = r?.refQuality?.score != null ? ` (photo quality ${r.refQuality.score}/100)` : '';
         return ok(r?.lowQualityRef ? `Replaced “${low.name}”’s photo${q}, but this one is still too unclear to cast well — try a sharper, front-facing, well-lit photo, or save_creator(name: "${low.name}", useAnyway: true).` : `Replaced “${low.name}”’s photo${q} — renders now cast them from it.`, { ok: true, id: low.id, creator: { id: low.id, name: low.name, image: abs(low.image), source: low.source }, refQuality: r?.refQuality || null });
@@ -18086,19 +18221,23 @@ function memoryNoteVerdict(text) {
     // IDEMPOTENT ON (name, portrait): a retrying agent must get the SAME creator back, not a twin nobody can tell
     // apart in the picker. A same-name creator with a DIFFERENT portrait is a deliberate re-shoot and still saves.
     const dupe = list.find(x => x && String(x.name || '').trim().toLowerCase() === name.toLowerCase() && String(x.image || '') === image);
+    if (dupe && (dupe.source === 'upload' || dupe.source === 'social') && !dupe.consentAt) { dupe.consentAt = Date.now(); dupe.consentVia = 'api-implied'; await writeStore('heist.avatars.v1', list); recordImpliedLikeness('save_creator', { creatorId: dupe.id, source: dupe.source }); }
     if (dupe) return ok(`“${name}” is already in the workspace cast.`, { ok: true, id: dupe.id, creator: { id: dupe.id, name, image: abs(image), source: dupe.source || source } });
     const item = {
       id: newId('av'), name, image,
       poses: (Array.isArray(a.poses) ? a.poses : []).filter(p => typeof p === 'string' && p.trim()).slice(0, 4),
       voice: String(a.voice || '').trim(), source,
-      // The consent stamp is recorded ONLY when the caller states it, and never for a synthetic creator (which needs
-      // none) — the same rule as the web's Avatars.add(source) → consentAt.
-      consentAt: (source !== 'generated' && a.consented === true) ? Date.now() : null,
+      // A REAL person saved over MCP / API / CLI is consented BY THE CALL (see recordImpliedLikeness): stamped with the
+      // time and `consentVia: 'api-implied'`, and the ledger row carries the account. Never for a synthetic creator,
+      // which needs none — the same rule as the web's Avatars.add(source) → consentAt after its Confirm step.
+      consentAt: source !== 'generated' ? Date.now() : null,
+      ...(source !== 'generated' ? { consentVia: 'api-implied' } : {}),
       ...(String(a.look || '').trim() ? { desc: String(a.look).trim().slice(0, 400) } : {}),
       createdAt: Date.now(),
     };
     await writeStore('heist.avatars.v1', [item, ...list].slice(0, 200));
-    const warn = (source !== 'generated' && !item.consentAt) ? ' ⚠ This is a REAL person and NO likeness consent is on file — say so to the user, and do not put them in a published ad until they confirm that person agreed.' : '';
+    if (source !== 'generated') recordImpliedLikeness('save_creator', { creatorId: item.id, source });
+    const warn = source !== 'generated' ? ' Saving this real person is recorded as your confirmation that you have their consent to use their face and likeness (or are them).' : '';
     return ok(`Saved “${item.name}” to the workspace cast — they now show up in list_creators and in the app’s creator picker. Star them in a finished ad with render_ad(creator: "${item.name}"), or re-cast them in a raw render by passing ${abs(item.image)} as generate_avatar.image / generate_video.refImage / recast_motion.image.${warn}`, { ok: true, id: item.id, creator: { id: item.id, name: item.name, image: abs(item.image), source } });
   }));
   server.registerTool('delete_creator', {
@@ -19491,22 +19630,71 @@ function memoryNoteVerdict(text) {
   server.group('create');
   server.registerTool('analyze_video', {
     title: 'Analyze video',
-    description: "Break a video ad down into its structure: the verbatim transcript (voiceover + on-screen text) with a beat list, plus duration and sampled frame timestamps. Use to study a reference/competitor ad before remixing its structure. Costs ~a transcription call.",
-    inputSchema: { url: z.string().describe('the video URL (a served /generated/ path or a public http(s) video)') },
+    description: "A video ad's structure: verbatim transcript (voiceover + on-screen text), beat list, duration and sampled frame times; study a reference before remixing it. ~A transcription call.",
+    inputSchema: {
+      url: z.string().describe('the video URL (a served /generated/ path or a public http(s) video)'),
+      frames: z.boolean().optional().describe('also return the frames as images'),
+      words: z.any().optional().describe("true | 'only': each spoken word's start/end"),
+      anchors: z.array(z.any()).optional().describe('{afterWord|beforeWord|atWord, occurrence?, offset?} -> s'),
+    },
     outputSchema: {
       durationSeconds: z.number().optional().describe('the video length in seconds'),
       frameTimes: z.array(z.number()).optional().describe('timestamps (seconds) of the sampled frames'),
       transcript: z.string().nullable().optional().describe('verbatim voiceover + on-screen text with a beat list (null when silent/unreachable)'),
+      words: z.array(z.any()).optional(), anchors: z.array(z.any()).optional(), cues: z.array(z.any()).optional(),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-  }, wrap(async ({ url }) => {
-    const [fr, tr] = await Promise.all([
+  }, wrap(async ({ url, frames, words, anchors }) => {
+    const wantWords = words === true || words === 'only' || anchors != null;
+    const wr = wantWords ? apiPost('/api/video/words', { url, ...(anchors ? { anchors } : {}) }).then(r => ({ r }), e => ({ e })) : null;
+    const wordsText = (w) => {
+      if (!w) return '';
+      if (w.e) return `\n\nWord timings could not be read: ${w.e.message || w.e}`;
+      const d = w.r || {};
+      const list = (d.words || []).slice(0, 3000).map(x => `[${x.start.toFixed(2)}-${x.end.toFixed(2)}]${x.word}`).join(' ');
+      const anc = Array.isArray(d.anchors) ? `\n\nAnchors:\n${d.anchors.map(a => a.error ? `- ${JSON.stringify(a.anchor)}: ${a.error}` : `- ${a.kind} "${a.word}" (${a.occurrence} of ${a.of}): ${a.time}s  [word ${a.start}-${a.end}s]`).join('\n')}\n${d.editRule || ''}` : '';
+      const cq = Array.isArray(d.cues) ? `\n\nCaption cues for add_subtitles:\n${JSON.stringify(d.cues)}` : '';
+      return `\n\nWord timings (${d.wordCount || 0} words, ${d.timing || 'word-level'}):\n${list || `(none: ${d.note || 'no speech was heard'})`}${(d.words || []).length > 3000 ? ' …' : ''}${anc}${cq}`;
+    };
+    const wordOut = (w) => (w && w.r ? { words: w.r.words, ...(w.r.anchors ? { anchors: w.r.anchors } : {}), ...(w.r.cues ? { cues: w.r.cues } : {}), durationSeconds: w.r.durationSeconds } : {});
+    if (words === 'only') {
+      const w = await wr;
+      if (w.e) throw w.e;
+      return ok(`Duration: ${w.r.durationSeconds}s${wordsText(w)}`, wordOut(w));
+    }
+    const [fr, tr, w] = await Promise.all([
       apiGet(`/api/video/frames?n=auto&url=${encodeURIComponent(url)}`).catch(() => null),
       apiGet(`/api/video/transcript?url=${encodeURIComponent(url)}`).catch(() => null),
+      wr,
     ]);
     const dur = fr?.durationSeconds, times = fr?.times || [];
     const transcript = tr?.transcript || '(no transcript — the video may be silent or unreachable)';
-    return ok(`Duration: ${dur ? Math.round(dur) + 's' : 'unknown'} · frames sampled at: ${times.map(t => Math.round(t * 10) / 10 + 's').join(', ') || 'n/a'}\n\nTranscript & beats:\n${transcript}`, { durationSeconds: dur, frameTimes: times, transcript: tr?.transcript || null });
+    const r = ok(`Duration: ${dur ? Math.round(dur) + 's' : 'unknown'} · frames sampled at: ${times.map(t => Math.round(t * 10) / 10 + 's').join(', ') || 'n/a'}\n\nTranscript & beats:\n${transcript}${wordsText(w)}`, { durationSeconds: dur, frameTimes: times, transcript: tr?.transcript || null, ...wordOut(w), ...(dur ? { durationSeconds: dur } : {}) });
+    // THE EYES (2026-09-24): an agent that composed its own design, edit or render can SEE the frames, not just their times.
+    if (frames) for (const f of (fr?.frames || []).slice(0, 8)) { const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(String(f)); if (m) r.content.push({ type: 'image', data: m[2], mimeType: m[1] }); }
+    return r;
+  }));
+
+  // A SOUND FOR AN EDIT + THE INSERT CLIP THAT CARRIES IT (2026-09-24): found per edit, never a library.
+  server.registerTool('find_sound', {
+    title: 'Find a sound',
+    description: "A sound for an edit by name ('the FAAAA sound'), by the moment ('bad news reaction') or by link (TikTok sound, meme-sound page, post, audio file): a durable mp3 and where it starts and lands. Named/described sounds come from what TikTok uses now; pick takes another candidate.",
+    inputSchema: { query: z.string().optional(), url: z.string().optional(), pick: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/sound/find', a);
+    const cands = (d.candidates || []).length ? `\nCandidates: ${d.candidates.map(c => `${c.pick}. ${c.title}${c.author ? ` (${c.author})` : ''}${c.uses ? `, ${c.uses} uses` : ''}${c.durationSeconds ? `, ${c.durationSeconds}s` : ''}`).join('; ')}` : '';
+    return ok(`Sound: ${abs(d.audio)} - "${d.title || 'sound'}"${d.author ? ` by ${d.author}` : ''} (${d.source})${d.note ? `\n${d.note}` : ''}${d.beat ? `\nStarts ${d.beat.onset}s, lands ${d.beat.resolves}s (${d.beat.seconds}s)` : ''}${cands}\n${d.howToUse || ''}`, { ...d, audio: abs(d.audio) });
+  }));
+
+  server.registerTool('make_insert', {
+    title: 'Make an insert clip',
+    description: 'A reaction picture (image, or video from videoStart) with its sound, cut to when the sound lands (or seconds): a 1080x1920 clip for post_edit join.',
+    inputSchema: { image: z.string().optional(), video: z.string().optional(), videoStart: z.number().optional(), sound: z.string(), soundStart: z.number().optional(), soundEnd: z.number().optional(), seconds: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/video/insert', a);
+    return okVideo(`Insert clip (${d.seconds}s): ${abs(d.video)}\n${d.howToUse || ''}`, { ...d, url: abs(d.video), video: abs(d.video) });
   }));
 
   server.registerTool('score_ad', {
@@ -19589,7 +19777,7 @@ function memoryNoteVerdict(text) {
     inputSchema: {
       video: z.string().describe('the source video URL'),
       count: z.number().optional().describe('how many variants, 1-12 (default 6)'),
-      axes: z.array(z.enum(['character', 'outfit', 'location', 'objects'])).optional().describe('which axes to vary (default: all four)'),
+      axes: z.array(z.string()).optional().describe('what to vary: character, outfit, location, objects (default all four), or your own, e.g. "season"'),
       notes: z.string().optional().describe('anything the variants must respect, e.g. "keep it women 25-40", "no gyms"'),
       regions: z.array(z.string()).optional().describe('markets to restyle for, one or more variants each, e.g. ["Berlin","Tokyo","São Paulo"] — visuals only; audio is never translated here'),
       dryRun: z.boolean().optional().describe('true = return the plan and the quote, render nothing'),
@@ -19618,7 +19806,7 @@ function memoryNoteVerdict(text) {
   // (the fix_beat worker at 0s: the hook renders silent and is spliced on the picture only). lib/hook-variants.mjs.
   server.registerTool('hook_variants', {
     title: 'New opening hooks for a video',
-    description: "HOOK MULTIPLIER: give ONE finished video ad N NEW OPENING HOOKS and get N complete edited versions to A/B test. WHAT CHANGES: a new opening shot over roughly the first 1.5-4 seconds (the hook ends at the source's first shot cut in that range, else at 3s; hookSeconds overrides). WHAT STAYS: everything after that point is the original footage, and the ENTIRE original soundtrack (voiceover, music, sound) plays under every version unchanged, so every version is the SAME length, aspect ratio and resolution as the source. Because the audio is kept, each hook is a VISUAL hook built to play under the words the source already says there: nobody in it talks to camera, it carries no on-screen text, and it does NOT write a new spoken hook line. Every version uses a DIFFERENT named hook mechanic chosen for the product (open mid-problem, before/after snap, object into frame, satisfying macro, pattern interrupt, POV, whip/snap-zoom, unexpected place, countdown to reveal); list_hooks describes them. Pass the video's file URL (a previous render, a job result, list_library, or upload_file for a local file). 1-5 versions, default 3. REFUSED FOR FREE, before anything is billed: a source over 120 seconds (trim it with post_edit first), one too short to leave 2 seconds of the original after a 1.5 second hook, an unreadable file, or a link to a social post rather than a video file (use clone_video to remake someone else's ad). COST: a small planning read, then each version is billed like fix_beat for the hook's seconds; the reply quotes credits per version, and dryRun:true returns the plan and the quote without rendering (pass that `plan` back to render exactly those hooks without planning again). Returns ONE JOB PER VERSION; call get_job on each until it reports done, and never describe a version before its URL arrives. Uses the workspace brand's product photo as a reference in hooks that show the product (productImage overrides; useBrand:false sends none).",
+    description: "HOOK MULTIPLIER: give ONE finished video ad N NEW OPENING HOOKS, N complete versions to A/B test. A planned hook replaces the first ~1.5-4 s (ends at the source's first cut there, else 3 s; hookSeconds overrides) with a new silent shot on a DIFFERENT named mechanic (list_hooks); the rest of the footage and the WHOLE original soundtrack stay, so every version keeps the source's length, and nobody in the hook talks or shows text. hooks[] adds your own openings: {url} a FOUND viral hook (post link or file) joined in front with the approved bridge (cut before its payoff, its own payoff sound carried across; post_edit price), {prompt} an opening described in words, {mechanic} a named one; with hooks and no count only those are made. To make the found hook's subject your product or creator first: recast_hook. Pass the video's FILE URL (a render, job result, list_library or upload_file). 1-5 versions, default 3. Refused free before billing: a source over 120 s, too short for a 1.5 s hook plus 2 s after it, unreadable, or a social post as the SOURCE (clone_video remakes someone else's ad). COST: a small planning read, then each planned version is billed like fix_beat for the hook's seconds; the reply quotes credits, and dryRun:true returns the plan and quote without rendering (pass that `plan` back to render exactly those). Returns ONE JOB PER VERSION; call get_job on each until done, never describe a version before its URL arrives. Hooks that show the product use the brand's product photo (productImage overrides; useBrand:false sends none).",
     inputSchema: {
       video: z.string().describe('the finished video to give new hooks: its served file URL'),
       count: z.number().optional().describe('how many hook versions, 1-5 (default 3)'),
@@ -19629,25 +19817,27 @@ function memoryNoteVerdict(text) {
       useBrand: z.boolean().optional().describe('false = send no brand name or product photo (for a video that is not this workspace brand’s)'),
       plan: z.any().optional().describe('the `plan` object a previous dryRun returned, to render exactly those hooks without planning again'),
       dryRun: z.boolean().optional().describe('true = return the plan and the quote, render nothing'),
+      hooks: z.array(z.object({ url: z.string().optional(), prompt: z.string().optional(), mechanic: z.string().optional(), start: z.number().optional().describe('url: skip the video’s own first seconds'), cutAt: z.number().optional().describe('url: override the found payoff cut') })).optional().describe('your own openings, one version each'),
     },
-    outputSchema: { jobs: z.array(z.any()).optional(), plan: z.any().optional(), hookSeconds: z.number().optional(), perVariantCredits: z.number().optional(), totalCredits: z.number().optional(), dryRun: z.boolean().optional() },
+    outputSchema: { jobs: z.array(z.any()).optional(), plan: z.any().optional(), hookSeconds: z.number().nullable().optional(), perVariantCredits: z.number().optional(), totalCredits: z.number().optional(), dryRun: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ video, count, notes, hookSeconds, resolution, productImage, useBrand, plan, dryRun }) => {
+  }, wrap(async ({ video, count, notes, hookSeconds, resolution, productImage, useBrand, plan, dryRun, hooks }) => {
     const src = String(video || '').trim();
     if (!src) return { content: [{ type: 'text', text: 'Pass the finished video as a URL: a previous render, a job result, an entry from list_library, or an upload_file link.' }], isError: true };
     let b = {};
     if (useBrand !== false) { try { b = (await readStore('heist.brand.v1')) || {}; } catch { b = {}; } }
     const prod = String(productImage || '').trim() || (useBrand !== false && Array.isArray(b.productImages) ? String(b.productImages[0] || '') : '');
-    const body = { video: src, ...(count != null ? { count } : {}), ...(notes ? { notes } : {}), ...(hookSeconds != null ? { hookSeconds } : {}), ...(resolution ? { resolution } : {}), ...(prod ? { productImage: prod } : {}), ...(useBrand !== false && b.name ? { brand: { name: b.name, sells: b.sells || b.description || '' } } : {}), ...(plan ? { plan } : {}), ...(dryRun ? { dryRun: true } : {}) };
+    const body = { video: src, ...(count != null ? { count } : {}), ...(notes ? { notes } : {}), ...(hookSeconds != null ? { hookSeconds } : {}), ...(resolution ? { resolution } : {}), ...(prod ? { productImage: prod } : {}), ...(useBrand !== false && b.name ? { brand: { name: b.name, sells: b.sells || b.description || '' } } : {}), ...(plan ? { plan } : {}), ...(dryRun ? { dryRun: true } : {}), ...(Array.isArray(hooks) && hooks.length ? { hooks } : {}) };
     const r = await apiPost('/api/hooks/variants', body);
     const p = r?.data || r;
     const vs = Array.isArray(p.variants) ? p.variants : [];
-    const lines = vs.map((v, i) => `${i + 1}. ${v.label} [${v.mechanicLabel || v.mechanic}]: ${v.shot}`);
-    const head = `Source: ${p.source?.durationSeconds}s at ${p.source?.width}x${p.source?.height}. New hooks replace 0-${p.hookSeconds}s (${p.cutAligned ? 'ending on the source’s own first cut' : 'no cut in range, so the hook ends mid-shot'}); the rest of the video and all of its audio stay as they are.`;
-    const quote = `~${p.perVariantCredits} credits per version · ~${p.totalCredits} for ${(p.jobs || []).length || vs.length}`;
+    const found = Array.isArray(p.found) ? p.found : [];
+    const lines = vs.map((v, i) => `${i + 1}. ${v.label} [${v.mechanicLabel || v.mechanic}]: ${v.shot}`).concat(found.map((f, i) => `${vs.length + i + 1}. Found hook ${i + 1}: ${f.url} joined in front, cut before its payoff, its own payoff sound carried across`));
+    const head = `Source: ${p.source?.durationSeconds}s at ${p.source?.width}x${p.source?.height}.${p.hookSeconds ? ` New hooks replace 0-${p.hookSeconds}s (${p.cutAligned ? 'ending on the source’s own first cut' : 'no cut in range, so the hook ends mid-shot'}); the rest of the video and all of its audio stay as they are.` : ''}${found.length ? ` A found hook plays first, so its version is longer than the source by the hook's seconds.` : ''}`;
+    const quote = `${vs.length ? `~${p.perVariantCredits} credits per new hook` : ''}${vs.length && found.length ? ' · ' : ''}${found.length ? `~${p.foundCredits} per found hook (up to ${p.foundMaxCredits} if its sound has to be generated)` : ''} · ~${p.totalCredits} for ${(p.jobs || []).length || vs.length + found.length}`;
     if (dryRun) return { content: [{ type: 'text', text: `Plan (nothing rendered). ${head}\n${lines.join('\n')}\n${quote}. Run again with plan set to this plan (and no dryRun) to render exactly these.${p.note ? '\nNOTE: ' + p.note : ''}` }], structuredContent: { plan: p.plan, hookSeconds: p.hookSeconds, perVariantCredits: p.perVariantCredits, totalCredits: p.totalCredits, dryRun: true } };
     const jobs = (p.jobs || []).map(j => ({ id: j.id, label: j.label, mechanic: j.mechanic }));
-    return { content: [{ type: 'text', text: `${head}\nQueued ${jobs.length} hook version${jobs.length === 1 ? '' : 's'}. ${quote}.\n${jobs.map((j, i) => `${i + 1}. ${j.label} [${vs[i]?.mechanicLabel || j.mechanic}] → job ${j.id}`).join('\n')}\nEach renders the new opening and splices it in (usually 2-5 minutes). Call get_job with each id until it reports done; a version has NO file until then.${p.note ? '\nNOTE: ' + p.note : ''}` }], structuredContent: { jobs, plan: p.plan, hookSeconds: p.hookSeconds, perVariantCredits: p.perVariantCredits, totalCredits: p.totalCredits } };
+    return { content: [{ type: 'text', text: `${head}\nQueued ${jobs.length} hook version${jobs.length === 1 ? '' : 's'}. ${quote}.\n${jobs.map((j, i) => `${i + 1}. ${j.label} [${vs[i]?.mechanicLabel || (j.mechanic === 'found' ? 'found hook' : j.mechanic)}] → job ${j.id}`).join('\n')}\nEach renders its new opening and splices it in, or joins a found hook in front (usually 2-5 minutes). Call get_job with each id until it reports done; a version has NO file until then.${p.note ? '\nNOTE: ' + p.note : ''}` }], structuredContent: { jobs, plan: p.plan, hookSeconds: p.hookSeconds, perVariantCredits: p.perVariantCredits, totalCredits: p.totalCredits } };
   }));
 
   server.registerTool('dub_video', {
@@ -19686,7 +19876,7 @@ function memoryNoteVerdict(text) {
     title: 'Recast motion',
     description: "Motion transfer: re-perform a reference video's motion with a different person/character (supply their image). The reference clip drives the movement; the image supplies the identity. Paid render, billed per output second (the output is as long as the reference clip, 3-30s); a 5s clip takes about 5 minutes. Runs on the Pro tier by default: 1080p, and the person really handles the object the reference performer handles.",
     inputSchema: {
-      image: z.string().describe("the actor/character image URL (who should appear)"),
+      image: z.string().describe("the actor/character image URL (who should appear); a real person’s photo confirms their likeness consent"),
       video: z.string().describe('the reference video whose motion to re-perform'),
       prompt: z.string().optional().describe('optional scene/style guidance'),
       orientation: z.enum(['video', 'image']).optional().describe("which aspect to keep: the video's (default) or the image's"),
@@ -19695,8 +19885,56 @@ function memoryNoteVerdict(text) {
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ image, video, prompt = '', orientation = 'video', tier }) => {
+    recordImpliedLikeness('recast_motion');
     const r = await renderJob('motion', { image, video, prompt, orientation, ...(tier ? { tier } : {}) }, 'Motion recast');
     return okVideo(`Recast video: ${r.url}`, r);
+  }));
+
+  // RECAST A VIRAL HOOK WITH OUR OWN SUBJECT (2026-09-24): the found hook's subject becomes the brand's product or saved
+  // creator, so the cut into our clip links by identity. Quote first (no confirm = a free quote), then confirm:true queues
+  // one `videoedit` (swap) or `motion` job. The server (planHookRecast) reads the hook, face-checks both sides and picks
+  // the engine; this wrapper only fills the brand's product photo. Held out of the default list on size (ON_DEMAND_TOOLS).
+  server.registerTool('recast_hook', {
+    title: 'Recast a viral hook with your subject',
+    description: "RECAST A VIRAL HOOK so the brand's own product or saved creator is its subject (the egg that rolls off the table becomes your product rolling off the same table; the viral move is done by your host), then join it into your clip so the cut links by identity. hook: a public TikTok / Reel / Facebook / X / YouTube post link or a video file (a post link uses its one lookup). Subject: creator (a saved creator's name or id), image (a picture of a product or a person; a real person's photo confirms you have their consent, and it is logged), or neither for the brand's first product photo. mode 'auto' (default): 'swap' replaces the hook's subject inside its own scene with a region edit (camera, set, light, timing, on-screen text and sound kept), 'motion' makes your person perform the hook's moves (motion transfer; needs a person in the hook). A face in the hook or as the subject routes the swap to an editor that takes faces, found by a free local face check. swap: your own words for what changes ('the egg becomes our serum bottle'; look with video_frames first). start/end pick the window (3 s minimum; default the first 10 s). PAID and QUOTED FIRST: without confirm it returns the plan and the credits and renders nothing; call again with confirm:true once the user okays it. Returns one job: get_job until done, then post_edit with videoUrl = the recast hook and ops [{op:'join', clips:[{url: your clip}], bridge:{kind:'impact'}}].",
+    inputSchema: {
+      hook: z.string().describe('the viral hook: a post link or a video URL'),
+      creator: z.string().optional().describe("a saved creator's name or id (list_creators)"),
+      image: z.string().optional().describe('a picture of the subject instead: a product or a person'),
+      swap: z.string().optional().describe('what changes, in your own words'),
+      mode: z.enum(['auto', 'swap', 'motion']).optional(),
+      start: z.number().optional(), end: z.number().optional(),
+      prompt: z.string().optional().describe('extra direction for the render'),
+      model: z.string().optional().describe('swap: a clip editor id (hermoso_capabilities); omit for the default'),
+      tier: z.enum(['pro', 'standard']).optional().describe('motion: the motion-transfer tier (default pro)'),
+      useBrand: z.boolean().optional().describe('false = no brand product photo'),
+      confirm: z.boolean().optional().describe('true = render it (after the user okayed the quote)'),
+    },
+    outputSchema: { plan: z.any().optional(), job: z.any().optional(), credits: z.number().optional(), queued: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    let b = {};
+    if (a.useBrand !== false && !a.creator && !a.image) { try { b = (await readStore('heist.brand.v1')) || {}; } catch { b = {}; } }
+    // a person's photo as the subject is recorded as implied likeness consent SERVER-side, only when the free face check finds a face there (a product photo is not a likeness)
+    const body = { hook: a.hook, ...(a.creator ? { creator: a.creator } : {}), ...(a.image ? { image: a.image } : {}), ...(a.swap ? { swap: a.swap } : {}), ...(a.mode && a.mode !== 'auto' ? { mode: a.mode } : {}), ...(a.start != null ? { start: a.start } : {}), ...(a.end != null ? { end: a.end } : {}), ...(a.prompt ? { prompt: a.prompt } : {}), ...(a.model ? { model: a.model } : {}), ...(a.tier ? { tier: a.tier } : {}), ...(b && Array.isArray(b.productImages) && b.productImages.length ? { brand: { name: b.name || '', product: b.sells || b.name || '', productImages: b.productImages.slice(0, 1) } } : {}), ...(a.confirm === true ? { confirm: true } : {}) };
+    const r = await apiPost('/api/hooks/recast', body);
+    const p = r?.data || r;
+    const head = `${p.mode === 'motion' ? 'Motion transfer' : 'Swap'} on ${p.engine}: ${p.hook?.window?.seconds}s of the hook (${p.hook?.window?.start}-${p.hook?.window?.end}s of ${p.hook?.durationSeconds}s). Subject: ${p.subject?.kind}${p.subject?.name ? ` "${p.subject.name}"` : ''}. Face in the hook: ${p.hook?.face}; in the subject: ${p.subject?.face}. Why: ${p.why}.${p.instruction ? `\nInstruction: ${p.instruction}` : ''}${p.consent ? `\n${p.consent}` : ''}`;
+    if (!p.queued) return { content: [{ type: 'text', text: `QUOTE (nothing rendered, nothing charged): about ${p.credits} credits.\n${head}\nTell the user the price; after they okay it, call recast_hook again with the same inputs and confirm:true.` }], structuredContent: { plan: p, credits: p.credits, queued: false } };
+    return { content: [{ type: 'text', text: `Recast queued as job ${p.job?.id} (about ${p.credits} credits).\n${head}\nCall get_job until it reports done; it has no file until then. ${p.next || ''}` }], structuredContent: { plan: p, job: p.job, credits: p.credits, queued: true } };
+  }));
+
+  // THE FREE FACE CHECK (2026-09-24): a local face detector on our own CPU (lib/face-detect.mjs), no model call, 0 credits.
+  server.registerTool('face_check', {
+    title: 'Check a reference for a face (free)',
+    description: "FREE, before any paid render: does a picture or video contain a face, and which video models refuse it (they cannot take a real person's face; a render there fails after it starts) or were measured to take one, plus the model a face-bearing render is routed to. A local detector, no model call, 0 credits. It cannot tell a photo from a drawing, so a drawn face counts. Takes a picture or video URL, a Library item or a public post link (a post link uses its one lookup).",
+    inputSchema: { url: z.string().describe('the picture or video to check') },
+    outputSchema: { face: z.string().optional(), best: z.number().nullable().optional(), refuse: z.array(z.any()).optional(), accept: z.array(z.any()).optional(), route: z.any().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async ({ url }) => {
+    const r = await apiPost('/api/face/check', { url });
+    const d = r?.data || r;
+    return ok(`${d.summary}${d.refuse?.length ? `\nRefuse a face: ${d.refuse.map(x => `${x.label} (${x.id})`).join(', ')}.` : ''}${d.face !== 'no' && d.accept?.length ? `\nMeasured to take a face: ${d.accept.map(x => `${x.label} (${x.id})`).join(', ')}.` : ''}${Array.isArray(d.frames) ? `\nFrames: ${d.frames.map(f => `${f.t}s ${f.face}`).join(', ')}` : ''}`, d);
   }));
 
   server.registerTool('plan_variations', {
@@ -19805,7 +20043,7 @@ function memoryNoteVerdict(text) {
     title: 'Clone a static ad',
     description: "One-click STATIC-AD CLONE (the web app calls it Clone): rebuild a competitor/reference STATIC (image) ad as an on-brand version — SAME layout, composition and energy, but YOUR product, brand colours, logo and voice, with every trace of the source brand removed. Pass `imageUrl` = the static ad image to clone. Uses your saved brand (pass brandId to target a specific brand — that switches this key's active brand like use_brand). IMAGES ONLY — for a video ad use clone_video with its link, then render_ad. Bills as one image generation.",
     inputSchema: {
-      imageUrl: z.string().describe('the URL of the static ad image to clone'),
+      imageUrl: z.string().describe('the URL of the static ad image to clone; a real person in it confirms their likeness consent'),
       brandId: z.string().optional().describe('a brand id/name from list_brands to clone for; omit to use the active brand'),
     },
     outputSchema: {
@@ -19829,7 +20067,7 @@ function memoryNoteVerdict(text) {
     title: 'Clone a static ad (old name)',
     description: "The OLD NAME of clone_static, kept so agents that already call it keep working. It is the same tool with the same inputs, result and cost; prefer clone_static.",
     inputSchema: {
-      imageUrl: z.string().describe('the URL of the static ad image to clone'),
+      imageUrl: z.string().describe('the URL of the static ad image to clone; a real person in it confirms their likeness consent'),
       brandId: z.string().optional().describe('a brand id/name from list_brands to clone for; omit to use the active brand'),
     },
     outputSchema: {
