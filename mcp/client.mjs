@@ -101,12 +101,27 @@ function headers(extra = {}) {
   return h;
 }
 
+// NOT SIGNED IN, SAID AS HOW TO FIX IT (2026-09-25). A stdio server or CLI started with no key (a new user who skipped
+// `auth login`, a directory's "try this server", an IDE config missing HERMOSO_TOKEN) got the server's bare
+// "Sign in to continue." on every account tool, and `hermoso_credits` printed "Balance: undefined credits" because
+// /api/credits answers an anonymous caller 200 with a null balance. Neither says what to DO. Only when the process
+// itself holds no credential: a hosted request (mcpCtx) always carries its caller's bearer, and a localhost base
+// needs no auth at all. A caller who DOES send a key and still gets a 401 has a bad or revoked key, which the
+// server's own message already says.
+export const SIGN_IN_HINT = 'Not signed in. Run `npx -y hermoso auth login` (it opens a browser), or set HERMOSO_TOKEN to an agent key (hmk_…) created at app.hermoso.ai on the MCP & CLI tab, under Terminal & API keys.';
+export const signedOut = () => !mcpCtx.getStore() && !TOKEN && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(API_BASE);
+/** The 401 sentence a caller with no credential reads. PURE (the signed-out verdict is an argument) so a check runs it. */
+export function signInMessage(status, body, msg, isSignedOut = signedOut()) {
+  if (Number(status) !== 401 || body?.connector || !isSignedOut) return msg;
+  return /^sign in to continue\.?$/i.test(String(msg || '').trim()) ? SIGN_IN_HINT : `${msg} ${SIGN_IN_HINT}`;
+}
+
 // unwrap the {data}|{error} envelope; throw a clean Error (with .status) on failure
 async function unwrap(res) {
   let body = null;
   try { body = await res.json(); } catch {}
   if (!res.ok) {
-    const msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
+    const msg = signInMessage(res.status, body, (body && (body.error || body.message)) || `HTTP ${res.status}`);
     // `_viaApi` MARKS AN ERROR THAT ALREADY REACHED THE SERVER, so route() has already recorded it in the error
     // ledger with the tool name off x-hermoso-tool. wrap() reports ONLY the errors that lack this marker — a local
     // throw, a schema rejection, a socket reset — which is what stops the twins double-counting every 4xx.

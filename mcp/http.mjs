@@ -283,6 +283,14 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // a 22-tool server on ~430 directory pages. So an UNSTATED scope here resolves to the full pre-core-first
     // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
     registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) , hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    // WHO PROBES US WITHOUT A TOKEN, BY NAME (2026-09-25). A host's add-connector dialog decides "sign-in needed or
+    // not" from THIS answer: ChatGPT probes with an empty body and gets the 401; claude.ai's dialog sends a real
+    // tokenless initialize (UA python-httpx) and our 200 made it pre-select "No sign-in". The UA alone cannot tell
+    // that probe from a registry crawler, so the clientInfo it names is logged, one line per anonymous initialize,
+    // so the next matcher is chosen from evidence (the Grok one was).
+    if (methodsOf(req.body).includes('initialize')) {
+      try { const m = (Array.isArray(req.body) ? req.body : [req.body]).find((x) => x && x.method === 'initialize'); const ci = m?.params?.clientInfo || {}; console.error(`[mcp-anon] initialize client=${JSON.stringify(String(ci.name || '').slice(0, 64))} v=${JSON.stringify(String(ci.version || '').slice(0, 24))} proto=${String(m?.params?.protocolVersion || '').slice(0, 16)} ua=${JSON.stringify(String(req.headers['user-agent'] || '').slice(0, 80))} src=${srcOf(req) || '-'}`); } catch {}
+    }
     if (typeof onAnonDiscovery === 'function' && methodsOf(req.body).includes('tools/list')) { try { onAnonDiscovery({ client: clientInfoOf(req.body), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req) }); } catch {} }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
@@ -334,6 +342,21 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // DELETE too. The one exception is an `initialize`, which IS a client starting over: strict in what we send,
       // liberal in what we accept, because the entire point of this fix is that nothing here bricks a client.
       if (sid && !init) return sessionGone(res);
+      // ── `server/discover` IS A HOST ASKING WHICH ERA WE SPEAK, AND THE 400 IS THE ANSWER (2026-09-25) ────────────
+      // ChatGPT (openai-mcp/1.0.0) and Claude Code (2.1.282) open EVERY connection with the MCP 2026-07-28 probe
+      // `server/discover` (headers MCP-Protocol-Version: 2026-07-28 + Mcp-Method, the version in params._meta) and
+      // only then fall back to `initialize`. That is the first POST after a token, and it is a 400 in the request log
+      // on every connect — which read like the connect failing. It is not: the spec's own compatibility matrix
+      // (modelcontextprotocol.io/specification/2026-07-28/basic/versioning, "Dual-era client / Legacy server:
+      // Works") says a dual-era host falls back when "the modern request returns a 4xx without a recognized modern
+      // error body". So this answer is deliberate and must stay LEGACY-shaped: a -32601 or any other modern code
+      // (-32020/-32021/-32022) would tell the host we are a modern server and it would stop falling back — every
+      // host would stall at connect. Serving the modern revision for real is a transport rewrite (no protocol-level
+      // sessions, per-request _meta, subscriptions/listen) that SDK 1.29 does not implement; this is the answer
+      // until then. Pinned by tools/mcp-connect-canary-check.mjs and replayed daily by the connect canary.
+      if (!init && req.method === 'POST' && methodsOf(req.body).includes('server/discover')) {
+        return res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: this server speaks the initialize-based MCP revisions (2025-11-25 and earlier). Send initialize to open a session.' }, id: null });
+      }
       // Only an `initialize` may mint a session. Anything else naming no session at all is the SDK's own 400 —
       // answered here so we never build a server whose only job would be to reject the request.
       if (!init) return needSession(res);

@@ -5,7 +5,7 @@
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
 import { absolutizeAssetUrl, publicOrigin } from './public-url.mjs';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -447,7 +447,7 @@ const wrap = (fn) => {
     }
     catch (e) {
       try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {}
-      if (!e?._viaApi) { try { reportToolError(_tool, e); } catch {} }
+      if (!e?._viaApi && !e?._signedOut) { try { reportToolError(_tool, e); } catch {} } // a caller with no key is not a defect, and its report would be anonymous noise
       let msg = `Error: ${e?.message || e}`;
     // THE SAME TWO PIECES OF ADVICE, NAMED (2026-09-17). Everything below stays exactly as it was — the prose is
     // what a model reads and what half the hosts show. `_hints` is the identical advice keyed as {do, why}, so a
@@ -3621,6 +3621,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async () => {
     const d = await apiGet('/api/credits');
     const bal = d.accountBalance ?? d.balance; // accountBalance = the caller's Hermoso credits (authed); balance = the local-dev usage pill
+    // NO BALANCE IS NOT A NUMBER (2026-09-25): this printed "Balance: undefined credits" to every caller with no key,
+    // because /api/credits answers an anonymous caller 200 with a null balance. Say why there is none instead.
+    if (bal == null) throw Object.assign(new Error(signedOut() ? SIGN_IN_HINT : 'The balance could not be read just now. Try again in a moment; billing_status reads it too.'), { status: signedOut() ? 401 : 503, _signedOut: signedOut() });
     // THE CHARGES THEMSELVES (2026-09-12): the same ledger list as Billing ▸ Usage, so "where did my credits go" has an
     // answer here too. Best effort: a reply about the balance never fails on the history read.
     let recent = ''; try { const u = await apiGet('/api/billing/usage', { limit: 10 }); if (u?.items?.length) recent = `\nRecent charges (newest first):\n${u.items.map((r) => `• ${String(r.at).slice(0, 16).replace('T', ' ')} UTC · ${r.label} · ${r.credits} credits`).join('\n')}`; } catch {}

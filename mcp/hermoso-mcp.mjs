@@ -13,7 +13,12 @@ import { API_BASE, connectedProviders } from './client.mjs';
 
 // instructions = the full capability map (ad spy · create · raw model playground · account) — one source of truth
 // in tools.mjs, shared with the hosted connector (http.mjs), so every surface tells agents the same breadth.
-const server = new McpServer({ name: 'hermoso-mcp', version: '1.0.0' }, {
+// THE REAL VERSION IN serverInfo (2026-09-25). This said '1.0.0' — a version the package has never had — so a client's
+// server list and a directory that reads serverInfo both reported it, while npm shipped 0.1.x. Read from the package
+// this file ships in (cli/package.json in the npm package; the app's own package.json in the app repo).
+import { createRequire } from 'node:module';
+const PKG_VERSION = (() => { try { return createRequire(import.meta.url)('../package.json').version || '0.0.0'; } catch { return '0.0.0'; } })();
+const server = new McpServer({ name: 'hermoso-mcp', version: PKG_VERSION }, {
   instructions: MCP_INSTRUCTIONS,
 });
 

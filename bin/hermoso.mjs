@@ -85,7 +85,7 @@ async function main() {
     return console.log(`✓ Saved. API: ${apiBase}${cfg.token ? ' · token stored' : ''}`);
   }
   if (group === 'version' || flags.version) {
-    console.log(`hermoso-cli ${CLI_VERSION} · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai'} · ${cfg.token ? 'authed' : 'no token — run: hermoso auth login --token <key>'}`);
+    console.log(`hermoso-cli ${CLI_VERSION} · API ${cfg.apiBase || process.env.HERMOSO_API_BASE || 'https://app.hermoso.ai'} · ${cfg.token || process.env.HERMOSO_TOKEN ? 'authed' : 'not signed in — run: hermoso auth login'}`);
     return;
   }
 
@@ -120,9 +120,16 @@ async function main() {
         // pill. Reading only `balance` printed "Balance: undefined credits" against prod for every signed-in user
         // (measured 2026-08-19). Same expression the hermoso_credits MCP tool uses, so the two cannot disagree.
         const bal = d.accountBalance ?? d.balance;
+        // No key, no balance: /api/credits answers an anonymous caller 200 with a null balance, and "Balance: — credits"
+        // read as an empty account rather than a missing sign-in (2026-09-25).
+        if (bal == null && api.signedOut()) return die(api.SIGN_IN_HINT);
         return out(`Balance: ${bal ?? '—'} credits`, d); }
       case 'brand': {
-        if (sub !== 'draft') return die('usage: hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');
+        // BARE `hermoso brand` SHOWS THE SAVED BRAND (2026-09-25). The docs have always listed it as "the saved brand
+        // profile" and it died with the `brand draft` usage line instead — the first command a new user copies off
+        // the CLI page. It is get_brand, run through the same handler the MCP twins use.
+        if (!sub) { const reg = await import('../mcp/registry.mjs'); return await runTool(reg, 'get_brand', flags, []); }
+        if (sub !== 'draft') return die('usage: hermoso brand            the saved brand profile\n       hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');
         const body = flags.domain ? { domain: flags.domain } : flags.description ? { description: flags.description } : flags.social ? { socialHandle: flags.social, platform: flags.platform || 'instagram' } : null;
         if (!body) return die('give --domain, --description, or --social');
         const d = await api.apiPost('/api/brand/draft', body); const p = d.profile || d;
@@ -262,7 +269,7 @@ async function main() {
         }
         console.log(`hermoso <command>
   auth login [--url <base>] [--token <t>]   credits          capabilities
-  brand draft (--domain|--description|--social …)             create --brand --product [--format]
+  brand   ·   brand draft (--domain|--description|--social …)  create --brand --product [--format]
   generate image --prompt [--ref] [--model] [--aspect]        generate video|avatar|stitch … [--wait]
   jobs list | jobs get <id> [--wait]                          competitors <domain>
   ads pull (--company|--domain)                               research "<request>"
