@@ -72,6 +72,42 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
   app.get(`/.well-known/oauth-protected-resource${MCP_PATH}`, protectedResourceMetadata);
 
+  // ── THE STATIC SERVER CARD A DIRECTORY READS INSTEAD OF SCANNING (2026-09-25) ─────────────────────────────────────
+  // Smithery's re-scan stopped at "Authentication required": its first probe (UA `SmitheryBot/1.0 (+https://…)`) gets
+  // the anonymous preview, but its connect step sends NO user-agent, and a UA-less tokenless handshake is exactly
+  // Grok's setup probe, which MUST stay challenged (a 200 there made Grok save us as a no-auth connector). Smithery's
+  // own answer for an OAuth server is this document (smithery.ai/docs/build/publish, read 2026-09-25: "you can bypass
+  // scanning by serving metadata manually at /.well-known/mcp/server-card.json" — serverInfo, authentication, tools,
+  // resources, prompts, SEP-1649 shapes). So the roster a crawler would have listed anonymously is published here,
+  // built from the SAME registerTools call the anonymous preview makes and read back through a real MCP client, so
+  // it cannot drift from what tools/list serves. Built once per process (the roster is static per process).
+  let cardPromise = null;
+  const buildServerCard = async () => {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: MCP_INSTRUCTIONS });
+    registerTools(server, { only: [...DEFAULT_TOOL_GROUPS], directory: false, widgetHost: false, hosted: true });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'server-card', version: '1' });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    try {
+      const list = async (fn, key) => { const out = []; let cursor; do { const r = await fn(cursor ? { cursor } : {}).catch(() => null); if (!r) break; out.push(...(r[key] || [])); cursor = r.nextCursor; } while (cursor); return out; };
+      const tools = await list((p) => client.listTools(p), 'tools');
+      const resources = await list((p) => client.listResources(p), 'resources');
+      const prompts = await list((p) => client.listPrompts(p), 'prompts');
+      return { serverInfo: { name: 'hermoso', title: 'Hermoso', version: PKG_VERSION }, instructions: MCP_INSTRUCTIONS,
+        authentication: { required: true, schemes: ['oauth2', 'bearer'] },
+        transport: { type: 'streamable-http', url: `${BASE}${MCP_PATH}` },
+        tools, resources, prompts };
+    } finally { try { await client.close(); } catch {} try { await server.close(); } catch {} }
+  };
+  app.get('/.well-known/mcp/server-card.json', async (req, res) => {
+    try {
+      cardPromise ||= buildServerCard().catch((e) => { cardPromise = null; throw e; });
+      res.set('Cache-Control', 'public, max-age=3600').json(await cardPromise);
+    } catch (e) { res.status(503).json({ error: 'server card unavailable, try again', detail: String(e?.message || e).slice(0, 200) }); }
+  });
+
   // Per-session Streamable-HTTP transports. Each authenticated session gets its own McpServer with the same tools.
   //
   // ── A SESSION WAS EXPENSIVE, AND THIS MAP IS WHY PROD OOM'd (2026-08-01, again 2026-08-24) ───────────────────
@@ -132,7 +168,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // then the two that need no browser at all. `WWW-Authenticate` still points at the protected-resource metadata,
   // which is what a spec-following client uses; this is for the one that is not following it.
   const challenge = (res) => res.status(401)
-    .set('WWW-Authenticate', `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource"`)
+    // `scope` rides the challenge (MCP authorization spec, "Protected Resource Metadata Discovery Requirements":
+    // servers SHOULD include it; ChatGPT's own auth doc shows the same shape). The same ONE list the PRM and the AS
+    // metadata publish, so a client that scopes its authorize request from the challenge asks for exactly that.
+    .set('WWW-Authenticate', `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource", scope="hermoso.research hermoso.generate"`)
     .json({
       error: 'Authentication required',
       error_description: 'This Hermoso MCP server needs a signed-in account. Normally your client opens a browser consent page. IF NO BROWSER OR CONSENT CARD OPENED, your client cannot complete OAuth — retrying will keep failing the same way. Read the `how_to_connect` field of THIS response and use one of those two browser-free routes instead. Tell the user which one you are taking.',
@@ -341,7 +380,9 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
   app.all(MCP_PATH, async (req, res) => {
     const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    // The auth-scheme name is case-insensitive (RFC 9110 §11.1, RFC 6750 §2.1): `bearer <key>` is the same
+    // credential, and reading only `Bearer ` made a client that lower-cases it look tokenless, challenged for ever.
+    const token = (/^Bearer[ \t]+(\S+)[ \t]*$/i.exec(auth) || [])[1] || '';
     // A HANDSHAKE IS NOT USE. `verifyBearer` stamps the key's last_used_at, and the admin dashboard's "last
     // active" takes the max of that, the billed ledger and the user's last_seen — so an agent that merely holds a
     // connection open (initialize, tools/list, ping, a notification) kept reporting the account as ACTIVE while
@@ -420,7 +461,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: MCP_INSTRUCTIONS });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true, client: entry?.client || rememberedClient(req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true, client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
