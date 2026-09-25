@@ -12,7 +12,8 @@
 //
 // When the cloud step happens, the remaining work is small and explicit (see ENABLE CHECKLIST at the bottom).
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools, MCP_INSTRUCTIONS, parseToolScope, DEFAULT_TOOL_GROUPS } from './tools.mjs';
@@ -20,7 +21,15 @@ import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
-export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null } = {}) {
+// The release version directories show as ours (Smithery printed the hard-coded "1.0.0"). Server side this file sits
+// beside cli/, whose package.json carries the release; inside the npm package there is no ../cli/ and ../package.json
+// IS the CLI package. One resolver, so the byte-identical twins agree.
+const PKG_VERSION = (() => { const r = createRequire(import.meta.url); for (const p of ['../cli/package.json', '../package.json']) { try { const v = r(p).version; if (v) return v; } catch {} } return '0.0.0'; })();
+export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null, onConnectEvent = null } = {}) {
+  // Outcomes of a real connect, for the host's connect watch (lib/mcp-connect-watch.mjs): a bearer we reject, and the
+  // first tools/list of a signed-in session (keyed by the token's hash, so a FRESH token's first listing marks a
+  // completed connect). Never throws into the request.
+  const connectEvent = (req, evt) => { if (typeof onConnectEvent !== 'function') return; try { onConnectEvent({ ua: String(req?.headers?.['user-agent'] || '').slice(0, 160), ...evt }); } catch {} };
   if ((process.env.HERMOSO_MCP_REMOTE ?? process.env.HEIST_MCP_REMOTE) !== '1') return false;             // gate 1: off by default
   if (typeof verifyBearer !== 'function') {                           // gate 2: refuse without real auth
     console.error('[mcp-remote] REFUSING to mount: no token verifier wired. A remote, money-spending MCP must authenticate every caller (no-anon-spend). Wire Firebase Auth → verifyBearer first.');
@@ -233,8 +242,40 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // chat said "I'll send a connect card" and none ever came. Its catalog connectors (Stripe, Notion, Vercel) work
   // because their servers challenge the first request. So that client, and any caller that asks with
   // `?auth=required`, gets the challenge instead of the anonymous preview; everyone else keeps discovery.
-  const signinUpfront = (req) => /^grok-connectors-manager\b/i.test(String(req.headers['user-agent'] || ''))
+  //
+  // THE SAME DEFECT ON THREE MORE HOSTS, MEASURED BY THE clientInfo EACH PROBE SENDS (2026-09-25). The anonymous
+  // initialize is logged by name (below), and a probe from each host's add/connect flow was captured on prod:
+  //   • claude.ai's "Add custom connector" dialog — clientInfo "Anthropic" 1.0.0, UA python-httpx — pre-selected
+  //     "No sign-in [Detected]" on our 200, so a user who keeps the default gets a connector whose first tool call
+  //     fails. Challenged, the same dialog detects "Sign in now" + "Claude's published identity (CIMD)".
+  //   • Gemini CLI's connect test — clientInfo "mcp-test-client" 0.0.1, UA node — reported "Connected" and never
+  //     offered sign-in; its session client names itself "gemini-cli-mcp-client".
+  //   • Windsurf — UA windsurf/* — two anonymous handshakes on 2026-09-21 and never a signed-in session.
+  // Matched by the name the client gives itself, never by UA alone: python-httpx and node are also most of the
+  // registry crawlers, which keep the anonymous preview.
+  const SIGNIN_UPFRONT_CLIENTS = new Set(['Anthropic', 'mcp-test-client', 'gemini-cli-mcp-client']);
+  const signinUpfront = (req) => /^(grok-connectors-manager|windsurf)\b/i.test(String(req.headers['user-agent'] || ''))
+    || SIGNIN_UPFRONT_CLIENTS.has(clientInfoOf(req.body))
     || String(req.query?.auth || '').toLowerCase() === 'required';
+  // ── THE DEFAULT IS INVERTED: A TOKENLESS HANDSHAKE IS CHALLENGED UNLESS IT IS A KNOWN LIVENESS/DIRECTORY BOT (2026-09-25) ──
+  // Matching the connect probes host by host (Grok, then claude.ai's "Anthropic", Gemini's "mcp-test-client") was
+  // whack-a-mole, and Mistral's proved it the same afternoon: its setup dialog sends clientInfo "mcp" 0.1.0 with UA
+  // MistralAI-MCPClient/1.0, our 200 made it select "No Authentication", and it then DISABLED its OAuth option. A
+  // connector-setup flow reads a 200 to a tokenless initialize as "this server needs no sign-in", which for us is
+  // false, and the MCP authorization spec's answer to an unauthenticated request is the 401 + WWW-Authenticate that
+  // starts sign-in. So that is the default now. The anonymous preview is kept ONLY for the bots that only look:
+  // uptime/liveness monitors and directory/registry crawlers, recognised by the self-describing user-agent every one
+  // of them sends (a +https:// contact URL, or bot/crawler/probe/monitor/registry/... in the name; read off 7 days
+  // of 200s on /mcp, 2026-09-25). A plain library UA (node, undici, python-httpx, Go-http-client) is NOT a bot by
+  // itself: Gemini CLI is "node" and claude.ai's probe is python-httpx. `?auth=none` asks for the preview explicitly.
+  // Directories that list tools with a sign-in (Smithery, Glama's inspector, OpenAI's and Anthropic's reviews) use
+  // OAuth already. SIGNIN_UPFRONT_CLIENTS still wins over a bot-looking UA.
+  const ANON_PREVIEW_UA_RE = /\+https?:\/\/|\b(bot|crawler|spider|probe|scanner|health-?check|uptime|monitor|liveness|registry|collector|audit|checkup|validator|indexer|tripwire|research|catalog-health|signals)\b|mcpbeat|sentineloracle|mcp-watch|mcpwatch|verifymcp|mcp\.market|proofbench|factanker/i;
+  const anonPreviewAllowed = (req) => {
+    if (String(req.query?.auth || '').toLowerCase() === 'none') return true;
+    if (signinUpfront(req)) return false;
+    return ANON_PREVIEW_UA_RE.test(String(req.headers['user-agent'] || ''));
+  };
   const isAllPreauth = (body) => {
     const arr = Array.isArray(body) ? body : [body];
     const methods = arr.map((m) => m && m.method).filter((v) => typeof v === 'string');
@@ -267,7 +308,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   const methodsOf = (body) => (Array.isArray(body) ? body : [body]).map((m) => m && m.method).filter(Boolean);
 
   async function serveAnonDiscovery(req, res, scope) {
-    const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
+    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: MCP_INSTRUCTIONS });
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
     // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
     // only the authenticated path would leave both tools listed in the submission.
@@ -310,9 +351,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // unchanged in both branches: this decides bookkeeping, never access.
     const didWork = methodsOf(req.body).includes('tools/call');
     const user = token ? await verifyBearer(token, { stamp: didWork }).catch(() => null) : null;
+    if (!user && token) connectEvent(req, { step: 'mcp-auth', ok: false, reason: 'bearer token rejected', detail: `${token.slice(0, 4)}… (${token.length} chars) on ${req.method}` });
     if (!user) {
       // No valid bearer: allow ONLY the read-only discovery handshake (POST), fail CLOSED for everything else.
-      if (req.method === 'POST' && isAllPreauth(req.body) && !signinUpfront(req)) {
+      if (req.method === 'POST' && isAllPreauth(req.body) && anonPreviewAllowed(req)) {
         const scope = scopeFor(req, res);
         if (scope === false) return; // unknown group — already answered 400
         return serveAnonDiscovery(req, res, scope).catch(() => { try { challenge(res); } catch {} });
@@ -377,7 +419,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // OPEN with the full roster, so the whole change would be silently inert. Never throws; see
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
-      const server = new McpServer({ name: 'hermoso', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
+      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: MCP_INSTRUCTIONS });
       registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true, client: entry?.client || rememberedClient(req) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
@@ -400,7 +442,15 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // published app cannot be observed from here). It costs one frame after the handshake, it is only sent to
       // widget hosts, and if the host does honour it the stale-snapshot problem heals itself. The real belt is
       // LEGACY_TOOL_NAMES in tools.mjs, which keeps every name a snapshot could hold answering.
-      if (isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
+      //
+      // ── MEASURED NOT GUILTY OF "No app tools available yet" (2026-09-25) ─────────────────────────────────────────
+      // A fresh ChatGPT developer-mode app shows "No app tools available yet" right after Allow. This nudge was the
+      // first suspect (it lands on the notification stream ChatGPT opens at connect), so it was switched off and the
+      // connect repeated: same panel. What IS true: our tools/list answered 200 with the whole roster inside the
+      // connect every time, and a plain page reload — with ZERO further requests from ChatGPT to us — lists every
+      // tool. The panel is rendered before ChatGPT's own background sync finishes and never re-reads it. So the
+      // nudge is back on, as it had been since 2026-09-14; MCP_LIST_CHANGED_NUDGE=0 turns it off.
+      if (process.env.MCP_LIST_CHANGED_NUDGE !== '0' && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
       // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
       // objects are otherwise reachable only from this request's still-open response — close them explicitly
       // rather than leaving a session pinned by a dead socket.
@@ -414,7 +464,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // Counted here, before the transport sees the body, so the tally is of what the CLIENT asked and not of what
     // the SDK answered — a refused tools/call is still a call the roster earned.
     for (const m of methodsOf(req.body)) {
-      if (m === 'tools/list') entry.listed = true;
+      if (m === 'tools/list') { if (!entry.listed) connectEvent(req, { step: 'tools-list', ok: true, tokenHash: createHash('sha256').update(token).digest('hex'), client: entry.client || '' }); entry.listed = true; }
       else if (m === 'tools/call') {
         entry.calls = (entry.calls || 0) + 1;
         // THE FIRST CALL IS THE MILESTONE, NOT THE LISTING (2026-09-07). The connect_mcp reward was granted on "an API

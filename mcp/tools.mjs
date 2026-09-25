@@ -122,7 +122,7 @@ const timelineReviewText = (rv) => rv ? `\nREVIEW (${rv.verdict || 'unread'}${rv
 const seamsText = (d) => {
   const rows = Array.isArray(d?.seams) ? d.seams.filter((x) => x && x.before) : [], b = d?.budget, n = (x) => `${x >= 0 ? '+' : ''}${x}`;
   const dl = (x) => x ? `exposure ${n(x.exposurePct)}%, black ${n(x.black)}, WB u${n(x.wbU)} v${n(x.wbV)}, grain ${n(x.grain)}, sharpness x${x.sharpness}` : 'unread';
-  return `${rows.length ? `\nSEAMS MATCHED: ${rows.map((x) => `seam ${x.seam} (${x.at}s) before ${dl(x.before)} -> after ${dl(x.after)}; ${x.applied}`).join(' | ')}` : ''}${b ? `\nBUDGET: ${b.total}s total - ${b.intro}s intro = ${b.survivingWindow.seconds}s of ${b.footage}${b.dropped?.length ? `; not shown: ${b.dropped.map((x) => `${x.from}-${x.to}s (${x.why})`).join(', ')}${b.fixes ? `. To keep it: ${b.fixes.join(' / ')}` : ''}` : ''}` : ''}`;
+  return `${rows.length ? `\nSEAMS MATCHED: ${rows.map((x) => `seam ${x.seam} (${x.at}s) before ${dl(x.before)} -> after ${dl(x.after)}; ${x.applied}${x.reframe ? `; ${x.reframe}` : ''}`).join(' | ')}` : ''}${b ? `\nBUDGET: ${b.total}s total - ${b.intro}s intro = ${b.survivingWindow.seconds}s of ${b.footage}${b.dropped?.length ? `; not shown: ${b.dropped.map((x) => `${x.from}-${x.to}s (${x.why})`).join(', ')}${b.fixes ? `. To keep it: ${b.fixes.join(' / ')}` : ''}` : ''}` : ''}`;
 };
 const okVideo = async (text, r) => {
   if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; const t = text + geoLine(r) + qaLine(r); return { content: [{ type: 'text', text: p ? t + '\n(first frame attached — open the URL for the full video)' : t }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
@@ -1623,8 +1623,16 @@ function registerAppResources(server) {
 // /api/workspace, where resolveWs re-authorizes the pin per request, so hosted and stdio now resolve identically.
 const pk = async (base) => { const s = await storeSuffix(); return s ? `${base}.${s}` : base; };
 async function readStore(base) {
+  // A SIGNED-OUT READ IS NOT AN EMPTY STORE (2026-09-25). /api/store/bootstrap answers an anonymous caller 200 with
+  // nothing in it, so with no key list_library said "The Library is empty for this workspace" — measured over stdio
+  // on prod — and every other store-backed tool (memory, skills, swipefile, playbooks) would answer the same kind of
+  // lie. A process with no credential that reads back NOTHING has no workspace, so it says how to sign in; a 401 on
+  // the read means the same. Decided on what came back, not on the missing token alone, so a stubbed or local store
+  // that does answer is still read.
   const key = await pk(base); // deliberately OUTSIDE the try: an unresolvable workspace must fail loudly, not read the wrong one
-  let dump; try { dump = await apiGet('/api/store/bootstrap'); } catch { return null; }
+  const signIn = () => Object.assign(new Error(SIGN_IN_HINT), { status: 401, _signedOut: true });
+  let dump; try { dump = await apiGet('/api/store/bootstrap'); } catch (e) { if (signedOut()) throw signIn(); if (e?.status === 401) throw e; return null; }
+  if (signedOut() && (!dump || typeof dump !== 'object' || !Object.keys(dump).length)) throw signIn();
   const raw = dump && dump[key] && dump[key].value;
   if (typeof raw !== 'string') return null;
   try { return JSON.parse(raw); } catch { return null; }
@@ -3064,6 +3072,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
     for (const m of String(h.description || '').matchAll(/\b[a-zA-Z][a-zA-Z0-9]*(?:_[a-zA-Z0-9]+)+\b|\b[a-z]+(?:[A-Z][a-z0-9]+)+\b/g)) if (m[0].length >= 6) set.add(sq(m[0]));
     _squashIdx.set(h, set); return set;
   };
+  // THE MATCH COUNT find_tools REPORTS (2026-09-25). A row is a STRONG match when a query word ITSELF landed in its NAME
+  // (or it is the exact tool name asked for) and it answers as many of the query words as the best-covering such row.
+  // Tiered so a search always counts something: a synonym landing in the name ("tweet" → post_to_x) is the next tier,
+  // and a description-only search is the last. An empty query (browsing a group) counts every row. Rows carry `_cov`
+  // (words answered), `_nd` (direct name hits), `_nh` (name hits incl. synonyms) and `_exact`.
+  const findToolsMatchCount = (rows, hasQuery) => {
+    if (!hasQuery) return rows.length;
+    const exact = rows.filter((r) => r._exact).length;
+    const rest = rows.filter((r) => !r._exact);
+    const direct = rest.filter((r) => r._nd > 0), named = rest.filter((r) => r._nh > 0);
+    const pool = direct.length ? direct : named.length ? named : rest;
+    const best = pool.reduce((m, r) => Math.max(m, r._cov || 0), 0);
+    return exact + pool.filter((r) => (r._cov || 0) >= best).length;
+  };
   const makeFindToolsHandler = (ctx) => async ({ query = '', group = '', limit = 12, onlyHealthy = false } = {}) => {
     const q = String(query || '').toLowerCase().trim();
     const g = String(group || '').toLowerCase().trim();
@@ -3081,7 +3103,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // returned WITH their real group so the caller learns which group to enable instead of giving up.
       if (g && grp !== g) { if (!_offGroup.has(name)) _offGroup.set(name, { grp, h }); continue; }
       const desc = String(h.description || '');
-      let score = 0;
+      let score = 0, _cov = 0, _nh = 0, _nd = 0; // words answered, NAME hits, and name hits that are the word itself rather than a synonym (the match count below)
       if (q) {
         // A NAME-SHAPED ASK IS ALSO ITS WORDS (2026-09-12). Agents search the name they guess (list_meta_campaigns,
         // update_meta_ad, edit_meta): kept as one literal token it matched nothing and filed a dead end, while its parts
@@ -3092,24 +3114,25 @@ function buildTools(rawServer, opts = {}, sink = null) {
         if (_fieldHits) score += 4 * _fieldHits;
         const descLc = desc.toLowerCase();
         const nameTokens = name.split('_');
-        let nameHits = 0, covered = 0;
+        let nameHits = 0, covered = 0, directHits = 0;
         for (const { w, alts, literal } of words) {
-          if (literal) { if (name.includes(w)) { score += 5; nameHits++; covered++; } continue; } // "find_tools" typed as-is
+          if (literal) { if (name.includes(w)) { score += 5; nameHits++; directHits++; covered++; } continue; } // "find_tools" typed as-is
           const exactTok = nameTokens.find((t) => t === w);
-          if (exactTok) { score += 4 * tokenWeight(exactTok); nameHits++; covered++; continue; }  // the word IS a name token
+          if (exactTok) { score += 4 * tokenWeight(exactTok); nameHits++; directHits++; covered++; continue; }  // the word IS a name token
           // the best-weighted synonym/stem that is a name token — "tweet" must land on post_to_x's `x` (rare), not its `post` (everywhere)
           let synBest = 0;
           for (const t of nameTokens) for (const a of alts) if (a !== w && (t === a || (a.length >= 4 && t.startsWith(a) && t.length - a.length <= 2))) synBest = Math.max(synBest, 3 * stemAwareWeight(ctx, tokenWeight, t, a));
           if (synBest) { score += synBest; nameHits++; covered++; continue; }
-          if (w.length >= 4 && name.includes(w)) { score += 2; nameHits++; covered++; continue; }  // the literal word inside a name token
+          if (w.length >= 4 && name.includes(w)) { score += 2; nameHits++; directHits++; covered++; continue; }  // the literal word inside a name token
           const typoTok = nameTokens.find((t) => withinOneEdit(w, t));
-          if (typoTok) { score += 2 * tokenWeight(typoTok); nameHits++; covered++; continue; }    // a typo of a name token
+          if (typoTok) { score += 2 * tokenWeight(typoTok); nameHits++; directHits++; covered++; continue; }    // a typo of a name token
           if (alts.some((a) => a.length >= 3 && descLc.includes(a))) { score += 1; covered++; continue; } // any form in the description
           if (alts.some((a) => grp.includes(a))) { score += 1; covered++; }
         }
         if (!score) continue;
         if (words.length > 1) score += covered; // coverage: a tool that answers MORE of the words outranks one that answers one of them loudly
         if (words.length > 1 && nameHits === words.length) score += 2; // every word landed in the NAME: a phrase hit
+        _cov = covered; _nh = nameHits; _nd = directHits;
       }
       const hold = toolHoldReason(name, ctx);
       const health = toolHealth(name);
@@ -3117,7 +3140,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // endpoint in outage by default; we do not, because "Hermoso has no such tool" is the most expensive wrong
       // answer this product can give, and a hidden row is indistinguishable from an absent capability.
       if (onlyHealthy && (hold || health.state === 'failing')) continue;
-      rows.push({ name, group: grp, score, inRoster: !!h.enabled, callable: !hold, hold, cost: costOf(name, grp, hold), health, title: String(h.title || ''), description: desc.replace(/\s+/g, ' ').slice(0, 240) });
+      rows.push({ name, group: grp, score, _cov, _nh, _nd, inRoster: !!h.enabled, callable: !hold, hold, cost: costOf(name, grp, hold), health, title: String(h.title || ''), description: desc.replace(/\s+/g, ' ').slice(0, 240) });
     }
     // AN EXACT TOOL NAME OUTRANKS THE GROUP FILTER (2026-09-12). The name-shaped split above made a scoped search for a real
     // tool in the wrong group find its WORDS in-group (tiktok_creator_info in channels → post_to_tiktok), so `total` was no
@@ -3127,7 +3150,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       for (const lit of new Set(q.split(/[\s,]+/).map((r) => r.replace(/[^a-z0-9_]/g, '')).filter((r) => r.includes('_')))) {
         const off = _offGroup.get(lit); if (!off) continue;
         const hold = toolHoldReason(lit, ctx);
-        rows.push({ name: lit, group: off.grp, score: Number.MAX_SAFE_INTEGER, inRoster: !!off.h.enabled, callable: !hold, hold, cost: costOf(lit, off.grp, hold), health: toolHealth(lit), title: String(off.h.title || ''), description: String(off.h.description || '').replace(/\s+/g, ' ').slice(0, 240) });
+        rows.push({ name: lit, group: off.grp, score: Number.MAX_SAFE_INTEGER, _exact: true, inRoster: !!off.h.enabled, callable: !hold, hold, cost: costOf(lit, off.grp, hold), health: toolHealth(lit), title: String(off.h.title || ''), description: String(off.h.description || '').replace(/\s+/g, ' ').slice(0, 240) });
       }
     }
     // WHAT IS SHOWN IS DECIDED BY RELEVANCE; THE ORDER WITHIN IT IS DECIDED BY HEALTH (2026-09-17). (A plain comment,
@@ -3141,13 +3164,18 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // what is shown. An exact name hit (score MAX_SAFE_INTEGER) carries no penalty at all — an agent that named a
     // tool outright gets it first, with its hold and its health printed beside it.
     rows.sort((a, b) => b.score - a.score || a.name.length - b.name.length || a.name.localeCompare(b.name)); // ties: the shorter, more specific name first
-    const total = rows.length, top = rows.slice(0, cap);
+    // HOW MANY "MATCH" IS A RELEVANCE COUNT, NEVER THE ROSTER (2026-09-25). Every tool whose description merely
+    // contains one of the words scores, so "google ads report" reported 740 matches, which is the whole catalog and
+    // tells an agent nothing. `total` now counts the STRONG matches (findToolsMatchCount): tools with a query word in
+    // their NAME that answer as many of the words as the best such tool does. The ranking and the rows shown are
+    // unchanged; the looser description-only hits are still ranked below and counted separately as `related`.
+    const total = findToolsMatchCount(rows, !!q), related = rows.length, top = rows.slice(0, cap);
     for (const r of top) r._penalty = r.score === Number.MAX_SAFE_INTEGER ? 0 : healthPenalty(r.health, r.hold);
     top.sort((a, b) => a._penalty - b._penalty || b.score - a.score || a.name.length - b.name.length || a.name.localeCompare(b.name));
     // THE MOST VALUABLE ROW ON THE DEFECT BOARD: what a user asked for, in their agent's words, that our catalog could
     // not name. Unquoted and lowercased on purpose — the ledger collapses quoted strings to <q>, and one group per
     // distinct ask is exactly what we want to read.
-    if (!total && g && _offGroup.size) {
+    if (!related && g && _offGroup.size) {
       // Re-score the excluded tools by NAME only (the cheap, unambiguous half): an exact or token hit outside the
       // asked-for group is an answer, not a dead end — "it exists, in channel_admin; enable that group".
       const qw = String(q || '').toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
@@ -3155,11 +3183,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
         .map(([name, { grp, h }]) => `• ${name} [${grp}, not in the ${g} group] — ${String(h.description || '').replace(/\s+/g, ' ').slice(0, 200)}`);
       if (off.length) return ok(`Nothing in the ${g} group matches, but these tools do — they live in another group (enable that group with enable_tools, then call the tool by name):\n${off.join('\n')}`, { query: q, group: g, offGroup: off.length });
     }
-    if (!total) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
+    if (!related) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
     for (const r of top) r.params = compactParams(ctx.handleOf[r.name]);
     const lines = top.map((r) => `• ${r.name} [${r.group}${g && r.group !== g ? `, outside the ${g} group` : ''}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] —${r.description}\n    cost: ${r.cost.label} · health: ${healthLabel(r.health)}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
-    const text = total
-      ? `${total} tool(s) match${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}${total > cap ? ` (showing ${cap} — narrow the query)` : ''}. Run any of them with call_tool({name, args}) — a tool that is "not in your list" still runs; one marked not_connected needs that connector first. COST is what the call spends (free means free on every plan); HEALTH is what this server has seen recently — "no recent calls" means we have not seen it run, not that it is broken, and a row marked FAILING or held is ranked last rather than hidden.\n${lines.join('\n')}`
+    const looser = top.length > total ? top.length - total : 0;
+    const text = related
+      ? `${total} tool(s) match${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}${total > cap ? ` (showing the top ${cap} — narrow the query)` : ''}${looser ? `${total ? '; the other' : ''} ${looser} shown ${looser === 1 ? 'is a looser match' : 'are looser matches'}, ranked below` : ''}. Run any of them with call_tool({name, args}) — a tool that is "not in your list" still runs; one marked not_connected needs that connector first. COST is what the call spends (free means free on every plan); HEALTH is what this server has seen recently — "no recent calls" means we have not seen it run, not that it is broken, and a row marked FAILING or held is ranked last rather than hidden.\n${lines.join('\n')}`
       : `No tool matches${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}. Try a broader word (e.g. "lead", "campaign", "report") or a group: ${TOOL_GROUP_NAMES.join(', ')}.`;
     // THE NEXT STEP, NAMED. The text already ends "Run any of them with call_tool({name, args})"; this is the same
     // instruction with the actual name in it, plus the connect step when the best match is the one that is held.
@@ -3171,7 +3200,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         : { do: `call_tool({ name: '${best.name}', args: { … } })`, why: `${best.name} is the best match${best.inRoster ? '' : ' and is not in your list, which does not stop it running'}${best.cost?.free ? ' and it is free' : ''}` });
       if (best.health?.state === 'failing') hints.push({ do: `consider the next row, or tell the user ${best.name} is currently failing`, why: `${best.failures || best.health.failures} of its last ${best.health.calls} calls on this server failed` });
     }
-    return withHints({ content: [{ type: 'text', text }], structuredContent: { total, tools: top.map(({ score, _penalty, ...r }) => r) } }, hints);
+    return withHints({ content: [{ type: 'text', text }], structuredContent: { total, related, tools: top.map(({ score, _penalty, _cov, _nh, _nd, _exact, ...r }) => r) } }, hints);
   };
   // "DID YOU MEAN" HAS TO DISCRIMINATE, AND THE OLD ONE DID NOT (2026-09-17, off the defect board). Not a `// ──`
   // banner on purpose: tools/docs-data.mjs turns every banner into a public docs section, and this note sits
@@ -17369,6 +17398,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // a constant, or keyframes [{t | src, v, ease}] (shape spelled out on `segments`: one description beats thirteen copies)
   const KF = z.union([z.number(), z.array(z.any())]);
   // seam matching (lib/seam-match.mjs): 'auto' | 'off' | {grade, level, grain, blur: booleans, strength 0-1}
+  const REFRAME_OPT = z.union([z.enum(['auto', 'off']), z.number()]);
   const SEAM_MATCH = z.union([z.enum(['auto', 'off']), z.object({ grade: z.boolean().optional(), level: z.boolean().optional(), grain: z.boolean().optional(), blur: z.boolean().optional(), strength: z.number().optional() })]);
   server.registerTool('edit_timeline', {
     title: 'Compose an edit (timeline)',
@@ -17379,7 +17409,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "A VIRAL HOOK + THEIR PRODUCT: start from the hook. A clip matched to an unrelated hook never reads as one video, so write the clip AFTER the hook for it: a linking script + shot brief (the first line answers the hook, e.g. 'still waiting for the egg to land... anyway, come check out our restaurant'; what to film so it follows on; 5-15 s; then the pitch). The user records it, or you generate it (render_ad / generate_video, cost quoted first, on their OK); then join here: the hook with out:'payoff' and audio.tail:'payoff', then their clip. Match an existing unrelated clip only if they insist. A {generate:{prompt, seconds 3-8}} segment (a generated transition-only shot, paid, postEditTimeline) is never suggested; build it only when they explicitly ask for one. "
       + "LINK FIRST: an effect alone never connects two unrelated clips; the link comes from what is in the frames. (1) Match cut, the default: video_frames (with its MOTION readout) on the hook's last second and across the other clip; pick the out-point AND the in-point (in: seconds, not always 0) where a motion direction, a screen position or size, a shape, a surface, a gesture or a gaze carries across, then ride the effect on that shared motion. (2) Its host names the hook in the first line. If the two share nothing, say so and offer the follow clip made for the hook. "
       + "PRO, NOT IMOVIE: ease every curve (never linear on a move); keep the picture filling the frame through a move (scale up while it moves: two frames sliding side by side with a seam is the amateur tell); hide the handoff under the fastest, blurriest frames; carry direction into the next shot; cut on motion; end every effect cleanly; 0.2-0.6 s in total; a sound whose peak lands on the handoff (sfx whoosh at handoff minus 0.45 s, or the hook's own payoff sound). Moving segments get a real shutter blur automatically (motionBlur). "
-      + "EVERY SEAM IS MATCHED AUTOMATICALLY, hard cuts too: each cut is measured and the incoming clip graded (exposure, white balance, black level), grained UP (never smoothed) and softened while it moves toward the outgoing one; the reply gives before/after deltas per seam. match (timeline: every cut; segment: the cut into it): 'auto' default, 'off' for a deliberate contrast, or {grade, level, grain, blur: false to skip one, strength 0-1}; a segment's own constant exposure / contrast / saturation replaces the automatic grade. Still yours: subject size and headroom (scale it, never a jump from a third of the frame to two thirds) and sound (a 0.25-0.5 s J/L-cut, never a sonic wall). A clip placed after a hook gets a BUDGET (total - intro = its surviving window, and what was dropped). The plainest thing that links wins: a straight cut on action beats a decorative effect; over 0.5 s is too long in anything under 20 s; never flash more than 3 times a second. "
+      + "EVERY SEAM IS MATCHED AUTOMATICALLY, hard cuts too: each cut is measured and the incoming clip graded (exposure, white balance, black level), grained UP (never smoothed) and softened while it moves toward the outgoing one; the reply gives before/after deltas per seam. match (timeline: every cut; segment: the cut into it): 'auto' default, 'off' for a deliberate contrast, or {grade, level, grain, blur: false to skip one, strength 0-1}; a segment's own constant exposure / contrast / saturation replaces the automatic grade. A JUMP CUT (two moments of one shot at one framing) is punched in ~1.2x on the face automatically (reframe: 'off' or the step 1.1-1.5; a segment with its own scale is left alone). Still yours: subject size and headroom (scale it, never a jump from a third of the frame to two thirds) and sound (a 0.25-0.5 s J/L-cut, never a sonic wall). A clip placed after a hook gets a BUDGET (total - intro = its surviving window, and what was dropped). The plainest thing that links wins: a straight cut on action beats a decorative effect; over 0.5 s is too long in anything under 20 s; never flash more than 3 times a second. "
       + "RECIPES (c = the cut second, adapt freely): whip pan: A over its last 0.22 s x 0 to -0.22, scale 1 to 1.35, mblur 0 to 220, all ease in; B overlap 0.08, opacity 0 to 1 over 0.08, x 0.22 to 0, scale 1.35 to 1, mblur 220 to 0, all ease out over 0.3 s; whoosh at c-0.45. Zoom through: A over its last 0.35 s scale 1 to 3 ease in anchored on the object, blur 0 to 10; B overlap 0.12, opacity 0 to 1, scale 1.5 to 1 and blur 10 to 0 ease out over 0.4 s. Cut on action: A out ON the motion, B scale 1.08 to 1 ease out over 0.25 s, audio.lead 0.2. Speed ramp: speed [{src:t0,v:1},{src:t0+0.25,v:0.3}] then [{src:t1,v:0.3},{src:t1+0.1,v:2}] into the cut. Circle wipe: B overlap 0.5 + overlays [{mode:'mask', segment:1, start, end, html: a white div whose clip-path circle grows via @keyframes}]. Card (picture in picture: a proven ad playing in a rounded card over the host watching it, any length): the host segment full frame, then the clip ON TOP with at:0, fit:'contain' (crop to reframe it), scale ~0.6-0.7, y ~0.12, radius ~0.04-0.06; a card is not a cut, so it is never graded toward the host; duck it under the host's first line with audio.gain keys (the host's voice leads the switch) and end it on a hard cut at a sentence break. "
       + "SELF-CRITIQUE: the reply carries a vision REVIEW of each seam (pro / ok / amateur, linked or not, with fixes; about 2 credits, review:false skips it) and the seam frames. When it says ok or amateur, fix what it names and re-run the same sources (twice at most) before presenting; on a re-run give a generated segment {src: its URL, between: true} so it is not paid for twice. Then look at the WHOLE result once with video_frames, not only the seams: the first frame is not black or frozen, no dead air over ~0.3 s at the head, no lone black, flash or repeated frame at a cut, and nothing static for more than ~4-5 s (recut it or add a re-hook). "
       + "FOLLOW-UPS ('cut earlier', 'no splat', 'whip pan instead', 'use the second hook') re-run this with the SAME sources and the one change; the result echoes the resolved timeline (e.g. the found payoff cut) to edit from. Refusals are free and name the field.",
@@ -17402,6 +17432,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         reverse: z.boolean().optional(),
         between: z.boolean().optional().describe('a bridge clip between its neighbours (a re-used generated shot): trimmed and graded to them automatically'),
         match: SEAM_MATCH.optional().describe('the cut INTO this segment (default: the timeline match)'),
+        reframe: REFRAME_OPT.optional().describe('the cut INTO this segment'),
         slowmo: z.enum(['blend', 'hold', 'flow']).optional().describe('how slow motion fills frames (flow = motion-interpolated)'),
         scale: KF.optional(), x: KF.optional().describe('canvas widths'), y: KF.optional().describe('canvas heights'), rotate: KF.optional().describe('degrees'),
         opacity: KF.optional(), blur: KF.optional(), mblur: KF.optional().describe('directional motion blur px'), mblurAngle: z.number().optional(),
@@ -17416,11 +17447,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       motionBlur: z.boolean().optional().describe('default true: anything that moves gets a real shutter blur along its path'),
       review: z.boolean().optional().describe('default true: a vision read of each seam (about 2 credits) comes back with the render, with the seam frames'),
       match: SEAM_MATCH.optional().describe("every cut: 'auto' default"),
+      reframe: REFRAME_OPT.optional().describe("every cut: 'auto' default"),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const op = { op: 'timeline', segments: a.segments, ...(a.overlays ? { overlays: a.overlays } : {}), ...(a.sfx ? { sfx: a.sfx } : {}), ...(a.size ? { size: a.size } : {}), ...(a.fps ? { fps: a.fps } : {}), ...(a.motionBlur != null ? { motionBlur: a.motionBlur } : {}), ...(a.review != null ? { review: a.review } : {}), ...(a.match != null ? { match: a.match } : {}) };
+    const op = { op: 'timeline', segments: a.segments, ...(a.overlays ? { overlays: a.overlays } : {}), ...(a.sfx ? { sfx: a.sfx } : {}), ...(a.size ? { size: a.size } : {}), ...(a.fps ? { fps: a.fps } : {}), ...(a.motionBlur != null ? { motionBlur: a.motionBlur } : {}), ...(a.review != null ? { review: a.review } : {}), ...(a.match != null ? { match: a.match } : {}), ...(a.reframe != null ? { reframe: a.reframe } : {}) };
     const r = await renderJob('postedit', { ...(a.videoUrl ? { videoUrl: a.videoUrl } : {}), ops: [op] }, 'MCP timeline');
     const tl = r?.raw?.timeline;
     const gen = Array.isArray(r?.raw?.generatedShots) && r.raw.generatedShots.length ? `\nGENERATED SHOT: ${r.raw.generatedShots.map((g) => `${g.model} ${g.seconds}s ${abs(g.video)}`).join('; ')} (billed as its own render)` : '';
@@ -17857,7 +17889,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       }))).filter(Boolean);
     } catch {}
     const d = await apiGet('/api/skills').catch(() => ({ skills: [] }));
-    let custom = await readStore('heist.skills.v1'); if (!Array.isArray(custom)) custom = []; // the workspace's OWN skills (built-ins alone came from /api/skills)
+    let custom = await readStore('heist.skills.v1').catch((e) => { if (e?._signedOut) return []; throw e; }); if (!Array.isArray(custom)) custom = []; // the workspace's OWN skills (built-ins alone came from /api/skills); signed out, the built-ins still list
     const inApp = (d.skills || []).map(s => `${s.id} (${s.kind || s.group})`).join(', ');
     const customLine = custom.map(s => `- ${s.name} (${s.id})`).join('\n');
     const text = `Skill bundles (call get_skill with the name):\n${bundles.map(b => `- ${b.name}: ${b.description}`).join('\n') || '(none bundled)'}\n\nIn-app strategy skills + creative recipes (pass as plan_ad's recipe / create's skill): ${inApp}\n\nYour custom skills (save_skill / delete_skill):\n${customLine || '(none yet)'}`;

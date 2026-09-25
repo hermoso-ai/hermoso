@@ -155,9 +155,10 @@ the routes.
 
 ## Instant: the hosted Claude.ai connector
 
-Paste **`https://app.hermoso.ai/mcp?src=readme`** into Claude → Settings → Connectors → *Add custom connector*, pick
-**Always required** when Claude asks about authentication (its detector suggests "None" because our discovery
-handshake is open; "None" would leave every tool call unauthenticated), approve with your Hermoso account, and you are done: the full toolset with your saved brand context, billed to your plan.
+Paste **`https://app.hermoso.ai/mcp?src=readme`** into Claude → Customize → Connectors → Add → *Add custom connector*,
+press Continue, choose **Sign in now** under Authentication (Claude's detector pre-selects "No sign-in" because our
+discovery handshake is open, and with that your first request comes back "Authentication required"), press Add and
+Connect, approve with your Hermoso account, and you are done: the full toolset with your saved brand context, billed to your plan.
 
 ## Quickstart for Claude Code (one command)
 
@@ -181,10 +182,10 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
 Rather install the CLI by hand? `npm install -g hermoso` puts the same `hermoso` command on your PATH, and the
 skills use it when it is there.
 
-The hosted URL works in Claude Code too, but it is the worse path there and it is worth knowing why:
-`claude mcp add --transport http hermoso "https://app.hermoso.ai/mcp?src=readme"` is accepted, and then `claude mcp list`
-reports `! Needs authentication` because the client will not start the OAuth flow by itself: you have to open a
-session, run `/mcp`, find the server and press Authenticate. Measured against Claude Code 2.1.241 on 2026-08-23.
+The hosted URL works in Claude Code too, but the plugin is the lighter path there because it loads no tool list
+into your sessions. If you want the connector: `claude mcp add --transport http hermoso "https://app.hermoso.ai/mcp?src=readme"`,
+and `claude mcp list` reports `! Needs authentication` until you run `claude mcp login hermoso` once and approve in
+your browser (`--no-browser` prints the link on a headless machine). Measured against Claude Code 2.1.282 on 2026-09-25.
 
 Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
