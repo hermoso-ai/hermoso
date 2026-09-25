@@ -94,7 +94,7 @@ export function videoChoiceText(tool, choice) {
     `  1. Make it as an image instead (~${o.image?.credits ?? '?'} credits): ${videoChoiceImageCall(tool)}.`,
     `  2. Add credits: buy_credits({}) quotes a pack on a saved card or returns a checkout link${o.topup?.url ? ` (or ${o.topup.url})` : ''}; then repeat the same call and the video goes ahead as asked.`,
   ];
-  if (d) lines.push(`  3. Render the video anyway as a light draft on ${d.label || d.model} (${d.durationSeconds}s, ~${(Number(d.credits) || 0) + (Number(d.planCredits) || 0)} credits): ${videoChoiceDraftCall(tool, d)}. Premium models once they top up.`);
+  if (d) lines.push(`  3. Render the video anyway as a light draft on ${d.label || d.model} (${d.durationSeconds}s, ~${(Number(d.credits) || 0) + (Number(d.planCredits) || 0)} credits${d.audio === false ? '; SILENT: no voice, dialogue or music, so tell the user before they pick it for a spoken ad' : ''}): ${videoChoiceDraftCall(tool, d)}. Premium models once they top up.`);
   else lines.push(`  (No light-model draft fits this balance, so there is no "render anyway" option here.)`);
   return lines.join('\n');
 }

@@ -117,6 +117,13 @@ const stillMsg = (r, widget = hostRendersWidgets()) => widget
 // finished inside the wait, and get_job's when it did not (a prod timeline takes ~3 minutes, past the hosted 45 s wait,
 // so on a hosted MCP the review ONLY ever arrives through get_job). Empty for every other job.
 const timelineReviewText = (rv) => rv ? `\nREVIEW (${rv.verdict || 'unread'}${rv.score != null ? `, ${rv.score}/10` : ''}${rv.linked === false ? ', NOT LINKED: the two clips read as unrelated; say so and offer a follow clip made for the hook (a brief they record, or one generated with the cost quoted first)' : rv.linked ? ', linked' : ''}): ${(rv.issues || []).map((x) => `seam ${x.seam}: ${x.problem} → ${x.fix}`).join(' | ') || 'no issues'}. ${rv.verdict === 'amateur' || rv.verdict === 'ok' ? 'Fix what it names and re-run with the same sources (twice at most) before presenting it.' : 'Look at the seam frames too before presenting it.'}` : '';
+// THE SEAM MATCH + INTRO BUDGET of a timeline or join (lib/seam-match.mjs, post-edit.mjs introBudget): the measured
+// before/after per cut and the surviving window of a clip placed after a hook. Empty for every other result.
+const seamsText = (d) => {
+  const rows = Array.isArray(d?.seams) ? d.seams.filter((x) => x && x.before) : [], b = d?.budget, n = (x) => `${x >= 0 ? '+' : ''}${x}`;
+  const dl = (x) => x ? `exposure ${n(x.exposurePct)}%, black ${n(x.black)}, WB u${n(x.wbU)} v${n(x.wbV)}, grain ${n(x.grain)}, sharpness x${x.sharpness}` : 'unread';
+  return `${rows.length ? `\nSEAMS MATCHED: ${rows.map((x) => `seam ${x.seam} (${x.at}s) before ${dl(x.before)} -> after ${dl(x.after)}; ${x.applied}`).join(' | ')}` : ''}${b ? `\nBUDGET: ${b.total}s total - ${b.intro}s intro = ${b.survivingWindow.seconds}s of ${b.footage}${b.dropped?.length ? `; not shown: ${b.dropped.map((x) => `${x.from}-${x.to}s (${x.why})`).join(', ')}${b.fixes ? `. To keep it: ${b.fixes.join(' / ')}` : ''}` : ''}` : ''}`;
+};
 const okVideo = async (text, r) => {
   if (r?.stillRendering) return ok(stillMsg(r), r); const p = r?.url ? await videoPosterBlock(r.url) : null; const t = text + geoLine(r) + qaLine(r); return { content: [{ type: 'text', text: p ? t + '\n(first frame attached — open the URL for the full video)' : t }, ...(p ? [p] : [])], structuredContent: r ?? {} }; };
 
@@ -17309,7 +17316,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('post_edit', {
     title: 'Post-production edit',
-    description: "MECHANICAL post-production on an EXISTING video (its URL): an ordered plan of whitelisted primitives run by ffmpeg (+ Chrome) in seconds for ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, watermark (corner logo), grain (anti-AI), text (timed words over the clip in a native look, no branding: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle, position, start/end), join (this video FOLLOWED BY clips[], each a Library URL, a direct file or a public TikTok / Reel / Facebook / X / YouTube post link, as one 1080x1920 video with matched loudness; transition 'cut' or 'crossfade'). Up to 6 ops, in order. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound taken FROM THE HOOK ITSELF: its own audio carries across the cut, else a sound generated from its frames (then up to 8 credits), else a neutral impact (sound 'auto' default | 'own' never a model | 'impact' | 'whoosh' | 'none'). {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: best, make our clip's host say the connecting line. matchCut = where our clip starts. Other edits, transitions: edit_timeline. NEVER generate_video/render_ad for these.",
+    description: "MECHANICAL post-production on an EXISTING video (URL): ordered primitives run by ffmpeg in seconds, ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, watermark (brand logo), grain (anti-AI), text (timed words in a native look: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle; start/end), join (this video FOLLOWED BY clips[]: Library URLs, direct files or public post links, as one 1080x1920 video, loudness matched). Presets are shortcuts: text/watermark take any x/y, grain any amount, join any ffmpeg transition, a bridge any sound link. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound FROM THE HOOK ITSELF: its own audio carries across the cut, else one generated from its frames (up to 8 credits), else a neutral impact. {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: have our clip's host say the connecting line. matchCut = where our clip starts. ANY OTHER EDIT, op or bridge (whip, zoom, freeze, wipe, split screen, generated shot) is edit_timeline: free keyframes, any size. NEVER generate_video/render_ad for these.",
     inputSchema: {
       videoUrl: z.string().describe('the video to edit: a render / Library URL, a direct file, or a public post link'),
       ops: z.array(z.object({
@@ -17317,22 +17324,25 @@ function buildTools(rawServer, opts = {}, sink = null) {
         start: z.number().optional().describe('trim/mute/text window start (s)'),
         end: z.number().optional().describe('trim/mute/text window end (s)'),
         text: z.string().optional().describe('text: the words, verbatim'),
-        position: z.enum(['top', 'center', 'lower', 'bottom']).optional().describe('text: where'),
+        position: z.enum(['top', 'center', 'lower', 'bottom']).optional().describe('text: where, or x/y'),
+        x: z.number().optional().describe('text/watermark centre: 0-1 of frame, or px'),
+        y: z.number().optional(),
         style: z.union([z.string(), z.object({}).passthrough()]).optional().describe('text: a look name or a textStyle'),
         textStyle: z.union([z.string(), z.object({}).passthrough()]).optional(),
-        clips: z.array(z.object({ url: z.string(), start: z.number().optional(), end: z.number().optional() })).optional().describe('join: the clips after this video'),
-        transition: z.enum(['cut', 'crossfade']).optional().describe('join'),
-        bridge: z.object({ kind: z.enum(['impact', 'text']), cutAt: z.number().optional().describe('omit: found from the footage'), matchCut: z.number().optional(), sound: z.enum(['auto', 'own', 'impact', 'whoosh', 'none']).optional(), flash: z.boolean().optional(), shake: z.boolean().optional(), text: z.string().optional(), then: z.string().optional() }).optional().describe('join: connects the hook to the first clip'),
+        clips: z.array(z.object({ url: z.string(), start: z.number().optional(), end: z.number().optional(), match: z.any().optional() })).optional().describe('join: the clips after this video'),
+        match: z.any().optional().describe("join: seam match, 'auto' default | 'off' | {grade,level,grain,blur,strength}"),
+        transition: z.string().optional().describe("join: 'cut' default, 'crossfade', or any ffmpeg xfade name (wipeleft…)"),
+        bridge: z.object({ kind: z.enum(['impact', 'text']), cutAt: z.number().optional().describe('omit: found from the footage'), matchCut: z.number().optional(), sound: z.string().optional().describe("'auto' default, 'own', 'impact', 'whoosh', 'none', or an audio URL (find_sound)"), flash: z.boolean().optional(), shake: z.boolean().optional(), text: z.string().optional(), then: z.string().optional() }).optional().describe('join: connects the hook to the first clip'),
         factor: z.number().optional().describe('speed 0.5-2'),
         db: z.number().optional().describe('audio_gain -20..+6 dB'),
-        seconds: z.number().optional().describe('fade_out 0.3-3s / append_card 2-5s / crossfade 0.2-1.5s'),
-        headline: z.string().optional().describe('append_card: big line (defaults to the brand name)'),
+        seconds: z.number().optional().describe('fade_out 0.3-3s / append_card 2-5s / transition 0.2-1.5s'),
+        headline: z.string().optional().describe('append_card: big line (default: brand name)'),
         tagline: z.string().optional().describe('append_card: smaller line under the headline'),
-        sub: z.string().optional().describe('append_card: the pill line (defaults to the website) / text: a smaller second line'),
-        background: z.string().optional().describe("append_card: card background — hex or a color name ('red', 'navy'…); the user's stated color always wins over the brand palette"),
-        card_html: z.string().optional().describe('append_card: your OWN full-frame card design as inline-styled HTML ({{logo}} inserts the real brand logo) — use when the standard layout cannot honor the request'),
-        corner: z.enum(['tl', 'tr', 'bl', 'br']).optional().describe('watermark corner (default br)'),
-        intensity: z.enum(['default', 'strong']).optional().describe('grain look'),
+        sub: z.string().optional().describe('append_card: pill line (default: website) / text: a second, smaller line'),
+        background: z.string().optional().describe("append_card: hex or a colour name; the user's colour beats the brand palette"),
+        card_html: z.string().optional().describe('append_card: your OWN full-frame card as inline-styled HTML ({{logo}} = the brand logo)'),
+        corner: z.enum(['tl', 'tr', 'bl', 'br']).optional().describe('watermark corner (default br), or x/y'),
+        intensity: z.union([z.enum(['default', 'strong']), z.number()]).optional().describe('grain: or 0-1 (default 0.25)'),
       })).describe('the ordered edit plan (max 6 ops)'),
       brandName: z.string().optional().describe('override the workspace brand name'),
       domain: z.string().optional().describe('override the brand website'),
@@ -17344,7 +17354,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     let b = await readStore('heist.brand.v1'); if (!b || typeof b !== 'object') b = {}; // via /api/store/bootstrap — there is no GET /api/store/:key route
     const pal = (Array.isArray(b.palette) ? b.palette : []).filter(c => /^#[0-9a-f]{6}$/i.test(String(c || '')));
     const r = await renderJob('postedit', { videoUrl: a.videoUrl, ops: (a.ops || []).slice(0, 6), brandName: a.brandName || b.name || '', domain: a.domain || b.domain || '', logo: b.logo || '', accent: a.accent || pal[0] || '' }, 'MCP post edit');
-    return okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.applied) ? `  (${r.raw.applied.join(', ')})` : ''}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : ''}  [job ${r.jobId}]`, r);
+    return okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.applied) ? `  (${r.raw.applied.join(', ')})` : ''}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.filter((x) => !/^seams matched:/.test(x)).join('; ')}` : ''}${seamsText(r?.raw)}  [job ${r.jobId}]`, r);
   }));
 
   // THE OPEN EDIT PRIMITIVE (2026-09-24). The owner: "I hate being rigid, the whole point of this is being able to do basically
@@ -17355,6 +17365,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // the default LIST on size (ON_DEMAND_TOOLS): find_tools finds it, call_tool and a direct call run it.
   // a constant, or keyframes [{t | src, v, ease}] (shape spelled out on `segments`: one description beats thirteen copies)
   const KF = z.union([z.number(), z.array(z.any())]);
+  // seam matching (lib/seam-match.mjs): 'auto' | 'off' | {grade, level, grain, blur: booleans, strength 0-1}
+  const SEAM_MATCH = z.union([z.enum(['auto', 'off']), z.object({ grade: z.boolean().optional(), level: z.boolean().optional(), grain: z.boolean().optional(), blur: z.boolean().optional(), strength: z.number().optional() })]);
   server.registerTool('edit_timeline', {
     title: 'Compose an edit (timeline)',
     description: "Compose ANY edit or transition yourself; there is no preset list. Segments on an output timeline (later ones drawn on top; overlapping ones ARE the transition), each animated by keyframes, plus your own HTML overlays and masks, compiled server-side into one render. Whip pan, zoom through, push, spin, speed ramp, slow motion, freeze frame, reverse, flash, J-cut / L-cut, circle or shape wipe, split screen, picture in picture: all composed from the fields below. Local render, the flat post_edit price (~2 credits, overlays included); a `generate` segment (a paid generated transition shot) only when the user explicitly asks for one. "
@@ -17364,8 +17376,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "A VIRAL HOOK + THEIR PRODUCT: start from the hook. A clip matched to an unrelated hook never reads as one video, so write the clip AFTER the hook for it: a linking script + shot brief (the first line answers the hook, e.g. 'still waiting for the egg to land... anyway, come check out our restaurant'; what to film so it follows on; 5-15 s; then the pitch). The user records it, or you generate it (render_ad / generate_video, cost quoted first, on their OK); then join here: the hook with out:'payoff' and audio.tail:'payoff', then their clip. Match an existing unrelated clip only if they insist. A {generate:{prompt, seconds 3-8}} segment (a generated transition-only shot, paid, postEditTimeline) is never suggested; build it only when they explicitly ask for one. "
       + "LINK FIRST: an effect alone never connects two unrelated clips; the link comes from what is in the frames. (1) Match cut, the default: video_frames (with its MOTION readout) on the hook's last second and across the other clip; pick the out-point AND the in-point (in: seconds, not always 0) where a motion direction, a screen position or size, a shape, a surface, a gesture or a gaze carries across, then ride the effect on that shared motion. (2) Its host names the hook in the first line. If the two share nothing, say so and offer the follow clip made for the hook. "
       + "PRO, NOT IMOVIE: ease every curve (never linear on a move); keep the picture filling the frame through a move (scale up while it moves: two frames sliding side by side with a seam is the amateur tell); hide the handoff under the fastest, blurriest frames; carry direction into the next shot; cut on motion; end every effect cleanly; 0.2-0.6 s in total; a sound whose peak lands on the handoff (sfx whoosh at handoff minus 0.45 s, or the hook's own payoff sound). Moving segments get a real shutter blur automatically (motionBlur). "
-      + "MATCH EVERY SEAM, hard cuts too, cheapest first: exposure (skin and midtones within ~5%), white balance (skin first; a green cast reads worse than a warm one), black level, then grain UP, never down (post_edit grain on the result so the clean clip meets the grainy one; never smooth the grainy one), motion blur (cut where both move least, or mblur the crisp side only while it moves), subject size and headroom (scale it, never a jump from a third of the frame to two thirds), sound (a 0.25-0.5 s J/L-cut, never a sonic wall). Grade with the segment's exposure / contrast / saturation. The plainest thing that links wins: a straight cut on action beats a decorative effect; over 0.5 s is too long in anything under 20 s; never flash more than 3 times a second. "
-      + "RECIPES (c = the cut second, adapt freely): whip pan: A over its last 0.22 s x 0 to -0.22, scale 1 to 1.35, mblur 0 to 220, all ease in; B overlap 0.08, opacity 0 to 1 over 0.08, x 0.22 to 0, scale 1.35 to 1, mblur 220 to 0, all ease out over 0.3 s; whoosh at c-0.45. Zoom through: A over its last 0.35 s scale 1 to 3 ease in anchored on the object, blur 0 to 10; B overlap 0.12, opacity 0 to 1, scale 1.5 to 1 and blur 10 to 0 ease out over 0.4 s. Cut on action: A out ON the motion, B scale 1.08 to 1 ease out over 0.25 s, audio.lead 0.2. Speed ramp: speed [{src:t0,v:1},{src:t0+0.25,v:0.3}] then [{src:t1,v:0.3},{src:t1+0.1,v:2}] into the cut. Circle wipe: B overlap 0.5 + overlays [{mode:'mask', segment:1, start, end, html: a white div whose clip-path circle grows via @keyframes}]. "
+      + "EVERY SEAM IS MATCHED AUTOMATICALLY, hard cuts too: each cut is measured and the incoming clip graded (exposure, white balance, black level), grained UP (never smoothed) and softened while it moves toward the outgoing one; the reply gives before/after deltas per seam. match (timeline: every cut; segment: the cut into it): 'auto' default, 'off' for a deliberate contrast, or {grade, level, grain, blur: false to skip one, strength 0-1}; a segment's own constant exposure / contrast / saturation replaces the automatic grade. Still yours: subject size and headroom (scale it, never a jump from a third of the frame to two thirds) and sound (a 0.25-0.5 s J/L-cut, never a sonic wall). A clip placed after a hook gets a BUDGET (total - intro = its surviving window, and what was dropped). The plainest thing that links wins: a straight cut on action beats a decorative effect; over 0.5 s is too long in anything under 20 s; never flash more than 3 times a second. "
+      + "RECIPES (c = the cut second, adapt freely): whip pan: A over its last 0.22 s x 0 to -0.22, scale 1 to 1.35, mblur 0 to 220, all ease in; B overlap 0.08, opacity 0 to 1 over 0.08, x 0.22 to 0, scale 1.35 to 1, mblur 220 to 0, all ease out over 0.3 s; whoosh at c-0.45. Zoom through: A over its last 0.35 s scale 1 to 3 ease in anchored on the object, blur 0 to 10; B overlap 0.12, opacity 0 to 1, scale 1.5 to 1 and blur 10 to 0 ease out over 0.4 s. Cut on action: A out ON the motion, B scale 1.08 to 1 ease out over 0.25 s, audio.lead 0.2. Speed ramp: speed [{src:t0,v:1},{src:t0+0.25,v:0.3}] then [{src:t1,v:0.3},{src:t1+0.1,v:2}] into the cut. Circle wipe: B overlap 0.5 + overlays [{mode:'mask', segment:1, start, end, html: a white div whose clip-path circle grows via @keyframes}]. Card (picture in picture: a proven ad playing in a rounded card over the host watching it, any length): the host segment full frame, then the clip ON TOP with at:0, fit:'contain' (crop to reframe it), scale ~0.6-0.7, y ~0.12, radius ~0.04-0.06; a card is not a cut, so it is never graded toward the host; duck it under the host's first line with audio.gain keys (the host's voice leads the switch) and end it on a hard cut at a sentence break. "
       + "SELF-CRITIQUE: the reply carries a vision REVIEW of each seam (pro / ok / amateur, linked or not, with fixes; about 2 credits, review:false skips it) and the seam frames. When it says ok or amateur, fix what it names and re-run the same sources (twice at most) before presenting; on a re-run give a generated segment {src: its URL, between: true} so it is not paid for twice. Then look at the WHOLE result once with video_frames, not only the seams: the first frame is not black or frozen, no dead air over ~0.3 s at the head, no lone black, flash or repeated frame at a cut, and nothing static for more than ~4-5 s (recut it or add a re-hook). "
       + "FOLLOW-UPS ('cut earlier', 'no splat', 'whip pan instead', 'use the second hook') re-run this with the SAME sources and the one change; the result echoes the resolved timeline (e.g. the found payoff cut) to edit from. Refusals are free and name the field.",
     inputSchema: {
@@ -17386,23 +17398,26 @@ function buildTools(rawServer, opts = {}, sink = null) {
         hold: z.array(z.object({ src: z.number(), seconds: z.number() })).optional().describe('freeze frames'),
         reverse: z.boolean().optional(),
         between: z.boolean().optional().describe('a bridge clip between its neighbours (a re-used generated shot): trimmed and graded to them automatically'),
+        match: SEAM_MATCH.optional().describe('the cut INTO this segment (default: the timeline match)'),
         slowmo: z.enum(['blend', 'hold', 'flow']).optional().describe('how slow motion fills frames (flow = motion-interpolated)'),
         scale: KF.optional(), x: KF.optional().describe('canvas widths'), y: KF.optional().describe('canvas heights'), rotate: KF.optional().describe('degrees'),
         opacity: KF.optional(), blur: KF.optional(), mblur: KF.optional().describe('directional motion blur px'), mblurAngle: z.number().optional(),
+        radius: z.number().optional().describe("rounded corners, a fraction of the picture's shorter side (0-0.5): a picture-in-picture CARD over the segment under it, any length"),
         brightness: KF.optional().describe('-1..1, a flash'), exposure: KF.optional().describe('× the light, 1 = as shot (a fine grade)'), contrast: KF.optional(), saturation: KF.optional(),
         audio: z.object({ mute: z.boolean().optional(), gain: KF.optional().describe('dB'), lead: z.number().optional(), tail: z.union([z.number(), z.literal('payoff')]).optional(), fadeIn: z.number().optional(), fadeOut: z.number().optional(), level: z.enum(['match', 'keep']).optional() }).optional(),
       })).describe("the clips on the output, max 12, later ones on top. Every animated field (scale x y rotate opacity exposure blur mblur brightness contrast saturation, audio.gain) is a constant or keyframes [{t: seconds into this segment | src: a second of the source, v, ease: linear|in|out|inout|hold}]; x and y are in canvas widths / heights, rotate in degrees, mblur in px along mblurAngle"),
       overlays: z.array(z.object({ html: z.string().describe('HTML/CSS animated with @keyframes; no script, no network (images as data: URIs)'), start: z.number(), end: z.number(), mode: z.enum(['over', 'mask']).optional().describe("'mask': its opaque pixels are where `segment` shows"), segment: z.number().optional() })).optional(),
       sfx: z.array(z.object({ sound: z.enum(['whoosh', 'impact', 'payoff']), at: z.number(), gain: z.number().optional(), segment: z.number().optional().describe("payoff: the segment whose OWN payoff sound (the egg's real splat) lands at `at`") })).optional(),
-      size: z.enum(['9:16', '1:1', '4:5', '16:9']).optional(),
-      fps: z.number().optional(),
+      size: z.string().optional().describe("canvas: '9:16' default, '1:1', '4:5', '16:9', any 'W:H' (1:3 to 3:1, on a 1080 short side) or exact 'WxH' pixels"),
+      fps: z.number().optional().describe('the frame rate, a whole number from 24 to 60 (24, 25, 30, 60 are the usual ones). Leave it out: the canvas takes the rate of its own footage (the rate of most of it on screen), so no frames are invented; a faster clip is thinned, a slower one that does not divide it is motion-interpolated'),
       motionBlur: z.boolean().optional().describe('default true: anything that moves gets a real shutter blur along its path'),
       review: z.boolean().optional().describe('default true: a vision read of each seam (about 2 credits) comes back with the render, with the seam frames'),
+      match: SEAM_MATCH.optional().describe("every cut: 'auto' default"),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const op = { op: 'timeline', segments: a.segments, ...(a.overlays ? { overlays: a.overlays } : {}), ...(a.sfx ? { sfx: a.sfx } : {}), ...(a.size ? { size: a.size } : {}), ...(a.fps ? { fps: a.fps } : {}), ...(a.motionBlur != null ? { motionBlur: a.motionBlur } : {}), ...(a.review != null ? { review: a.review } : {}) };
+    const op = { op: 'timeline', segments: a.segments, ...(a.overlays ? { overlays: a.overlays } : {}), ...(a.sfx ? { sfx: a.sfx } : {}), ...(a.size ? { size: a.size } : {}), ...(a.fps ? { fps: a.fps } : {}), ...(a.motionBlur != null ? { motionBlur: a.motionBlur } : {}), ...(a.review != null ? { review: a.review } : {}), ...(a.match != null ? { match: a.match } : {}) };
     const r = await renderJob('postedit', { ...(a.videoUrl ? { videoUrl: a.videoUrl } : {}), ops: [op] }, 'MCP timeline');
     const tl = r?.raw?.timeline;
     const gen = Array.isArray(r?.raw?.generatedShots) && r.raw.generatedShots.length ? `\nGENERATED SHOT: ${r.raw.generatedShots.map((g) => `${g.model} ${g.seconds}s ${abs(g.video)}`).join('; ')} (billed as its own render)` : '';
@@ -17413,7 +17428,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // polling instruction, plus where the self-critique will arrive, so the caller neither re-renders nor presents blind.
     if (r?.stillRendering && !hostRendersWidgets()) return ok(`${stillMsg(r)} A timeline edit usually takes about 3 minutes. When get_job(${r.jobId}) reports done, its answer carries the SEAM REVIEW and the seam frames: read them before you present the edit, and fix + re-run (same sources) if it says ok or amateur.`, r);
     const rvText = timelineReviewText(rv);
-    const res = await okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.join('; ')}` : ''}${tl ? `\nRESOLVED: ${tl.segments.map((sg) => `[${sg.i}] ${sg.in != null ? `${sg.in}-${sg.out}s` : `${sg.seconds}s`} @${sg.at}s`).join(', ')} (${tl.seconds}s)` : ''}${gen}${rvText}  [job ${r.jobId}]`, r);
+    const res = await okVideo(`Edited video ready: ${r.url}${Array.isArray(r?.raw?.notes) && r.raw.notes.length ? `\nNOTE: ${r.raw.notes.filter((x) => !/^seams matched:/.test(x)).join('; ')}` : ''}${tl ? `\nRESOLVED: ${tl.segments.map((sg) => `[${sg.i}] ${sg.in != null ? `${sg.in}-${sg.out}s` : `${sg.seconds}s`} @${sg.at}s`).join(', ')} (${tl.seconds}s)` : ''}${gen}${seamsText(r?.raw)}${rvText}  [job ${r.jobId}]`, r);
     const sheet = rv?.seamSheets?.[0]?.url ? await imageBlock(abs(rv.seamSheets[0].url)) : null;
     if (sheet && Array.isArray(res.content)) res.content.push({ type: 'text', text: `Seam 1 frames (${rv.seamSheets[0].at}s${rv.seamSheets[0].end > rv.seamSheets[0].at ? `-${rv.seamSheets[0].end}s` : ''}, ${rv.seamSheets[0].fps || 15} fps, left to right):` }, sheet);
     return res;
@@ -17422,15 +17437,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // THE EYES (2026-09-24): exact frames as one contact sheet, free. Pairs with edit_timeline: look, cut, render, look.
   server.registerTool('video_frames', {
     title: 'Look at video frames',
-    description: "LOOK at a video's exact frames, free: one contact-sheet image of the frames from start to end at fps (e.g. a seam, 3.0-3.8 s at 10 fps) or at the listed times, tiles in reading order with each tile's second listed. Use it to find a moment before an edit and to check a render's seam after it. Takes a Library / render URL, a direct file or a public post link.",
+    description: "LOOK at a video's exact frames, free: one contact-sheet image of the frames from start to end at fps (e.g. a seam, 3.0-3.8 s at 10 fps) or at the listed times, tiles in reading order with each tile's second listed. Use it to find a moment before an edit and to check a render's seam after it. Takes a Library / render URL, a direct file or a public post link (a TikTok / Reel / Facebook / X post link is opened through one paid lookup, 1 credit; a file is free). SAVE STILLS: save:true returns full-size still images (frame grabs, up to 8) as URLs instead of a contact sheet, picked by times or by clips (numbered at the video's hard cuts, -1 = the last): a before / after from someone's own footage, a cover, a product shot. Compose with those URLs (make_template_ad template 'custom', a post) with no AI.",
     inputSchema: {
       url: z.string().describe('the video'),
       start: z.number().optional(), end: z.number().optional(),
       fps: z.number().optional().describe('frames per second in the window (default ~16 frames across it)'),
-      times: z.array(z.number()).optional().describe('exact seconds instead of a window (max 48)'),
+      times: z.array(z.number()).optional().describe('exact seconds instead of a window (max 48; max 8 with save)'),
+      save: z.boolean().optional().describe('true = save the frames at times / clips as full-size stills and return their URLs'),
+      clips: z.array(z.number()).optional().describe('save: one still from the middle of each numbered clip (split at hard cuts; negative counts from the end)'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
+    if (a.save === true || (Array.isArray(a.clips) && a.clips.length)) {
+      const st = await apiGet('/api/video/stills', { url: a.url, ...(Array.isArray(a.times) && a.times.length ? { times: a.times.join(',') } : {}), ...(Array.isArray(a.clips) && a.clips.length ? { clips: a.clips.join(',') } : {}) });
+      const stills = (st.stills || []).map((x) => ({ ...x, url: abs(x.url) }));
+      return { content: [{ type: 'text', text: String(st.summary || '').replace(/(^|\s)(\/generated\/\S+)/g, (m, sp, u) => sp + abs(u)) }], structuredContent: { stills, durationSeconds: st.durationSeconds, clipMap: st.clipMap || null } };
+    }
     const d = await apiGet('/api/video/sheet', { url: a.url, ...(a.start != null ? { start: a.start } : {}), ...(a.end != null ? { end: a.end } : {}), ...(a.fps != null ? { fps: a.fps } : {}), ...(Array.isArray(a.times) && a.times.length ? { times: a.times.join(',') } : {}) });
     const [head, b64] = String(d.image || '').split(',');
     const mv = (d.motion || []).filter(Boolean).map((m) => `${m.t.toFixed(2)}s ${m.region ? `subject at (${m.region.x}, ${m.region.y})${m.heading ? ` moving ${m.heading}` : ''}` : 'no moving subject'}${m.camera !== 'still' ? `, camera ${m.camera}` : ''}`).join('; ');
@@ -17793,12 +17815,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       model: j.model || rawJ.model || null, poster: abs(rawJ.poster) || null, creditsUsed: j.creditsUsed ?? null,
       deliveredWidth: rawJ.deliveredWidth ?? null, deliveredHeight: rawJ.deliveredHeight ?? null })}`;
     if (j.status === 'done' && res?.video && res?.review) { // a finished TIMELINE edit: its seam review + frames, as edit_timeline would have shown them
-      const out = await okVideo(`${wireText}${timelineReviewText(res.review)}`, { ...j, url });
+      const out = await okVideo(`${wireText}${seamsText(res)}${timelineReviewText(res.review)}`, { ...j, url });
       const sheet = res.review?.seamSheets?.[0]?.url ? await imageBlock(abs(res.review.seamSheets[0].url)) : null;
       if (sheet && Array.isArray(out.content)) out.content.push({ type: 'text', text: `Seam 1 frames (${res.review.seamSheets[0].at}s${res.review.seamSheets[0].end > res.review.seamSheets[0].at ? `-${res.review.seamSheets[0].end}s` : ''}, ${res.review.seamSheets[0].fps || 15} fps, left to right):` }, sheet);
       return out;
     }
-    if (j.status === 'done' && res?.video) return okVideo(wireText, { ...j, url }); // resumed video → same inline poster as a direct return
+    const seamLine = seamsText(res); // a timeline / join's measured seams + intro budget ('' for any other video)
+    if (j.status === 'done' && res?.video) return okVideo(wireText + seamLine, { ...j, url }); // resumed video → same inline poster as a direct return
     if (j.status === 'done' && res?.image) { const img = await imageBlock(url); return { content: [{ type: 'text', text: wireText }, ...(img ? [img] : [])], structuredContent: { ...j, url } }; }
     return ok(wireText, { ...j, url });
   }));
@@ -19763,24 +19786,43 @@ function memoryNoteVerdict(text) {
   // headless caller's only route to a restyled clip was paying for a whole new render.
   server.registerTool('edit_video', {
     title: 'Edit a video clip',
-    description: "EDIT/transform an existing video clip with a natural-language instruction (video-to-video) — KEEPS the original motion, timing and edit, changes the subject/setting/style. Use for 'change the background to a city', 'make it nighttime', 'restyle it as claymation', 'swap the product'. Best on 3–10s clips. NOT for mechanical cuts, trims, end cards or watermarks (use post_edit — seconds, ~2 credits, no AI model), NOT for making a new video (generate_video / render_ad), NOT for translating the spoken track (dub_video) and NOT for putting a saved creator's face on the motion (recast_motion). Paid render; returns the served URL of the edited clip.",
+    description: "EDIT an existing clip from a plain instruction (video-to-video): the motion, timing, framing and cut stay, the named thing changes. 'change only the mug to red', 'make it nighttime', 'restyle it as claymation'. Your words are wrapped so the model keeps everything else identical, changes only what you named and repeats that lock; lighting is kept unless the change needs new light (set lighting to force either); literal:true sends your words as written. One change per call holds best. previewFirstFrame:true edits ONE still first (one image edit; previewAt picks the second) and quotes the clip; nothing else runs until you call again, ideally with previewStill. The reply scores how well the shot held outside the change (free) and flags an edit that touched more than asked. NOT for cuts/trims/end cards (post_edit), a new video (generate_video / render_ad), translation (dub_video) or a saved creator's face (recast_motion). Best on 3-15s clips.",
     inputSchema: {
-      video: z.string().describe('the source video URL (from a previous render, a job result, or list_library)'),
-      instruction: z.string().describe('the exact transformation to apply, in the user’s own words'),
-      keepAudio: z.boolean().optional().describe('default true — keep the source clip’s audio track. Set false to return the edit silent'),
-      elements: z.array(z.object({ frontal: z.string().describe('the reference image URL'), refs: z.array(z.string()).optional().describe('up to 2 extra angles of the SAME subject') }).passthrough()).optional().describe('OPTIONAL identity/product grounding (≤4): a creator portrait or the real product photo, so the edit restores the REAL thing instead of re-inventing it. Describe each one in the instruction. Leave out for a plain restyle'),
-      interactionId: z.string().optional().describe('OPTIONAL: the interactionId an earlier Gemini Omni render or edit returned. The edit then continues that clip on the SAME Omni model from its own stored context (identity-true, no re-upload, usually cheaper). If that edit cannot run, the clip is edited by the video editor instead and the reply says so.'),
+      video: z.string().describe('the source video URL (a render, job result or list_library)'),
+      instruction: z.string().describe('the change, in the user’s own words'),
+      keepAudio: z.boolean().optional().describe('default true: keep the source audio; false = silent'),
+      lighting: z.enum(['auto', 'preserve', 'relight']).optional().describe("default auto: keep the source light unless the change needs new light (night, a lamp, fire). 'preserve' or 'relight' forces it"),
+      reference: z.string().optional().describe('OPTIONAL image URL that anchors the MATERIAL of what changes (a fabric, a finish, a colour swatch, the real product). Only its surface is used, never its framing or light'),
+      literal: z.boolean().optional().describe('true = send the instruction exactly as written, with no preserve/lock wrapper'),
+      previewFirstFrame: z.boolean().optional().describe('true = edit ONE still of the first frame first and quote the clip; the paid clip does not run'),
+      previewStill: z.string().optional().describe('the still a previewFirstFrame call returned; the clip then matches the changed thing to it'),
+      previewAt: z.number().optional().describe('second to preview (default 0); resend with previewStill'),
+      elements: z.array(z.object({ frontal: z.string().describe('the reference image URL'), refs: z.array(z.string()).optional().describe('up to 2 extra angles of the SAME subject') }).passthrough()).optional().describe('OPTIONAL identity/product grounding (≤4): a creator portrait or the real product photo, so the edit restores the REAL thing. Describe each one in the instruction'),
+      interactionId: z.string().optional().describe('OPTIONAL: the interactionId an earlier Gemini Omni render or edit returned; the edit continues that clip on the same Omni model. If it cannot run, the video editor edits it and the reply says so.'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ video, instruction, keepAudio, elements, interactionId }) => {
+  }, wrap(async ({ video, instruction, keepAudio, lighting, reference, literal, previewFirstFrame, previewStill, previewAt, elements, interactionId }) => {
     const prompt = String(instruction || '').trim();
     if (!prompt) return { content: [{ type: 'text', text: 'Say what to change — edit_video needs an instruction.' }], isError: true };
+    const _ref = reference ? await toRef(reference) : undefined;
+    if (previewFirstFrame === true) {
+      const d = await apiPost('/api/video/edit/preview', { video, instruction: prompt, ...(lighting ? { lighting } : {}), ...(_ref ? { reference: _ref } : {}), ...(literal === true ? { literal: true } : {}), ...(Number.isFinite(previewAt) ? { previewAt } : {}) });
+      const still = d.still || d.image ? abs(d.still || d.image) : '';
+      const img = still ? await imageBlock(still) : null;
+      const c = d.clip || {};
+      const text = `${d.frameAt > 0 ? `Preview of the frame at ${d.frameAt}s` : 'First-frame preview'} (${d.stillCredits ?? d.creditsUsed ?? '?'} credits): ${still || 'no still came back'}\nThe clip is NOT rendered yet. On ${c.engine || 'the video editor'} it is held at up to ${c.holdCredits ?? '?'} credits and settles at the real price, about ${c.expectedCredits ?? '?'}${c.seconds ? ` for ${c.seconds}s` : ''}.\nTo render it: edit_video with the same video and instruction${still ? ` and previewStill: ${still}${d.frameAt > 0 ? `, previewAt: ${d.frameAt}` : ''}` : ''}.${d.editNote ? `\n${d.editNote}` : ''}`;
+      return { content: [{ type: 'text', text }, ...(img ? [img] : [])], structuredContent: { ...d, ...(still ? { still, image: still } : {}), ...(d.frame ? { frame: abs(d.frame) } : {}) } };
+    }
     const els = (Array.isArray(elements) ? elements : []).filter(e => e && e.frontal).slice(0, 4);
     const _iid = String(interactionId || '').trim();
-    const r = await renderJob('videoedit', { video, prompt, keepAudio: keepAudio !== false, ...(els.length ? { elements: els } : {}), ...(_iid ? { interactionId: _iid } : {}) }, `Video edit · ${prompt.slice(0, 40)}`);
-    const _nextIid = renderPayload(r)?.interactionId;
-    return okVideo(`Edited clip: ${r.url}${r.model ? `  (${r.model})` : ''}${_nextIid ? `\ninteractionId: ${_nextIid} (pass it to edit_video again to keep editing this clip)` : ''}${switchNote(r)}`, r);
+    const _still = previewStill ? await toRef(previewStill) : undefined;
+    const r = await renderJob('videoedit', { video, prompt, grammar: true, keepAudio: keepAudio !== false, ...(lighting ? { lighting } : {}), ...(_ref ? { reference: _ref } : {}), ...(_still ? { previewStill: _still, ...(previewAt > 0 ? { previewStillAt: previewAt } : {}) } : {}), ...(literal === true ? { literal: true } : {}), ...(els.length ? { elements: els } : {}), ...(_iid ? { interactionId: _iid } : {}) }, `Video edit · ${prompt.slice(0, 40)}`);
+    const p = renderPayload(r) || {};
+    const _nextIid = p.interactionId;
+    const pres = p.preservation;
+    const presLine = pres && pres.measured ? `\nHeld outside the change: ${pres.preserved} SSIM (${pres.verdict}; ${Math.round((pres.changedShare || 0) * 100)}% of the frame changed)${pres.overreach ? ' TOUCHED MORE THAN ASKED' : ''}.` : ''; // an unmeasured read-back says so in editNote; the overreach sentence rides there too
+    return okVideo(`Edited clip: ${r.url}${r.model ? `  (${r.model})` : ''}${presLine}${p.editNote ? `\n${p.editNote}` : ''}${_nextIid ? `\ninteractionId: ${_nextIid} (pass it to edit_video again to keep editing this clip)` : ''}${switchNote(r)}`, r);
   }));
 
   // AD MULTIPLIER (2026-09-01): ONE winning ad → N variants (new character / outfit / location / objects) with the edit, the
@@ -19941,7 +19983,7 @@ function memoryNoteVerdict(text) {
   // THE FREE FACE CHECK (2026-09-24): a local face detector on our own CPU (lib/face-detect.mjs), no model call, 0 credits.
   server.registerTool('face_check', {
     title: 'Check a reference for a face (free)',
-    description: "FREE, before any paid render: does a picture or video contain a face, and which video models refuse it (they cannot take a real person's face; a render there fails after it starts) or were measured to take one, plus the model a face-bearing render is routed to. A local detector, no model call, 0 credits. It cannot tell a photo from a drawing, so a drawn face counts. Takes a picture or video URL, a Library item or a public post link (a post link uses its one lookup).",
+    description: "FREE, before any paid render: does a picture or video contain a face, and which video models refuse it (they cannot take a real person's face; a render there fails after it starts) or were measured to take one, plus the model a face-bearing render is routed to. A local detector, no model call, 0 credits. It cannot tell a photo from a drawing, so a drawn face counts. Takes a picture or video URL, a Library item or a public post link. A file or Library item is free; a TikTok / Reel / Facebook / X post link is opened through one paid lookup (1 credit), refused when the account has no credits.",
     inputSchema: { url: z.string().describe('the picture or video to check') },
     outputSchema: { face: z.string().optional(), best: z.number().nullable().optional(), refuse: z.array(z.any()).optional(), accept: z.array(z.any()).optional(), route: z.any().optional(), summary: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
