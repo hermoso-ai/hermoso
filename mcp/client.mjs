@@ -429,10 +429,38 @@ export function jobWaitMs(requested, cap) {
   return Math.min(cap, Math.floor(n));
 }
 
-export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 1000, onTick } = {}) {
-  const deadline = Date.now() + timeoutMs;
+// A 404 IN THE SECONDS AFTER A SUBMIT IS NOT "NO SUCH JOB" (journey QA 2026-09-25). edit_video queued a render on the
+// revision a deploy was retiring; the poll 3s later reached the new revision, which had never heard of it, and the tool
+// answered "Error: No such job" about a real render that held credits. The server now reads through to the durable job
+// mirror before a 404 (lib/job-readthrough.mjs), and this is the client half: inside a short grace from the submit a
+// 404 (and a 502/503/504, which is what a rollover looks like from outside) is retried; past it a 404 is final and is
+// said in words, never as the bare route error. PURE, so tools/job-readthrough-check.mjs runs it.
+export const JOB_MISS_GRACE_MS = 30_000;
+export function pollMissVerdict(status, { startedAt, now = Date.now(), deadline = Infinity, graceMs = JOB_MISS_GRACE_MS } = {}) {
+  const st = Number(status);
+  if (st === 404) return (now - startedAt < graceMs && now < deadline) ? 'retry' : 'final';
+  if ((st === 502 || st === 503 || st === 504) && now < deadline) return 'retry';
+  return 'throw';
+}
+export function jobMissMessage(id) {
+  return `Hermoso has no record of job ${id} on this workspace, after checking the live queue and the durable job store for ${Math.round(JOB_MISS_GRACE_MS / 1000)}s. `
+    + 'If it was just submitted, the server that took it was replaced before it wrote the job down, so it cannot be followed from here. A render lost that way is not charged: the credits held for it are released automatically. '
+    + 'Call list_jobs to see this workspace\'s recent jobs. Do not re-run the render on the strength of this message alone.';
+}
+export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 1000, onTick, getJobFn = getJob } = {}) {
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   for (;;) {
-    const job = await getJob(id);
+    let job;
+    try { job = await getJobFn(id); }
+    catch (e) {
+      const v = pollMissVerdict(e?.status, { startedAt, now: Date.now(), deadline });
+      if (v === 'final') throw Object.assign(new Error(jobMissMessage(id)), { status: 404, _viaApi: true, _jobMissing: true });
+      if (v === 'throw') throw e;
+      await new Promise(r => setTimeout(r, Math.min(intervalMs, Math.max(50, deadline - Date.now()))));
+      if (Date.now() > deadline) throw Object.assign(new Error('Render timed out — check `hermoso jobs get ' + id + '`'), { jobId: id });
+      continue;
+    }
     onTick?.(job);
     if (job.status === 'done') return { job, result: jobResult(job) };
     // A FAILED JOB HAS ALREADY BEEN RECORDED BY THE SERVER (2026-09-21). The job runner files the worker's real error in

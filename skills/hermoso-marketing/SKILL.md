@@ -59,7 +59,7 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 - Feed the winners back into the next round.
 
 ## Notes
-- Publishing, scheduling, campaign management and analytics cost no credits. Credits are spent on running a model and on research. State a render's cost before you run it.
+- Publishing, scheduling, campaign management and analytics cost no credits. Credits are spent on running a model and on research. State a render's or a fix's exact cost before you run it, from a live quote (`dryRun: true` on render_ad, generate_video, edit_image, fix_beat or post_edit), never from memory. A fix is an edit, not a full re-render.
 - Text baked into an AI video frame comes out garbled, so `render_ad` composites it in post. Captions, end cards and brand lockups are **opt-in**: leave them off unless the user asked for them.
 - One real product photo is enough. `--ref` on an image render, or `list_product_photos` / `set_product_image` to manage the brand's own.
 - `get_brand` shows what the workspace already knows, and omitting `brand` on a create call uses it.

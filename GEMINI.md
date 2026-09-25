@@ -21,7 +21,7 @@ Everything runs through the `hermoso` CLI in the shell, so no tool list is loade
 - Run commands as `npx -y hermoso <command>`, or `hermoso <command>` after `npm install -g hermoso`.
 - `hermoso capabilities` lists model ids, exact credit costs and live durations.
 - Every tool is reachable: `hermoso tools --search <what you want>` finds one, `hermoso tools <name>` prints its arguments, `hermoso call <name> --json '{...}'` runs it.
-- Always show the exact copy and target before publishing anything, and state the credit cost before any render.
+- Always show the exact copy and target before publishing anything, and state the exact credit cost before any render or fix, from a live quote (`dryRun: true` on render_ad, generate_video, edit_image, fix_beat or post_edit), never from memory.
 - A tool for a channel that is not connected means the channel is not connected yet; say to connect it under Settings, Connectors in the app.
 
 Full tool reference: https://hermoso.ai/mcp
