@@ -17156,75 +17156,80 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // balance cannot cover it.
   const staticItemsText = (d, label) => {
     const items = Array.isArray(d.items) ? d.items : [];
-    const rows = items.map((x, i) => `${i + 1}. ${x[label] || ''}${x.image ? ` — ${abs(x.image)}` : ` — not delivered: ${x.error || 'failed'}`}${x.textCheck && x.textCheck.ok === false ? `\n   ⚠ ${x.textCheck.note}` : ''}`);
+    const rows = items.map((x, i) => `${i + 1}. ${x[label] || ''}${x.image ? ` — ${abs(x.image)}` : ` — not delivered: ${x.error || 'failed'}`}${x.textCheck && x.textCheck.ok === false ? `\n   ⚠ ${x.textCheck.note}` : ''}${x.labelPass && x.labelPass.note ? `\n   ${x.labelPass.note}` : ''}`);
     return `${rows.join('\n')}\n${d.note || ''}`;
   };
   const staticImages = async (d) => (await Promise.all((Array.isArray(d.items) ? d.items : []).filter(x => x.image).slice(0, 4).map(x => imageBlock(abs(x.image))))).filter(Boolean);
   const staticItemsOut = z.array(z.any()).optional().describe('one entry per output: the image URL (or an error), what changed, and a textCheck flag when the rendered text may not match');
   server.registerTool('edit_image', {
     title: 'Edit an image',
-    description: "EDIT an existing image in place with a plain-language instruction and keep everything else: 'make the headline bigger', 'add our logo bottom right', 'swap the background for a kitchen', 'remove the person on the left', 'erase all the text'. Pass `image` (URL, Library item, upload_file URL or local path) and `instruction`. The same edit the web Studio's Edit runs: composition, aspect ratio, people and every untouched line of text stay as they are; the saved brand's real name and website are pinned so an added line never invents one, and the brand's real logo is attached when the instruction asks for the logo. Set removal:true when the edit STRIPS text, branding or an object, so nothing branded is put back. For a precise region, pass `mask` (see generate_image). One image edit's credits; returns the new image URL. For a new image from a prompt use generate_image; to rebuild a competitor's ad for your brand use clone_static.",
+    description: "EDIT an existing image in place with a plain-language instruction and keep everything else: 'make the headline bigger', 'add our logo bottom right', 'swap the background for a kitchen', 'remove the person on the left', 'erase all the text'. Pass `image` (URL, Library item, upload_file URL or local path) and `instruction`. The same edit the web Studio's Edit runs: composition, aspect ratio, people and every untouched line of text stay as they are; the saved brand's real name and website are pinned so an added line never invents one, and the brand's real logo is attached when the instruction asks for the logo. Set removal:true when the edit STRIPS text, branding or an object, so nothing branded is put back. When the saved brand has a product photo and the ad shows that product, the photo rides with the edit and the product's label is read and checked against it: re-printed from the photo only when it came out wrong (the check alone is charged when it is right; one small extra charge finds the product first). fixLabel:false turns that off. For a precise region, pass `mask` (see generate_image). One image edit's credits; returns the new image URL. For a new image from a prompt use generate_image; to rebuild a competitor's ad for your brand use clone_static.",
     inputSchema: {
       image: z.string().describe('the image to edit: URL, Library item URL, upload_file URL or local path'),
       instruction: z.string().describe('the change to make, in plain words (pass the user’s own words for a removal or plain photo edit)'),
       removal: z.boolean().optional().describe('true when the edit REMOVES text, branding, a logo, a watermark, a person or an object, so the brand name and logo are not re-added'),
       mask: z.string().optional().describe('optional mask image (URL or local path) marking the region to change: transparent = change, or white = change on an opaque mask'),
       dryRun: z.boolean().optional().describe('true = return the exact credits this edit reserves and render nothing'),
+      fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: {
       image: z.string().optional().describe('the served absolute URL of the edited image'),
       model: z.string().optional().describe('the model label that rendered it'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ image, instruction, removal, mask, dryRun }) => {
+  }, wrap(async ({ image, instruction, removal, mask, dryRun, fixLabel }) => {
     const src = await toRef(image);
     const maskRef = mask ? await toRef(mask) : undefined;
-    if (dryRun) { const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), dryRun: true }); return ok(quoteText(d && d.quote, 'This image edit (a change to the existing image, not a new render)'), {}); }
-    const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}) });
+    const fl = fixLabel === false ? { fixLabel: false } : {};
+    if (dryRun) { const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), ...fl, dryRun: true }); return ok(quoteText(d && d.quote, 'This image edit (a change to the existing image, not a new render)'), {}); }
+    const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), ...fl });
     const img = await imageBlock(abs(d.image));
-    return { content: [{ type: 'text', text: `Edited image: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
+    return { content: [{ type: 'text', text: `Edited image: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
   server.registerTool('headline_variants', {
     title: 'Headline variants of a static ad',
-    description: "Turn ONE finished static ad into several copies that differ ONLY in the headline, for an A/B test: same picture, product, layout, colours and every other line. Pass `image`, and either `headlines` (your own, up to 10) or `count` (default 5, max 10) to have distinct angles written for you in the saved brand's voice (never inventing numbers, prices, ratings or claims the ad or brand does not state); `brief` steers what to test. The ad's text is read first (3 credits), then one image edit per headline; each output is proofread and flagged (textCheck) if the rendered words do not match, never silently re-rendered. The whole batch is priced before anything runs. Returns each headline, its angle and its image URL.",
+    description: "Turn ONE finished static ad into several copies that differ ONLY in the headline, for an A/B test: same picture, product, layout, colours and every other line. Pass `image`, and either `headlines` (your own, up to 10) or `count` (default 5, max 10) to have distinct angles written for you in the saved brand's voice (never inventing numbers, prices, ratings or claims the ad or brand does not state); `brief` steers what to test. The ad's text is read first (3 credits), then one image edit per headline; each output is proofread and flagged (textCheck) if the rendered words do not match, never silently re-rendered. When the saved brand has a product photo and the ad shows that product, the photo rides with the edit and the product's label is read and checked against it: re-printed from the photo only when it came out wrong (the check alone is charged when it is right; one small extra charge finds the product first). fixLabel:false turns that off. The whole batch is priced before anything runs. Returns each headline, its angle and its image URL.",
     inputSchema: {
       image: z.string().describe('the finished static ad: URL, Library item URL, upload_file URL or local path'),
       headlines: z.array(z.string()).optional().describe('your own headlines to test (up to 10); omit to have them written'),
       count: z.number().int().min(1).max(10).optional().describe('how many headlines to write when `headlines` is omitted (default 5)'),
       brief: z.string().optional().describe('what to test, e.g. "price-led vs outcome-led" or "speak to busy parents"'),
+      fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: { items: staticItemsOut, note: z.string().optional(), original: z.string().optional().describe('the headline read off the source ad') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ image, headlines, count, brief }) => {
-    const d = await apiPost('/api/static/headlines', { image: await toRef(image), ...(headlines?.length ? { headlines } : {}), ...(count ? { count } : {}), ...(brief ? { brief } : {}) });
+  }, wrap(async ({ image, headlines, count, brief, fixLabel }) => {
+    const d = await apiPost('/api/static/headlines', { image: await toRef(image), ...(headlines?.length ? { headlines } : {}), ...(count ? { count } : {}), ...(brief ? { brief } : {}), ...(fixLabel === false ? { fixLabel: false } : {}) });
     const imgs = await staticImages(d);
     return { content: [{ type: 'text', text: `Headline variants (original: “${d.original || ''}”):\n${staticItemsText(d, 'headline')}` }, ...imgs], structuredContent: { ...d, items: (d.items || []).map(x => ({ ...x, image: x.image ? abs(x.image) : null })) } };
   }));
   server.registerTool('resize_ad', {
     title: 'Resize a static ad for other placements',
-    description: "Re-lay out ONE finished static ad for other placements: the same ad, product, copy (word for word), logo and style, recomposed natively for each canvas rather than cropped. Pass `image` and optionally `aspectRatios` from 1:1, 4:5, 9:16, 16:9, 3:4, 4:3 (default 1:1, 4:5 and 9:16; the ad's own ratio is skipped). Reads the ad's text first (3 credits) so every line survives, then one image edit per canvas. Priced before it runs. For VIDEO use reframe_video.",
+    description: "Re-lay out ONE finished static ad for other placements: the same ad, product, copy (word for word), logo and style, recomposed natively for each canvas rather than cropped. Pass `image` and optionally `aspectRatios` from 1:1, 4:5, 9:16, 16:9, 3:4, 4:3 (default 1:1, 4:5 and 9:16; the ad's own ratio is skipped). Reads the ad's text first (3 credits) so every line survives, then one image edit per canvas. When the saved brand has a product photo and the ad shows that product, the photo rides with the edit and the product's label is read and checked against it: re-printed from the photo only when it came out wrong (the check alone is charged when it is right; one small extra charge finds the product first). fixLabel:false turns that off. Priced before it runs. For VIDEO use reframe_video.",
     inputSchema: {
       image: z.string().describe('the finished static ad: URL, Library item URL, upload_file URL or local path'),
       aspectRatios: z.array(z.enum(['1:1', '4:5', '9:16', '16:9', '3:4', '4:3'])).optional().describe('target canvases (default 1:1, 4:5, 9:16)'),
+      fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: { items: staticItemsOut, note: z.string().optional(), sourceAspectRatio: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ image, aspectRatios }) => {
-    const d = await apiPost('/api/static/resize', { image: await toRef(image), ...(aspectRatios?.length ? { aspectRatios } : {}) });
+  }, wrap(async ({ image, aspectRatios, fixLabel }) => {
+    const d = await apiPost('/api/static/resize', { image: await toRef(image), ...(aspectRatios?.length ? { aspectRatios } : {}), ...(fixLabel === false ? { fixLabel: false } : {}) });
     const imgs = await staticImages(d);
     return { content: [{ type: 'text', text: `Resized (source ${d.sourceAspectRatio || '?'}):\n${staticItemsText(d, 'aspectRatio')}` }, ...imgs], structuredContent: { ...d, items: (d.items || []).map(x => ({ ...x, image: x.image ? abs(x.image) : null })) } };
   }));
   server.registerTool('localize_ad', {
     title: 'Localize a static ad into other languages',
-    description: "Translate the on-image text of ONE finished static ad into other languages and keep everything else: same picture, layout, typeface, colours, logo and product. Pass `image` and `languages` (up to 5, e.g. [\"Spanish\", \"German\", \"French (Canada)\"]). The ad's text is read (3 credits), translated the way a native copywriter in each market would write it (brand and product names, URLs and prices kept as written), then one image edit per language; each output is proofread and flagged (textCheck) if the words do not match, never silently re-rendered. Priced before it runs. For a VIDEO use dub_video.",
+    description: "Translate the on-image text of ONE finished static ad into other languages and keep everything else: same picture, layout, typeface, colours, logo and product. Pass `image` and `languages` (up to 5, e.g. [\"Spanish\", \"German\", \"French (Canada)\"]). The ad's text is read (3 credits), translated the way a native copywriter in each market would write it (brand and product names, URLs and prices kept as written), then one image edit per language; each output is proofread and flagged (textCheck) if the words do not match, never silently re-rendered. When the saved brand has a product photo and the ad shows that product, the photo rides with the edit and the product's label is read and checked against it: re-printed from the photo only when it came out wrong (the check alone is charged when it is right; one small extra charge finds the product first). fixLabel:false turns that off. Priced before it runs. For a VIDEO use dub_video.",
     inputSchema: {
       image: z.string().describe('the finished static ad: URL, Library item URL, upload_file URL or local path'),
       languages: z.array(z.string()).min(1).max(5).describe('target languages, by name'),
+      fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: { items: staticItemsOut, note: z.string().optional(), source: z.array(z.string()).optional().describe('the lines read off the source ad') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async ({ image, languages }) => {
-    const d = await apiPost('/api/static/localize', { image: await toRef(image), languages });
+  }, wrap(async ({ image, languages, fixLabel }) => {
+    const d = await apiPost('/api/static/localize', { image: await toRef(image), languages, ...(fixLabel === false ? { fixLabel: false } : {}) });
     const imgs = await staticImages(d);
     return { content: [{ type: 'text', text: `Localized:\n${staticItemsText(d, 'language')}` }, ...imgs], structuredContent: { ...d, items: (d.items || []).map(x => ({ ...x, image: x.image ? abs(x.image) : null })) } };
   }));
