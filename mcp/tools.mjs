@@ -12944,7 +12944,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       name: z.string(),
       objective: z.enum(['APP_INSTALLS', 'BRAND_AWARENESS', 'CATALOG_SALES', 'CLICKS', 'CONVERSIONS', 'IMPRESSIONS', 'LEAD_GENERATION', 'SALES', 'VIDEO_VIEWABLE_IMPRESSIONS']).optional().describe('default CLICKS \u2014 which is what Reddit calls website traffic'),
       spendCapCents: z.number().optional().describe('lifetime spend ceiling for the whole campaign, in minor units of the ad account\u2019s currency'),
-      useCatalog: z.boolean().optional().describe('SALES only: true makes it a product-catalog campaign (the new spelling of CATALOG_SALES) \u2014 every ad group under it must then use a catalog'),
+      useCatalog: z.boolean().optional().describe('SALES only: true makes it a product-catalog campaign (the new spelling of CATALOG_SALES) \u2014 every ad group under it must then use a catalog (create_reddit_ads_ad_group with productSetId + shoppingType). Frozen once created'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), useCatalog: z.boolean().optional(), adAccountId: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
@@ -12969,6 +12969,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       conversionPixelId: z.string().optional().describe('only needed when the ad account has more than one pixel'),
       optimizationGoal: z.string().optional().describe('the event this ad group optimizes toward, e.g. PURCHASE, SIGN_UP, LEAD, ADD_TO_CART, PAGE_VISIT, CLICKS, VIDEO_VIEW_6S; leave it unset on a CONVERSIONS or SALES campaign to take the campaign\u2019s. CUSTOM_EVENT (new) optimizes toward a custom pixel event: Reddit switches it on per ad account and answers "not available for this ad account" where it has not. Cannot be changed later'),
       savedAudienceId: z.string().optional().describe('reuse a saved audience instead of spelling targeting out — from list_reddit_ads_saved_audiences'),
+      viewThroughConversionType: z.enum(['SEVEN_DAY_CLICKS', 'SEVEN_DAY_CLICKS_ONE_DAY_VIEW']).optional().describe('the conversion window counted. SEVEN_DAY_CLICKS_ONE_DAY_VIEW is only accepted with a conversion goal (PURCHASE, SIGN_UP, LEAD, ADD_TO_CART, PAGE_VISIT), and Reddit requires it for a catalog SALES ad group optimizing for PURCHASE. Cannot be changed later'),
+      productSetId: z.string().optional().describe('CATALOG SALES — the Reddit product set this ad group advertises (a UUID from Reddit Ads Manager > Catalogs). Required on every ad group under a SALES campaign created with useCatalog:true; Reddit silently drops it on any other campaign, and the note says so'),
+      shoppingType: z.enum(['DYNAMIC', 'STATIC']).optional().describe('CATALOG SALES — DYNAMIC builds each ad from the product set, STATIC links a normal ad to the catalog. Required on every ad group under a useCatalog:true SALES campaign'),
       targeting: z.object({
         communities: z.array(z.string()).optional().describe('bare subreddit NAMES, e.g. ["running"] — not t5_ ids, not "r/running"'),
         excludedCommunities: z.array(z.string()).optional(),
@@ -12997,7 +13000,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         endHour: z.number(),
       })).optional().describe('weekly dayparting windows — omit to run all week'),
     },
-    outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), budget: z.number().nullable().optional(), note: z.string().optional() },
+    outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), budget: z.number().nullable().optional(), optimizationGoal: z.string().nullable().optional(), viewThroughConversionType: z.string().nullable().optional(), productSetId: z.string().nullable().optional(), shoppingType: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ad-groups', a);
@@ -13018,10 +13021,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       startTime: z.string().optional(),
       endTime: z.string().optional(),
       savedAudienceId: z.string().optional().describe('point this ad group at a saved audience instead'),
+      productSetId: z.string().optional().describe('CATALOG SALES — rebind the ad group to another product set (a UUID from Reddit Ads Manager > Catalogs). Reddit stores an edit without checking the set exists or that the campaign uses a catalog, so pass the right id; the note says if it was not kept'),
+      shoppingType: z.enum(['DYNAMIC', 'STATIC']).optional().describe('CATALOG SALES — DYNAMIC or STATIC product ads. Reddit has been measured keeping the value an ad group was created with, and the note says when it did not change'),
       targeting: z.record(z.any()).optional().describe('same shape as create_reddit_ads_ad_group — REPLACES the existing targeting'),
       schedule: z.array(z.any()).optional(),
     },
-    outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), budget: z.number().nullable().optional(), note: z.string().optional() },
+    outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), budget: z.number().nullable().optional(), productSetId: z.string().nullable().optional(), shoppingType: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ad-groups/update', a);
@@ -13133,7 +13138,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('update_reddit_ads_campaign', {
     title: 'Edit a Reddit campaign',
-    description: 'Change an existing Reddit campaign’s name, spend cap, budget, goal type or flight dates. Amounts are ordinary numbers in the ad account’s currency. This does NOT activate, pause or archive anything — use set_reddit_ads_status for that. The result is read back from Reddit before you are told it took.',
+    description: 'Change an existing Reddit campaign’s name, spend cap, budget, goal type or flight dates. Amounts are ordinary numbers in the ad account’s currency. The OBJECTIVE and useCatalog cannot be changed: Reddit freezes both at creation and refuses a change even from an old objective name to its new one (IMPRESSIONS to BRAND_AWARENESS), so create a new campaign instead. This does NOT activate, pause or archive anything — use set_reddit_ads_status for that. The result is read back from Reddit before you are told it took.',
     inputSchema: {
       adAccountId: z.string().optional(),
       campaignId: z.string(),
@@ -17479,11 +17484,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('post_edit', {
     title: 'Post-production edit',
-    description: "MECHANICAL post-production on an EXISTING video (URL): ordered primitives run by ffmpeg in seconds, ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, watermark (brand logo), grain (anti-AI), text (timed words in a native look: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle; start/end), join (this video FOLLOWED BY clips[]: Library URLs, direct files or public post links, as one 1080x1920 video, loudness matched). Presets are shortcuts: text/watermark take any x/y, grain any amount, join any ffmpeg transition, a bridge any sound link. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound FROM THE HOOK ITSELF: its own audio carries across the cut, else one generated from its frames (up to 8 credits), else a neutral impact. {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: have our clip's host say the connecting line. matchCut = where our clip starts. ANY OTHER EDIT, op or bridge (whip, zoom, freeze, wipe, split screen, generated shot) is edit_timeline: free keyframes, any size. NEVER generate_video/render_ad for these.",
+    description: "MECHANICAL post-production on an EXISTING video (URL): ordered primitives run by ffmpeg in seconds, ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, music (a bed UNDER the clip, its own sound kept and ducked under: omit track = a free library track picked by mood, no attribution; or track = an audio link: an upload_file URL, a find_sound link, a video post's sound; track 'generate' composes it, paid, ONLY when the user asks; start/end, db, replace), watermark (brand logo), grain (anti-AI), text (timed words in a native look: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle; start/end), join (this video FOLLOWED BY clips[]: Library URLs, direct files or public post links, as one 1080x1920 video, loudness matched). Presets are shortcuts: text/watermark take any x/y, grain any amount, join any ffmpeg transition, a bridge any sound link. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound FROM THE HOOK ITSELF: its own audio carries across the cut, else one generated from its frames (up to 8 credits), else a neutral impact. {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: have our clip's host say the connecting line. matchCut = where our clip starts. ANY OTHER EDIT, op or bridge (whip, zoom, freeze, wipe, split screen, generated shot) is edit_timeline: free keyframes, any size. NEVER generate_video/render_ad for these.",
     inputSchema: {
       videoUrl: z.string().describe('the video to edit: a render / Library URL, a direct file, or a public post link'),
       ops: z.array(z.object({
-        op: z.enum(['trim', 'speed', 'mute', 'audio_gain', 'fade_out', 'append_card', 'watermark', 'grain', 'text', 'join']),
+        op: z.enum(['trim', 'speed', 'mute', 'audio_gain', 'fade_out', 'music', 'append_card', 'watermark', 'grain', 'text', 'join']),
         start: z.number().optional().describe('trim/mute/text window start (s)'),
         end: z.number().optional().describe('trim/mute/text window end (s)'),
         text: z.string().optional().describe('text: the words, verbatim'),
@@ -17498,7 +17503,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
         transition: z.string().optional().describe("join: 'cut' default, 'crossfade', or any ffmpeg xfade name (wipeleft…)"),
         bridge: z.object({ kind: z.enum(['impact', 'text']), cutAt: z.number().optional().describe('omit: found from the footage'), matchCut: z.number().optional(), sound: z.string().optional().describe("'auto' default, 'own', 'impact', 'whoosh', 'none', or an audio URL (find_sound)"), flash: z.boolean().optional(), shake: z.boolean().optional(), text: z.string().optional(), then: z.string().optional() }).optional().describe('join: connects the hook to the first clip'),
         factor: z.number().optional().describe('speed 0.5-2'),
-        db: z.number().optional().describe('audio_gain -20..+6 dB'),
+        db: z.number().optional().describe('audio_gain -20..+6 dB / music: trim on its automatic level, -20..+12'),
+        track: z.string().optional().describe("music: omit = a library track by mood; a library track name; an audio link; 'generate' (paid, only on the user's ask)"),
+        mood: z.string().optional().describe('music: mood words for the library pick, or the brief for generated music'),
+        from: z.number().optional().describe('music: the second of the track to start from'),
+        duck: z.union([z.literal('auto'), z.boolean()]).optional().describe("music: 'auto' default = dips while the clip's own sound plays"),
+        replace: z.boolean().optional().describe("music: true = replaces the clip's own sound"),
+        fadeOut: z.number().optional().describe('music: fade-out seconds 0-5'),
         seconds: z.number().optional().describe('fade_out 0.3-3s / append_card 2-5s / transition 0.2-1.5s'),
         headline: z.string().optional().describe('append_card: big line (default: brand name)'),
         tagline: z.string().optional().describe('append_card: smaller line under the headline'),
@@ -18111,12 +18122,14 @@ const MEMORY_PII_RE = /(\+\d[\d\s().-]{7,}\d)|(\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{
 // A conversation's language is not a brand fact; a market's is (journey QA 2026-09-25 — lib/memory-hygiene.mjs says why).
 const MEMORY_LANG_RE = /\b(?:(?:in|en)\s+(?:English|Spanish|French|German|Portuguese|Italian|Dutch|Polish|Turkish|Indonesian|Swedish|Romanian|Japanese|Korean|Chinese|Mandarin|Cantonese|Arabic|Hebrew|Russian|Ukrainian|Hindi|Bengali|Thai|Greek|Vietnamese|Czech|Danish|Finnish|Hungarian|Norwegian|Malay|Filipino|Tagalog|Urdu|Persian|Farsi|Swahili|español|espanol|castellano|français|francais|deutsch|português|portugues|italiano|nederlands)|(?:English|Spanish|French|German|Portuguese|Italian|Dutch|Polish|Turkish|Indonesian|Swedish|Romanian|Japanese|Korean|Chinese|Mandarin|Cantonese|Arabic|Hebrew|Russian|Ukrainian|Hindi|Bengali|Thai|Greek|Vietnamese|Czech|Danish|Finnish|Hungarian|Norwegian|Malay|Filipino|Tagalog|Urdu|Persian|Farsi|Swahili)(?:[- ](?:language|speaking)|\s+(?:copy|ads?|replies|responses|answers|messages|captions|text|version|translations?))|(?:speaks?|writes?|communicates?|chats?|talks?|converses?|types?|messages?|replies|responds?|prefers?)\s+(?:in\s+)?(?:English|Spanish|French|German|Portuguese|Italian|Dutch|Polish|Turkish|Indonesian|Swedish|Romanian|Japanese|Korean|Chinese|Mandarin|Cantonese|Arabic|Hebrew|Russian|Ukrainian|Hindi|Bengali|Thai|Greek|Vietnamese|Czech|Danish|Finnish|Hungarian|Norwegian|Malay|Filipino|Tagalog|Urdu|Persian|Farsi|Swahili))\b/i;
 const MEMORY_MARKET_RE = /\b(?:markets?|audiences?|customers?|buyers?|shoppers?|clients?|patients?|guests?|countr(?:y|ies)|regions?|locales?|bilingual|Mexico|Mexican|Spain|LATAM|Latin America|Latinx?|Hispanic|France|Germany|Brazil|Portugal|Italy|Quebec|Canada|Japan|Korea|Taiwan|Hong Kong|India|Indonesia|Philippines|Netherlands|Belgium|Switzerland|Austria|Poland|Sweden|Norway|Denmark|Finland|Israel|Ukraine|Argentina|Colombia|Peru|Vietnam|Thailand|Malaysia|Singapore|Puerto Rico|Miami|Europe|EU|DACH|MENA|GCC)\b/i;
+// A language the user asked for on EVERY ad ("Always write our ads in Spanish") is a standing rule, and is kept.
+const MEMORY_STANDING_RE = /(?<![\p{L}\p{N}])(?:always|from now on|from here on|going forward|by default|default language|every time|every (?:single )?(?:ad|post|video|image|creative)s?|all (?:of )?(?:my|our|the|future) (?:ads|posts|videos|images|creatives|copy)|all future (?:ads|posts|copy)|permanently|siempre|de ahora en adelante|a partir de ahora|por defecto|todos (?:mis|nuestros|los) anuncios|sempre|de agora em diante|a partir de agora|por padrão|todos os (?:meus |nossos )?anúncios|toujours|désormais|dorénavant|à partir de maintenant|par défaut|toutes (?:mes|nos|les) (?:annonces|pubs|publicités)|immer|ab jetzt|von nun an|künftig|zukünftig|standardmäßig|alle (?:meine|unsere) (?:Anzeigen|Werbungen)|d'ora in poi|da ora in poi|d'ora in avanti|di default|altijd|voortaan|zawsze|od teraz|domyślnie|her zaman|bundan sonra|varsayılan olarak|selalu|mulai sekarang|alltid|altid|fremover|framöver|från och med nu|mereu|întotdeauna|vždy|vždycky|mindig|πάντα|всегда|отныне|по умолчанию|завжди|відтепер|תמיד|מעכשיו|دائما|دائمًا|دائماً|من الآن فصاعدا|हमेशा|luôn luôn|từ giờ trở đi|palagi|lagi)(?![\p{L}\p{N}])|いつも|常に|今後|これから|总是|總是|一直|以后|以後|今后|始终|始終|항상|언제나|앞으로|เสมอ|ตลอดไป/iu;
 function memoryNoteVerdict(text) {
   const t = String(text || '').trim();
   if (!t) return { ok: false, reason: 'empty' };
   if (MEMORY_PII_RE.test(t)) return { ok: false, reason: 'pii', message: 'Not saved: Memory never holds a phone number or an email address.' };
   if (MEMORY_MECHANICS_RE.test(t)) return { ok: false, reason: 'mechanics', message: 'Not saved: that is about how Hermoso or a platform API behaves, not about the brand. Memory holds brand, audience, offer, taste and working preferences only — product behaviour lives in the tools themselves.' };
-  if (MEMORY_LANG_RE.test(t) && !MEMORY_MARKET_RE.test(t)) return { ok: false, reason: 'language', message: 'Not saved: the language someone chats in, or asked for once, is not a brand fact. Every request is answered, and its ads written, in the language it is written in. If the brand sells to a market that speaks another language, save that instead (for example: "Our customers are in Mexico: ads in Spanish").' };
+  if (MEMORY_LANG_RE.test(t) && !MEMORY_MARKET_RE.test(t) && !MEMORY_STANDING_RE.test(t)) return { ok: false, reason: 'language', message: 'Not saved: the language someone chats in, or asked for once, is not a brand fact. Every request is answered, and its ads written, in the language it is written in. Save a language only when the user asked for it on EVERY ad, phrased as that rule (for example: "Always write our ads in Spanish"), or when the brand sells to a market that speaks it (for example: "Our customers are in Mexico: ads in Spanish").' };
   return { ok: true };
 }
   server.registerTool('remember', {
@@ -20313,7 +20326,8 @@ function memoryNoteVerdict(text) {
     const url = abs(d.image);
     const img = await imageBlock(url); // show the cloned creative inline, not just a link
     const resid = d.residual && d.residual.clean === false ? `\n⚠ Residual source branding may remain: ${d.residual.note}` : '';
-    return { content: [{ type: 'text', text: `Cloned ad ready: ${url}${d.model ? `  (${d.model})` : ''}${resid}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: url } };
+    const prod = d.productNote ? `\n${d.productNote}` : ''; // a product-mode clone runs the label check + product comparison (server.js /api/remix/render): say what they found
+    return { content: [{ type: 'text', text: `Cloned ad ready: ${url}${d.model ? `  (${d.model})` : ''}${resid}${prod}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: url } };
   }));
   server.registerTool('remix_static', {
     title: 'Clone a static ad (old name)',
