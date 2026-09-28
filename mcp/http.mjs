@@ -71,6 +71,15 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   });
   app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
   app.get(`/.well-known/oauth-protected-resource${MCP_PATH}`, protectedResourceMetadata);
+  // ── AND AT THE APPENDED FORM, /mcp/.well-known/oauth-protected-resource (2026-09-28, Perplexity) ──────────────────
+  // Perplexity's connector (UA `Perplexity-MCP/1.0`) probes this URL FIRST on every connect and every session, got our
+  // 404, and fell through to the RFC 9728 inserted form above (prod log 2026-09-28 13:10Z: 404 → 200 → AS metadata, on
+  // each of its five opens). It is not an RFC 9728 construction (§3.1 only INSERTS the suffix), but it is the naive
+  // "resource URL + suffix" one, and it is SAFE to answer with the same document: a client that built it by appending
+  // to `${BASE}/mcp` validates `resource` against `${BASE}/mcp` (§3.3), which is exactly what the document says. That
+  // is the property the AS metadata lacks (see the asymmetry note above), so this alias is for the PRM only. Same one
+  // handler, never a copy. Pinned by the canary (`prm-appended`) and tools/mcp-connect-canary-check.mjs.
+  app.get(`${MCP_PATH}/.well-known/oauth-protected-resource`, protectedResourceMetadata);
 
   // ── THE STATIC SERVER CARD A DIRECTORY READS INSTEAD OF SCANNING (2026-09-25) ─────────────────────────────────────
   // Smithery's re-scan stopped at "Authentication required": its first probe (UA `SmitheryBot/1.0 (+https://…)`) gets

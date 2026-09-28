@@ -73,12 +73,15 @@ const creatorLine = (c) => {
 // LIKENESS CONSENT OVER MCP / API / CLI IS IMPLIED BY THE CALL (product decision 2026-09-24). There is no consent flag
 // and nothing is refused for a missing one: the Terms say that using a real person's photo through these tools IS the
 // caller's confirmation that they have that person's consent, and each tool that takes one says so in one sentence.
-// What we DO is record it: one `likeness_consent` row in the server's durable ledger (via 'api-implied'), stamped
-// there with the account, user, brand and time from the caller's own bearer. Best effort by design, never awaited
-// into a failure: a lost audit row must not fail a render the user asked for.
-function recordImpliedLikeness(lane, meta = {}) {
-  try { Promise.resolve(apiPost('/api/signal', { type: 'likeness_consent', meta: { via: 'api-implied', lane, ...meta } })).catch(() => {}); } catch {}
-}
+// The RECORD is the server's: the spend gate every render passes writes one consent row (via 'api-implied') per real
+// face a paid key's call uses, with the SHA-256 of its bytes and the attestation version (server.js
+// scheduleImpliedLikeness, 2026-09-28). Tools no longer post it themselves: two did and five did not, which is how
+// generate_image / generate_video / clone_static and the CLI used a face with nothing recorded. save_creator still posts
+// it, awaited, because saving a portrait is not a render and must be refused on a free plan BEFORE the roster is written.
+// THE ONE SENTENCE (2026-09-28, owner decision B): every tool that takes a real person's face or voice carries it,
+// byte-identical to LIKENESS_TERMS in lib/likeness.mjs (tools/face-rights-check.mjs pins the copy). The CLI twin cannot
+// import ../lib, so the words live here.
+const LIKENESS_TERMS = 'Using a real person’s face, likeness or voice confirms you are them or have their consent, take full, unlimited responsibility for its use and will cover any claim against Hermoso (hermoso.ai/terms). Paid plan only; recorded.';
 function rowLines(rows, max = 40) {
   const all = Array.isArray(rows) ? rows : [];
   if (!all.length) return '  (no rows)';
@@ -3297,8 +3300,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
       .sort((a, b) => b.score - a.score || a.k.length - b.k.length || a.k.localeCompare(b.k))
       .slice(0, max).map((r) => r.k);
   };
+  // A HOST'S OWN PREFIX IS NOT PART OF THE NAME (2026-09-28): agents pass the id their host shows them —
+  // `mcp__hermoso__search_instagram`, `mcp__claude_ai_Hermoso__…`, `hermoso:…`, `Hermoso.…` — and got "does not exist".
+  // The bare name is tried only when the name as given is not itself a tool.
+  const bareToolName = (raw, handleOf) => {
+    if (handleOf[raw]) return raw;
+    const bare = raw.replace(/^mcp__[A-Za-z0-9_-]*?__(?=[a-z])/, '').replace(/^hermoso[:./]/i, '');
+    return handleOf[bare] ? bare : raw;
+  };
   const makeCallToolHandler = (ctx) => async ({ name, args } = {}, extra) => {
-    const n = String(name || '').trim();
+    const n = bareToolName(String(name || '').trim(), ctx.handleOf);
     const h = ctx.handleOf[n];
     // A RETIRED NAME ANSWERS THE SAME SENTENCE HERE AS IT DOES ON A DIRECT CALL (2026-09-17). LEGACY_TOOL_NAMES was
     // built for `tools/call` from a host holding an old snapshot and wired ONLY into installHeldToolCalls — so an
@@ -3652,6 +3663,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       video: z.boolean().optional().describe('TRUE when video generation is available. A BOOLEAN, never a provider name (same never-leak-the-provider rule as image). The model ids live in options.video.models[].'),
       canEdit: z.boolean().optional().describe('whether image editing is enabled on this account'),
       canAvatar: z.boolean().optional().describe('whether talking-avatar generation is enabled'),
+      avatarEngines: z.array(z.any()).optional().describe('the talking-avatar engines this account can use (generate_avatar `engine`): id, label, model, default, resolutions, creditsPerSecond, and oneAtATime for an engine that renders one video at a time'),
       editCredits: z.number().nullable().optional().describe('credit cost of one image edit (null when image editing is not configured)'),
       options: z.any().optional().describe('the live model catalog — image/video/voice/llm model lists with per-model credit costs'),
       recipes: z.array(z.any()).optional().describe('the creative recipe catalog (id + label per recipe)'),
@@ -3699,7 +3711,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // recast_motion's two tiers, priced off the same live quote the app's costs page reads (toolExamples), never a number here.
     const _mq = (q) => (q ? Object.entries(q).map(([s, c]) => `${s}s=${c}cr`).join(' ') : null);
     const _motionLine = _mq(d.toolExamples?.motion) ? `\nRecast motion (recast_motion, billed per output second): tier pro (default) ${_mq(d.toolExamples.motion)}${_mq(d.toolExamples.motionStandard) ? `; tier standard ${_mq(d.toolExamples.motionStandard)}` : ''}` : '';
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}${_motionLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
+    // THE TALKING-AVATAR ENGINES (generate_avatar `engine`), priced live per second of speech — never a number here.
+    const _avLine = (d.avatarEngines || []).length ? `\nTalking-avatar engines (generate_avatar engine): ${(d.avatarEngines || []).map(e => `${e.id}${e.default ? ' (default)' : ''} = ${e.label}${e.id === 'natural' ? ` · ${e.model}` : ''}, ~${e.creditsPerSecond}cr per second of speech, ${(e.resolutions || []).join('/')}${e.oneAtATime ? ', renders one video at a time (about ' + e.renderSecondsPerAudioSecond + 'x the speech length plus any wait), speech under 60s' : ''}`).join('; ')}` : '';
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
     return ok(text + connLine, d);
   }));
 
@@ -17102,7 +17116,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Render a finished ad IMAGE and return its served URL. refImages (local paths or URLs) force product-accurate compositing (drops a real product into the scene). MULTI-BRAND CAUTION: useBrand hydration pulls the SAVED workspace brand — when working a brand that is NOT the saved one (a fresh draft_brand), pass that brand\'s own productImages/logo as refImages (and useBrand:false) or the output composites the WRONG brand\'s product. NOTE that the saved-brand hydration also decides the ENGINE: attaching product photos routes the render to the compositing model, so a `model` you named is only honoured when no references ride — pass raw:true (or useBrand:false) to render on exactly the model you asked for. model = a catalog id from hermoso_capabilities (omit for the default). PUTTING A REAL PRODUCT IN A REAL PERSON’S HANDS, or a garment on them, is a DIFFERENT KIND OF ROW and you must name it: the ids marked `needsRefs` with a `refsMax` in hermoso_capabilities take a person photo first and up to three product/garment photos after it, and they EDIT THE PHOTOGRAPH rather than compositing — THE PERSON IS RE-POSED to hold or wear the thing, so their stance and hands change while their face, clothing, setting and lighting are kept. That is not an object swap in a fixed frame; if you needed the rest of the photograph untouched, this is the wrong tool. Every finished render says which way it went. RAW MODEL ACCESS: ' + RAW_TOOL_NOTE + ' Fast (seconds). Spends credits.',
     inputSchema: {
       prompt: z.string().optional().describe('REQUIRED on every model EXCEPT the pose rows below. the full image prompt — subject, composition, lighting, and any on-image ad text. ON A POSE MODEL (product-in-hand / try-on) THIS IS EXTRA DIRECTION AND IT IS OPTIONAL — leave it out and the pose is built for you. If you do write one, DESCRIBE THE POSE ("she holds the bottle upright in her right hand at chest height, label to camera"); do NOT phrase it as a swap ("replace the mug with the bottle"), which is REFUSED for free, because the product then comes out the size of whatever it replaced — a 30ml bottle rendered mug-sized in testing.'),
-      refImages: z.array(z.string()).optional().describe('local file paths or URLs of product/logo references to composite in. ON THE POSE MODELS — any row hermoso_capabilities marks `needsRefs` with a `refsMax`, such as putting your product in someone’s hands or a virtual try-on — THE ORDER IS THE CONTRACT AND IT IS NOT A COMPOSITE: refImages[0] is the PERSON photo, and the rest (up to `refsMax` minus one) are the product or garment photos. Reversed, you get the product wearing the person. A 4th product is dropped and the reply says so. A real person’s photo confirms their likeness consent.'),
+      refImages: z.array(z.string()).optional().describe('local file paths or URLs of product/logo references to composite in. ON THE POSE MODELS — any row hermoso_capabilities marks `needsRefs` with a `refsMax`, such as putting your product in someone’s hands or a virtual try-on — THE ORDER IS THE CONTRACT AND IT IS NOT A COMPOSITE: refImages[0] is the PERSON photo, and the rest (up to `refsMax` minus one) are the product or garment photos. Reversed, you get the product wearing the person. A 4th product is dropped and the reply says so. ' + LIKENESS_TERMS),
       useBrand: z.boolean().optional().describe('default true: with no refImages, the server hydrates the SAVED brand’s product/logo references so the output lands on-brand; pass false for a pure prompt-only render'),
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: run the caller’s prompt on the named model with no Hermoso adjustments at all — the prompt reaches the provider byte-identical (no hex-to-colour-name rewrite, no prepended fidelity preamble) and NO saved-brand product photos are attached, so the model you name is the model that renders. Use it to drive the raw catalog; leave it off for an on-brand ad. Billing, the durable Library landing and per-model validation are unchanged.'),
       aspectRatio: z.string().optional().describe("e.g. '1:1', '9:16', '16:9', '4:5'. Each model draws its own list (hermoso_capabilities prints it per model, e.g. Nano Banana 2 goes to 1:8 and 8:1); a ratio the chosen model cannot draw is refused before anything is charged"),
@@ -17363,7 +17377,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), a music bed under the voice, real product references. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
-      creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default on any plan with a person on camera, and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, or if an explicitly named creator is cast on a plan with nobody on camera. Casting a REAL person confirms their likeness consent.'),
+      creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default when the plan has a person on camera and the account is on a paid Hermoso plan (a free account gets a fresh AI person), and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if an explicitly named creator is cast on a plan with nobody on camera, or if a REAL person is cast on a free plan. ' + LIKENESS_TERMS),
       model: z.string().optional().describe('video model id from hermoso_capabilities (default: the plan’s pick). Naming one is a DELIBERATE pick — the server asks before ever swapping it (no silent fallback)'),
       durationSeconds: z.number().optional().describe('total ad length in seconds (supported range 4–180; outside that it is clamped). Omit to honor the plan’s own duration — that is almost always right. This only RE-TIMES an already-authored board (its scenes are scaled to fit), it does NOT re-write it, so to change the length of the ad the user asked for, re-run plan_ad with durationSeconds instead. A length that fits ONE clip of the render model renders as one continuous pass; longer is stitched from acts filled to that model’s clip maximum with the remainder last — the maximum is 15s on most models and 30s on the longest-clip one, so use dryRun:true to see the exact act split for free before spending.'),
       aspectRatio: z.string().optional().describe('output aspect ratio, e.g. 9:16 (default) / 1:1 / 16:9'),
@@ -17800,7 +17814,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       prompt: z.string().describe('the video prompt / shot description (for a refVideo edit, this is the transformation instruction)'),
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: dispatch this prompt to the model BYTE-IDENTICAL — no appended packaging/label guidance, no negative prompt, no reference-binding lines, no hex-to-colour-name rewrite. Use it when you want the model itself rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence. Billing, durable delivery and per-model validation are unchanged.'),
-      refImage: z.string().optional().describe('local path or URL to anchor the first frame; a real person’s photo here or in refImages confirms their likeness consent'),
+      refImage: z.string().optional().describe('local path or URL to anchor the first frame. ' + LIKENESS_TERMS),
+      speak: z.string().optional().describe('A PERSON SAYING THESE EXACT WORDS TO CAMERA — the default for any "make my photo talk" / spokesperson / talk-to-camera ask. Pass with `creator` or a portrait as `refImage`: the video model films them saying it in their own voice, matched to who they are, and the length follows the words (leave durationSeconds out). `prompt` is then the staging (e.g. "natural", "walking in a park"). Real footage, not an animated photo; generate_avatar is the animated-photo look, only when asked for by name'),
+      creator: z.string().optional().describe('STAR A SAVED CREATOR in this clip — their id from list_creators, or the name you know them by. Their saved portrait rides first among the references as the on-camera person, with their saved consent, exactly as render_ad casts them; a real person saved from a photo keeps their real face on camera. An unknown name is refused by name, nothing charged.'),
       refImages: z.array(z.string()).optional().describe('SEVERAL reference images (local paths or URLs) — a person, products, a place — that must all appear in the clip. Only models whose `refs.max` in hermoso_capabilities is above 1 use more than one, and each uses at most that many; with `refs.promptAddressed` true, name them in your prompt as Image 1, Image 2… in this order. minimax-h3-max-ref takes up to 9 and keeps each one as a reference rather than a first frame. On a model that takes one image, only the first is used.'),
       refVideo: z.string().optional().describe("URL of an existing video to EDIT rather than generate from scratch — the clip is transformed per your prompt, inheriting the SOURCE clip’s canvas (aspect ratio) and, on every model hermoso_capabilities marks `sourceLength`, its LENGTH too: those endpoints have no duration parameter, their listed `durations` are the per-second price ladder, and a durationSeconds you send is reported back as unused rather than silently dropped. Trim the source to change the length. Omit `model` for the default editor, or name a model whose videoEdit is true in hermoso_capabilities (a named model that cannot edit is refused, nothing charged); refImage rides along as the look of what the edit adds. With extend:true this is instead the clip to EXTEND. Omit to generate a fresh clip."),
       endImage: z.string().optional().describe('local path or URL of the LAST frame: the clip travels from refImage (required with it) to this image. Only models with endFrame true in hermoso_capabilities take it; any other named model is refused by name, nothing charged.'),
@@ -17891,21 +17907,31 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('generate_avatar', {
     title: 'Generate talking avatar',
-    description: 'Render a TALKING-AVATAR / creator lip-sync clip from a portrait image + a script. Blocks until done (1–3 min). Requires the avatar capability (canAvatar in hermoso_capabilities). Spends credits.',
+    // ONE ENGINE ON THE PUBLIC SCHEMA (2026-09-28): the natural-motion engine is switched off (server OMNIHUMAN_AVATAR
+    // unset) after its live cert was judged fake (product decision, 2026-09-28). This schema is a byte-twin shipped to npm, so it cannot read the
+    // server's switch: it names no second engine, and `engine` is a free string the SERVER rules on — any engine it
+    // offers is listed live in hermoso_capabilities (avatarEngines), and a name it does not offer is refused, free.
+    description: "ANIMATE A PHOTO so it talks: the presenter in `image` says `script` word for word, a separate voice lip-synced onto the still. Use it ONLY when the user asks for an animated photo / talking photo / lip-sync look by name; for any other talk-to-camera or spokesperson ask use generate_video with `speak` (the person filmed saying it, which reads as real footage). About 1-3 min, holds the pose steady, 480p/720p. The per-second credit price is in hermoso_capabilities (avatarEngines); dryRun:true returns this exact job's hold without rendering. Blocks until done where the host allows, else returns a job id to poll with get_job. Requires canAvatar. Spends credits; a refusal before rendering costs nothing.",
     inputSchema: {
-      image: z.string().describe('local path or URL of the presenter portrait; a real person’s photo confirms their likeness consent'),
+      image: z.string().describe('local path or URL of the presenter portrait. ' + LIKENESS_TERMS),
       script: z.string().describe('the words the avatar speaks'),
-      voice: z.string().optional().describe('voice name (Rachel/Sarah/George/Adam)'),
-      resolution: z.string().optional().describe("'1080p' (default) or '480p'/'720p' draft"),
+      voice: z.string().optional().describe('voice name (Aria / Sarah / George / Adam). Leave it out and the voice matches the person in `image`; if nobody can be read, the call is refused free asking for one'),
+      engine: z.string().optional().describe('leave out for the standard engine; only an engine listed in hermoso_capabilities avatarEngines is accepted'),
+      resolution: z.string().optional().describe("'720p' (default) or '480p'"),
+      prompt: z.string().optional().describe('motion direction, only for an engine other than standard that hermoso_capabilities lists'),
+      seed: z.number().int().optional().describe('fixed seed, only for an engine other than standard'),
+      acceptQueue: z.boolean().optional().describe('only for an engine hermoso_capabilities marks oneAtATime: wait in line'),
+      dryRun: z.boolean().optional().describe('return the credits this exact job would hold, without rendering'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your avatar clip…', 'Avatar clip ready'),
   }, wrap(async (a) => {
     const image = await toRef(a.image);
-    recordImpliedLikeness('generate_avatar');
-    const r = await renderJob('avatar', { ...a, image }, 'MCP avatar');
-    return okVideo(`Avatar clip ready: ${r.url}  [job ${r.jobId}]`, r);
+    const { dryRun, ...rest } = a;
+    if (dryRun) { const q = await quoteJob('avatar', { ...rest, image }); return ok(quoteText(q, `This ${a.engine === 'natural' ? 'natural-motion ' : ''}avatar clip`), { raw: q }); }
+    const r = await renderJob('avatar', { ...rest, image }, 'MCP avatar');
+    return okVideo(`Avatar clip ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]`, r);
   }));
 
   server.registerTool('stitch_video', {
@@ -17986,7 +18012,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // long render is received, so every disclosure the direct reply carries has to be here too — the model
     // substitution (`switchNote`) explicitly, the vision-QA verdict via `okVideo`'s own `qaLine`. Both resolve the
     // payload through `renderPayload`, which is why handing them the JOB works at all.
-    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${url ? ` → ${url}` : ''}${channelOutcomeLine(res)}${j.error ? ` — ${j.error}` : ''}${j.status === 'done' ? switchNote(j) : ''}`;
+    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${(j.status === 'queued' || j.status === 'running') && j.queue?.line ? ` — ${j.queue.line}` : ''}${url ? ` → ${url}` : ''}${channelOutcomeLine(res)}${j.error ? ` — ${j.error}` : ''}${j.status === 'done' ? switchNote(j) : ''}`;
     // THE TEXT BLOCK MUST CARRY THE JOB, NOT JUST structuredContent (2026-08-24). ChatGPT hands a widget the
     // content array WITHOUT structuredContent, so the render card — which polls this tool over the host bridge —
     // received prose it could not read: 219 polls over 9 minutes, every one HTTP 200, against a job that finished
@@ -18406,12 +18432,12 @@ function memoryNoteVerdict(text) {
   }, wrap(async (a) => {
     const d = await apiGet('/api/creators', a.limit ? { limit: Math.max(1, Math.min(200, Math.round(+a.limit) || 24)) } : {});
     const creators = (d.creators || []).map(c => ({ ...c, image: abs(c.image) })); // portraits ride abs() like every other asset url here
-    if (!creators.length) return ok('This workspace has no saved creators yet — there is nobody to re-cast, so do not offer one. generate_avatar renders a talking clip from a portrait you supply, and save_creator adds a portrait to the reusable cast so the same person can star in later ads.', { creators: [], count: 0 });
-    return ok(`${creators.length} saved creator(s) in this workspace:\n${creators.map(creatorLine).join('\n')}\nCast one into a finished ad with render_ad(creator: "<id or name>"); for the raw lanes, pass their portrait url as generate_avatar.image / generate_video.refImage / recast_motion.image / generate_image.refImages — either way that is what keeps the same face across ads.`, { creators, count: creators.length });
+    if (!creators.length) return ok('This workspace has no saved creators yet — there is nobody to re-cast, so do not offer one. generate_video with `speak` films a person from a portrait you supply saying your exact words, and save_creator adds a portrait to the reusable cast so the same person can star in later ads.', { creators: [], count: 0 });
+    return ok(`${creators.length} saved creator(s) in this workspace:\n${creators.map(creatorLine).join('\n')}\nCast one into a finished ad with render_ad(creator: "<id or name>"); for them to say a line to camera use generate_video(creator: "<id or name>", speak: "…"); for the other raw lanes, pass their portrait url as generate_video.refImage / recast_motion.image / generate_image.refImages (or generate_avatar.image, only when the user asks for the animated-photo look by name) — either way that is what keeps the same face across ads.`, { creators, count: creators.length });
   }));
   server.registerTool('save_creator', {
     title: 'Save a creator',
-    description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s + > Pick a creator > save. Pass the portrait’s public url (a generate_image render of a person, a headshot, any public photo) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS: leave `source` "generated" for an AI-made person and use "upload"/"social" for a REAL person. Saving a real person confirms you have their consent to use their likeness (or are them).',
+    description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s + > Pick a creator > save. Pass the portrait’s public url (a generate_image render of an AI person, or a photo of a real person you have permission to use, or of yourself; never a photo just because it is public) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS: leave `source` "generated" for an AI-made person (free on every plan) and use "upload"/"social" for a REAL person. ' + LIKENESS_TERMS,
     inputSchema: {
       name: z.string().describe('what to call this creator (e.g. “Sarah”) — list_creators and the app’s picker match on it'),
       image: z.string().optional().describe('REQUIRED except with useAnyway. public https url of the portrait (an existing render’s url, or any public photo). Not a local file path — upload it with upload_file first and save the url that returns'),
@@ -18439,7 +18465,7 @@ function memoryNoteVerdict(text) {
         if (!/^https?:\/\//i.test(image) && !image.startsWith('/generated/')) return { content: [{ type: 'text', text: 'The new photo must be a public https url — upload the file with upload_file first, then pass the url it returns.' }], isError: true };
         const r = await apiPost('/api/creator/ref', { image, name: low.name });
         low.image = r?.image || image; low.refQuality = r?.refQuality || null; low.lowQualityRef = !!r?.lowQualityRef; delete low.refAccepted; low.poses = [];
-        if (low.source === 'upload' || low.source === 'social') { low.consentAt = Date.now(); low.consentVia = 'api-implied'; recordImpliedLikeness('save_creator', { creatorId: low.id, source: low.source }); }
+        if (low.source === 'upload' || low.source === 'social') { await apiPost('/api/likeness/consent', { kind: 'face', via: 'api-implied', lane: 'save_creator', creatorId: low.id, source: low.source, image: low.image }); low.consentAt = Date.now(); low.consentVia = 'api-implied'; } // awaited: a free plan is refused here, before the store is written
         await writeStore('heist.avatars.v1', _l);
         const q = r?.refQuality?.score != null ? ` (photo quality ${r.refQuality.score}/100)` : '';
         return ok(r?.lowQualityRef ? `Replaced “${low.name}”’s photo${q}, but this one is still too unclear to cast well — try a sharper, front-facing, well-lit photo, or save_creator(name: "${low.name}", useAnyway: true).` : `Replaced “${low.name}”’s photo${q} — renders now cast them from it.`, { ok: true, id: low.id, creator: { id: low.id, name: low.name, image: abs(low.image), source: low.source }, refQuality: r?.refQuality || null });
@@ -18455,13 +18481,13 @@ function memoryNoteVerdict(text) {
     // IDEMPOTENT ON (name, portrait): a retrying agent must get the SAME creator back, not a twin nobody can tell
     // apart in the picker. A same-name creator with a DIFFERENT portrait is a deliberate re-shoot and still saves.
     const dupe = list.find(x => x && String(x.name || '').trim().toLowerCase() === name.toLowerCase() && String(x.image || '') === image);
-    if (dupe && (dupe.source === 'upload' || dupe.source === 'social') && !dupe.consentAt) { dupe.consentAt = Date.now(); dupe.consentVia = 'api-implied'; await writeStore('heist.avatars.v1', list); recordImpliedLikeness('save_creator', { creatorId: dupe.id, source: dupe.source }); }
+    if (dupe && (dupe.source === 'upload' || dupe.source === 'social') && !dupe.consentAt) { await apiPost('/api/likeness/consent', { kind: 'face', via: 'api-implied', lane: 'save_creator', creatorId: dupe.id, source: dupe.source, image: dupe.image }); dupe.consentAt = Date.now(); dupe.consentVia = 'api-implied'; await writeStore('heist.avatars.v1', list); }
     if (dupe) return ok(`“${name}” is already in the workspace cast.`, { ok: true, id: dupe.id, creator: { id: dupe.id, name, image: abs(image), source: dupe.source || source } });
     const item = {
       id: newId('av'), name, image,
       poses: (Array.isArray(a.poses) ? a.poses : []).filter(p => typeof p === 'string' && p.trim()).slice(0, 4),
       voice: String(a.voice || '').trim(), source,
-      // A REAL person saved over MCP / API / CLI is consented BY THE CALL (see recordImpliedLikeness): stamped with the
+      // A REAL person saved over MCP / API / CLI is consented BY THE CALL (see LIKENESS_TERMS above): stamped with the
       // time and `consentVia: 'api-implied'`, and the ledger row carries the account. Never for a synthetic creator,
       // which needs none — the same rule as the web's Avatars.add(source) → consentAt after its Confirm step.
       consentAt: source !== 'generated' ? Date.now() : null,
@@ -18469,10 +18495,12 @@ function memoryNoteVerdict(text) {
       ...(String(a.look || '').trim() ? { desc: String(a.look).trim().slice(0, 400) } : {}),
       createdAt: Date.now(),
     };
+    // A REAL PERSON: the consent is recorded FIRST and awaited, because that call is also where the server refuses a free
+    // plan (2026-09-28) — nothing is written to the roster for a face the rules refuse.
+    if (source !== 'generated') await apiPost('/api/likeness/consent', { kind: 'face', via: 'api-implied', lane: 'save_creator', creatorId: item.id, source, image });
     await writeStore('heist.avatars.v1', [item, ...list].slice(0, 200));
-    if (source !== 'generated') recordImpliedLikeness('save_creator', { creatorId: item.id, source });
-    const warn = source !== 'generated' ? ' Saving this real person is recorded as your confirmation that you have their consent to use their face and likeness (or are them).' : '';
-    return ok(`Saved “${item.name}” to the workspace cast — they now show up in list_creators and in the app’s creator picker. Star them in a finished ad with render_ad(creator: "${item.name}"), or re-cast them in a raw render by passing ${abs(item.image)} as generate_avatar.image / generate_video.refImage / recast_motion.image.${warn}`, { ok: true, id: item.id, creator: { id: item.id, name: item.name, image: abs(item.image), source } });
+    const warn = source !== 'generated' ? ' Saved as a real person: this is recorded as your confirmation that you are this person or have their consent, and that you take full, unlimited responsibility for their use (hermoso.ai/terms).' : '';
+    return ok(`Saved “${item.name}” to the workspace cast — they now show up in list_creators and in the app’s creator picker. Star them in a finished ad with render_ad(creator: "${item.name}"), have them say a line with generate_video(creator: "${item.name}", speak: "…"), or re-cast them in a raw render by passing ${abs(item.image)} as generate_video.refImage / recast_motion.image (generate_avatar.image only for the animated-photo look, when asked for by name).${warn}`, { ok: true, id: item.id, creator: { id: item.id, name: item.name, image: abs(item.image), source } });
   }));
   server.registerTool('delete_creator', {
     title: 'Delete a creator',
@@ -20146,7 +20174,7 @@ function memoryNoteVerdict(text) {
     title: 'Recast motion',
     description: "Motion transfer: re-perform a reference video's motion with a different person/character (supply their image). The reference clip drives the movement; the image supplies the identity. Paid render, billed per output second (the output is as long as the reference clip, 3-30s); a 5s clip takes about 5 minutes. Runs on the Pro tier by default: 1080p, and the person really handles the object the reference performer handles.",
     inputSchema: {
-      image: z.string().describe("the actor/character image URL (who should appear); a real person’s photo confirms their likeness consent"),
+      image: z.string().describe('the actor/character image URL (who should appear). ' + LIKENESS_TERMS),
       video: z.string().describe('the reference video whose motion to re-perform'),
       prompt: z.string().optional().describe('optional scene/style guidance'),
       orientation: z.enum(['video', 'image']).optional().describe("which aspect to keep: the video's (default) or the image's"),
@@ -20155,7 +20183,6 @@ function memoryNoteVerdict(text) {
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async ({ image, video, prompt = '', orientation = 'video', tier }) => {
-    recordImpliedLikeness('recast_motion');
     const r = await renderJob('motion', { image, video, prompt, orientation, ...(tier ? { tier } : {}) }, 'Motion recast');
     return okVideo(`Recast video: ${r.url}`, r);
   }));
@@ -20313,7 +20340,7 @@ function memoryNoteVerdict(text) {
     title: 'Clone a static ad',
     description: "One-click STATIC-AD CLONE (the web app calls it Clone): rebuild a competitor/reference STATIC (image) ad as an on-brand version — SAME layout, composition and energy, but YOUR product, brand colours, logo and voice, with every trace of the source brand removed. Pass `imageUrl` = the static ad image to clone. Uses your saved brand (pass brandId to target a specific brand — that switches this key's active brand like use_brand). IMAGES ONLY — for a video ad use clone_video with its link, then render_ad. Bills as one image generation.",
     inputSchema: {
-      imageUrl: z.string().describe('the URL of the static ad image to clone; a real person in it confirms their likeness consent'),
+      imageUrl: z.string().describe('the URL of the static ad image to clone. ' + LIKENESS_TERMS),
       brandId: z.string().optional().describe('a brand id/name from list_brands to clone for; omit to use the active brand'),
     },
     outputSchema: {
@@ -20338,7 +20365,7 @@ function memoryNoteVerdict(text) {
     title: 'Clone a static ad (old name)',
     description: "The OLD NAME of clone_static, kept so agents that already call it keep working. It is the same tool with the same inputs, result and cost; prefer clone_static.",
     inputSchema: {
-      imageUrl: z.string().describe('the URL of the static ad image to clone; a real person in it confirms their likeness consent'),
+      imageUrl: z.string().describe('the URL of the static ad image to clone. ' + LIKENESS_TERMS),
       brandId: z.string().optional().describe('a brand id/name from list_brands to clone for; omit to use the active brand'),
     },
     outputSchema: {
