@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**863 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**864 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
@@ -175,7 +175,7 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
    Codex, Gemini CLI and the rest are in [Install in one command](#install-in-one-command).
 3. **Sign in once.** `npx -y hermoso auth login` opens your browser; your agent also runs it by itself the first
    time it needs Hermoso. On a machine with no browser, use `npx -y hermoso auth login --token hmk_…` with a key
-   from the **MCP & CLI** tab, under **Terminal & API keys**.
+   from the **MCP & CLI** tab, under **Terminal & API keys** (Settings → API keys, or https://app.hermoso.ai/?tab=api-keys, go straight there).
 4. **Ask for what you want**, in your normal prompts. Claude Code picks the Hermoso skill for the job and runs the
    commands. You type none of them.
 
@@ -217,7 +217,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 863 tools cover
+### What the 864 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic

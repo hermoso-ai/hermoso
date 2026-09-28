@@ -330,7 +330,9 @@ export async function connectedProviders() {
     // connectLink: the app deep link for THIS brand with a {provider} slot, so a tool held back for a missing
     // connection can hand the user the one-click link instead of only naming the Connectors page.
     const connectLink = typeof r?.connectLink === 'string' && r.connectLink.includes('{provider}') ? r.connectLink : '';
-    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink };
+    // withheld: tools the server does not offer right now (roster-scope.mjs toolWithheldByServer). Absent = none.
+    const withheld = new Set((Array.isArray(r?.withheld) ? r.withheld : []).filter((n) => typeof n === 'string' && n));
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld };
   } catch { return { connected: new Set(), readOk: false }; }
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so

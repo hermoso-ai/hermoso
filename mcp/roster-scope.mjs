@@ -156,7 +156,15 @@ export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(na
   : isWhatsAppTool(name)
     ? ' A WhatsApp Business Account the business already manages is ticked on the "meta" connection\'s assets step; the "whatsapp" connection sets up a number the business does not have yet. Either one is enough for this tool.'
     : '';
+// ── A TOOL THE SERVER WITHHOLDS FROM EVERY ROSTER (2026-09-27, owner: "why do we even allow access to creator
+// marketplace if we can't even access it ourselves?"). `withheld` rides the same /api/connectors/providers read as the
+// connected set: the server names the tools whose capability it does not offer right now (today: the Instagram
+// creator marketplace trio while META_CREATOR_MARKETPLACE_SCOPE is off). ONE server flag decides it, so flipping the
+// env var lights every surface back up with no code change. Absent or unreadable = nothing withheld (fail open, like
+// every other read of this set); a withheld tool is held like a connector-gated one and answered as 'unavailable'.
+export function toolWithheldByServer(name, conn) { return !!(conn && conn.withheld instanceof Set && conn.withheld.has(String(name || ''))); }
 export function toolHeldBackByConnectors(name, conn) {
+  if (toolWithheldByServer(name, conn)) return true;              // the server says this capability is not offered now
   if (!conn || !conn.readOk) return false;                       // property 1 — fail OPEN on an unreadable store
   const p = toolProvider(name);
   if (p === null) return false;                                  // property 2 — unmapped is never held back

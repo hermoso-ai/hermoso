@@ -16,7 +16,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { registerTools, MCP_INSTRUCTIONS, parseToolScope, DEFAULT_TOOL_GROUPS } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS } from './tools.mjs';
 import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
@@ -310,9 +310,37 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // Directories that list tools with a sign-in (Smithery, Glama's inspector, OpenAI's and Anthropic's reviews) use
   // OAuth already. SIGNIN_UPFRONT_CLIENTS still wins over a bot-looking UA.
   const ANON_PREVIEW_UA_RE = /\+https?:\/\/|\b(bot|crawler|spider|probe|scanner|health-?check|uptime|monitor|liveness|registry|collector|audit|checkup|validator|indexer|tripwire|research|catalog-health|signals)\b|mcpbeat|sentineloracle|mcp-watch|mcpwatch|verifymcp|mcp\.market|proofbench|factanker/i;
+  // ── A DIRECTORY HEALTH CHECK THAT DOES NOT SAY WHAT IT IS IN ITS UA, RECOGNISED BY NAME + UA TOGETHER (2026-09-25) ──
+  // Glama's connector health check (glama.ai/mcp/connectors/io.github.hermoso-ai/hermoso) sends UA "node" — bare,
+  // exactly what Gemini CLI sends — so the UA rule above cannot see it, and since the inversion it has been 401 every
+  // ~20 min and the listing reads "Status: Unhealthy". Matched on the evidence, not a guess: its "Last Tested" stamp
+  // moved 01:05 → 01:24 UTC on 2026-09-26 in step with our tokenless `node` POSTs at 01:05:36 and 01:24:22, and the
+  // one pre-inversion [mcp-anon] line on that cadence names clientInfo "mcpdd" (2026-09-25T13:34:47). It keeps the
+  // preview only when BOTH match, so neither Gemini CLI ("node" + "mcp-test-client") nor any other host naming
+  // itself differently changes state. Glama's user connections are configured as OAuth on their side (the listing's
+  // inspector links carry authType "oauth"), so they never decide sign-in from this answer.
+  // NOT here, deliberately: python-httpx2 (sends a foreign bearer "ligh…" on retry, unidentified — it is not the
+  // Glama check, whatever an earlier note said), docker-mcp-gateway and Go-http-client (a gateway carrying real
+  // users), and mcp.so's "Fetch tools" (UA node, name unknown; it already falls through to our OAuth). The refused
+  // line below logs the clientInfo of every challenged tokenless initialize, so the next entry comes from evidence.
+  const DIRECTORY_PROBES = [{ client: 'mcpdd', ua: /^node$/i }]; // Glama connector health check
+  const directoryProbe = (req) => {
+    const name = clientInfoOf(req.body); const ua = String(req.headers['user-agent'] || '');
+    return !!name && DIRECTORY_PROBES.some((p) => p.client === name && p.ua.test(ua));
+  };
+  // THE PREVIEW HAS TO OUTLAST THE INITIALIZE. Only the initialize carries clientInfo; the tools/list that follows is
+  // a bare tokenless POST from UA "node", indistinguishable from anyone. So a preview granted by NAME answers the
+  // initialize with an Mcp-Session-Id marked as a preview, the SDK client echoes it, and a tokenless follow-up that
+  // carries it keeps the preview. It unlocks nothing `?auth=none` does not already give anyone (the public tool list;
+  // tools/call is refused on this path whatever the header says), and no host that connects users ever holds one,
+  // because we only ever issue it to a name on the list above. The anonymous transport is stateless, so the SDK
+  // ignores the id rather than validating it.
+  const ANON_PREVIEW_SID_PREFIX = 'anonpreview_';
+  const heldPreviewSession = (req) => String(req.headers['mcp-session-id'] || '').startsWith(ANON_PREVIEW_SID_PREFIX);
   const anonPreviewAllowed = (req) => {
     if (String(req.query?.auth || '').toLowerCase() === 'none') return true;
     if (signinUpfront(req)) return false;
+    if (directoryProbe(req) || heldPreviewSession(req)) return true;
     return ANON_PREVIEW_UA_RE.test(String(req.headers['user-agent'] || ''));
   };
   const isAllPreauth = (body) => {
@@ -347,7 +375,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   const methodsOf = (body) => (Array.isArray(body) ? body : [body]).map((m) => m && m.method).filter(Boolean);
 
   async function serveAnonDiscovery(req, res, scope) {
-    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: MCP_INSTRUCTIONS });
+    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope) });
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
     // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
     // only the authenticated path would leave both tools listed in the submission.
@@ -372,6 +400,9 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       try { const m = (Array.isArray(req.body) ? req.body : [req.body]).find((x) => x && x.method === 'initialize'); const ci = m?.params?.clientInfo || {}; console.error(`[mcp-anon] initialize client=${JSON.stringify(String(ci.name || '').slice(0, 64))} v=${JSON.stringify(String(ci.version || '').slice(0, 24))} proto=${String(m?.params?.protocolVersion || '').slice(0, 16)} ua=${JSON.stringify(String(req.headers['user-agent'] || '').slice(0, 80))} src=${srcOf(req) || '-'}`); } catch {}
     }
     if (typeof onAnonDiscovery === 'function' && methodsOf(req.body).includes('tools/list')) { try { onAnonDiscovery({ client: clientInfoOf(req.body), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req) }); } catch {} }
+    // A preview granted by name carries its marker into the follow-ups (see ANON_PREVIEW_SID_PREFIX); set before the
+    // transport writes, and Node merges it into the SDK's own headers.
+    if (methodsOf(req.body).includes('initialize') && directoryProbe(req)) res.setHeader('mcp-session-id', ANON_PREVIEW_SID_PREFIX + randomUUID().replace(/-/g, ''));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { try { transport.close(); server.close(); } catch {} });
     await server.connect(transport);
@@ -399,6 +430,11 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
         const scope = scopeFor(req, res);
         if (scope === false) return; // unknown group — already answered 400
         return serveAnonDiscovery(req, res, scope).catch(() => { try { challenge(res); } catch {} });
+      }
+      // The refused half of the [mcp-anon] line: the clientInfo a challenged tokenless initialize named, so a
+      // directory check that starts failing can be identified from the log instead of guessed from its UA.
+      if (!token && req.method === 'POST' && methodsOf(req.body).includes('initialize')) {
+        try { console.error(`[mcp-anon] refused initialize client=${JSON.stringify(clientInfoOf(req.body))} ua=${JSON.stringify(String(req.headers['user-agent'] || '').slice(0, 80))} src=${srcOf(req) || '-'}`); } catch {}
       }
       return challenge(res);
     }
@@ -460,7 +496,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // OPEN with the full roster, so the whole change would be silently inert. Never throws; see
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
-      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: MCP_INSTRUCTIONS });
+      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope) });
       registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true, client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
