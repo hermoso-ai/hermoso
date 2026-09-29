@@ -461,6 +461,12 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
     const sid = req.headers['mcp-session-id'];
     let entry = sid ? sessions.get(sid) : null;
+    // A CONNECT IS COMPLETE WHEN THE NEW TOKEN IS FIRST USED, WHATEVER THE METHOD (2026-09-29). This used to be reported on
+    // a session's first tools/list, and ChatGPT never lists on a reconnect — it opens each turn as initialize →
+    // initialized → GET → tools/call against the roster it already holds — so every ChatGPT sign-in since 09-25 read as
+    // "no completed connect" and paged. Reported once per session (and on each session-less request, which is rare); the
+    // watch matches it against the tokens it saw minted (lib/mcp-connect-watch.mjs) and ignores any other key.
+    if (!entry || !entry.connectSeen) { if (entry) entry.connectSeen = true; connectEvent(req, { step: 'mcp-use', ok: true, tokenHash: createHash('sha256').update(token).digest('hex') }); }
 
     if (!entry) {
       const init = req.method === 'POST' && hasInitialize(req.body);
@@ -516,7 +522,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
       // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
-      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0 };
+      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true };
       if (typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
       // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
       // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
@@ -550,7 +556,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // Counted here, before the transport sees the body, so the tally is of what the CLIENT asked and not of what
     // the SDK answered — a refused tools/call is still a call the roster earned.
     for (const m of methodsOf(req.body)) {
-      if (m === 'tools/list') { if (!entry.listed) connectEvent(req, { step: 'tools-list', ok: true, tokenHash: createHash('sha256').update(token).digest('hex'), client: entry.client || '' }); entry.listed = true; }
+      if (m === 'tools/list') entry.listed = true; // the completed connect is reported above, on the token's first use of any kind
       else if (m === 'tools/call') {
         entry.calls = (entry.calls || 0) + 1;
         // THE FIRST CALL IS THE MILESTONE, NOT THE LISTING (2026-09-07). The connect_mcp reward was granted on "an API
