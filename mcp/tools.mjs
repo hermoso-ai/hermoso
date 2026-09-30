@@ -4189,7 +4189,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirmConnectors: z.number().optional().describe('the number of connected accounts the inventory reported, required when there is at least one — the user must specifically agree to losing them, because reconnecting each needs a browser and no agent can do it'),
     },
     outputSchema: { ok: z.boolean().optional(), deleted: z.any().optional(), connectorsDisconnected: z.array(z.string()).optional(), blastRadius: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const list = (await apiGet('/api/brands')).brands || [];
     const want = String(a.brand || '').trim().toLowerCase();
