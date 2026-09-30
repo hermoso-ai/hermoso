@@ -365,7 +365,7 @@ export const MCP_INSTRUCTIONS_WIDGET = [
   '• CREATE: get_brand / draft_brand (the saved brand), plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, remake_video_for_brand; variants of a finished ad with edit_image, headline_variants, hook_variants, multiply_ad. Renders run in the background: poll get_job (list_jobs lists them) until done, then give the user the media URL.',
   "• FILES & POSTING: upload_file turns a file into a URL; schedule_post queues a post to the user's own connected accounts; list_scheduled shows the queue; list_connectors shows what is connected (the user connects accounts in the Hermoso app under Settings > Connectors); list_library lists past creations.",
   '• RESULTS: post_performance, analyze_campaigns.',
-  '• WORKSPACE: list_brands, use_brand, create_brand, delete_brand, hermoso_credits, report_bug, request_feature.',
+  '• WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
   "CREDITS: tools that run an AI model or ad research use credits from the user's Hermoso account, and the reply says how many. If the balance is too low, say so plainly; the user manages their account at hermoso.ai. Never start a purchase.",
   'CONFIRM with the user before scheduling a post, deleting anything, or replacing a saved brand profile (draft_brand with save:true).',
 ].join('\n');
@@ -2181,7 +2181,10 @@ export function parseToolScope(raw) {
 // plan's price, the saved card and auto-reload, and its own description points at upgrade_plan / set_auto_reload.
 // The plugin guidelines say a plugin "must not display subscription plans … or promote upgrades"; hermoso_credits
 // still answers "what is my balance" on ChatGPT, and the plan is managed in the Hermoso app.
-export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status']);
+// `delete_brand` JOINED THEM 2026-09-30 (owner's call, for the 1.0.0 review): destroying a whole workspace is a heavy,
+// irreversible action a reviewer has to reason about, and it is always one click away in the Hermoso app. Every other
+// surface keeps it.
+export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand']);
 // ── WHAT A WIDGET HOST (CHATGPT) LISTS, AFTER OPENAI'S AUTOMATED PLUGIN SCAN (2026-09-30) ──────────────────────────
 // Two rules from developers.openai.com/plugins/plugin-guidelines.md, both HOST rules: every other surface keeps today's
 // roster exactly.
