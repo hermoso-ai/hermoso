@@ -17774,7 +17774,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       cameras: z.array(z.string()).optional().describe("host_episode: the rotation, ids frontal / three_quarter / close or framings in words; one entry = one fixed camera"),
       thumbnail: z.boolean().optional().describe('host_episode: one thumbnail of the host (default true)'),
       durationSeconds: z.number().optional().describe('target length 20-120s (default 60); drives the section count — ~10s of narration each, 3-8 sections'),
-      frameDensity: z.enum(['standard', 'lean', 'minimal']).optional().describe("how many pictures per second of narration, and therefore what it costs. 'standard' (default) is a frame about every 1.5s — the density a stills film needs to read as a film rather than a slideshow; 'lean' is one about every 2.5s (the longest hold that still reads as a film, ~40% of the frames and ~40% of the cost); 'minimal' is ONE picture per narration section, which is cheapest and is frankly a slideshow. Only drop below the default if the user asked for something cheaper."),
+      frameDensity: z.enum(['standard', 'lean', 'minimal']).optional().describe("how many pictures per second of narration, and therefore what it costs. 'standard' (default) is a frame about every 1.5s — the density a stills film needs to read as a film rather than a slideshow; 'lean' is one about every 2.5s (the longest hold that still reads as a film, ~40% of the frames and ~40% of the cost); 'minimal' is one picture about every 3.5s, the cheapest and the longest any still is ever held, and it reads close to a slideshow. Only drop below the default if the user asked for something cheaper."),
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:5', '3:4']).optional().describe("'9:16' default"),
       style: z.string().optional().describe("visual style: 'cinematic' (default, photoreal); styled shortcuts editorial_collage, flat_vector, stickman, whiteboard, ink_marker, silhouette, storybook, paper_diorama, isometric, claymation, pixel_art, watercolor, fluffy_toy, low_poly, stylized_3d, studio_3d (the Kids default), mannequin; or ANY look described in words ('80s anime cel animation'), locked across every frame. Ask rather than pick silently; a styled look costs more."),
       channel: z.enum(['explainer', 'history', 'kids', 'fairytale']).optional().describe("the CHANNEL TYPE — it sets the pacing, the narration register and the default look, and is orthogonal to `style` (a named style always wins): explainer (casual second-person, fast cuts), history (witty chronological retelling / documentary), kids (fastest, question-first, warm teacher), fairytale (slow, atmospheric myth or folklore). Default 'explainer'."),
@@ -18564,19 +18564,27 @@ function memoryNoteVerdict(text) {
   }));
   server.registerTool('update_brand', {
     title: 'Update brand fields',
-    description: 'Patch SPECIFIC fields of the workspace brand profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. Only pass the fields you’re changing.',
+    description: 'Patch SPECIFIC fields of the workspace brand profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. Only pass the fields you’re changing.',
     inputSchema: {
       name: z.string().optional(), domain: z.string().optional().describe('website domain'), sells: z.string().optional().describe('what the brand sells'),
       summary: z.string().optional().describe('one-line description'), category: z.string().optional(), audience: z.string().optional(),
       positioning: z.string().optional(), voice: z.string().optional().describe('brand voice/tone'), style: z.string().optional().describe('visual style — palette, typography, aesthetic'), goal: z.string().optional().describe('current marketing goal'),
+      pronounce: z.string().optional().describe('how the brand NAME is said aloud, as a simple respelling with the stressed syllable in capitals (e.g. "KOH-dee-ak"). Videos use it as a delivery note beside the spoken line; set it when a render mispronounced the name.'),
+      pronunciations: z.record(z.string()).optional().describe('how PRODUCT names are said aloud, e.g. {"Power Cakes": "POW-er cakes"}. Merged into the saved ones; an empty string removes one.'),
     },
     outputSchema: { ok: z.boolean().optional(), updated: z.array(z.string()).optional(), brand: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, wrap(async (a) => {
-    const allow = ['name', 'domain', 'sells', 'summary', 'category', 'audience', 'positioning', 'voice', 'style', 'goal'];
+    const allow = ['name', 'domain', 'sells', 'summary', 'category', 'audience', 'positioning', 'voice', 'style', 'goal', 'pronounce'];
     const patch = {}; for (const k of allow) if (a[k] != null && String(a[k]).trim()) patch[k] = String(a[k]).slice(0, 400);
-    if (!Object.keys(patch).length) return { content: [{ type: 'text', text: 'Pass at least one brand field to change.' }], isError: true };
     let brand = await readStore('heist.brand.v1'); if (!brand || typeof brand !== 'object' || Array.isArray(brand)) brand = {};
+    // PRODUCT-NAME PRONUNCIATIONS merge into the saved map ('' removes one) — the user's correction of a derived hint.
+    if (a.pronunciations && typeof a.pronunciations === 'object' && !Array.isArray(a.pronunciations)) {
+      const cur = { ...((brand.pronunciations && typeof brand.pronunciations === 'object' && !Array.isArray(brand.pronunciations)) ? brand.pronunciations : {}) };
+      for (const [k, v] of Object.entries(a.pronunciations).slice(0, 30)) { const n = String(k || '').trim().slice(0, 60); if (!n) continue; const say = String(v || '').trim().slice(0, 60); if (say) cur[n] = say; else delete cur[n]; }
+      patch.pronunciations = cur;
+    }
+    if (!Object.keys(patch).length) return { content: [{ type: 'text', text: 'Pass at least one brand field to change.' }], isError: true };
     const merged = { ...brand, ...patch };
     await writeStore('heist.brand.v1', merged); // the store PUT preserves server-side brand enrichments (playbook/pronounce)
     return ok(`Updated brand (${Object.keys(patch).join(', ')}).`, { ok: true, updated: Object.keys(patch), brand: merged });
