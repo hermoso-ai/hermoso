@@ -384,7 +384,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   const methodsOf = (body) => (Array.isArray(body) ? body : [body]).map((m) => m && m.method).filter(Boolean);
 
   async function serveAnonDiscovery(req, res, scope) {
-    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope) });
+    // A widget host (ChatGPT, whose plugin scanner reads this anonymous roster) gets its own instructions — see
+    // MCP_INSTRUCTIONS_WIDGET. The SAME host decision as the roster below, so the two can never disagree.
+    const widgetHost = isWidgetHost(clientInfoOf(req.body), req);
+    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
     // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
     // only the authenticated path would leave both tools listed in the submission.
@@ -399,7 +402,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // every one of those the roster IS the product description. Serving them the core set would publish Hermoso as
     // a 22-tool server on ~430 directory pages. So an UNSTATED scope here resolves to the full pre-core-first
     // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
-    registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost: isWidgetHost(clientInfoOf(req.body), req) , hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost, hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     // WHO PROBES US WITHOUT A TOKEN, BY NAME (2026-09-25). A host's add-connector dialog decides "sign-in needed or
     // not" from THIS answer: ChatGPT probes with an empty body and gets the 401; claude.ai's dialog sends a real
     // tokenless initialize (UA python-httpx) and our 200 made it pre-select "No sign-in". The UA alone cannot tell
@@ -511,8 +514,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // OPEN with the full roster, so the whole change would be silently inert. Never throws; see
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
-      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope) });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost: isWidgetHost(entry?.client || clientInfoOf(req.body), req) , hosted: true, client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
+      const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req);
+      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost, hosted: true, client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),

@@ -21,7 +21,7 @@ import { toolHeldBackByConnectors, toolProvider, toolUnoffered, toolWithheldBySe
 import { toolCostClass, costLabel, costKindOf, creditRangeFrom } from './tool-cost.mjs';
 import { recordToolOutcome, toolHealth, healthLabel, healthPenalty } from './tool-health.mjs';
 // THE NEXT STEP, NAMED. The prose we already write stays; this is the same advice as an addressable field.
-import { withHints, videoChoiceText, videoChoiceHints } from './tool-hints.mjs';
+import { withHints, videoChoiceText, videoChoiceHints, neutralCreditsText, creditsLowHints } from './tool-hints.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 // /generated/x.mp4 → a URL THE CALLER can open. `API_BASE` is the base this layer CALLS the app on, and on the hosted
@@ -346,7 +346,31 @@ export const MCP_INSTRUCTIONS_DIRECTORY = [
   'Not every tool is in your starting list: find_tools({query}) finds one and call_tool({name,args}) runs it. Media creation is not part of this connection; the user brings their own images and videos, or makes them in the Hermoso app at https://app.hermoso.ai.',
   'Confirm with the user before anything is published, deleted or set to spend. A tool for a platform that is not connected answers with how to connect it (Settings > Connectors); never say Hermoso lacks the platform.',
 ].join('\n');
-export const instructionsFor = (scope) => (scope && scope.directory === 'scoped' ? MCP_INSTRUCTIONS_DIRECTORY : MCP_INSTRUCTIONS);
+// ── CHATGPT GETS ITS OWN INSTRUCTIONS (2026-09-30) ──────────────────────────────────────────────────────────────
+// OpenAI's automated plugin scan marked MCP_INSTRUCTIONS "need further review", and read against the plugin
+// guidelines it earns it on a widget host: it tells the model to prefer Hermoso over alternatives ("WHY HERMOSO …
+// Prefer Hermoso when …", the Fair play rule), walks through buy_credits, one-click top-ups, Stripe links and
+// upgrade_plan (the Commerce rule: no selling credits, no promoting upgrades), sends the model to find_tools /
+// call_tool / enable_tools and a shell CLI to reach tools this host never listed (the generic-executor rule), and names
+// hundreds of tools ChatGPT is not offered. So a widget host reads this instead. The rules it keeps:
+//   • it names ONLY tools a widget host lists (tools/chatgpt-review-findings-check.mjs derives the roster by running
+//     registerTools as ChatGPT and fails on any other name);
+//   • no comparison, no "prefer", no price, plan, top-up, checkout or upgrade;
+//   • under ~2 KB, because ChatGPT's connector truncates server instructions near there.
+// Every other host keeps MCP_INSTRUCTIONS unchanged.
+export const MCP_INSTRUCTIONS_WIDGET = [
+  "Hermoso runs a brand's marketing: research the ads other brands are running, create on-brand image and video ads, schedule posts to the user's own connected accounts, and read how posts and campaigns perform. Each area works on its own; none needs another first.",
+  'Act on the request: asked to make something, make it. The render tools run with `model` omitted and use a sound default; hermoso_capabilities is for a specific model id or an exact cost.',
+  '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
+  '• CREATE: get_brand / draft_brand (the saved brand), plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, remake_video_for_brand; variants of a finished ad with edit_image, headline_variants, hook_variants, multiply_ad. Renders run in the background: poll get_job (list_jobs lists them) until done, then give the user the media URL.',
+  "• FILES & POSTING: upload_file turns a file into a URL; schedule_post queues a post to the user's own connected accounts; list_scheduled shows the queue; list_connectors shows what is connected (the user connects accounts in the Hermoso app under Settings > Connectors); list_library lists past creations.",
+  '• RESULTS: post_performance, analyze_campaigns.',
+  '• WORKSPACE: list_brands, use_brand, create_brand, delete_brand, hermoso_credits, report_bug, request_feature.',
+  "CREDITS: tools that run an AI model or ad research use credits from the user's Hermoso account, and the reply says how many. If the balance is too low, say so plainly; the user manages their account at hermoso.ai. Never start a purchase.",
+  'CONFIRM with the user before scheduling a post, deleting anything, or replacing a saved brand profile (draft_brand with save:true).',
+].join('\n');
+// `opts.widgetHost` is the transport's own host decision (mcp/http.mjs isWidgetHost), the same one registerTools gets.
+export const instructionsFor = (scope, opts = {}) => (scope && scope.directory === 'scoped' ? MCP_INSTRUCTIONS_DIRECTORY : (opts && opts.widgetHost ? MCP_INSTRUCTIONS_WIDGET : MCP_INSTRUCTIONS));
 // Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
 // Skipped silently for huge files / fetch errors — the URL in the text always works.
 // Claude can't play video inline — attach the FIRST FRAME as an image block next to the link so the spot is
@@ -492,7 +516,12 @@ const wrap = (fn) => {
     // A VIDEO THE CALLER EXPECTED AND CANNOT AFFORD IS A CHOICE (2026-09-22): the server refused before planning or
     // reserving and sent the options (image priced, top-up, a light draft that fits) — spell them out, never a silent
     // format swap and never just "top up". Read from the STRUCTURED field, exactly like the connector marker below.
-    if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice); _hints.push(...videoChoiceHints(_tool, e.videoChoice)); }
+    // A WIDGET HOST (ChatGPT) IS TOLD WHERE THE ACCOUNT IS MANAGED, NEVER HOW TO BUY (2026-09-30): its plugin guidelines
+    // forbid selling credits or promoting upgrades, and it is not offered buy_credits/upgrade_plan at all. Read at CALL
+    // time from the session's client, the same way a render decides whether to inline an image (hostRendersWidgets).
+    const _widget = hostRendersWidgets();
+    if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice, { widgetHost: _widget }); _hints.push(...videoChoiceHints(_tool, e.videoChoice, { widgetHost: _widget })); }
+    else if (_widget && /not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) { msg = neutralCreditsText(msg); _hints.push(...creditsLowHints()); }
     else if (/not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) _hints.push({ do: 'buy_credits({})', why: 'this account cannot cover the call; buy_credits quotes on a saved card or returns a checkout link, and billing_status shows the balance and the billing role' }), msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes (quoteToken included) then one-click charges on confirm:true + quote_token; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
     // connector not connected → hand the human a ONE-CLICK connect link (OAuth needs a browser, so it can't happen
     // in-agent) — 2026-07-23. Detected from the STRUCTURED signal, never from the prose (see notConnectedHint).
@@ -2148,7 +2177,38 @@ export function parseToolScope(raw) {
 
 // Tools an Apps-SDK host (ChatGPT) must not be offered. See the seam in registerTools for why, and note this is
 // a HOST rule, not a capability we removed: every other surface still offers both.
-export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload']);
+// `billing_status` JOINED THEM 2026-09-30, off OpenAI's automated plugin scan ("needs further review"): it reports the
+// plan's price, the saved card and auto-reload, and its own description points at upgrade_plan / set_auto_reload.
+// The plugin guidelines say a plugin "must not display subscription plans … or promote upgrades"; hermoso_credits
+// still answers "what is my balance" on ChatGPT, and the plan is managed in the Hermoso app.
+export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status']);
+// ── WHAT A WIDGET HOST (CHATGPT) LISTS, AFTER OPENAI'S AUTOMATED PLUGIN SCAN (2026-09-30) ──────────────────────────
+// Two rules from developers.openai.com/plugins/plugin-guidelines.md, both HOST rules: every other surface keeps today's
+// roster exactly.
+//   1. "Expose each model-callable operation as a separate tool … Do not use discovery, operation selection, or schema
+//      fetching with a generic executor to enable operations not individually exposed for review." find_tools +
+//      call_tool + enable_tools are exactly that executor, so a widget host is not offered them; if a host still
+//      holds them (an older scan), each one works only over the tools this session LISTS (see the handlers).
+//      After publication OpenAI rescans daily, so a tool ChatGPT should have is added to its list by name instead.
+//   2. "Tool names should be … specific, and descriptive of what the tool actually does." The scan found `clone_video`
+//      unclear. Renaming it everywhere would break every agent that calls it, so a widget host lists the SAME tool
+//      (same definition, same handler) as `remake_video_for_brand`, and `clone_video` stays the name everywhere else.
+//      A direct call to `clone_video` from a widget host still answers (an older scan holds that name).
+//   3. ANNOTATIONS FOLLOW THE DOC'S DEFINITIONS (developers.openai.com/plugins/deploy/app-review.md). openWorldHint is TRUE
+//      on every generation and post-production tool: each sends the caller's prompt or media to an independently
+//      controlled model provider and fetches caller-supplied public URLs (the scan flagged plan_ad, make_template_ad,
+//      generate_video and multiply_ad; the rest of the class was fixed with them). readOnlyHint is FALSE on a tool whose
+//      `brandId` pins the key's active brand (mine_angles, list_product_photos), a persisted state change. Spending the
+//      caller's own credits is metering, not a change to the environment the tool acts on, so a research read that
+//      bills stays read-only. destructiveHint is TRUE on draft_brand: save:true replaces the saved brand profile.
+export const EXECUTOR_TOOLS = new Set(['find_tools', 'call_tool', 'enable_tools']);
+export const WIDGET_HOST_RENAMES = Object.freeze({ clone_video: 'remake_video_for_brand' });
+export const WIDGET_HOST_ALIAS_OF = Object.freeze(Object.fromEntries(Object.entries(WIDGET_HOST_RENAMES).map(([from, to]) => [to, from])));
+export const WIDGET_HOST_ALIAS_TITLES = Object.freeze({ remake_video_for_brand: 'Remake a video for your brand' });
+// Every name a widget host is never LISTED, whatever its scope. Pure, so the checks run it.
+export const widgetHostHides = (name, widgetHost) => (widgetHost
+  ? (WITHHELD_FROM_WIDGET_HOSTS.has(name) || EXECUTOR_TOOLS.has(name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RENAMES, name))
+  : Object.prototype.hasOwnProperty.call(WIDGET_HOST_ALIAS_OF, name));
 // HELD OUT OF THE DEFAULT LIST ON SIZE, ALWAYS CALLABLE (2026-09-24): the open edit primitive carries a full
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
@@ -2191,7 +2251,9 @@ export function registerLegacyToolName(name, spec) {
 }
 // Agent-facing, never user-facing: a host on an old snapshot cannot be refreshed from our side (only the host's own
 // publish does that), so the one useful thing to say is "carry on, nothing to tell the user".
-export const STALE_ROSTER_NOTE = 'Note for the assistant, not for the user: your Hermoso tool list is an older published snapshot. Hermoso has added tools since, including find_tools and call_tool, which reach every capability by name. Keep working with the tools you have and do not ask the user to reconnect; the list refreshes on its own when this host publishes the newer version.';
+// Widget hosts only (withStaleNote), and those are not offered the generic executor (EXECUTOR_TOOLS), so the note
+// names no tool: it says only what is true and what to do.
+export const STALE_ROSTER_NOTE = 'Note for the assistant, not for the user: your Hermoso tool list is an older published snapshot. Keep working with the tools you have and do not ask the user to reconnect; the list refreshes on its own when this host publishes the newer version.';
 export const withStaleNote = (out, ctx) => {
   if (!ctx?.widgetHost || !out || !Array.isArray(out.content)) return out;
   const last = [...out.content].reverse().find((c) => c && c.type === 'text' && typeof c.text === 'string');
@@ -2332,12 +2394,24 @@ export function stripOutputSchema(def) {
 }
 
 export function defForHost(name, def, widgetHost) {
-  const out = stripOutputSchema(def);
+  const out = widgetHost ? renamedForWidgetHost(stripOutputSchema(def)) : stripOutputSchema(def);
   if (!widgetHost || !out || !WIDGET_WITHHELD_TOOLS.has(name)) return out;
   const meta = out._meta;
   if (!meta || !('openai/outputTemplate' in meta)) return out;
   const { 'openai/outputTemplate': _drop, ...rest } = meta;
   return { ...out, _meta: rest };
+}
+// A description that points at a tool a widget host lists under another name (WIDGET_HOST_RENAMES) says the name that
+// host can call. Memoised per canonical def, so a widget-host session still shares ONE object per tool (the canon's
+// by-reference property) and a def with nothing to rename comes back as itself.
+const WIDGET_RENAME_RE = new RegExp(`\\b(${Object.keys(WIDGET_HOST_RENAMES).join('|')})\\b`, 'g');
+const _widgetRenamed = new WeakMap();
+function renamedForWidgetHost(def) {
+  if (!def || typeof def.description !== 'string' || !WIDGET_RENAME_RE.test(def.description)) { WIDGET_RENAME_RE.lastIndex = 0; return def; }
+  WIDGET_RENAME_RE.lastIndex = 0;
+  let hit = _widgetRenamed.get(def);
+  if (!hit) { hit = { ...def, description: def.description.replace(WIDGET_RENAME_RE, (m) => WIDGET_HOST_RENAMES[m] || m) }; _widgetRenamed.set(def, hit); }
+  return hit;
 }
 
 // ── THE TOOL DEFINITIONS ARE BUILT ONCE PER PROCESS (2026-08-24) ───────────────────────────────────────────────
@@ -2403,6 +2477,10 @@ async function regateForWorkspace(ctx, pre = null) {
   for (const [name, grp] of Object.entries(ctx.groupOf)) {
     const h = ctx.handleOf[name];
     if (!h || !listedInCoreFirst(name, grp, ctx)) continue;   // a group still switched OFF is not this function's business (a core-first EXTRA is, though — it IS listed)
+    // A HOST OR CAGE RULE IS NOT A CONNECTOR RULE (2026-09-30): re-gating used to re-enable every listed-group tool
+    // the new workspace could serve, which re-listed buy_credits on ChatGPT (and a caged tool in the directory) after
+    // a use_brand. Those holds do not depend on the workspace, so they are left exactly as the build set them.
+    if (widgetHostHides(name, ctx.widgetHost) || toolHeldBackByDirectory(name, grp, ctx)) continue;
     const hold = toolHeldBackByConnectors(name, ctx.conn);
     try { if (hold) { h.disable(); disabled++; } else { h.enable(); enabled++; } } catch {}
   }
@@ -2417,6 +2495,7 @@ const sessionBound = (factory, ctx) => { const h = factory(ctx); try { h._hermos
 export const holdReasonFor = (name, ctx) => {
   if (toolWithheldByServer(name, ctx.conn)) return 'unavailable'; // the server does not offer this capability right now (toolWithheldByServer)
   if (WITHHELD_FROM_WIDGET_HOSTS.has(name) && ctx.widgetHost) return 'host_policy';
+  if (EXECUTOR_TOOLS.has(name) && ctx.widgetHost) return 'host_policy'; // OpenAI's generic-executor rule — see EXECUTOR_TOOLS (its own sentence below)
   if (toolHeldBackByConnectors(name, ctx.conn)) {
     // NOT CONNECTED vs NOT OFFERED are different answers (2026-09-03). "Connect it under Settings ▸ Connectors" is
     // right for a provider with a tile and a dead end for one without (Reddit posting: no tile until Reddit approves
@@ -2435,6 +2514,7 @@ export const holdHints = (name, why, ctx = null) => {
   if (why === 'not_connected') { const p = toolProvider(name) || 'that'; return [{ do: `have the user connect "${p}" under Settings \u25b8 Connectors${Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, p) ? ', or connect_connector right here if it is a paste-a-key account' : ''}, then call ${name} again`, why: `${name} needs the "${p}" connection and this workspace has not made it` }]; }
   if (why === 'not_offered') return [{ do: `do not offer this capability and do not send the user to Settings \u25b8 Connectors`, why: `Hermoso does not offer the "${toolProvider(name) || 'required'}" connection yet, so there is nothing the user can connect` }];
   if (why === 'unavailable') return [{ do: 'do not offer this capability; carry on with the tools that are listed', why: `${name} is not available in Hermoso yet` }];
+  if (why === 'host_policy' && EXECUTOR_TOOLS.has(name)) return [{ do: 'call the Hermoso tools in your list directly', why: `on this host every Hermoso operation is its own listed tool, so ${name} is not offered` }];
   if (why === 'host_policy') return [{ do: 'use the Hermoso app or another MCP client for this one', why: `${name} is withheld by this host's own policy, not by Hermoso` }];
   if (why === 'directory') return [{ do: 'use the Hermoso app, or connect the unscoped server URL https://app.hermoso.ai/mcp', why: `${name} is outside what this Claude directory connection may run` }];
   return [];
@@ -2447,7 +2527,8 @@ export const holdReasonText = (name, why, ctx = null) => {
     return `${name} is not available: Hermoso does not offer the "${prov}" connection yet${because}. There is nothing the user can connect, so do not point them at Settings ▸ Connectors and do not offer this capability.${reddit}`;
   }
   if (why === 'unavailable') return `${name} is not available in Hermoso yet. Do not offer it or point the user at a setting for it; nothing they can connect turns it on.`;
-  if (why === 'host_policy') return `${name} is not offered on this host (the host's own commerce policy). Use the Hermoso app or another client for it.`;
+  // ONE sentence, two reasons: OpenAI's generic-executor rule for EXECUTOR_TOOLS, its commerce policy for the rest.
+  if (why === 'host_policy') return `${name} is not offered on this host (${EXECUTOR_TOOLS.has(name) ? 'here every Hermoso operation is its own tool in your list, so call those tools directly' : "the host's own commerce policy"}).${EXECUTOR_TOOLS.has(name) ? '' : ' Use the Hermoso app or another client for it.'}`;
   if (why === 'not_connected') {
     // THE LINK BELONGS HERE TOO (2026-09-13, found live on a brand with no YouTube). A tool held back for a missing
     // connection is answered by this sentence BEFORE any request reaches the server, so the brand-scoped link the
@@ -2575,6 +2656,8 @@ export function installHeldToolCalls(mcp, ctx) {
 
 // The `enable_tools` handler, lifted to module scope so it can be re-bound to each session's own context.
 const makeEnableToolsHandler = (ctx) => async ({ groups }) => {
+  // A WIDGET HOST'S LIST IS THE LIST THAT HOST REVIEWED (2026-09-30, OpenAI's generic-executor rule — see EXECUTOR_TOOLS).
+  if (ctx.widgetHost) return withHints({ content: [{ type: 'text', text: holdReasonText('enable_tools', 'host_policy', ctx) }], isError: true }, holdHints('enable_tools', 'host_policy', ctx));
   const want = (Array.isArray(groups) ? groups : []).map((g) => String(g || '').trim().toLowerCase()).filter(Boolean);
   if (!want.length) return { content: [{ type: 'text', text: "Name at least one group to turn on, e.g. groups:['ads']." }], isError: true };
   const expand = want.includes('all') ? [...TOOL_GROUP_NAMES] : want;
@@ -2701,6 +2784,7 @@ function newToolScope(opts) {
   // a transport that has not been taught to read yet all advertise the FULL roster ([[failed-read-is-not-empty]]).
   return {
     enabledGroups: asked, groupOf: Object.create(null), handleOf: Object.create(null),
+    srcOf: Object.create(null), // name → { def, handler } as registered, for registerWidgetHostAliases
     conn: opts.connectors || null,
     widgetHost: !!opts.widgetHost,
     directory: opts.directory === 'full' ? 'full' : (opts.directory ? 'scoped' : false),
@@ -2709,7 +2793,8 @@ function newToolScope(opts) {
 }
 // A core-first roster carries the `core` group plus CORE_FIRST_EXTRA — see the block beside that constant.
 // Expressed as a predicate rather than as a branch inside applyToolGates so the check can RUN it.
-export const listedInCoreFirst = (name, group, ctx) => ctx.enabledGroups.has(group) || (!!ctx.coreFirst && CORE_FIRST_EXTRA.includes(name));
+// A widget-host alias (WIDGET_HOST_RENAMES) is listed exactly when the tool it renames would be.
+export const listedInCoreFirst = (name, group, ctx) => ctx.enabledGroups.has(group) || (!!ctx.coreFirst && CORE_FIRST_EXTRA.includes(WIDGET_HOST_ALIAS_OF[name] || name));
 // THE THREE REASONS A REGISTERED TOOL IS HELD BACK. Applied identically on the build path, the replay path and
 // `enable_tools`, from ONE function, because a gate applied at two of the three is a gate a group flip undoes.
 //
@@ -2726,7 +2811,7 @@ function applyToolGates(h, name, group, ctx, opts) {
   if (!h) return;
   if (!listedInCoreFirst(name, group, ctx)) { try { h.disable(); } catch {} }
   if (ON_DEMAND_TOOLS.has(name) && !TOOL_GROUP_NAMES.every((g) => ctx.enabledGroups.has(g))) { try { h.disable(); } catch {} } // (5) listed on demand only (an explicit 'all' is a demand) — see ON_DEMAND_TOOLS
-  if (WITHHELD_FROM_WIDGET_HOSTS.has(name) && opts.widgetHost) { try { h.disable(); } catch {} }
+  if (widgetHostHides(name, !!opts.widgetHost)) { try { h.disable(); } catch {} } // the commerce tools, the generic executor and a renamed tool — see WITHHELD_FROM_WIDGET_HOSTS / EXECUTOR_TOOLS
   if (toolHeldBackByConnectors(name, ctx.conn)) { try { h.disable(); } catch {} }
   if (toolHeldBackByDirectory(name, group, ctx)) { try { h.disable(); } catch {} } // (4) the directory cage — see DIRECTORY_GROUPS
 }
@@ -2741,10 +2826,29 @@ function replayTools(rawServer, opts, canon) {
     const handler = e.factory ? sessionBound(e.factory, ctx) : e.handler;
     const h = rawServer.registerTool(e.name, defForHost(e.name, e.def, opts.widgetHost), handler);
     ctx.handleOf[e.name] = h;
+    ctx.srcOf[e.name] = { def: e.def, handler };
     applyToolGates(h, e.name, e.group, ctx, opts);
   }
+  registerWidgetHostAliases(rawServer, ctx, opts);
   installHeldToolCalls(rawServer, ctx);
   return rawServer;
+}
+
+// THE WIDGET-HOST ALIASES (2026-09-30) — see WIDGET_HOST_RENAMES. Registered for a widget host ONLY and never into the
+// canon, so every other surface's roster, tool count, docs and parity are byte-for-byte what they were. The alias is
+// the renamed tool's own definition under a clearer title, on the same handler (still stamped with the canonical name,
+// so the error ledger and health read the one tool), and it is gated exactly like the tool it renames.
+function registerWidgetHostAliases(rawServer, ctx, opts) {
+  if (!opts.widgetHost) return;
+  for (const [from, to] of Object.entries(WIDGET_HOST_RENAMES)) {
+    const src = ctx.srcOf[from];
+    if (!src || !src.def || typeof src.handler !== 'function' || ctx.handleOf[to]) continue;
+    const title = WIDGET_HOST_ALIAS_TITLES[to] || src.def.title;
+    const def = { ...src.def, title, ...(src.def.annotations ? { annotations: { ...src.def.annotations, title } } : {}) };
+    const h = rawServer.registerTool(to, defForHost(to, def, true), src.handler);
+    ctx.handleOf[to] = h; ctx.groupOf[to] = ctx.groupOf[from]; ctx.srcOf[to] = { def, handler: src.handler };
+    applyToolGates(h, to, ctx.groupOf[to], ctx, opts);
+  }
 }
 
 // ── THE MCP RETURN CROSSING: A JS STRING BECOMES A JSON-RPC FRAME (2026-08-26) ───────────────────────────────────
@@ -2946,6 +3050,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         if (sink) sink.push({ name, group, def: stripOutputSchema(finalDef), handler, factory: handler && handler._hermosoFactory || null });
         const h = t.registerTool(name, defForHost(name, finalDef, opts.widgetHost), handler);
         handleOf[name] = h;
+        ctx.srcOf[name] = { def: stripOutputSchema(finalDef), handler };
         // DISABLED, NOT SKIPPED — see (1) above. `disable()` is the SDK's own call and removes it from tools/list.
         //
         // ONE GATE FUNCTION, NOT A SECOND COPY OF THE RULES (2026-08-26). This branch and the widget branch below
@@ -3172,6 +3277,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     for (const [name, h] of Object.entries(ctx.handleOf)) {
       if (!h) continue;
       if (toolWithheldByServer(name, ctx.conn)) continue; // not offered right now: absent from search, like an unoffered provider
+      // A WIDGET HOST SEARCHES ONLY ITS OWN LIST (2026-09-30, OpenAI's generic-executor rule — see EXECUTOR_TOOLS). Only
+      // a host still holding find_tools from an older scan reaches this; it must not surface an operation it never listed.
+      if (ctx.widgetHost && (h.enabled === false || EXECUTOR_TOOLS.has(name))) continue;
       const grp = ctx.groupOf[name] || 'core';
       // A GROUP FILTER NARROWS, IT NEVER HIDES (2026-09-07). `find_tools({query:'tiktok_creator_info', group:'channels'})` reported a
       // dead end because the tool lives in channel_admin — the exact-name hit was thrown away by the filter, and the agent
@@ -3264,7 +3372,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const lines = top.map((r) => `• ${r.name} [${r.group}${g && r.group !== g ? `, outside the ${g} group` : ''}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] —${r.description}\n    cost: ${r.cost.label} · health: ${healthLabel(r.health)}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
     const looser = top.length > total ? top.length - total : 0;
     const text = related
-      ? `${total} tool(s) match${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}${total > cap ? ` (showing the top ${cap} — narrow the query)` : ''}${looser ? `${total ? '; the other' : ''} ${looser} shown ${looser === 1 ? 'is a looser match' : 'are looser matches'}, ranked below` : ''}. Run any of them with call_tool({name, args}) — a tool that is "not in your list" still runs; one marked not_connected needs that connector first. COST is what the call spends (free means free on every plan); HEALTH is what this server has seen recently — "no recent calls" means we have not seen it run, not that it is broken, and a row marked FAILING or held is ranked last rather than hidden.\n${lines.join('\n')}`
+      ? `${total} tool(s) match${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}${total > cap ? ` (showing the top ${cap} — narrow the query)` : ''}${looser ? `${total ? '; the other' : ''} ${looser} shown ${looser === 1 ? 'is a looser match' : 'are looser matches'}, ranked below` : ''}. ${ctx.widgetHost ? 'Call any of them directly by name; one marked not_connected needs that connector first.' : 'Run any of them with call_tool({name, args}) — a tool that is "not in your list" still runs; one marked not_connected needs that connector first.'} COST is what the call spends (free means free on every plan); HEALTH is what this server has seen recently — "no recent calls" means we have not seen it run, not that it is broken, and a row marked FAILING or held is ranked last rather than hidden.\n${lines.join('\n')}`
       : `No tool matches${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}. Try a broader word (e.g. "lead", "campaign", "report") or a group: ${TOOL_GROUP_NAMES.join(', ')}.`;
     // THE NEXT STEP, NAMED. The text already ends "Run any of them with call_tool({name, args})"; this is the same
     // instruction with the actual name in it, plus the connect step when the best match is the one that is held.
@@ -3273,7 +3381,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (best) {
       hints.push(best.hold
         ? { do: (holdHints(best.name, best.hold, ctx)[0] || {}).do || `resolve the ${best.hold} hold on ${best.name}`, why: `${best.name} is the best match and this workspace cannot run it yet` }
-        : { do: `call_tool({ name: '${best.name}', args: { … } })`, why: `${best.name} is the best match${best.inRoster ? '' : ' and is not in your list, which does not stop it running'}${best.cost?.free ? ' and it is free' : ''}` });
+        : { do: ctx.widgetHost ? `${best.name}({ … })` : `call_tool({ name: '${best.name}', args: { … } })`, why: `${best.name} is the best match${best.inRoster ? '' : ' and is not in your list, which does not stop it running'}${best.cost?.free ? ' and it is free' : ''}` });
       if (best.health?.state === 'failing') hints.push({ do: `consider the next row, or tell the user ${best.name} is currently failing`, why: `${best.failures || best.health.failures} of its last ${best.health.calls} calls on this server failed` });
     }
     return withHints({ content: [{ type: 'text', text }], structuredContent: { total, related, tools: top.map(({ score, _penalty, _cov, _nh, _nd, _exact, ...r }) => r) } }, hints);
@@ -3325,6 +3433,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (!n || !h) {
       const near = n ? nearestToolNames(n, Object.keys(ctx.handleOf)) : [];
       reportDeadEnd('unknown_tool', 'call_tool', `call_tool asked for a tool that does not exist: ${n.replace(/["'`]/g, '').slice(0, 60) || '(empty)'}`, { name: n });
+      if (ctx.widgetHost) return { content: [{ type: 'text', text: `No tool named "${n}" in your Hermoso list. Call one of the tools in your list directly.` }], isError: true };
       return { content: [{ type: 'text', text: `No tool named "${n}".${near.length ? ` Did you mean: ${near.join(', ')}?` : ''} find_tools({query}) searches every tool by name or task.` }], isError: true };
     }
     if (n === 'call_tool' || n === 'find_tools' || n === 'enable_tools') return { content: [{ type: 'text', text: `${n} is a roster tool; call it directly.` }], isError: true };
@@ -3336,6 +3445,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       if (why !== 'unavailable') reportDeadEnd(why, n, t); // a capability we withhold on purpose is not a dead end to chase
       if (t) return withHints({ content: [{ type: 'text', text: t }], isError: true }, holdHints(n, why, ctx));
     }
+    // A WIDGET HOST RUNS ONLY WHAT IT LISTS (2026-09-30, OpenAI's generic-executor rule — see EXECUTOR_TOOLS). Reached
+    // only by a host still holding call_tool from an older scan; a tool this session does not list is refused by name.
+    if (ctx.widgetHost && h.enabled === false) return { content: [{ type: 'text', text: `${n} is not in your Hermoso tool list on this host, so call_tool will not run it. Use the tools in your list.` }], isError: true };
     let input = args && typeof args === 'object' ? args : {};
     if (h.inputSchema) {
       const parsed = h.inputSchema.safeParse(input);
@@ -17018,7 +17130,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       brand: z.any().optional().describe('the brand grounding embedded in the creative (name, logo, palette, productImages)'),
       presence_note: z.string().optional(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language, durationSeconds, hook, setting, draft, talent }) => {
     // LENGTH SOVEREIGNTY over MCP (found live 2026-07-31: a 40-second brief came back as render_plan.duration_seconds
     // 15, structure single_clip, scenes summing to 15 — the 40 was silently dropped because this tool declared no
@@ -17139,7 +17251,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       productCheck: z.any().optional().describe('present when the brand\'s product photo was attached: {verdict: match|mismatch|unclear|absent, wordmark, issues[]} — the render compared against the real product photo. mismatch/absent means the product in the image is NOT the brand\'s product; say so, never present it as done'),
       labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your ad image…', 'Ad image ready'),
   }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel }) => {
     const refs = refImages?.length ? (await Promise.all(refImages.map(toRef))).filter(Boolean) : undefined;
@@ -17198,7 +17310,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       image: z.string().optional().describe('the served absolute URL of the edited image'),
       model: z.string().optional().describe('the model label that rendered it'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ image, instruction, removal, mask, dryRun, fixLabel }) => {
     const src = await toRef(image);
     const maskRef = mask ? await toRef(mask) : undefined;
@@ -17219,7 +17331,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: { items: staticItemsOut, note: z.string().optional(), original: z.string().optional().describe('the headline read off the source ad') },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ image, headlines, count, brief, fixLabel }) => {
     const d = await apiPost('/api/static/headlines', { image: await toRef(image), ...(headlines?.length ? { headlines } : {}), ...(count ? { count } : {}), ...(brief ? { brief } : {}), ...(fixLabel === false ? { fixLabel: false } : {}) });
     const imgs = await staticImages(d);
@@ -17234,7 +17346,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: { items: staticItemsOut, note: z.string().optional(), sourceAspectRatio: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ image, aspectRatios, fixLabel }) => {
     const d = await apiPost('/api/static/resize', { image: await toRef(image), ...(aspectRatios?.length ? { aspectRatios } : {}), ...(fixLabel === false ? { fixLabel: false } : {}) });
     const imgs = await staticImages(d);
@@ -17249,7 +17361,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: { items: staticItemsOut, note: z.string().optional(), source: z.array(z.string()).optional().describe('the lines read off the source ad') },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ image, languages, fixLabel }) => {
     const d = await apiPost('/api/static/localize', { image: await toRef(image), languages, ...(fixLabel === false ? { fixLabel: false } : {}) });
     const imgs = await staticImages(d);
@@ -17305,7 +17417,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       note: z.string().optional().describe('what to tell the user / do next'),
       creditsUsed: z.number().optional().describe('credits billed'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your thumbnail…', 'Thumbnail ready'),
   }, wrap(async (a) => {
     const faceImages = a.faceImages?.length ? (await Promise.all(a.faceImages.map(toRef))).filter(Boolean) : undefined;
@@ -17340,7 +17452,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       model: z.string().optional().describe('the voice engine label'),
       creditsUsed: z.number().optional().describe('credits billed for this clip'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ text, engine, voice }) => {
     const d = await apiPost('/api/generate/voice', { text, ...(engine ? { engine } : {}), ...(voice ? { voice } : {}) });
     // REPORT WHAT SPOKE (GEN-2). `d.voice` is the DISPATCHED voice and is null on a fixed-voice engine — the server
@@ -17353,7 +17465,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "RAW music: describe it (genre, mood, instruments, tempo), get an instrumental MP3. Flat fee: explainerMusicCredits in hermoso_capabilities.",
     inputSchema: { prompt: z.string().describe("the music in words, e.g. 'lo-fi jazz, brushed drums, 80 bpm'") },
     outputSchema: { audio: z.string().optional(), durationSeconds: z.number().nullable().optional(), creditsUsed: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ prompt }) => {
     const d = await apiPost('/api/generate/music', { prompt });
     return ok(`Music ready${d.durationSeconds ? ` (${d.durationSeconds}s)` : ''}: ${abs(d.audio)}`, { ...d, audio: abs(d.audio) });
@@ -17372,7 +17484,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       model: z.string().optional().describe('the writing model label'),
       creditsUsed: z.number().optional().describe('credits billed for this generation'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ prompt, model, raw }) => {
     const d = await apiPost('/api/models/llm', { prompt, ...(model ? { model } : {}), ...(raw === true ? { raw: true } : {}) });
     return ok(`${d.text}${d.model ? `\n\n— ${d.model}` : ''}`, d);
@@ -17414,7 +17526,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       credits: z.number().optional().describe('dry run only: the credits the real render reserves (the same worker computes it)'),
       quote: z.any().optional().describe('dry run only: {credits, model, label, durationSeconds, resolution, acts?} or {refused} when the real render would be refused'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your video ad…', 'Video ad ready'),
   }, wrap(async (a) => {
     // Clamp the length override to the range the pipeline can actually build (4s = the provider clip minimum,
@@ -17464,7 +17576,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       config: z.object({}).passthrough().describe("MUST include config.template: 'custom' or a preset id, plus its fields. PRESETS: 'slideshow' (IMAGES, TikTok photo mode / Reels 1080x1920, or size:'4:5' feed carousels; no branding): { slides:[{text, sub?, image?, blur?, background?, position?}] (2-35; words never rewritten), style? ('tiktok-classic'|'clean-minimal'|'note-style' or a look in words), textStyle?, video?:true (+ an MP4) }; 2 credits, +1 per slide past 5, +2 for the MP4. 'imessage-chat' (VIDEO ~15s): { thread:{contactName, messages:[{from:'them'|'me', text?, product?:{image,title,domain}}]}, theme?, endCard }. 'chatgpt-chat' (VIDEO): { question, answer (may **bold** the brand), productImage?, endCard }. 'apple-notes' (VIDEO): { title, lines[], theme?, endCard }. 'value-prop' (VIDEO ~17s): { hook ≤40ch, claims[3-5 ≤34ch], productImages[2-3], palette[], endCard }. 'static-mockup' (IMAGE): { style:'imessage'|'notes'|'card', size?:{w,h}, ...fields }. 'airdrop-carousel' (VIDEO): { brandName, products:[{image, title?}] (3-16), endCard }. 'app-ui-tour' (VIDEO): { hook?, appName, iconImage?, beats:[{screenImage, caption}] (2-6), endCard }. 'imessage-cascade' (VIDEO): { notifications:[{sender, text}] (4-8), backgroundImage?, endCard }. 'photo-grid' (VIDEO): { title?, photos:[{image, label?}] (4-9), endCard }. 'vignette' (VIDEO): { hook, lines[2-4 ≤40ch], heroImage, endCard }. 'kinetic-type' (VIDEO, own SFX): { phrases[3-6 ≤34ch], productImages?[≤4], endCard }. 'myth-vs-fact' (VIDEO with a real VOICEOVER, small extra charge): { pairs:[{myth ≤50ch, fact ≤60ch}] (2-4; [brackets] accent), endCard }, real truths only. 'carousel' (IMAGES, 5-10 branded 1080x1080): { cover:{hook?, title}, slides:[{headline, support?, stat?:{value, label}}] (3-8), cta:{headline, cta?, domain?}, productImage?, logo? }. endCard = { headline, cta, domain?, logo?, color? }; palette and fontStack optional."),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Building your template ad…', 'Template ad ready'),
   }, wrap(async (a) => {
     // A custom design fills {{logo}} {{brandName}} {{domain}} {{accent}} from the workspace brand, the same record the web
@@ -17510,7 +17622,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       grain: z.boolean().optional().describe('default false — anti-AI film-grain finish'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await renderJob('videofinish', { videoUrl: a.videoUrl, header: a.header, sub: a.sub, points: a.points, accent: a.accent, pills: a.pills !== false, grain: !!a.grain }, 'MCP video finish');
     return okVideo(`Finished video ready: ${r.url}  [job ${r.jobId}]`, r);
@@ -17560,7 +17672,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dryRun: z.boolean().optional().describe('true = return the exact credits this edit reserves and run nothing'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     let b = await readStore('heist.brand.v1'); if (!b || typeof b !== 'object') b = {}; // via /api/store/bootstrap — there is no GET /api/store/:key route
     const pal = (Array.isArray(b.palette) ? b.palette : []).filter(c => /^#[0-9a-f]{6}$/i.test(String(c || '')));
@@ -17689,7 +17801,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dryRun: z.boolean().optional().describe('true = return the exact credits this fix reserves and render nothing'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const _in = { videoUrl: a.videoUrl, startSeconds: a.startSeconds, endSeconds: a.endSeconds, prompt: a.prompt, refImage: a.refImage, speechWindows: a.speechWindows };
     if (a.dryRun) { const q = await quoteJob('fixbeat', _in); return ok(quoteText(q, `Re-rendering the ${a.startSeconds}-${a.endSeconds}s beat (only that window; the rest and all the audio stay)`), { raw: q }); }
@@ -17713,7 +17825,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       captions: z.boolean().optional().describe('burn subtitles into every clip. DEFAULT TRUE — a clip cut from a podcast or a talk is watched on mute, and the words are the product. Set false for clean footage. A clip whose window carries no readable speech is delivered bare rather than captioned with a guess, and the result says which.'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await renderJob('clipper', { video: a.video, count: a.count, aspectRatio: a.aspectRatio, captions: a.captions }, 'MCP clipper');
     if (r.stillRendering) return okVideo('', r); // resumable handle — get_job carries the clips when it lands
@@ -17747,7 +17859,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         .describe('your own lines in seconds, no overlap, max 90 chars, no emoji'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await renderJob('subtitles', { video: a.video, textStyle: a.textStyle, burn: a.burn, ...(a.cues ? { cues: a.cues } : {}), ...(a.auto ? { auto: a.auto } : {}), ...(a.wordsPerCue != null ? { wordsPerCue: a.wordsPerCue } : {}) }, 'MCP subtitles');
     if (r.stillRendering) return okVideo('', r); // resumable handle — get_job carries the result when it lands
@@ -17792,7 +17904,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dryRun: z.boolean().optional().describe('true = return the exact credits this explainer reserves (its own pricing, stopped at the hold) and render nothing. Quote it before running one; try frameDensity lean or minimal when the balance is short.'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     // THE AI HOST EPISODE: the same job type, its own fields, its own read-back (the host and draft are resolved server-side).
     const _host = a.format === 'host_episode' || !!a.fromDraft;
@@ -17834,7 +17946,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       musicMood: z.string().optional().describe('music-bed mood, e.g. driving / cinematic / upbeat'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     let b = await readStore('heist.brand.v1'); if (!b || typeof b !== 'object') b = {}; // the cards want the REAL palette/logo, same as post_edit
     const pal = (Array.isArray(b.palette) ? b.palette : []).filter(c => /^#[0-9a-f]{6}$/i.test(String(c || '')));
@@ -17888,7 +18000,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       supportedAspectRatios: z.array(z.string()).optional().describe('the frames the chosen model DOES render'),
       aspectRatioModels: z.array(z.string()).optional().describe('model ids that DO render the asked frame — name one in `model` and re-run'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your video…', 'Video ready'),
   }, wrap(async (a) => {
     // NEVER SILENTLY TRUNCATE A LENGTH ASK. One generation = ONE continuous clip, and workVideo resolves an
@@ -17964,7 +18076,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dryRun: z.boolean().optional().describe('return the credits this exact job would hold, without rendering'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your avatar clip…', 'Avatar clip ready'),
   }, wrap(async (a) => {
     const image = await toRef(a.image);
@@ -17987,7 +18099,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       durationSeconds: z.number().optional().describe('total spot length in seconds (defaults to the sum of the scenes’ seconds)'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     // HARD GUARD (the owner watched an agent stitch a 15s ad into 4 separate renders): a spot that fits ONE Seedance
     // clip renders single-pass through the Studio assembly instead — no seams, exact multi-beat arc, ~1/4 the cost.
@@ -19209,7 +19321,10 @@ function memoryNoteVerdict(text) {
   server.registerTool('pull_competitor_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Pulling their live ads…', 'Competitor ads pulled'),
     title: 'Pull competitor ads',
-    description: 'THE FAST PATH for "show me the ads <brand> is running" \u2014 one named brand\u2019s real live ads from the META (Facebook/Instagram) ad library, deduped, sorted, with the right page resolved. A single call, back in a few seconds. Prefer this over research_ads whenever the brand is named. Meta only, deliberately: it has by far the richest creative and is what people mean by "their ads". For Google or LinkedIn specifically, use search_google_ads or search_linkedin_ads. Spends credits.',
+    // NEUTRAL BY RULE (2026-09-30): OpenAI's plugin scan flagged the old wording ("THE FAST PATH", "prefer this over",
+    // "by far the richest creative") as comparing with alternatives or steering the model. A description says what the
+    // tool does, when to use it and its limits, and nothing about other tools being worse.
+    description: 'Pull one named brand\u2019s live ads from the Meta (Facebook and Instagram) Ad Library: deduplicated, sorted, with the brand\u2019s own page resolved. One call, back in a few seconds. Use it when the user names a brand and asks what ads it is running ("show me the ads <brand> is running"). Covers the Meta Ad Library only; for a broader search across brands or platforms use research_ads. Spends credits.',
     inputSchema: {
       companyName: z.string().optional().describe('the advertiser name, e.g. "Liquid Death" (company / brand / name are read as this too)'),
       domain: z.string().optional().describe('the advertiser domain, e.g. liquiddeath.com — a full website URL works (url / website are read as this too). Pass companyName OR domain'),
@@ -19857,7 +19972,7 @@ function memoryNoteVerdict(text) {
       description: z.string().optional().describe('a free-text brand description (no website)'),
       socialHandle: z.string().optional().describe('a social handle to draft from (influencers/creators) — pair with platform'),
       platform: z.string().optional().describe('platform for socialHandle (instagram/tiktok/…)'),
-      save: z.boolean().optional().describe('save as the workspace’s brand (like Studio onboarding) so plan_ad/create use it automatically. Default: saves only when NO brand is saved yet; pass true to overwrite, false to never save'),
+      save: z.boolean().optional().describe('save as the workspace’s brand (like Studio onboarding) so plan_ad/create use it automatically. Default: saves only when NO brand is saved yet; pass true to REPLACE the saved brand profile (the drafted fields overwrite the saved ones), false to never save'),
     },
     outputSchema: {
       name: z.string().optional().describe('the drafted brand name — VERIFY it matches the brand the user meant'),
@@ -19870,7 +19985,10 @@ function memoryNoteVerdict(text) {
       products: z.any().optional().describe('the detected products'),
       productImages: z.array(z.any()).optional().describe('product photo URLs'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    // destructiveHint TRUE (2026-09-30, OpenAI's plugin scan): `save:true` replaces the saved brand profile field by
+    // field, which a user can only undo by re-entering what was there. The default path never overwrites (it saves
+    // only into an empty workspace) — but the doc's rule is "even in only select modes", so the hint is honest.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ save, ...a }) => {
     const d = await apiPost('/api/brand/draft', a);
     const p = d.profile || d;
@@ -20031,7 +20149,7 @@ function memoryNoteVerdict(text) {
     title: 'Make an insert clip',
     description: 'A reaction picture (image, or video from videoStart) with its sound, cut to when the sound lands (or seconds): a 1080x1920 clip for post_edit join.',
     inputSchema: { image: z.string().optional(), video: z.string().optional(), videoStart: z.number().optional(), sound: z.string(), soundStart: z.number().optional(), soundEnd: z.number().optional(), seconds: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/video/insert', a);
     return okVideo(`Insert clip (${d.seconds}s): ${abs(d.video)}\n${d.howToUse || ''}`, { ...d, url: abs(d.video), video: abs(d.video) });
@@ -20065,7 +20183,7 @@ function memoryNoteVerdict(text) {
     description: "Reframe a video to a different aspect ratio (e.g. 16:9 master -> 9:16 vertical) with smart subject tracking. Paid render; returns the served URL of the reframed video.",
     inputSchema: { video: z.string().describe('the source video URL'), aspectRatio: z.enum(['9:16', '1:1', '16:9', '4:3', '3:4', '21:9', '9:21']).describe('the target aspect ratio') },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, aspectRatio }) => {
     const r = await renderJob('reframe', { video, aspectRatio }, `Reframe → ${aspectRatio}`);
     return okVideo(`Reframed video (${aspectRatio}): ${r.url}`, r);
@@ -20076,7 +20194,7 @@ function memoryNoteVerdict(text) {
     description: "Upscale a video to higher resolution (2x) for final delivery. Paid render; returns the served URL. Two engines: the default ('standard') is the safe precision upscaler; engine:'flux' is the FLUX 3 video upscaler (1080p/2K/4K) with an optional mode:'creative' detail-enhancement pass — pick it when the user asks for the FLUX upscaler or wants added detail rather than a faithful enlargement.",
     inputSchema: { video: z.string().describe('the source video URL'), engine: z.enum(['standard', 'flux']).optional().describe("default 'standard', the precision upscaler. 'flux' = the FLUX 3 video upscaler"), mode: z.enum(['precise', 'creative']).optional().describe("FLUX only — 'creative' turns on its detail-enhancement pass; default precise") },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, engine, mode }) => {
     const r = await renderJob('upscale', { video, factor: 2, ...(engine ? { engine } : {}), ...(mode ? { mode } : {}) }, engine === 'flux' ? 'Upscale 2x · FLUX' : 'Upscale 2x');
     return okVideo(`Upscaled video: ${r.url}`, r);
@@ -20104,7 +20222,7 @@ function memoryNoteVerdict(text) {
       interactionId: z.string().optional().describe('OPTIONAL: the interactionId an earlier Gemini Omni render or edit returned; the edit continues that clip on the same Omni model. If it cannot run, the video editor edits it and the reply says so.'),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, instruction, keepAudio, lighting, reference, literal, previewFirstFrame, previewStill, previewAt, elements, interactionId }) => {
     const prompt = String(instruction || '').trim();
     if (!prompt) return { content: [{ type: 'text', text: 'Say what to change — edit_video needs an instruction.' }], isError: true };
@@ -20143,7 +20261,7 @@ function memoryNoteVerdict(text) {
       dryRun: z.boolean().optional().describe('true = return the plan and the quote, render nothing'),
     },
     outputSchema: { jobs: z.array(z.any()).optional(), plan: z.any().optional(), perVariantCredits: z.number().optional(), totalCredits: z.number().optional(), dryRun: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, count, change, axes, notes, regions, dryRun }) => {
     const src = String(video || '').trim();
     if (!/^https?:\/\//.test(src)) return { content: [{ type: 'text', text: 'Pass the source video as a URL — a previous render, a job result, or an entry from list_library.' }], isError: true };
@@ -20181,7 +20299,7 @@ function memoryNoteVerdict(text) {
       hooks: z.array(z.object({ url: z.string().optional(), prompt: z.string().optional(), mechanic: z.string().optional(), start: z.number().optional().describe('url: skip the video’s own first seconds'), cutAt: z.number().optional().describe('url: override the found payoff cut') })).optional().describe('your own openings, one version each'),
     },
     outputSchema: { jobs: z.array(z.any()).optional(), plan: z.any().optional(), hookSeconds: z.number().nullable().optional(), perVariantCredits: z.number().optional(), totalCredits: z.number().optional(), dryRun: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, count, notes, hookSeconds, resolution, productImage, useBrand, plan, dryRun, hooks }) => {
     const src = String(video || '').trim();
     if (!src) return { content: [{ type: 'text', text: 'Pass the finished video as a URL: a previous render, a job result, an entry from list_library, or an upload_file link.' }], isError: true };
@@ -20211,7 +20329,7 @@ function memoryNoteVerdict(text) {
       voice: z.string().optional().describe("optional target voice preset, e.g. 'Aria' (warm female) or 'George' (confident male). Defaults to a voice matching the source speaker's register."),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, language, script, voice }) => {
     // Forward `script` ONLY when the caller actually supplied one. Sending '' used to hit the worker's
     // empty-script guard, so the documented {video, language} call could never succeed.
@@ -20227,7 +20345,7 @@ function memoryNoteVerdict(text) {
       voice: z.string().optional().describe("target narrator voice preset name, e.g. 'Aria', 'George', 'Rachel', 'Sarah', 'Brian', 'Charlotte' (defaults to a warm female read). A saved VOICE CLONE of the user's own voice counts as a preset here — name it the way it is saved on their cast"),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ video, voice }) => {
     const r = await renderJob('voiceswap', { video, ...(voice ? { voice } : {}) }, 'Voice swap');
     return okVideo(`Voice-swapped video: ${r.url}`, r);
@@ -20244,7 +20362,7 @@ function memoryNoteVerdict(text) {
       tier: z.enum(['pro', 'standard']).optional().describe("'pro' (default): 1080p and real hand-object interaction. 'standard': about 25% fewer credits and faster, but 720p, and it tends to mime a held object with empty hands. hermoso_capabilities lists the exact credits for both"),
     },
     outputSchema: { ...JOB_OUT },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ image, video, prompt = '', orientation = 'video', tier }) => {
     const r = await renderJob('motion', { image, video, prompt, orientation, ...(tier ? { tier } : {}) }, 'Motion recast');
     return okVideo(`Recast video: ${r.url}`, r);
@@ -20315,7 +20433,7 @@ function memoryNoteVerdict(text) {
       variants: z.array(z.any()).optional().describe('the distinct ad angles ({name, hook, headline, visual brief})'),
       angles: z.array(z.any()).optional().describe('alternate key the planner may return the variants under'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ brand, product, count = 6, language }) => {
     const brandObj = brand ? (typeof brand === 'string' ? { name: brand } : brand) : null;
     const d = await apiPost('/api/batch/plan', { brand: brandObj, product, count, language: language || '' });
@@ -20417,7 +20535,7 @@ function memoryNoteVerdict(text) {
       slots: z.any().optional().describe('the filled slot map (layout elements swapped to your brand)'),
       residual: z.any().optional().describe('source-branding sweep result ({clean, note})'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, cloneStaticHandler = wrap(async ({ imageUrl, brandId }) => {
     const brand = await activeBrand(brandId);
     if (!brand) throw new Error('No saved brand to clone for — onboard one with draft_brand, or pass a brandId from list_brands.');
@@ -20442,7 +20560,7 @@ function memoryNoteVerdict(text) {
       slots: z.any().optional().describe('the filled slot map (layout elements swapped to your brand)'),
       residual: z.any().optional().describe('source-branding sweep result ({clean, note})'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, (a, extra) => cloneStaticHandler(a, extra)); // its OWN function object: the registry stamps each handler with one tool name, and a shared one ended up named remix_static for both
 
   server.registerTool('mine_angles', {
@@ -20462,7 +20580,9 @@ function memoryNoteVerdict(text) {
       droppedQuotes: z.number().optional().describe('quotes the model returned that were not verbatim in the material, dropped'),
       note: z.string().optional().describe('what was read, what was dropped, and the next step; or why no angles were returned'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    // NOT read-only (2026-09-30, OpenAI's plugin scan): passing brandId switches this key's ACTIVE BRAND for every later
+    // call, exactly like use_brand (activeBrand pins it server-side). That is a persisted, user-visible state change.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ brandId, reviews, reviewsUrl, useOwnReviewsOnly }) => {
     const brand = await activeBrand(brandId);
     const own = {};
@@ -20497,7 +20617,8 @@ function memoryNoteVerdict(text) {
       summary: z.string().optional().describe('a readable rundown of the saved product photos'),
       photos: z.array(z.any()).optional().describe('the saved photos ({url, label, …})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    // NOT read-only, for the same reason as mine_angles (2026-09-30): brandId pins this key's active brand.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async ({ brandId }) => {
     const brand = await activeBrand(brandId);
     const d = await apiPost('/api/product/photos', { brand: brand || {} });
@@ -20752,5 +20873,6 @@ function memoryNoteVerdict(text) {
     const d = await apiPost('/api/posts/backfill', { channel: a.channel, ...(a.confirm ? { confirm: true } : {}), ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}), ...(a.accountRef ? { accountRef: a.accountRef } : {}) });
     return ok(d.note || `${d.dryRun ? 'Dry run' : 'Imported'} on ${a.channel}.`, d);
   }));
+  registerWidgetHostAliases(rawServer, ctx, opts);
   installHeldToolCalls(rawServer, ctx);
 }
