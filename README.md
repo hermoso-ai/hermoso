@@ -59,6 +59,15 @@ codex plugin marketplace add hermoso-ai/hermoso && codex plugin add hermoso@herm
 gemini extensions install https://github.com/hermoso-ai/hermoso
 ```
 
+**Grok Build and Grok Bot** (xAI), as a stdio MCP server:
+
+```bash
+grok mcp add hermoso -- npx -y hermoso mcp
+```
+
+**Grok on grok.com** runs in a browser, so it takes the hosted connector: open grok.com/connectors, choose
+**New Connector → Custom**, paste `https://app.hermoso.ai/mcp` and sign in with your Hermoso account.
+
 **Cursor, OpenCode, GitHub Copilot, Windsurf and about 75 more agents**, through the open skills installer:
 
 ```bash
