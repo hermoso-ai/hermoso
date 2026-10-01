@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
-  "description": "Marketing on autopilot from your agent. 864 tools, usable alone. Publishing and ads cost no credits.",
-  "version": "0.1.366",
+  "description": "Marketing on autopilot from your agent. 868 tools, usable alone. Publishing and ads cost no credits.",
+  "version": "0.1.371",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.366",
+      "version": "0.1.371",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

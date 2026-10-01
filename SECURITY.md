@@ -12,5 +12,5 @@ Only the latest published release of the `hermoso` npm package and the current h
 
 ## Scope notes
 
-- Agent keys (`hmk_…`) are per-user secrets. Never commit them to a repository or paste them into a public issue. If a key is exposed, revoke it at app.hermoso.ai → Settings → Agents & API.
+- Agent keys (`hmk_…`) are per-user secrets. Never commit them to a repository or paste them into a public issue. If a key is exposed, revoke it in the app at app.hermoso.ai under MCP & CLI → Terminal & API keys.
 - This repository contains no credentials. The skills run the `hermoso` CLI, which reads the key stored by `hermoso auth login`.

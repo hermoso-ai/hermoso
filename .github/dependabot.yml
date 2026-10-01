@@ -1,9 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: "npm"
-    directory: "/"
-    schedule:
-      interval: "weekly"
+  # Only the Actions this mirror owns. package.json here is copied from the private source on every release,
+  # so an npm update PR merged on the mirror would be overwritten by the next sync.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

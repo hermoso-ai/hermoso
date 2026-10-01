@@ -5,7 +5,7 @@
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
 import { absolutizeAssetUrl, publicOrigin } from './public-url.mjs';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT, brandScope } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -748,6 +748,17 @@ const MANAGE_BRAND = {
   brand: z.string().optional().describe('WHICH BRAND the post lives in — id or exact name from list_brands (a shared workspace: its profile id). Needed when it was published in a brand this connection is not pinned to; applies to THIS CALL ONLY. A name that matches no brand, or two, is REFUSED and nothing is done.'),
 };
 const namedBrand = (a) => (a && typeof a.brand === 'string' && a.brand.trim() ? a.brand.trim() : '');
+// A BRAND NAMED ON A WORKSPACE-STORE TOOL (2026-09-30). `update_brand {brand:'pmuojpxnfrx0', voice}` reached the server
+// through call_tool, `brand` was stripped as undeclared, and the voice was written onto the connection's PINNED brand —
+// another brand's voice, overwritten silently. The store tools (brand profile, memory, skills, cast, playbooks,
+// swipefile) now take the same per-call brand as the publish tools, and `inBrand` runs the whole handler inside the
+// client's brandScope, so EVERY request it makes — resolving the store namespace, the read, the write, the tombstone —
+// carries `?brandId=` and lands in that brand. tools/brand-write-honoured-check.mjs runs every write tool that declares
+// a brand and fails when any request it makes goes out without it.
+const STORE_BRAND = {
+  brand: z.string().optional().describe('brand id/name from list_brands, this call only'),
+};
+const inBrand = (fn) => async (a, extra) => (namedBrand(a) ? brandScope.run({ brand: namedBrand(a) }, () => fn(a, extra)) : fn(a, extra));
 // POST body: the belt reads a string `brand` and deletes it before the route sees the body.
 const bodyBrand = (a, body = {}) => (namedBrand(a) ? { ...body, brand: namedBrand(a) } : body);
 // GET params: the query spelling is `brandId` only.
@@ -800,22 +811,45 @@ const UI_MIME = 'text/html+skybridge';
 // (adapters/blob/gcs.js -> storage.googleapis.com/<GEN_BUCKET>, adapters/blob/r2.js -> <bucket>.r2.dev). Those
 // defaults are what a config flip lands on, so they are covered too. The npm twin ships with none of this env
 // set, so the production origins ride as a static floor rather than vanishing off a stdio install.
-const WIDGET_MEDIA_FLOOR = ['https://app.hermoso.ai', 'https://assets.hermoso.ai', 'https://storage.googleapis.com', 'https://*.r2.dev'];
+// THE WIDGET CSP NAMES OUR OWN ORIGINS AND NOTHING ELSE (2026-09-30). OpenAI rejected the plugin: "a template where
+// a CSP is either missing or too broad". Their rule (developers.openai.com/apps-sdk/build/chatgpt-ui, CSP section)
+// is "declare the exact domains the component connects to or loads resources from", and the plugin guidelines add
+// that "separate tenants on a shared hosting service count as different domains". The old list named
+// `https://*.r2.dev` and bare `https://storage.googleapis.com`: a wildcard over every R2 bucket on the internet and
+// a host every Google Cloud customer serves from. Both are gone. Production assets are on assets.hermoso.ai (the R2
+// public base) and app.hermoso.ai (/generated, /api/img, /api/video/poster), so those two are the floor; an env base
+// is added only when it is a dedicated https origin, never a shared-hosting host or a loopback. The ad card routes
+// any picture that is NOT on these origins through app.hermoso.ai/api/img (see ownSrc in AD_RESULT_HTML), so
+// narrowing the list cannot paint an empty frame. Pinned by tools/tool-annotations-check.mjs + apps-widget-delivery.
+const WIDGET_MEDIA_FLOOR = ['https://app.hermoso.ai', 'https://assets.hermoso.ai'];
+const SHARED_HOSTING_RE = /(^|\.)(storage\.googleapis\.com|googleusercontent\.com|r2\.dev|r2\.cloudflarestorage\.com|amazonaws\.com|cloudfront\.net|blob\.core\.windows\.net|run\.app|pages\.dev|workers\.dev|vercel\.app|netlify\.app)$/i;
 export const widgetMediaOrigins = (env = process.env, apiBase = API_BASE) => {
   const out = [];
   const add = (u) => {
-    if (!u) return;
-    let o = String(u).replace(/\/+$/, '');
-    if (!o.includes('*')) { try { o = new URL(o).origin; } catch { return; } }   // a wildcard host is not a parseable URL
-    if (o && !out.includes(o)) out.push(o);
+    let o; try { o = new URL(String(u || '')); } catch { return; }
+    if (o.protocol !== 'https:' || o.hostname.includes('*')) return;
+    if (/^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(o.hostname)) return;   // no remote iframe reaches a dev box
+    if (SHARED_HOSTING_RE.test(o.hostname)) return;                              // a shared host is everyone's, not ours
+    if (!out.includes(o.origin)) out.push(o.origin);
   };
   WIDGET_MEDIA_FLOOR.forEach(add);
-  add(env.GEN_PUBLIC_BASE); add(env.GEN_BUCKET && 'https://storage.googleapis.com/' + env.GEN_BUCKET);
-  add(env.R2_PUBLIC_BASE); add(env.R2_BUCKET && 'https://' + env.R2_BUCKET + '.r2.dev');
-  add(env.APP_URL); add(env.PUBLIC_BASE); add(apiBase);
+  add(env.GEN_PUBLIC_BASE); add(env.R2_PUBLIC_BASE); add(env.APP_URL); add(env.PUBLIC_BASE); add(apiBase);
   return out;
 };
-const WIDGET_CSP = { connect_domains: [], resource_domains: widgetMediaOrigins() };
+// The dedicated sandbox origin ChatGPT hosts our components on. OpenAI's reference: `_meta.ui.domain` is "required
+// when submitting a plugin with UI; must be unique per plugin". It is the MCP server's own origin.
+export const WIDGET_DOMAIN = 'https://app.hermoso.ai';
+// Every resource carries the CSP in BOTH shapes: the standard `_meta.ui.csp` (camelCase, "preferred") and the legacy
+// `openai/widgetCSP` (snake_case), which alone carries `redirect_domains` — the ad card's Download goes through
+// window.openai.openExternal to an asset URL on these same origins. No widget fetches anything (connectDomains is
+// empty: polling is window.openai.callTool, not a network request) and none embeds a frame.
+export const widgetResourceMeta = (description, origins = widgetMediaOrigins()) => ({
+  ui: { prefersBorder: true, domain: WIDGET_DOMAIN, csp: { connectDomains: [], resourceDomains: [...origins] } },
+  'openai/widgetDescription': description,
+  'openai/widgetPrefersBorder': true,
+  'openai/widgetDomain': WIDGET_DOMAIN,
+  'openai/widgetCSP': { connect_domains: [], resource_domains: [...origins], redirect_domains: [...origins] },
+});
 const openaiMeta = (template, invoking, invoked) => ({ 'openai/outputTemplate': template, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked }); // status strings ≤64 chars
 
 // String.raw so regex backslashes inside the inline widget JS survive the template literal (no ${} used).
@@ -910,6 +944,12 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
   // Reserve the right box BEFORE the media loads, so the card does not jump. Only when both dimensions were
   // actually probed: a guessed aspect is worse than none, because it would letterbox correctly-shaped media.
   function arAttr(v) { return v.w > 0 && v.h > 0 ? ' data-ar style="--ar:' + v.w + '/' + v.h + '"' : ''; }
+  // THE CSP NAMES ONLY OUR OWN ORIGINS (see widgetResourceMeta), so a picture anywhere else -- an older render kept
+  // on a shared bucket, a reference someone pasted -- is fetched through our own image proxy instead of painting an
+  // empty frame, and a video off our origins (the proxy carries pictures only) becomes a link to open it.
+  var OWN_HOST_RE = /(^|\.)hermoso\.ai$/i;
+  function isOwn(u) { var m = /^https:\/\/([^\/?#:]+)/i.exec(String(u || '')); return !!(m && OWN_HOST_RE.test(m[1])); }
+  function ownSrc(u) { return !u ? '' : isOwn(u) ? u : 'https://app.hermoso.ai/api/img?url=' + encodeURIComponent(u); }
   function looksVideo(u) { return /\.(mp4|webm|mov|m4v)([?#]|$)/i.test(String(u || '')); }
   function urlOf(x) { return typeof x === 'string' ? x : ((x && (x.image || x.url || x.src)) || ''); }
   function picks(out, raw) {
@@ -1133,9 +1173,10 @@ const AD_RESULT_HTML = String.raw`<div id="root"></div>
       : (dlUrl ? '<a class="dl" href="' + esc(dlUrl) + '" download target="_blank" rel="noopener">Download</a>' : '');
     var footer = '<div class="meta">' + pills + '<span class="spacer"></span>' + dl + '<span class="wordmark">Hermoso</span></div>';
     var body;
-    if (v.slides) body = '<div class="grid">' + v.slides.map(function (u) { return '<img src="' + esc(u) + '" alt="rendered image" loading="lazy">'; }).join('') + '</div>';
-    else if (v.video) body = '<div class="media"' + arAttr(v) + '><video controls muted autoplay loop playsinline preload="metadata"' + (v.poster ? ' poster="' + esc(v.poster) + '"' : '') + ' src="' + esc(v.video) + '"></video></div>';
-    else if (v.image) body = '<div class="media"' + arAttr(v) + '><img src="' + esc(v.image) + '" alt="generated ad"></div>';
+    if (v.slides) body = '<div class="grid">' + v.slides.map(function (u) { return '<img src="' + esc(ownSrc(u)) + '" alt="rendered image" loading="lazy">'; }).join('') + '</div>';
+    else if (v.video && !isOwn(v.video)) body = '<div class="media"' + arAttr(v) + '>' + (v.poster ? '<img src="' + esc(ownSrc(v.poster)) + '" alt="video poster">' : '') + '</div><div class="empty"><a href="' + esc(v.video) + '" target="_blank" rel="noopener">Open the video</a></div>';
+    else if (v.video) body = '<div class="media"' + arAttr(v) + '><video controls muted autoplay loop playsinline preload="metadata"' + (v.poster ? ' poster="' + esc(ownSrc(v.poster)) + '"' : '') + ' src="' + esc(v.video) + '"></video></div>';
+    else if (v.image) body = '<div class="media"' + arAttr(v) + '><img src="' + esc(ownSrc(v.image)) + '" alt="generated ad"></div>';
     else if (v.notFound) body = '<div class="empty bad">' + (v.jobId ? 'Job ' + esc(v.jobId) + ' does not exist' : 'That job does not exist') + '. Nothing is rendering under that id — ask me to list your recent renders.</div>';
     // Testing v.status too matters: a failed job whose message field is empty fell through EVERY branch,
     // so body stayed undefined, the card wrote innerHTML='' and reported zero height — a failure rendered as
@@ -1539,9 +1580,9 @@ const AD_SPY_MAX_CARDS = 24;
 // FUTURE narrowing of widgetMediaOrigins: today every candidate is one of the values that list is built FROM, so
 // no environment can reach it. Buried inside the env reader it was untestable, i.e. a comment in the costume of a
 // guard; split out, the check hands it a candidate the list does not contain and watches it refuse. The candidates
-// are a SEPARATE list from the allowlist on purpose -- the allowlist also holds blob hosts (storage.googleapis.com,
-// *.r2.dev) which serve assets and do NOT run /api/img, so iterating it blindly would hand the card a proxy origin
-// with no proxy on it.
+// are a SEPARATE list from the allowlist on purpose -- the allowlist also holds the asset host (assets.hermoso.ai),
+// which serves files and does NOT run /api/img, so iterating it blindly would hand the card a proxy origin with no
+// proxy on it.
 export const proxyBaseFrom = (candidates, allowed) => {
   for (const cand of candidates) {
     let u; try { u = new URL(String(cand || '')); } catch { continue; }
@@ -1650,12 +1691,12 @@ const AD_SPY_URI = widgetAlias('ad-spy', AD_SPY_HTML);
 
 function registerAppResources(server) {
   const reg = (name, uri, description, html) => {
-    const meta = { 'openai/widgetDescription': description, 'openai/widgetPrefersBorder': true, 'openai/widgetCSP': WIDGET_CSP };
+    const meta = widgetResourceMeta(description);
     server.registerResource(name, uri, { description, mimeType: UI_MIME, _meta: meta },
       async () => ({ contents: [{ uri, mimeType: UI_MIME, text: html, _meta: meta }] }));
   };
   const regAnyHash = (name, slug, description, html) => {
-    const meta = { 'openai/widgetDescription': description, 'openai/widgetPrefersBorder': true, 'openai/widgetCSP': WIDGET_CSP };
+    const meta = widgetResourceMeta(description);
     server.registerResource(name, new ResourceTemplate('ui://widget/' + slug + '-{hash}.html', { list: undefined }),
       { description, mimeType: UI_MIME, _meta: meta },
       async (uri) => ({ contents: [{ uri: String(uri), mimeType: UI_MIME, text: html, _meta: meta }] }));
@@ -2263,6 +2304,34 @@ export const withStaleNote = (out, ctx) => {
   if (last) last.text = `${last.text}\n\n${STALE_ROSTER_NOTE}`; else out.content.push({ type: 'text', text: STALE_ROSTER_NOTE });
   return out;
 };
+// ── AN UNDECLARED ARGUMENT IS REFUSED, NEVER STRIPPED (2026-09-30) ──────────────────────────────────────────────
+// Measured on the hosted connector: `call_tool {name:'update_brand', args:{brand:'pmuojpxnfrx0', voice:…}}` — update_brand
+// did not declare `brand`, zod's default object STRIPS unknown keys, so the call validated, `brand` vanished, and the
+// voice was written onto the connection's pinned brand: somebody else's. call_tool's own description promises "a
+// mistake is answered with the expected parameters, not a silent default", and a dropped key is exactly a silent
+// default. So every executor WE own (call_tool, a held tool called directly, a legacy name) refuses a key the tool does
+// not declare and names the ones it does. A schema that is deliberately loose (a catchall other than never) is left
+// alone: accepting extra keys is that tool's contract. A host's normal tools/call is untouched — the advertised schema
+// already says additionalProperties:false there.
+export const undeclaredArgs = (h, input) => {
+  if (!h || !input || typeof input !== 'object' || Array.isArray(input)) return [];
+  const keys = Object.keys(input);
+  if (!keys.length) return [];
+  const s = h.inputSchema;
+  if (!s) return keys; // the tool takes no arguments at all
+  const shape = typeof s.safeParse === 'function' ? s.shape : null;
+  if (!shape || typeof shape !== 'object') return [];
+  const cat = s._def && s._def.catchall;
+  const catType = cat && cat._def ? String(cat._def.type || cat._def.typeName || '') : '';
+  if (catType && !/never/i.test(catType)) return [];
+  return keys.filter((k) => !Object.prototype.hasOwnProperty.call(shape, k));
+};
+export const undeclaredArgsText = (name, extra, h) => {
+  const shape = h && h.inputSchema && h.inputSchema.shape;
+  const takes = shape && typeof shape === 'object' ? Object.keys(shape) : [];
+  const brandNote = extra.includes('brand') ? ` ${name} acts on the brand this connection is on — pin another with use_brand first, then call it again.` : '';
+  return `${name} does not take ${extra.map((k) => `\`${k}\``).join(', ')}, so nothing was run: an argument a tool does not declare would be silently ignored.${brandNote} It takes: ${takes.length ? takes.join(', ') : '(no arguments)'}.`;
+};
 export async function legacyToolAnswer(name, request, extra, ctx) {
   const spec = LEGACY_TOOL_NAMES[name];
   reportDeadEnd('stale_roster', name, `${name} no longer exists — the host's tool list is an older published snapshot`);
@@ -2276,6 +2345,7 @@ export async function legacyToolAnswer(name, request, extra, ctx) {
   const fn = h && (h.handler || h.callback);
   if (typeof fn !== 'function') return withStaleNote({ content: [{ type: 'text', text: `${name} was renamed to ${spec.to}, which is not part of this session's roster.` }], isError: true }, ctx);
   let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
+  { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return withStaleNote({ content: [{ type: 'text', text: undeclaredArgsText(spec.to, extraKeys, h) }], isError: true }, ctx); }
   if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
     const parsed = h.inputSchema.safeParse(input);
     if (!parsed.success) {
@@ -2390,6 +2460,17 @@ const SEND_OUTPUT_SCHEMA = false;
 
 // Identity-preserving when there is nothing to strip, which is what keeps the cached canon a single shared
 // object rather than a fresh copy per session.
+// EVERY HINT IS AN EXPLICIT BOOLEAN ON EVERY TOOL (2026-09-30, OpenAI rejected the plugin for annotations that were
+// "not explicitly set to true or false (not null) for every tool"). 546 defs carried no idempotentHint. A read
+// repeats with no extra effect, so it is idempotent; a write is NOT unless its own def says so, because a second
+// render, post or report is a second one. Filled IN PLACE so the shared canon stays one object per tool.
+// tools/tool-annotations-check.mjs pins the whole roster and the reviewed ChatGPT table.
+export function explicitHints(def) {
+  const a = def && def.annotations;
+  if (a && typeof a.idempotentHint !== 'boolean') a.idempotentHint = a.readOnlyHint === true;
+  return def;
+}
+
 export function stripOutputSchema(def) {
   if (SEND_OUTPUT_SCHEMA || !def || !def.outputSchema) return def;
   const { outputSchema: _dropSchema, ...rest } = def;
@@ -2397,6 +2478,7 @@ export function stripOutputSchema(def) {
 }
 
 export function defForHost(name, def, widgetHost) {
+  explicitHints(def);
   const out = widgetHost ? renamedForWidgetHost(stripOutputSchema(def)) : stripOutputSchema(def);
   if (!widgetHost || !out || !WIDGET_WITHHELD_TOOLS.has(name)) return out;
   const meta = out._meta;
@@ -2638,6 +2720,7 @@ export function installHeldToolCalls(mcp, ctx) {
         const fn = h.handler || h.callback;
         if (typeof fn === 'function') {
           let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
+          { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return { content: [{ type: 'text', text: undeclaredArgsText(name, extraKeys, h) }], isError: true }; }
           if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
             const parsed = h.inputSchema.safeParse(input);
             if (!parsed.success) {
@@ -3370,7 +3453,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         .map(([name, { grp, h }]) => `• ${name} [${grp}, not in the ${g} group] — ${String(h.description || '').replace(/\s+/g, ' ').slice(0, 200)}`);
       if (off.length) return ok(`Nothing in the ${g} group matches, but these tools do — they live in another group (enable that group with enable_tools, then call the tool by name):\n${off.join('\n')}`, { query: q, group: g, offGroup: off.length });
     }
-    if (!related) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
+    // A query with no word of two or more characters ("a", "?") is a probe, not an ask the catalog failed to answer,
+    // so it answers "nothing found" without landing on the defect board.
+    if (!related && /[a-z0-9]{2}/i.test(String(q || ''))) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
     for (const r of top) r.params = compactParams(ctx.handleOf[r.name]);
     const lines = top.map((r) => `• ${r.name} [${r.group}${g && r.group !== g ? `, outside the ${g} group` : ''}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] —${r.description}\n    cost: ${r.cost.label} · health: ${healthLabel(r.health)}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
     const looser = top.length > total ? top.length - total : 0;
@@ -3452,6 +3537,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // only by a host still holding call_tool from an older scan; a tool this session does not list is refused by name.
     if (ctx.widgetHost && h.enabled === false) return { content: [{ type: 'text', text: `${n} is not in your Hermoso tool list on this host, so call_tool will not run it. Use the tools in your list.` }], isError: true };
     let input = args && typeof args === 'object' ? args : {};
+    const extraKeys = undeclaredArgs(h, input);
+    if (extraKeys.length) {
+      const params = Object.entries(compactParams(h)).map(([k, v]) => `${k}: ${v}`).join(' | ');
+      return { content: [{ type: 'text', text: `${undeclaredArgsText(n, extraKeys, h)}${params ? ` Expected params: ${params}` : ''}` }], isError: true };
+    }
     if (h.inputSchema) {
       const parsed = h.inputSchema.safeParse(input);
       if (!parsed.success) {
@@ -3516,7 +3606,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. Bluesky has no cover setting and shows the video\u2019s FIRST frame, so by default Hermoso checks it and, only when that frame is blank (a template ad\u2019s empty opening card), sends Bluesky a copy with the first frame replaced by the video\u2019s best frame. Your Library file is never changed. true = send the file exactly as it is.'),
     },
     outputSchema: { url: z.string().optional(), uri: z.string().optional(), handle: z.string().optional(), note: z.string() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await apiPost('/api/bluesky/post', a);
     return ok(r.note || `Posted to Bluesky — ${r.url || ''}`, r);
@@ -3578,7 +3668,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       coverAtMs: z.number().optional().describe('THE VIDEO COVER in the chat, as ONE frame: milliseconds from the start (7000 = the frame at 7s). Sent as Telegram’s cover image; beats platformCover.'),
     },
     outputSchema: { ok: z.boolean().optional(), chatId: z.string().optional(), chatTitle: z.string().optional(), messageId: z.number().optional(), url: z.string().nullable().optional(), album: z.boolean().optional(), slides: z.number().optional(), video: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await apiPost('/api/telegram/post', a);
     return ok(r.note || `Posted to Telegram${r.url ? ` — ${r.url}` : ''}`, r);
@@ -4088,6 +4178,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         `• ${w.name || 'Shared workspace'}${w.ownerName ? ` — ${w.ownerName}` : ''} (${w.role || 'member'})\n    use_brand "${w.name || w.profileUuid}"  ← switch this connection into it\n    profile ${w.profileUuid} · owner ${w.ownerAccountId}`).join('\n')
         + `\n\nSwitch into one with use_brand, exactly like a brand of your own — it stays pinned on this connection until you switch again, and its connected accounts, Library and memory are what every tool then sees.${isRemote() ? '' : ` (Or pin it before startup with ${ENV_PREFIX}_OWNER + ${ENV_PREFIX}_PROFILE set to the two values above — use the profile id exactly as printed, a brand's short slug is refused.)`}`
       : '';
+    // ZERO BRANDS IS A REAL STATE (2026-10-01): the owner may delete their last brand. Say so, and say how to make one,
+    // rather than printing an empty list under a heading that implies there should be something in it.
+    if (!(d.brands || []).length) return ok(`This account has no brands yet (the last one was deleted, or none was ever made). create_brand makes one, and draft_brand fills it in from a website, a description or a social handle.${sharedTxt}`, { ...d, sharedWorkspaces: shared });
     return ok(`Brands on this account:\n${lines}\n\nSwitch with use_brand.${sharedTxt}`, { ...d, sharedWorkspaces: shared });
   }));
 
@@ -4139,6 +4232,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     }
     const own = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})`).join('\n');
     const shr = shared.map(w => `• ${w.name || 'Shared workspace'}${w.ownerName ? ` — ${w.ownerName}` : ''} (id: ${w.profileUuid}, shared with you)`).join('\n');
+    if (!own && !shr) return { content: [{ type: 'text', text: `No brand matching "${brand}": this account has no brands yet. create_brand makes one.` }], isError: true }; // zero brands is a real state (2026-10-01)
     return { content: [{ type: 'text', text: `No brand matching "${brand}". Available:\n${own}${shr ? `\n${shr}` : ''}` }], isError: true };
   });
   server.registerTool('use_brand', {
@@ -4227,7 +4321,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (a.confirmConnectors != null) q.set('confirmConnectors', String(a.confirmConnectors));
     const d = await apiDelete(`/api/brands/${encodeURIComponent(hit.id)}?${q}`);
     const dis = d.connectorsDisconnected || [];
-    return ok(`Deleted “${hit.name}” and everything in it.${dis.length ? ` Disconnected: ${dis.join(', ')}. Those connections can be restored for ${d.connectorsRecoverableForDays || 30} days from Settings ▸ Connectors; after that they are gone.` : ''}`, d);
+    const nq = +d.scheduledPostsCancelled || 0; // its queued posts go with it (2026-10-01)
+    return ok(`Deleted “${hit.name}” and everything in it.${dis.length ? ` Disconnected: ${dis.join(', ')}. Those connections can be restored for ${d.connectorsRecoverableForDays || 30} days from Settings ▸ Connectors; after that they are gone.` : ''}${nq ? ` Cancelled ${nq} scheduled post${nq === 1 ? '' : 's'} that had not published yet.` : ''}${d.brandsLeft === 0 ? ' That was the last brand on this account: create_brand makes a new one.' : ''}`, d);
   }));
 
 
@@ -5016,7 +5111,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('post_to_meta', {
     title: 'Post to Facebook, Instagram or Threads',
     description: 'Publish to a connected Facebook Page, its linked Instagram, OR the brand’s Threads account — text/link/image/VIDEO/CAROUSEL. A MULTI-SLIDE creative is a CAROUSEL, not several posts: pass the slides in order as imageUrls[] and they publish as ONE swipeable post (Instagram album, Threads carousel, Facebook multi-photo post). Never publish slide 1 of a deck on its own — the creative tells the viewer to swipe. target:"facebook" (default) posts to the Page; target:"instagram" publishes a photo or Reel to the linked IG business account (needs an image or video); target:"threads" posts to the connected Threads account (text, image, or video). Works with ANY media — a finished Hermoso ad OR an arbitrary user file: imageUrl/videoUrl accept a public https URL, a data: URI, or a Hermoso /generated path; for a LOCAL file (e.g. on the user’s desktop) call upload_file first and pass the url it returns. INSTAGRAM COLLAB: pass `collaborators` (up to 3 usernames) to invite other accounts to CO-AUTHOR the post — it then shows on their profile too once they accept, which is the reach play behind every creator partnership. This PUBLISHES immediately — confirm the copy + media with the user first. Needs a connected Meta account (Settings > Connectors > Meta) with posting permission; Threads needs its own connection.',
-    inputSchema: {
+    // LOOSE ON PURPOSE (2026-09-30): an argument this schema does not declare is FORWARDED, not stripped, so a caption
+    // sent as `caption` or a picture as `image_url` reaches the server and is refused BY NAME with the right field
+    // (metaPostAliasRefusal). Stripped, it vanished and the call read as empty: five identical refusals in 35 minutes.
+    inputSchema: z.object({
       ...HOOK_ATTR,
       message: z.string().optional().describe('post text / caption'),
       imageUrl: z.string().optional().describe('public https URL, a data: URI, or a Hermoso /generated path (upload_file gives you one for a local file)'),
@@ -5076,9 +5174,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       crossreshareToIg: z.boolean().optional().describe('THREADS ONLY — ALSO share this Threads post to the linked Instagram account AS A STORY (not a feed post), in the same publish. NOT available on a Threads CAROUSEL, which is refused by name rather than silently dropped. THERE IS NO CONFIRMATION: Threads returns no field saying whether the Story was created, so report it as REQUESTED and tell the user to check their Instagram Stories — never that it is live.'),
       crossreshareDarkMode: z.boolean().optional().describe('THREADS ONLY — render that Instagram Story in dark mode. Only meaningful alongside crossreshareToIg; on its own it is refused rather than silently ignored, because a parameter that never reaches the wire must not look accepted.'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (Instagram Reel: thumb_offset; Facebook video/Reel: an uploaded cover image) \u2014 and on Threads, which has no cover setting, a blank first frame is replaced on a copy sent to Threads only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
-    },
+    }).loose(),
     outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), url: z.string().optional(), target: z.string().optional(), page: z.string().optional(), account: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/meta/post', a);
     if (d?.queued) return ok(`${d.note} Nothing is live yet — poll get_job("${d.jobId}") and report the post id and url it returns.`, d);
@@ -5204,7 +5302,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       brandedContentSponsorIds: z.array(z.string()).optional().describe('INSTAGRAM — the numeric Instagram USER IDS of the brands behind that label (at most 2, and ids rather than @handles). Naming sponsors IS asking for the label, so setting these with `paidPartnership:false` is refused instead of publishing brand credits with no disclosure.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE']).optional().describe('INSTAGRAM TRIAL REEL \u2014 publish this Reel to NON-FOLLOWERS ONLY at first (Instagram allows trials only on accounts above its follower threshold — about 1,000 followers; an ineligible account is refused by name and nothing is posted), so a hook can be tested on a cold audience without spending it on the people who already follow the brand; Instagram shows it to followers only if it graduates. MANUAL = the creator graduates it by hand in the Instagram app; SS_PERFORMANCE = Instagram graduates it automatically if it performs. REELS ONLY and INSTAGRAM ONLY: an image, a carousel, or a Facebook/Threads channel is REFUSED BY NAME rather than quietly published as an ordinary post \u2014 a trial that silently goes to every follower is the exact opposite of what was asked for, so Instagram must be one of the `channels` and the item must carry a video. Omit it for a normal Reel.'),
       story: z.boolean().optional().describe('INSTAGRAM STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. A Story carries NO CAPTION (there is nowhere to show one), no collaborators, no product tags and no trialReel \u2014 passing any of those is refused by name and nothing is posted, because a story that silently drops the words is worse than one that never went. INSTAGRAM ONLY: a Facebook Page story is a different upload and is not built, so a Facebook channel with `story` set is refused rather than published to the feed.'),
-      aiGenerated: z.boolean().optional().describe('INSTAGRAM / FACEBOOK REEL \u2014 Meta\u2019s is_ai_generated self-disclosure. OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, media that came through upload_file or from an external URL (the user\u2019s own photographs or footage) is NOT \u2014 a real photo must never carry Instagram\u2019s \u201cAI info\u201d label. Pass true or false only to override: false strips the label from something Hermoso would otherwise declare, true declares a render the user uploaded themselves.'),
+      aiGenerated: z.boolean().optional().describe('AI-CONTENT DISCLOSURE (Instagram / Facebook Reel is_ai_generated, TikTok is_aigc, YouTube containsSyntheticMedia). OMIT IT and Hermoso decides from provenance: a Hermoso render is declared AI-generated, media that came through upload_file or from an external URL (the user\u2019s own photos or footage) is NOT. Pass true or false only to override.'),
       // ── WHICH ACCOUNT (server-side SCHED_ID_FIELDS). Every one of these is an answer the publish helper REFUSES
       // to guess, so a schedule that cannot carry it can only fail at fire time with nobody watching.
       boardId: z.string().optional().describe('PINTEREST — REQUIRED whenever pinterest is a channel: the board the Pin goes on, from list_pinterest_boards. The user picks it; a Pin on the wrong board is a public mistake. Scheduling pinterest without one is refused immediately.'),
@@ -5218,7 +5316,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover on every channel that allows one (Instagram, Facebook, TikTok direct posts, LinkedIn Pages, Pinterest, Telegram, YouTube) \u2014 and on X, Threads and Bluesky, which have none, a blank first frame is replaced on a copy sent there only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
     outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), label: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/schedule', a);
     return ok(`Scheduled for ${d.at} → ${(d.channels || []).join(', ')}. It is NOT posted yet; Hermoso publishes it at that time (id ${d.id}).${a.visibility && a.visibility !== 'public' ? ` Visibility: ${a.visibility} (as asked) — it will NOT be publicly live.` : ' It will go LIVE publicly.'}${d.note ? ` ${d.note}` : ''}`, d);
@@ -5237,7 +5335,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       scheduled: z.array(z.object({ id: z.string().optional(), at: z.string().nullable().optional(), channels: z.array(z.string()).optional(), message: z.string().optional(), status: z.string().optional() })).optional(),
       history: z.array(z.object({ id: z.string().optional(), at: z.string().nullable().optional(), channels: z.array(z.string()).optional(), status: z.string().optional(), results: z.array(z.object({ channel: z.string().optional(), ok: z.boolean().optional(), id: z.string().nullable().optional(), url: z.string().nullable().optional(), error: z.string().optional() })).nullable().optional(), error: z.string().nullable().optional() })).optional(),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ id, channel, upcoming, fired, brand } = {}) => {
     const d = await apiGet('/api/schedule', brand ? { brandId: brand } : {});
     // ONE POST IN FULL (2026-09-13). The compact list below shortens captions, and reschedule_post's `captions`
@@ -5372,7 +5470,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       linkPicture: z.string().optional().describe('FACEBOOK — replaces the link preview image url; an empty string removes the override.'),
       audience: z.object({ countries: z.array(z.string()).optional(), regions: z.array(z.string()).optional(), cities: z.array(z.string()).optional(), minAge: z.number().optional() }).optional().describe('FACEBOOK — replaces who can see the Page post {countries, regions, cities, minAge}; {} removes the limit.'),
       targetAudience: z.object({ geoLocations: z.array(z.string()).optional(), industries: z.array(z.string()).optional(), seniorities: z.array(z.string()).optional(), jobFunctions: z.array(z.string()).optional(), staffCountRanges: z.array(z.string()).optional(), degrees: z.array(z.string()).optional(), fieldsOfStudy: z.array(z.string()).optional(), organizations: z.array(z.string()).optional() }).optional().describe('LINKEDIN COMPANY PAGE — replaces who sees the post; {} removes the limit. The matching audience must be over 300 followers.'),
-      aiGenerated: z.boolean().optional().describe('INSTAGRAM / FACEBOOK REEL \u2014 Meta\u2019s is_ai_generated self-disclosure. OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, media that came through upload_file or from an external URL (the user\u2019s own photographs or footage) is NOT \u2014 a real photo must never carry Instagram\u2019s \u201cAI info\u201d label. Pass true or false only to override: false strips the label from something Hermoso would otherwise declare, true declares a render the user uploaded themselves.'),
+      aiGenerated: z.boolean().optional().describe('AI-CONTENT DISCLOSURE (Instagram / Facebook Reel is_ai_generated, TikTok is_aigc, YouTube containsSyntheticMedia). OMIT IT and the value already on the post stays; a post that never had one is decided from provenance at publish: a Hermoso render is declared AI-generated, media that came through upload_file or from an external URL (the user\u2019s own photos or footage) is NOT. Pass true or false only to override.'),
       boardId: z.string().optional().describe('PINTEREST — move the Pin to a different board (list_pinterest_boards)'),
       chatId: z.string().optional().describe('TELEGRAM — send it to a different chat, group or channel (@username or numeric id). It can be changed but never cleared: telegram cannot publish without one.'),
       linkedinOrganizationId: z.string().optional().describe('LINKEDIN — target a different company Page, or "" to post as the connected person instead'),
@@ -5383,7 +5481,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover on every channel that allows one \u2014 and on X, Threads and Bluesky, which have none, a blank first frame is replaced on a copy sent there only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
     outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), visibility: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const { id, ...patch } = a;
     const d = await apiPatch(`/api/schedule/${encodeURIComponent(id)}`, patch);
@@ -5426,7 +5524,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       captions: z.record(z.string()).optional().describe('CORRECT ONE CHANNEL’S CAPTION on retry, e.g. { "x": "..." } when only that channel refused the text.'),
     },
     outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), retryOf: z.string().optional(), retrying: z.array(z.string()).optional(), alreadyPublished: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const { id, ...rest } = a;
     const d = await apiPost(`/api/schedule/${encodeURIComponent(id)}/retry`, rest);
@@ -5456,7 +5554,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       visibility: z.enum(['public', 'unlisted', 'private', 'draft']).optional(),
     },
     outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), duplicateOf: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const { id, ...rest } = a;
     const d = await apiPost(`/api/schedule/${encodeURIComponent(id)}/duplicate`, rest);
@@ -5501,7 +5599,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — which connected Page to publish from (list_meta_pages). Omit for the brand’s only Page.'),
     },
     outputSchema: { enabled: z.boolean().optional(), dryRun: z.boolean().optional(), running: z.boolean().optional(), daysAhead: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPut('/api/schedule/refill', a);
     return ok(d.enabled
@@ -5520,7 +5618,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       posts: z.array(z.any()).optional(), queued: z.array(z.any()).optional(), skippedSlots: z.array(z.any()).optional(),
       notes: z.array(z.string()).optional(), spend: z.any().optional(), perChannel: z.any().optional(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/schedule/refill/run', { dryRun: a.dryRun === false ? false : true, force: !!a.force });
     const lines = (d.posts || []).map((p, i) => `  ${i + 1}. ${p.at} → ${(p.channels || []).map(c => `${c}[${(p.visibilityByChannel || {})[c] || 'public'}]`).join(', ')}\n     ${String(p.message || '').replace(/\n+/g, ' / ').slice(0, 220)}\n     creative: ${p.kind} · ${p.asset?.model || 'Library render'} (${p.asset?.credits || 0} credits)`);
@@ -5546,7 +5644,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       visibility: z.enum(['PUBLIC', 'CONNECTIONS']).optional().describe('default PUBLIC'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/linkedin/post', a);
     if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
@@ -5582,7 +5680,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. X has no cover setting and shows the video\u2019s FIRST frame, so by default Hermoso checks it and, only when that frame is blank (a template ad\u2019s empty opening card), sends X a copy with the first frame replaced by the video\u2019s best frame. Your Library file is never changed. true = send the file exactly as it is.'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional(), thread: z.boolean().optional(), media: z.boolean().optional(), altText: z.boolean().optional(), poll: z.boolean().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), text: z.string().optional(), url: z.string().optional() })).optional(), quotedPostId: z.string().optional(), communityId: z.string().optional(), paidPartnership: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/post', a);
     const extra = d.media ? (d.altText ? ' with the render + alt text' : ' with the render attached (no alt text was written)') : d.poll ? ' with a poll' : '';
@@ -5601,7 +5699,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       publish: z.boolean().optional().describe('default true. Pass false to save it as a DRAFT in the account’s X Articles composer instead — nothing becomes public, the user can review and publish it from X, and it does not spend one of the five daily publishes.'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), draftId: z.string().optional(), draft: z.boolean().optional(), url: z.string().optional(), title: z.string().optional(), note: z.string().optional(), costCredits: z.number().optional(), stats: z.record(z.number()).optional(), budget: z.object({ limit: z.number().nullable().optional(), remaining: z.number().nullable().optional(), resetsAt: z.string().nullable().optional() }).optional(), article: z.object({ found: z.boolean().optional(), title: z.string().nullable().optional(), plainText: z.string().nullable().optional(), chars: z.number().nullable().optional(), links: z.array(z.string()).optional(), editable: z.boolean().optional(), note: z.string().optional() }).optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/article', a);
     if (d.draft) return ok(`Saved an X Article DRAFT — “${d.title}”. Nothing is public yet. ${d.note || ''}`.trim(), d);
@@ -5875,7 +5973,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (on Pinterest the frame rides as the cover image). true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().nullable().optional(), url: z.string().nullable().optional(), boardId: z.string().optional(), title: z.string().optional(), kind: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/pinterest/pin', a);
     if (d?.idempotentReplay) return ok(`${d.note} (Nothing was pinned a second time.)`, d);
@@ -6098,7 +6196,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       languageCode: z.string().optional().describe("BCP-47 language of the Post, default 'en'"),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().nullable().optional(), url: z.string().nullable().optional(), state: z.string().nullable().optional(), topicType: z.string().optional(), location: z.string().optional(), locationId: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-business/post', a);
     return ok(`Posted to the Google Business Profile for “${d.location}”${d.url ? ` — ${d.url}` : '.'}${d.state && d.state !== 'LIVE' ? ` Google reports state ${d.state}; it goes live once their review finishes.` : ''}`, d);
@@ -6265,7 +6363,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       coverAtMs: z.number().optional().describe('THE VIDEO COVER (the custom thumbnail), as ONE frame: milliseconds from the start (7000 = the frame at 7s). That frame is cut from the upload and set with thumbnails.set. thumbnailUrl wins; this beats platformCover.'),
     },
     outputSchema: { ok: z.boolean().optional(), videoId: z.string().optional(), url: z.string().optional(), privacy: z.string().optional(), requestedPrivacy: z.string().optional(), categoryId: z.string().optional(), categoryName: z.string().optional(), publishAt: z.string().optional(), scheduled: z.boolean().optional(), notifySubscribers: z.boolean().optional(), notifyNote: z.string().optional(), warning: z.string().optional(), scheduleWarning: z.string().optional(), thumbnailSet: z.boolean().optional(), thumbnailSource: z.string().nullable().optional(), thumbnailReadBack: z.string().nullable().optional(), thumbnailNote: z.string().optional(), title: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/upload', a);
     // `d.privacy`, `d.categoryId` and `d.publishAt` are all what YOUTUBE returned on the row, not what we asked — an
@@ -7126,12 +7224,30 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (TikTok video_cover_timestamp_ms, on a direct post \u2014 a draft takes no cover, you pick it in the TikTok app). true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
     outputSchema: { ok: z.boolean().optional(), publishId: z.string().optional(), status: z.string().optional(), destination: z.string().optional(), media: z.string().optional(), images: z.number().optional(), coverIndex: z.number().optional(), postId: z.string().nullable().optional(), url: z.string().nullable().optional(), account: z.string().nullable().optional(), pending: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok/post', a);
     const what = d.media === 'photo' ? (d.images > 1 ? `photo post (${d.images} slides)` : 'photo post') : 'video';
     if (d.destination === 'draft') return ok(`Sent the ${what} to TikTok${d.account ? ` on @${d.account}` : ''} — it's waiting in the TikTok app (inbox notification, or ＋ ▸ drafts) for the user to finish and post.${d.pending ? ' TikTok was still processing when polling stopped; it usually lands within a minute.' : ''}`, d);
     return ok(`Posted the ${what} to TikTok${d.account ? ` as @${d.account}` : ''}${d.url ? ` — ${d.url}` : ''}.${d.pending ? ' TikTok was still processing when polling stopped — it normally appears within a minute or two. Do not post it again.' : ''}`, d);
+  }));
+  // A publish TikTok was still PROCESSING when post_to_tiktok stopped polling came back `pending:true` with a publishId
+  // and the words "do not post it again", and nothing to follow it with: an agent asked call_tool for
+  // `tiktok_post_status` on 2026-10-01 and dead-ended. Same read as the web app's /api/tiktok/publish-status.
+  server.registerTool('tiktok_post_status', {
+    title: 'Check whether a TikTok post finished publishing',
+    description: 'Follow a TikTok post that post_to_tiktok sent but TikTok was still processing (it came back pending:true). Pass the publishId it returned. Answers one of three states: done (PUBLISH_COMPLETE, with the public postId when TikTok gives one), failed (with TikTok\u2019s reason), or still processing, which is normal for a few minutes and is NOT a failure. Never post the video again while it is processing. Free, read-only. Needs TikTok connected (Settings > Connectors > TikTok).',
+    inputSchema: {
+      publishId: z.string().describe('the publishId post_to_tiktok returned'),
+      account: z.string().optional().describe('which connected TikTok account the post went out on (@handle or id from list_connector_accounts) when the brand has more than one'),
+    },
+    outputSchema: { publishId: z.string().optional(), status: z.string().optional(), done: z.boolean().optional(), failed: z.boolean().optional(), postId: z.string().nullable().optional(), failReason: z.string().nullable().optional(), uploadedBytes: z.number().nullable().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/tiktok/publish-status', { publishId: a.publishId, ...(a.account ? { account: a.account } : {}) });
+    if (d.done) return ok(`TikTok finished publishing it${d.postId ? ` (post id ${d.postId})` : ''}.`, d);
+    if (d.failed) return ok(`TikTok did not publish it: ${d.failReason || 'no reason given'}.`, d);
+    return ok(`TikTok is still processing it (${d.status || 'no status yet'}). That is normal for a few minutes; check again shortly and do not post it again.`, d);
   }));
   server.group('channel_admin');
   server.registerTool('tiktok_account', {
@@ -7728,7 +7844,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('ads');
   server.registerTool('analyze_campaigns', {
     title: 'What to scale, pause, fix and test next',
-    description: 'ONE verdict across EVERY ad platform this workspace has connected. It pulls each platform\'s own report (Meta, Google Ads, ChatGPT Ads, TikTok, LinkedIn, Microsoft Advertising, Pinterest, Reddit, Snapchat, X, Apple Ads), normalises every campaign / ad set / ad into ONE table — spend, impressions, clicks, CTR, CPC, conversions, CPA, ROAS and frequency where the platform reports them — and answers with four lists: `scale`, `pause`, `fix` and `test_next`, plus `insufficient_data`. Each recommendation carries the row\'s OWN numbers as evidence, the reason, a concrete next action, and the EXACT Hermoso tool call that would apply it (for example set_meta_campaign_status with confirm) — which this tool never runs. FOUR REFUSALS TO REPEAT RATHER THAN PAPER OVER: (1) A ROW BELOW THE DATA FLOOR IS NEVER JUDGED — the minimums are stated in the reply, and an under-powered row lands in insufficient_data with what it lacks, never in "pause"; a row whose conversions are too few for a CPA verdict can still be read on CTR and CPC and says so. (2) A PLATFORM WHOSE READ FAILED IS NAMED AS UNREADABLE and its numbers are MISSING, never zero — never move budget on the strength of an absence. (3) A META AD SET IN THE LEARNING PHASE IS HELD BACK, because editing it restarts learning. (4) A CONVERSION COLUMN THE PLATFORM DOES NOT PUBLISH READS UNMEASURED, not zero (Reddit, Snapchat and X in this report). Conversion definitions differ per platform and travel with every row, and each platform\'s days are its own account\'s days, so a cross-platform CPA comparison must carry that caveat. Args: days (complete days ending yesterday, default 14, max 90), platforms (omit for every connected one), goal ("lowest CPA", "ROAS", "leads under $30"), level (campaign | ad_group | ad — a platform with no report at that tier is read at campaign level and says so). Reads only; spends no ad money and no scrape credits, and bills one model call over the table.',
+    description: 'ONE verdict across EVERY ad platform this workspace has connected. It pulls each platform\'s own report (Meta, Google Ads, ChatGPT Ads, TikTok, LinkedIn, Microsoft Advertising, Pinterest, Reddit, Snapchat, X, Apple Ads), normalises every campaign / ad set / ad into ONE table — spend, impressions, clicks, CTR, CPC, conversions, CPA, ROAS and frequency where the platform reports them — and answers with four lists: `scale`, `pause`, `fix` and `test_next`, plus `insufficient_data`. Each recommendation carries the row\'s OWN numbers as evidence, the reason, a concrete next action, and the EXACT Hermoso tool call that would apply it (for example set_meta_campaign_status with confirm) — which this tool never runs. FOUR REFUSALS TO REPEAT RATHER THAN PAPER OVER: (1) A ROW BELOW THE DATA FLOOR IS NEVER JUDGED — the minimums are stated in the reply, and an under-powered row lands in insufficient_data with what it lacks, never in "pause"; a row whose conversions are too few for a CPA verdict can still be read on CTR and CPC and says so. (2) A PLATFORM WHOSE READ FAILED IS NAMED AS UNREADABLE and its numbers are MISSING, never zero — never move budget on the strength of an absence. (3) A META AD SET IN THE LEARNING PHASE IS HELD BACK, because editing it restarts learning. (4) A CONVERSION COLUMN THE PLATFORM DOES NOT PUBLISH READS UNMEASURED, not zero (Reddit, Snapchat and X in this report). Conversion definitions differ per platform and travel with every row, and each platform\'s days are its own account\'s days, so a cross-platform CPA comparison must carry that caveat. Args: days (complete days ending yesterday, default 14, max 90), platforms (omit for every connected one), goal ("lowest CPA", "ROAS", "leads under $30"), level (campaign | ad_group | ad — a platform with no report at that tier is read at campaign level and says so). Changes nothing in any ad account and spends no ad money; it bills one model call over the table.',
     inputSchema: {
       days: z.number().optional().describe('how many complete days back, ending yesterday (default 14, max 90)'),
       platforms: z.array(z.string()).optional().describe('meta, google_ads, openai_ads, tiktok_ads, linkedin, microsoft_ads, pinterest_ads, reddit_ads, snapchat_ads, x_ads, apple_ads — omit for every connected ad platform'),
@@ -7744,7 +7860,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       analysis: z.any().optional().describe('{summary, scale[], pause[], fix[], test_next[], insufficient_data[], moved[], dropped[]} — each recommendation with evidence, reason, next_action and the apply call'),
       text: z.string().optional(), note: z.string().optional(), notes: z.array(z.string()).optional(),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/ads/analyze', a);
     if (!d.analysis) return ok(d.note || 'Nothing delivered in that window.', d);
@@ -8196,7 +8312,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       alt: z.string().optional().describe('alt text for accessibility and SEO; defaults to a generic credit'),
     },
     outputSchema: { shop: z.string().optional(), ok: z.boolean().optional(), productId: z.string().optional(), productUrl: z.string().optional(), media: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/shopify/publish-to-product', { productId: a.productId, imageUrl: a.imageUrl, alt: a.alt });
     const st = d.media?.status || 'UNKNOWN';
@@ -11058,7 +11174,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   });
   server.registerTool('list_openai_ads_campaigns', {
     title: 'List ChatGPT Ads account / campaigns / ad groups / ads',
-    description: 'Read the brand’s connected ChatGPT Ads account — the ads that appear below ChatGPT answers. Every campaign, ad group and ad row carries servingIssues, OpenAI’s own list of what is blocking delivery (payment method, brand review, budget spent, ad in review, landing page not crawlable, country policy…) with a plain meaning each: null means OpenAI was not asked, [] means it reports no blocker, which is still not a promise of impressions. Call with NO ids to get the ad account itself (name, currency, status, review state) plus its campaigns; with campaignId to list that campaign’s ad groups; with adGroupId to list that ad group’s ads, including each ad’s REVIEW status, which is what decides whether it can ever show. Statuses here are active / paused / archived. Read-only, free, zero spend risk. Needs ChatGPT Ads connected (Settings > Connectors > ChatGPT Ads, or connect_connector): the user pastes an Advertiser API key from ChatGPT Ads Manager > Settings — there is no OAuth and no manager account, and one key is scoped to one ad account.',
+    description: 'Read the brand’s connected ChatGPT Ads account — the ads that appear below ChatGPT answers. Every campaign, ad group and ad row carries servingIssues, OpenAI’s own list of what is blocking delivery (payment method, brand review, budget spent, ad in review, landing page not crawlable, country policy…) with a plain meaning each: null means OpenAI was not asked, [] means it reports no blocker, which is still not a promise of impressions. Call with NO ids to get the ad account itself (its three names: brandName shown in ads, accountName internal to Ads Manager, legalName; currency, status, brand review and business review state) plus its campaigns; with campaignId to list that campaign’s ad groups; with adGroupId to list that ad group’s ads, including each ad’s REVIEW status, which is what decides whether it can ever show. Statuses here are active / paused / archived. Read-only, free, zero spend risk. Needs ChatGPT Ads connected (Settings > Connectors > ChatGPT Ads, or connect_connector): the user pastes an Advertiser API key from ChatGPT Ads Manager > Settings — there is no OAuth and no manager account, and one key is scoped to one ad account.',
     inputSchema: {
       campaignId: z.string().optional().describe('list this campaign’s ad groups'),
       adGroupId: z.string().optional().describe('list this ad group’s ads'),
@@ -11069,15 +11185,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/campaigns', a);
-    const blk = (x) => (x.servingIssues && x.servingIssues.length ? ` ⚠ not serving: ${x.servingIssues.map(i => i.meaning).join('; ')}` : '');
+    const blk = (x) => `${x.servingIssues && x.servingIssues.length ? ` ⚠ not serving: ${x.servingIssues.map(i => i.meaning).join('; ')}` : ''}${x.phoneVerificationRequired ? ' ⚠ the advertiser must verify a phone number in Ads Manager before this can serve' : ''}`;
     if (d.level === 'ad') return ok(`${d.count} ad(s) in ChatGPT Ads ad group ${d.adGroupId}:\n${(d.ads || []).map(x => `• ${x.title || x.name} (${x.id}) — ${x.status}, review ${x.reviewStatus || 'unknown'}${x.appeal ? `, appeal ${x.appeal.status}` : ''}${x.targetUrl ? ` → ${x.targetUrl}` : ''}${blk(x)}`).join('\n') || '(none)'}`, d);
     if (d.level === 'adGroup') return ok(`${d.count} ad group(s) in ChatGPT Ads campaign ${d.campaignId}:\n${(d.adGroups || []).map(g => `• ${g.name} (${g.id}) — ${g.status}, ${g.contextHints} context hint(s)${g.maxBid != null ? `, max bid ${g.maxBid}` : ''}${(g.audienceBidMultipliers || []).length ? `, ${g.audienceBidMultipliers.length} audience bid multiplier(s)` : ''}${blk(g)}`).join('\n') || '(none)'}`, d);
     const acc = d.account;
-    return ok(`ChatGPT Ads account${acc ? ` "${acc.name}" (${acc.id})${acc.currency ? `, ${acc.currency}` : ''}${acc.status ? ` · ${acc.status}` : ''}` : ''}\n${d.count} campaign(s):\n${(d.campaigns || []).map(c => `• ${c.name} (${c.id}) — ${c.status}${c.dailyBudget != null ? `, ${c.dailyBudget}/day` : ''}${c.lifetimeBudget != null ? `, ${c.lifetimeBudget} lifetime` : ''}${c.biddingType ? `, ${c.biddingType}` : ''}${blk(c)}`).join('\n') || '(none)'}`, d);
+    return ok(`ChatGPT Ads account${acc ? ` "${acc.brandName || acc.name}" (${acc.id})${acc.currency ? `, ${acc.currency}` : ''}${acc.status ? ` · ${acc.status}` : ''}${acc.reviewStatus ? ` · brand review ${acc.reviewStatus}` : ''}${acc.legalName && acc.legalName !== (acc.brandName || acc.name) ? ` · legal name "${acc.legalName}"` : ''}${acc.accountName && acc.accountName !== (acc.brandName || acc.name) ? ` · account name "${acc.accountName}"` : ''}` : ''}\n${d.count} campaign(s):\n${(d.campaigns || []).map(c => `• ${c.name} (${c.id}) — ${c.status}${c.dailyBudget != null ? `, ${c.dailyBudget}/day` : ''}${c.lifetimeBudget != null ? `, ${c.lifetimeBudget} lifetime` : ''}${c.biddingType ? `, ${c.biddingType}` : ''}${blk(c)}`).join('\n') || '(none)'}`, d);
   }));
   server.registerTool('openai_ads_report', {
     title: 'ChatGPT Ads performance report',
-    description: 'Performance for ChatGPT Ads — impressions, clicks, spend, CTR, CPC, CPM, and CONVERSIONS with CPA, post-click conversion rate and attributed order sales / ROAS, in the ad account currency. OpenAI returns conversions only with granularity none or daily and with no segment or a country/device segment (never platform or product), and CPA, conversion rate and sales only with no segment at all; the report adds every column OpenAI allows for the shape you asked and its note names any it left out, so a missing column is their limit, not a zero. These conversions are CLICK-THROUGH (the ones CPA and bidding use); view-through lives only in openai_ads_conversions and is never added to them. The scope follows the id you pass: none = the whole ad account, or campaignId / adGroupId / adId. PRODUCT-FEED CAMPAIGNS serving in the multi-product CAROUSEL unit also report per-card numbers: ask for them in `fields` — carousel_product_card_impressions, carousel_product_card_clicks, product_impressions, product_clicks, product_spend, product_ctr, product_cpc, product_cpm plus product_title / product_price / product_feed_id and the other product_* fields (complete from 2026-08-20 on a rolling 30-day basis); they come back under each row’s `fields`. A card impression counts when a product card becomes viewable and is NOT a billable impression, so never add it to spend math. granularity is hourly, daily, monthly or none (default daily); the default window is the last 30 days; segment by country or device for a breakdown, and level rolls the rows up by campaign / ad group / ad. A report with NO rows genuinely means there was NO delivery in that window — say exactly that; never present zeros as measured performance. Read-only and free, so run it FIRST after connecting: it proves the key works with zero spend risk.',
+    description: 'Performance for ChatGPT Ads — impressions, clicks, spend, CTR, CPC, CPM, and CONVERSIONS with CPA, post-click conversion rate and attributed order sales / ROAS, in the ad account currency. OpenAI returns conversions only with granularity none or daily and with no segment or a country/device segment (never platform or product), and CPA, conversion rate and sales only with no segment at all; the report adds every column OpenAI allows for the shape you asked and its note names any it left out, so a missing column is their limit, not a zero. These conversions are CLICK-THROUGH (the ones CPA and bidding use); view-through lives only in openai_ads_conversions and is never added to them. The scope follows the id you pass: none = the whole ad account, or campaignId / adGroupId / adId. PRODUCT-FEED CAMPAIGNS serving in the multi-product CAROUSEL unit also report per-card numbers: ask for them in `fields` — carousel_product_card_impressions, carousel_product_card_clicks, product_impressions, product_clicks, product_spend, product_ctr, product_cpc, product_cpm plus product_title / product_price / product_feed_id and the other product_* fields (complete from 2026-08-20 on a rolling 30-day basis); they come back under each row’s `fields`. A card impression counts when a product card becomes viewable and is NOT a billable impression, so never add it to spend math. granularity is hourly, daily, monthly or none (default daily); the default window is the last 30 days; segment by country or device for a breakdown, and level rolls the rows up by campaign / ad group / ad. A report with NO rows genuinely means there was NO delivery in that window — say exactly that; never present zeros as measured performance. attributedEvents:true adds every event OpenAI attributed beyond the campaign goal (purchases on a sign-up campaign) for the same scope and days; never add those counts to conversions. Read-only and free, so run it FIRST after connecting: it proves the key works with zero spend risk.',
     inputSchema: {
       campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(),
       since: z.string().optional().describe('YYYY-MM-DD'), until: z.string().optional().describe('YYYY-MM-DD'),
@@ -11091,8 +11207,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       after: z.string().optional().describe('nextAfter from the previous page; limit goes up to 2000 rows'),
       conversions: z.boolean().optional().describe('default true: add conversions, CPA, conversion rate and sales where OpenAI allows them. false leaves them out.'),
       fields: z.array(z.string()).optional().describe('extra insight fields by name, e.g. product_title, product_price, carousel_product_card_impressions; each row returns them under `fields`'),
+      attributedEvents: z.boolean().optional().describe('add events attributed beyond the goal'),
+      eventNames: z.array(z.string()).optional().describe('only these events, e.g. ["order_created"]'),
+      attributionTimeBasis: z.enum(['ad_event_time', 'conversion_time']).optional().describe('default ad_event_time'),
+      clickWindowDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).optional().describe('default 30'),
+      viewWindowDays: z.union([z.literal(0), z.literal(1)]).optional().describe('default 1; 0 = no views'),
     },
-    outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), currency: z.string().optional(), timezone: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), hasMore: z.boolean().optional(), nextAfter: z.string().optional(), note: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), scope: z.string().optional(), currency: z.string().optional(), timezone: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), attributedEvents: z.array(z.any()).optional(), attributedGoalConversions: z.number().optional(), attributedOrderSales: z.number().optional(), attributedEventsError: z.string().optional(), hasMore: z.boolean().optional(), nextAfter: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/report', a);
@@ -11100,7 +11221,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('openai_ads_geo_search', {
     title: 'Find ChatGPT Ads location ids',
-    description: 'Look up ChatGPT Ads location ids by name — countries, regions and DMAs — so a campaign can be geo-targeted. GEO AND CUSTOM AUDIENCES ARE THE ONLY LIST-BASED TARGETING THIS PLATFORM HAS: there are no interests, no lookalikes, no age or gender. Everything else is semantic, through an ad group’s context hints. Custom audiences are targeted with customAudienceIds / excludedCustomAudienceIds (see list_openai_ads_audiences). Pass the returned ids as locationIds when creating or updating a campaign; a campaign with no location targeting runs everywhere available. Read-only, free.',
+    description: 'Look up ChatGPT Ads location ids by name — countries, regions and DMAs — so a campaign can be geo-targeted. GEO AND CUSTOM AUDIENCES ARE THE ONLY LIST-BASED TARGETING THIS PLATFORM HAS: there are no interests, no lookalikes, no age or gender. Everything else is semantic, through an ad group’s context hints. Custom audiences are targeted with customAudienceIds / excludedCustomAudienceIds (see list_openai_ads_audiences). Pass the returned ids as locationIds when creating or updating a campaign; a campaign with no location targeting runs everywhere available. OpenAI opens new markets without notice (Indonesia, Malaysia, the Philippines, Singapore, Thailand, Vietnam and Taiwan went live 2026-09-30), so search a market rather than assuming from memory that ChatGPT Ads does not serve it. Read-only, free.',
     inputSchema: { query: z.string().describe('a place name, e.g. "Toronto" or "United Kingdom"'), limit: z.number().optional() },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
@@ -12362,7 +12483,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('openai_ads_bulk', {
     title: 'ChatGPT Ads bulk create/update job',
-    description: 'Create or update up to 1,000 ChatGPT Ads campaigns, ad groups and ads in ONE asynchronous job — the direct analogue of a Google Ads atomic mutate, and the only way to build a whole tree in a single call. Each operation is {operation_id, type, idempotency_key|target_resource_id, input}. Types: campaign.create, campaign.update, ad_group.create, ad_group.update, ad.create, ad.update. FORWARD REFERENCES are the point: set input.campaign_idempotency_key / input.ad_group_idempotency_key to another CREATE operation’s idempotency_key and the child attaches to the parent made in the same job (a key no operation mints is refused here, for free, rather than failing the whole job at OpenAI). EVERYTHING CREATED IS PAUSED and spends nothing — status:"active" on a create is overridden, and an UPDATE that would set "active" is REFUSED BY NAME, because one job could otherwise arm a thousand objects in a single call that no confirmation ever saw; turn things on one at a time with set_openai_ads_status. Use validateOnly:true for a FREE dry run (it checks fields and dependencies but NOT update-target existence, image fetching or entity limits, so a validated job can still fail for real). Returns a jobId — poll it with openai_ads_bulk_job; an operation’s result is only final once the job is completed, partially_failed or failed. LIMITS (OpenAI’s own): 1–1000 operations, 16 MiB body, 512 KiB per operation, 10 job creates per 10 seconds per ad account, campaign budget ≥ 1000000 micros, names 3–1000 chars, ad titles 3–50, bodies ≤100, URLs ≤2048, ≤2500 location ids, ≤2000 context hints. THE BULK API IS IN LIMITED PREVIEW AND ENABLED PER AD ACCOUNT: a 404 means this account has not been granted it (not a wrong path), and the refusal says so and names the per-object tools that do the same work.',
+    description: 'Create or update up to 1,000 ChatGPT Ads campaigns, ad groups and ads in ONE asynchronous job — the direct analogue of a Google Ads atomic mutate, and the only way to build a whole tree in a single call. It builds CHAT-CARD campaigns only: its campaign.create has no product-feed mode, and OpenAI’s spreadsheet bulk creation of product-feed campaigns and ad groups with auto-generated ad templates (announced 2026-09-30) is an Ads Manager feature with no API. Build a product-feed campaign with create_openai_ads_campaign (mode product_feed), create_openai_ads_ad_group and an ad whose creative type is the product-ad template instead. Each operation is {operation_id, type, idempotency_key|target_resource_id, input}. Types: campaign.create, campaign.update, ad_group.create, ad_group.update, ad.create, ad.update. FORWARD REFERENCES are the point: set input.campaign_idempotency_key / input.ad_group_idempotency_key to another CREATE operation’s idempotency_key and the child attaches to the parent made in the same job (a key no operation mints is refused here, for free, rather than failing the whole job at OpenAI). EVERYTHING CREATED IS PAUSED and spends nothing — status:"active" on a create is overridden, and an UPDATE that would set "active" is REFUSED BY NAME, because one job could otherwise arm a thousand objects in a single call that no confirmation ever saw; turn things on one at a time with set_openai_ads_status. Use validateOnly:true for a FREE dry run (it checks fields and dependencies but NOT update-target existence, image fetching or entity limits, so a validated job can still fail for real). Returns a jobId — poll it with openai_ads_bulk_job; an operation’s result is only final once the job is completed, partially_failed or failed. LIMITS (OpenAI’s own): 1–1000 operations, 16 MiB body, 512 KiB per operation, 10 job creates per 10 seconds per ad account, campaign budget ≥ 1000000 micros, names 3–1000 chars, ad titles 3–50, bodies ≤100, URLs ≤2048, ≤2500 location ids, ≤2000 context hints. THE BULK API IS IN LIMITED PREVIEW AND ENABLED PER AD ACCOUNT: a 404 means this account has not been granted it (not a wrong path), and the refusal says so and names the per-object tools that do the same work.',
     inputSchema: {
       operations: z.array(z.record(z.any())).describe('1–1000 operations: {operation_id, type, idempotency_key (creates) or target_resource_id (updates), input:{…}}'),
       validateOnly: z.boolean().optional().describe('true = FREE dry run; nothing is created or changed'),
@@ -12432,7 +12553,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('openai_ads_conversions', {
     title: 'ChatGPT Ads attributed conversions',
-    description: 'ATTRIBUTED CONVERSIONS for ChatGPT Ads — the number the whole pixel + conversion-event setup exists to produce, beyond what openai_ads_report shows: that report carries click-through conversions and CPA for the account, a campaign, ad group or ad, while this tool adds VIEW-THROUGH conversions, totals per id across many ids, and the received-event sample. Pass entityIds — the campaign / ad group / ad ids to report on — with a matching level; the default window is the last 30 days. NEVER ADD conversions AND viewThroughConversions TOGETHER: OpenAI states that "conversions is always equal to click_through_conversions" and that view-through is "a separate, supplemental metric" NOT added to that total, and that view-through is reporting-only because CPA, post-click CVR, bidding, billing and conversion optimization all remain click-through-based. NO ROWS means no attributed conversion was recorded, not that data is missing — say exactly that, and check that an event setting exists (list_openai_ads_conversion_events) and that its pixel snippet is actually live on the site. RECEIVED EVENTS: pass recentEvents:true (no ids needed) to read a recent SAMPLE of the events OpenAI actually received on the pixel — type, event time, receive time, API channel and the event id — which answers "did OpenAI get the signup at all?" when a conversion is missing. It is a sample, not a complete log, and receiving an event is not the same as attributing it. Read-only, free.',
+    description: 'ATTRIBUTED CONVERSIONS for ChatGPT Ads — the number the whole pixel + conversion-event setup exists to produce, beyond what openai_ads_report shows: that report carries click-through conversions and CPA for the account, a campaign, ad group or ad, while this tool adds VIEW-THROUGH conversions, totals per id across many ids, and the received-event sample. Pass entityIds — the campaign / ad group / ad ids to report on — with a matching level; the default window is the last 30 days. NEVER ADD conversions AND viewThroughConversions TOGETHER: OpenAI states that "conversions is always equal to click_through_conversions" and that view-through is "a separate, supplemental metric" NOT added to that total, and that view-through is reporting-only because CPA, post-click CVR, bidding, billing and conversion optimization all remain click-through-based. NO ROWS means no attributed conversion was recorded, not that data is missing — say exactly that, and check that an event setting exists (list_openai_ads_conversion_events) and that its pixel snippet is actually live on the site. RECEIVED EVENTS: pass recentEvents:true (no ids needed) to read a recent SAMPLE of the events OpenAI actually received on the pixel — type, event time, receive time, API channel and the event id — which answers "did OpenAI get the signup at all?" when a conversion is missing. It is a sample, not a complete log, and receiving an event is not the same as attributing it. BEYOND THE GOAL (on by default): each row and the reply carry attributedEvents, every event OpenAI attributed whether or not it is the campaign’s goal (e.g. purchases on a sign-up campaign), with count and value; totals.orderSales is attributed purchase value. An event count already includes goal activity: NEVER add it to conversions; a null value is unknown, not zero. A current day is not final until OpenAI’s daily processing runs. Read-only, free.',
     inputSchema: {
       level: z.enum(['ad_account', 'campaign', 'ad_group', 'ad']).optional().describe('inferred from which id you pass — default ad_account'),
       entityIds: z.array(z.string()).optional().describe('the campaign, ad group or ad ids to report on, required below the account level; omit for level ad_account, which sums every campaign'),
@@ -12443,14 +12564,21 @@ function buildTools(rawServer, opts = {}, sink = null) {
       recentEvents: z.boolean().optional().describe('true = list a recent sample of the events OpenAI RECEIVED on the pixel instead of attributed totals'),
       pixelId: z.string().optional().describe('with recentEvents: the pixel_id to read; omit to use the account\'s first pixel'),
       limit: z.number().optional().describe('with recentEvents: how many events, 1-50 (default 50)'),
+      attributedEvents: z.boolean().optional().describe('default true; false = goal counts only'),
+      eventNames: z.array(z.string()).optional().describe('only these events, e.g. ["order_created"]'),
+      attributionTimeBasis: z.enum(['ad_event_time', 'conversion_time']).optional().describe('default ad_event_time'),
+      clickWindowDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).optional().describe('default 30'),
+      viewWindowDays: z.union([z.literal(0), z.literal(1)]).optional().describe('default 1; 0 = no views'),
+      includeZeroRows: z.boolean().optional().describe('default true'),
     },
-    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), events: z.array(z.any()).optional(), byType: z.any().optional(), pixelId: z.string().optional(), note: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), attributedEvents: z.array(z.any()).optional(), attributedEventsDropped: z.boolean().optional(), events: z.array(z.any()).optional(), byType: z.any().optional(), pixelId: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/conversions', a);
     if (d.mode === 'recentEvents') return ok(`${d.note}\n${(d.events || []).map(e => `• ${e.receivedAt || '?'} ${e.eventType}${e.customEventName ? `/${e.customEventName}` : ''} via ${e.apiChannel || '?'} id=${e.eventId ?? '—'}${e.hasOppref ? ' (ad click)' : ''}`).join('\n')}`, d);
     const daily = Array.isArray(d.byDate) && d.byDate.length ? `\nBy day: ${d.byDate.map(x => `${x.date} ${x.conversions}`).join(' · ')}` : '';
-    return ok(`${d.note}${daily}\n${(d.rows || []).slice(0, 200).map(r => `• ${r.date ? `${r.date} ` : ''}${r.entityId}${r.country ? ` ${r.country}` : ''}${r.device ? ` ${r.device}` : ''} — ${r.conversions ?? 0} conversion(s), ${r.viewThroughConversions ?? 0} view-through`).join('\n')}`, d);
+    const ev = (r) => ((r.attributedEvents || []).length ? ` · events: ${r.attributedEvents.map(e => `${e.count} ${e.eventName}${e.value != null ? ` (${e.value}${e.valueCurrency ? ` ${e.valueCurrency}` : ''})` : ''}${e.goal ? ' [goal]' : ''}`).join(', ')}` : '');
+    return ok(`${d.note}${daily}\n${(d.rows || []).slice(0, 200).map(r => `• ${r.date ? `${r.date} ` : ''}${r.entityId}${r.country ? ` ${r.country}` : ''}${r.device ? ` ${r.device}` : ''} — ${r.conversions ?? 0} goal conversion(s), ${r.viewThroughConversions ?? 0} view-through${r.orderSales ? `, ${r.orderSales} order sales` : ''}${ev(r)}`).join('\n')}`, d);
   }));
   server.registerTool('preview_openai_ads_ad', {
     title: 'Preview a ChatGPT Ads ad',
@@ -12486,16 +12614,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`${d.note}${d.apiKey ? `\n\nKEY (store it now — it cannot be retrieved again): ${d.apiKey}` : ''}`, d);
   }));
   server.registerTool('update_openai_ads_account', {
-    title: 'Update the ChatGPT Ads account brand (name / URL / favicon)',
-    description: 'Update the ChatGPT Ads AD ACCOUNT’s brand metadata — its display name, its primary destination URL and/or its favicon — and start a new brand review. THIS IS THE GATE IN FRONT OF EVERY IMPRESSION: OpenAI states that an account whose review status is not "approved" CANNOT SERVE ADS, so this is how an account stuck in review gets fixed without leaving Hermoso. Pass any of name, url, faviconUrl (a public image URL — or just the brand’s home page, which OpenAI will resolve a favicon from; minimum 128×128) or faviconFileId. A brand change RESTARTS the review, so re-read the account (list_openai_ads_campaigns returns it) until it says approved before promising that anything will run. If OpenAI answers that programmatic brand updates are not enabled for this ad account, that is their account setting and not a Hermoso failure — they say to contact your partner representative.',
+    title: 'Update the ChatGPT Ads account (brand / account / legal name, URL, favicon)',
+    description: 'Update the ChatGPT Ads account’s names, primary URL and/or favicon. brandName is shown IN ADS, accountName is internal to Ads Manager, legalName is the business. Per OpenAI, a brand-name change PAUSES AD DELIVERY until brand review passes and a legal-name change restarts business review and may pause serving; an account name triggers no review. So a brand or legal change needs confirm:true: without it nothing changes and the reply names the old and new values and the pause, which the user must agree to first. Legacy name sets all three (cannot be combined with them). An unchanged name is not sent. Also url, faviconUrl (public image or home page, ≥256×256) or faviconFileId. An account whose brand review is not approved cannot serve: re-read it before promising anything runs. A 403 “not enabled” is OpenAI’s account setting, not a Hermoso failure.',
     inputSchema: {
-      name: z.string().optional().describe('new account display name'),
+      brandName: z.string().optional().describe('shown in ads; pauses delivery until review (confirm)'),
+      accountName: z.string().optional().describe('internal; no review'),
+      legalName: z.string().optional().describe('restarts business review (confirm)'),
+      confirm: z.boolean().optional().describe('required for a brand or legal change'),
+      name: z.string().optional().describe('legacy: sets all three names'),
       url: z.string().optional().describe('the account’s primary destination — a public http(s) URL. OpenAI accepts this field even though their published parameter table omits it.'),
       faviconUrl: z.string().optional().describe('public image URL (or the brand home page) to upload and assign as the account favicon — minimum 128×128'),
       faviconFileId: z.string().optional().describe('an already-uploaded favicon file id, if you have one'),
     },
-    outputSchema: { ok: z.boolean().optional(), changed: z.array(z.string()).optional(), faviconFileId: z.string().nullable().optional(), account: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    outputSchema: { ok: z.boolean().optional(), changed: z.array(z.string()).nullable().optional(), unchanged: z.array(z.string()).optional(), would: z.any().optional(), current: z.any().optional(), faviconFileId: z.string().nullable().optional(), account: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/account', a); return ok(d.note, d); }));
   server.registerTool('set_openai_ads_status', {
     title: 'Activate, pause or archive a ChatGPT Ads account / campaign / ad group / ad',
@@ -12645,13 +12777,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { windowId: z.string(), confirm: z.boolean().optional() }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/spend-window/delete', a))));
   server.registerTool('set_openai_ads_daily_spend_limit', {
-    title: 'Set the ChatGPT Ads account daily spending limit', description: 'Create or change the ACCOUNT-WIDE DAILY SPENDING LIMIT on ChatGPT Ads: the most all campaigns together may spend each day, renewing at midnight in the account timezone, until it is removed or reaches its optional end date. OpenAI offers it only on ad accounts with postpaid INVOICE billing and it needs billing-management permission; a card-billed account is refused whatever key is used. amount is per day in the account currency and is required even when only the end date changes (0 stops account spend). A NEW limit starts tomorrow or later: list_openai_ads_spend_windows names the earliest start date. On an existing limit leave startDate out, because its start cannot change. endDate is exclusive; noEndDate:true clears it. A daily limit and a date-range window cannot overlap. Lowering it can stop delivery and raising it lets campaigns spend up to their own budgets, so show the user the current and new values first: without confirm:true AND expectedRevision (the revision list_openai_ads_spend_windows returns) nothing changes and the reply states what would. The result is read back from ChatGPT Ads.',
-    inputSchema: { amount: z.number(), expectedRevision: z.number().optional().describe('the revision from list_openai_ads_spend_windows'), startDate: z.string().optional().describe('YYYY-MM-DD, first day of a NEW daily limit (tomorrow or later)'), endDate: z.string().optional().describe('YYYY-MM-DD, exclusive'), noEndDate: z.boolean().optional().describe('true removes the end date'), confirm: z.boolean().optional() },
+    title: 'Set the ChatGPT Ads account daily spending limit', description: 'Create or change the ACCOUNT-WIDE DAILY SPENDING LIMIT on ChatGPT Ads: the most all campaigns together may spend each day, renewing at midnight in the account timezone, until it is removed or reaches its optional end date. OpenAI offers it only on ad accounts with postpaid INVOICE billing and it needs billing-management permission; a card-billed account is refused whatever key is used. amount is per day in the account currency and is required even when only the end date changes (0 stops account spend). A NEW limit starts tomorrow or later: list_openai_ads_spend_windows names the earliest start date. On an existing limit leave startDate out, because its start cannot change. An account can hold SEVERAL non-overlapping daily rules (list_openai_ads_spend_windows returns each with a windowId): pass windowId to change one, or newRule:true (with startDate) to add another; with more than one rule OpenAI requires the windowId. endDate is exclusive; noEndDate:true clears it. A daily limit and a date-range window cannot overlap. Lowering it can stop delivery and raising it lets campaigns spend up to their own budgets, so show the user the current and new values first: without confirm:true AND expectedRevision (the revision list_openai_ads_spend_windows returns) nothing changes and the reply states what would. The result is read back from ChatGPT Ads.',
+    inputSchema: { amount: z.number(), windowId: z.string().optional().describe('the daily rule to change, from list_openai_ads_spend_windows; required when the account has more than one'), newRule: z.boolean().optional().describe('true adds another non-overlapping daily rule instead of editing one'), expectedRevision: z.number().optional().describe('the revision from list_openai_ads_spend_windows'), startDate: z.string().optional().describe('YYYY-MM-DD, first day of a NEW daily limit (tomorrow or later)'), endDate: z.string().optional().describe('YYYY-MM-DD, exclusive'), noEndDate: z.boolean().optional().describe('true removes the end date'), confirm: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/daily-spend-limit', a))));
   server.registerTool('remove_openai_ads_daily_spend_limit', {
-    title: 'Remove the ChatGPT Ads account daily spending limit', description: 'Remove the account-wide DAILY spending limit on ChatGPT Ads. This takes a spending CEILING off the whole account, so campaigns may then spend up to their own budgets every day; date-range spend-limit windows are not touched. Like every account spending-limit request it needs postpaid INVOICE billing and billing-management permission; a card-billed account is refused whatever key is used. Without confirm:true AND expectedRevision (the revision list_openai_ads_spend_windows returns) nothing changes and the reply names the limit that would be removed. The result is read back from ChatGPT Ads.',
-    inputSchema: { expectedRevision: z.number().optional().describe('the revision from list_openai_ads_spend_windows'), confirm: z.boolean().optional() },
+    title: 'Remove the ChatGPT Ads account daily spending limit', description: 'Remove the account-wide DAILY spending limit on ChatGPT Ads. This takes a spending CEILING off the whole account, so campaigns may then spend up to their own budgets every day; date-range spend-limit windows are not touched. Like every account spending-limit request it needs postpaid INVOICE billing and billing-management permission; a card-billed account is refused whatever key is used. Without confirm:true AND expectedRevision (the revision list_openai_ads_spend_windows returns) nothing changes and the reply names the limit that would be removed. With several daily rules, pass windowId to name the one to remove (OpenAI requires it then). The result is read back from ChatGPT Ads.',
+    inputSchema: { windowId: z.string().optional().describe('the daily rule to remove; required when the account has more than one'), expectedRevision: z.number().optional().describe('the revision from list_openai_ads_spend_windows'), confirm: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/daily-spend-limit/delete', a))));
   server.registerTool('set_openai_ads_negative_keywords', {
@@ -12659,7 +12791,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { keywords: z.array(z.string()) }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/negative-keywords', a))));
   server.registerTool('list_openai_ads_feeds', {
-    title: 'List ChatGPT Ads product feeds', description: 'The PRODUCT FEEDS on this ChatGPT Ads account (id, name, countries, currencies, product and campaign counts). A product-feed campaign (mode product_feed) advertises products from one of these; update_openai_ads_feed_products fills one. Read-only, 0 credits.',
+    title: 'List ChatGPT Ads product feeds', description: 'The PRODUCT FEEDS on this ChatGPT Ads account (id, name, countries, currencies, the count of ingested products eligible for ads, and campaign count). A product-feed campaign (mode product_feed) advertises products from one of these; update_openai_ads_feed_products fills one. Read-only, 0 credits.',
     inputSchema: { limit: z.number().optional(), after: z.string().optional() }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/feeds', a))));
   server.registerTool('create_openai_ads_feed', {
@@ -12667,7 +12799,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { name: z.string(), countries: z.array(z.string()).optional() }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/feed', a))));
   server.registerTool('list_openai_ads_feed_uploads', {
-    title: 'List ChatGPT Ads feed uploads', description: 'Recent product-feed UPLOADS across the account with per-upload status and rows accepted / rejected / ads-eligible — the way to learn why products are not serving. Read-only, 0 credits.',
+    title: 'List ChatGPT Ads feed uploads', description: 'Recent product-feed UPLOADS across the account with per-upload status, rows accepted / rejected / ads-eligible and OpenAI’s DIAGNOSTICS (code, severity, field and rows affected, e.g. invalid_value on price) — the way to learn why products are not serving. Per-product review status (why ONE product was rejected) is shown only in ChatGPT Ads Manager > Products: OpenAI does not expose it through the API, so say that rather than guessing. Read-only, 0 credits.',
     inputSchema: { limit: z.number().optional() }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/feed-uploads', a))));
   server.registerTool('archive_openai_ads_feed', {
@@ -12675,7 +12807,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { feedId: z.string(), confirm: z.boolean().optional() }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/feed/archive', a))));
   server.registerTool('query_openai_ads_feed_products', {
-    title: 'Query products in a ChatGPT Ads feed', description: 'List the products in a feed that match filters ({field, operator in|not_in|gt|gte|lt|lte|contains|not_contains|starts_with, values[]}) — the SAME filter shape an ad group’s productSet takes, so this previews exactly which products that ad group would advertise. Paginate with after. Read-only, 0 credits.',
+    title: 'Query products in a ChatGPT Ads feed', description: 'List the products in a feed that match filters ({field, operator in|not_in|gt|gte|lt|lte|contains|not_contains|starts_with, values[]}) — the SAME filter shape an ad group’s productSet takes, so this previews exactly which products that ad group would advertise. Each product carries its price and filter values. It does not carry a per-product review status: that is only in ChatGPT Ads Manager > Products. Paginate with after. Read-only, 0 credits.',
     inputSchema: { feedId: z.string(), filters: z.array(z.object({ field: z.string(), operator: z.string(), values: z.array(z.string()) })).optional(), limit: z.number().optional(), after: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/feed/products/query', a))));
@@ -12688,6 +12820,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { feedId: z.string(), action: z.enum(['create', 'activate', 'pause']).optional(), authenticationMethod: z.enum(['password', 'ssh_key']).optional(), sshPublicKey: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/feed/sftp', a))));
+  server.registerTool('get_openai_ads_feed_settings', {
+    title: 'Read a ChatGPT Ads feed’s settings', description: 'A product feed’s name, countries and whether its organic ChatGPT search listing respects each product’s is_eligible_search flag. Read-only, 0 credits.',
+    inputSchema: { feedId: z.string() }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/feed/settings', a))));
+  server.registerTool('update_openai_ads_feed_settings', {
+    title: 'Change a ChatGPT Ads feed’s name or organic-listing setting', description: 'Rename a product feed and/or set searchEligibleRespected (its organic ChatGPT search listing follows each product’s is_eligible_search flag). Touches no ads or spend; the reply is what OpenAI stored.',
+    inputSchema: { feedId: z.string(), name: z.string().optional(), searchEligibleRespected: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/feed/settings', a))));
+  server.registerTool('list_openai_ads_audit_logs', {
+    title: 'ChatGPT Ads change history (audit log)', description: 'Who changed what on the ChatGPT Ads account and when: each create/update with its actor and every changed field’s before and after value. Read it first when a campaign starts or stops spending unexpectedly. Filter by campaignId (includes its ad groups and ads), adGroupId, adId, actorId, since/until (date, ISO time or unix seconds). Read-only, 0 credits.',
+    inputSchema: { campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(), actorId: z.string().optional(), since: z.string().optional(), until: z.string().optional(), order: z.enum(['asc', 'desc']).optional(), limit: z.number().optional().describe('1-100, default 25'), after: z.string().optional(), before: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/audit-logs', a))));
 
   server.registerTool('list_pinterest_ads_campaigns', {
     title: 'List Pinterest ad accounts / campaigns',
@@ -16127,7 +16273,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (LinkedIn\u2019s video thumbnail upload). true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional(), organizationId: z.string().optional(), videoExtras: z.object({ captions: z.boolean().optional(), thumbnail: z.boolean().optional() }).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/linkedin/org-post', a);
     if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
@@ -16755,7 +16901,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       trash: z.boolean().optional().describe('true -> move to Trash; false -> restore from Trash'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), trashed: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/drive/file/update', a);
     return ok(`Updated “${d.name || a.fileId}”.`, d);
@@ -16973,7 +17119,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       boldHeader: z.boolean().optional(), freezeRows: z.number().optional().describe('how many top rows to freeze (default 1, 0 = none)'), autoResize: z.boolean().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), spreadsheetId: z.string().optional(), tab: z.string().optional(), sheetId: z.number().optional(), url: z.string().optional(), applied: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/sheets/format', a);
     return ok(d.note, d);
@@ -17049,7 +17195,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       moveToFolderId: z.string().optional().describe('folder id to move the item into (from create_onedrive_folder / list_onedrive_files)'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/onedrive/file/update', a);
     return ok(`Updated “${d.name || a.fileId}”.`, d);
@@ -18255,34 +18401,34 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('save_skill', {
     title: 'Save a skill',
     description: 'Save a reusable custom SKILL — a named creative directive/playbook applied to future ads (a hook formula, a UGC recipe, a compliance rule, a named specialist persona like “our founder-story style” or “short-form ad strategist”). Distill an imperative, self-contained directive. Merges into the workspace Skills library (list_skills shows built-ins + your custom skills).',
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       name: z.string().describe('short skill name, e.g. “Founder-story hook”'),
       directive: z.string().describe('the full instruction the skill applies when used (1–6 sentences, imperative)'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const name = String(a.name || '').trim(), directive = String(a.directive || '').trim();
     if (!name || !directive) return { content: [{ type: 'text', text: 'A skill needs both a name and a directive.' }], isError: true };
     let list = await readStore('heist.skills.v1'); if (!Array.isArray(list)) list = [];
     const item = { id: newId('s'), name, directive, kind: 'custom', custom: true, createdAt: Date.now() };
     await writeStore('heist.skills.v1', [item, ...list].slice(0, 200));
     return ok(`Saved skill “${name}” — it’s now in the workspace Skills library.`, { ok: true, id: item.id });
-  }));
+  })));
   server.registerTool('delete_skill', {
     title: 'Delete a custom skill',
     description: 'Delete one of the workspace’s CUSTOM skills by id (from list_skills). Built-in skills/recipes can’t be deleted. Minor + re-creatable, so no confirm needed.',
-    inputSchema: { id: z.string().describe('the custom skill id (from list_skills)') },
+    inputSchema: { ...STORE_BRAND, id: z.string().describe('the custom skill id (from list_skills)') },
     outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const id = String(a.id || '').trim(); if (!id) return { content: [{ type: 'text', text: 'Pass the skill id (from list_skills).' }], isError: true };
     let list = await readStore('heist.skills.v1'); if (!Array.isArray(list)) list = [];
     if (!list.some(s => s && s.id === id)) return ok(`No custom skill ${id} (built-ins can’t be deleted).`, { ok: false, removed: false });
     await tombstone('heist.skills.v1', id); // write the delete FIRST so the content merge honors it (won’t resurrect)
     await writeStore('heist.skills.v1', list.filter(s => s && s.id !== id));
     return ok(`Deleted skill ${id}.`, { ok: true, removed: true });
-  }));
+  })));
   server.registerTool('list_memory', {
     title: 'List memory',
     description: 'List the durable facts & preferences saved in this workspace’s Memory (what the studio remembers about the brand, audience, taste, and do/don’t rules) — the same Memory the web app shows. These shape every future ad. Read-only, free.',
@@ -18321,13 +18467,13 @@ function memoryNoteVerdict(text) {
   server.registerTool('remember', {
     title: 'Remember a fact',
     description: 'Save a durable fact or PREFERENCE about the brand, audience, or the user’s creative TASTE (e.g. “audience is first-time homebuyers”, “prefers bold lime accents”, “always captions off”) into the workspace Memory so it shapes FUTURE ads. For lasting things, not one-off requests. Merges into the existing Memory (never overwrites); de-dupes on identical text. NEVER how Hermoso, a tool, a connector or a platform API behaves (what a call returns, errors, permissions, limits, ids) and never a phone number or email — those are refused.',
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       text: z.string().describe('the fact/preference, concise'),
       category: z.string().optional().describe('short bucket: Brand, Audience, Taste, Do, Don’t, or Preference (default General)'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const text = String(a.text || '').trim(); if (!text) return { content: [{ type: 'text', text: 'Nothing to remember — pass text.' }], isError: true };
     { const v = memoryNoteVerdict(text); if (!v.ok) return { content: [{ type: 'text', text: v.message }], isError: true }; }
     let list = await readStore('heist.memory.v1'); if (!Array.isArray(list)) list = [];
@@ -18335,21 +18481,21 @@ function memoryNoteVerdict(text) {
     const item = { id: newId('m'), text, category: String(a.category || 'General').trim() || 'General', source: 'mcp', createdAt: Date.now() };
     await writeStore('heist.memory.v1', [item, ...list].slice(0, 200));
     return ok(`Saved to memory: “${text}” [${item.category}].`, { ok: true, id: item.id });
-  }));
+  })));
   server.registerTool('forget', {
     title: 'Forget a memory',
     description: 'Delete a saved Memory item by its id (from list_memory). Records a cross-device delete so it doesn’t come back. Minor + re-creatable (you can remember it again), so no confirm needed.',
-    inputSchema: { id: z.string().describe('the memory item id (from list_memory)') },
+    inputSchema: { ...STORE_BRAND, id: z.string().describe('the memory item id (from list_memory)') },
     outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const id = String(a.id || '').trim(); if (!id) return { content: [{ type: 'text', text: 'Pass the memory id (from list_memory).' }], isError: true };
     let list = await readStore('heist.memory.v1'); if (!Array.isArray(list)) list = [];
     if (!list.some(m => m && m.id === id)) return ok(`No memory item ${id}.`, { ok: false, removed: false });
     await tombstone('heist.memory.v1', id);
     await writeStore('heist.memory.v1', list.filter(m => m && m.id !== id));
     return ok(`Forgot memory ${id}.`, { ok: true, removed: true });
-  }));
+  })));
 
   // ── SWIPEFILE — the workspace's saved-ad research board: named COLLECTIONS holding the ads and creatives the user
   // kept. It is a SERVER-SYNCED store, not browser state: `adInspo.swipefile.v1` is in the client's PROFILE_SCOPED_SYNC
@@ -18362,10 +18508,10 @@ function memoryNoteVerdict(text) {
   server.registerTool('tidy_memory', {
     title: 'Tidy the Memory list',
     description: 'Clean up and consolidate the workspace Memory: drops entries that are about how Hermoso, a tool, a connector or a platform API behaves (product behaviour, not the brand), drops phone numbers and emails, and merges near-duplicate facts into one sentence each. Call with no argument to get the PROPOSAL (what would be removed and merged, with reasons) — nothing changes. Call again with confirm:true to apply it through the same typed writers the app uses (deletes carry tombstones so they stay deleted on every device). One small model call; a few credits.',
-    inputSchema: { confirm: z.boolean().optional().describe('true to APPLY the proposal; omit to only see it') },
+    inputSchema: { ...STORE_BRAND, confirm: z.boolean().optional().describe('true to APPLY the proposal; omit to only see it') },
     outputSchema: { scanned: z.number().optional(), remove: z.array(z.any()).optional(), merge: z.array(z.any()).optional(), applied: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     let list = await readStore('heist.memory.v1'); if (!Array.isArray(list)) list = [];
     if (!list.length) return ok('Memory is empty — nothing to tidy.', { scanned: 0, remove: [], merge: [], applied: false });
     const r = await apiPost('/api/memory/tidy', { items: list.map(m => ({ id: m.id, text: m.text, category: m.category })) });
@@ -18381,7 +18527,7 @@ function memoryNoteVerdict(text) {
     const merged = (d.merge || []).map(m => ({ id: newId('m'), text: m.text, category: m.category || 'General', source: 'tidy', createdAt: Date.now() }));
     await writeStore('heist.memory.v1', [...merged, ...list.filter(m => m && !gone.has(String(m.id)))].slice(0, 200));
     return ok(`Tidied: removed ${gone.size - (d.merge || []).flatMap(m => m.ids).length}, merged ${(d.merge || []).length} group(s). ${list.length} → ${list.length - gone.size + merged.length} memories.\n${lines.join('\n')}`, { scanned: list.length, remove: d.remove, merge: d.merge, applied: true });
-  }));
+  })));
 
   const SWIPE_KEY = 'adInspo.swipefile.v1';
   const swipeEmpty = () => ({ collections: [{ id: 'default', name: 'My Swipefile' }], activeId: 'default', ads: [] });
@@ -18424,7 +18570,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('save_to_swipefile', {
     title: 'Save ads to the swipefile',
     description: 'Save one or more ads/creatives to a named SWIPEFILE collection, creating the collection if it does not exist — the headless twin of the heart on every ad card in the web app. Use it whenever research turns up something worth keeping: a competitor ad from search_meta_ads / pull_competitor_ads, an organic post, or one of your own renders. Saved ads persist to the workspace board the web Swipefile tab shows, and feed the taste signal every future ad is planned against. De-dupes: re-saving the same ad (same key/link/media) MOVES it into the named collection instead of duplicating it. Free.',
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       collection: z.string().describe('the collection name — an existing one, or a new one to create'),
       items: z.array(z.object({
         key: z.string().optional().describe('a stable id for this ad if you have one (an ad_archive_id, creativeId, …). Omit and one is derived from the link/media so re-saving is idempotent'),
@@ -18441,7 +18587,7 @@ function memoryNoteVerdict(text) {
     },
     outputSchema: { ok: z.boolean().optional(), collection: z.string().optional(), collectionId: z.string().optional(), saved: z.number().optional(), moved: z.number().optional(), total: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const name = String(a.collection || '').trim();
     const items = (Array.isArray(a.items) ? a.items : []).filter(x => x && typeof x === 'object');
     if (!name) return { content: [{ type: 'text', text: 'Name the collection to save into.' }], isError: true };
@@ -18461,7 +18607,7 @@ function memoryNoteVerdict(text) {
     s.activeId = col.id;
     await writeStore(SWIPE_KEY, s);
     return ok(`${saved} ad(s) saved${moved ? `, ${moved} moved` : ''} into “${col.name}”${created ? ' (new collection)' : ''} — it’s on the workspace swipefile now (list_swipefile to read it back).`, { ok: true, collection: col.name, collectionId: col.id, saved, moved, total: s.ads.length });
-  }));
+  })));
 
 
   // ── SAVED CREATORS: outreach status + notes (2026-09-05: "parity with dedicated tools"). A creator saved by
@@ -18471,14 +18617,14 @@ function memoryNoteVerdict(text) {
   server.registerTool('update_saved_creator', {
     title: 'Update a saved creator (outreach status, note)',
     description: 'Set the OUTREACH STATUS and/or a NOTE on a creator already saved in the swipefile (find_creators -> save_to_swipefile, or the heart on a creator card). Status is one of new | contacted | replied | booked | passed. The note is free text (deal terms, rate, what was sent). Reads back the updated row. Use list_swipefile to find the key. Free.',
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       key: z.string().describe("the saved row's key from list_swipefile, e.g. tiktok:handle"),
       status: z.enum(['new', 'contacted', 'replied', 'booked', 'passed']).optional(),
       note: z.string().max(2000).optional().describe('replaces the existing note; pass "" to clear it'),
     },
     outputSchema: { ok: z.boolean().optional(), key: z.string().optional(), status: z.string().optional(), note: z.string().optional(), creator: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(inBrand(async (a) => {
     const key = String(a.key || '').trim();
     if (!key) return { content: [{ type: 'text', text: 'Pass the saved creator key (from list_swipefile).' }], isError: true };
     if (a.status == null && a.note == null) return { content: [{ type: 'text', text: 'Pass a status and/or a note.' }], isError: true };
@@ -18495,7 +18641,7 @@ function memoryNoteVerdict(text) {
     await writeStore(SWIPE_KEY, s);
     const o = row.creator.outreach;
     return ok(`@${row.creator.handle || key}: status ${o.status}${o.note ? ` — note: ${o.note}` : ''}.`, { ok: true, key, status: o.status, note: o.note, creator: row.creator });
-  }));
+  })));
 
   // ── PLAYBOOKS — the "what's working + the plays to run" cards, distinct from the swipefile's raw creative. Same
   // server-synced store seam (`heist.playbooks.v1`, union-merged by id in adapters/sync-merge.js); the web app has a
@@ -18525,22 +18671,21 @@ function memoryNoteVerdict(text) {
   server.registerTool('save_playbook', {
     title: 'Save a playbook',
     description: 'Save a reusable PLAYBOOK — the strategy takeaways worth re-running: the hooks that work, the angles, the formats, and the concrete plays. Use it to keep what a competitor_teardown or mine_angles just found, or to bank a creative you want to repeat. Lands in the same Playbooks library the web app lists, runs and manages. Distinct from save_skill (a directive applied to every ad) and from the swipefile (raw saved creative). Free.',
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       name: z.string().describe('the playbook headline — what it is, in a few words'),
       hooks: z.array(z.string()).optional().describe('the opening hooks worth reusing, verbatim'),
       angles: z.array(z.object({ title: z.string(), detail: z.string().optional() }).passthrough()).optional().describe('the persuasion angles ({title, detail})'),
       formats: z.array(z.string()).optional().describe('the formats/recipes this plays best in (e.g. ugc_selfie, cinematic, static)'),
       plays: z.array(z.object({ title: z.string(), detail: z.string().optional() }).passthrough()).optional().describe('the concrete plays to run ({title, detail}) — the actionable half'),
-      brand: z.string().optional().describe('which brand this is for (defaults to the workspace brand)'),
       source: z.string().optional().describe('where it came from, e.g. “teardown · Ridge”'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const headline = String(a.name || '').trim();
     if (!headline) return { content: [{ type: 'text', text: 'A playbook needs a name.' }], isError: true };
     const list = await readPlaybooks();
-    const brand = String(a.brand || '').trim() || String((await readStore('heist.brand.v1'))?.name || '');
+    const brand = String((await readStore('heist.brand.v1'))?.name || '').trim() || namedBrand(a); // the label is the brand the playbook LANDS in (inBrand scoped the read), never a name that did not scope the write
     const item = {
       id: newId('pb'), headline: headline.slice(0, 200),
       hooks: (a.hooks || []).slice(0, 20).map(t => ({ text: String(t).slice(0, 400), why: 'saved by an agent' })),
@@ -18551,21 +18696,21 @@ function memoryNoteVerdict(text) {
     };
     await writeStore(PB_KEY, [item, ...list].slice(0, 200));
     return ok(`Saved playbook “${item.headline}” — it’s in the workspace Playbooks library (list_playbooks, and the app’s Playbooks tab can run it).`, { ok: true, id: item.id });
-  }));
+  })));
   server.registerTool('delete_playbook', {
     title: 'Delete a playbook',
     description: 'Delete a saved playbook by id (from list_playbooks). Records a cross-device delete so it does not come back on the next sync. Minor + re-creatable, so no confirm needed.',
-    inputSchema: { id: z.string().describe('the playbook id (from list_playbooks)') },
+    inputSchema: { ...STORE_BRAND, id: z.string().describe('the playbook id (from list_playbooks)') },
     outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const id = String(a.id || '').trim(); if (!id) return { content: [{ type: 'text', text: 'Pass the playbook id (from list_playbooks).' }], isError: true };
     const list = await readPlaybooks();
     if (!list.some(p => p && p.id === id)) return ok(`No playbook ${id}.`, { ok: false, removed: false });
     await tombstone(PB_KEY, id); // the delete is written BEFORE the content so the union-merge already sees it
     await writeStore(PB_KEY, list.filter(p => p && p.id !== id));
     return ok(`Deleted playbook ${id}.`, { ok: true, removed: true });
-  }));
+  })));
 
   // ── SAVED CREATORS — the workspace's reusable on-camera cast (`heist.avatars.v1`) ──────────────────────────────
   // Closed 2026-08-01 (feature-surface sweep §4b, "on the web, absent from MCP"). The app has the whole lifecycle —
@@ -18597,7 +18742,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('save_creator', {
     title: 'Save a creator',
     description: 'Add a portrait to this workspace’s reusable CAST so the SAME person can star in future ads — the headless twin of the app’s + > Pick a creator > save. Pass the portrait’s public url (a generate_image render of an AI person, or a photo of a real person you have permission to use, or of yourself; never a photo just because it is public) plus a name to call them by; from then on list_creators returns them and their url can be re-passed to generate_avatar / generate_video / recast_motion. Saving is FREE and renders nothing. LIKENESS: leave `source` "generated" for an AI-made person (free on every plan) and use "upload"/"social" for a REAL person. ' + LIKENESS_TERMS,
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       name: z.string().describe('what to call this creator (e.g. “Sarah”) — list_creators and the app’s picker match on it'),
       image: z.string().optional().describe('REQUIRED except with useAnyway. public https url of the portrait (an existing render’s url, or any public photo). Not a local file path — upload it with upload_file first and save the url that returns'),
       source: z.enum(['generated', 'upload', 'social']).optional().describe('"generated" (default) = an AI-made person; "upload" / "social" = a REAL person'),
@@ -18608,7 +18753,7 @@ function memoryNoteVerdict(text) {
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), creator: z.any().optional(), refQuality: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const name = String(a.name || '').trim();
     // A LINK TO A PHOTO'S WEB PAGE (an Unsplash / Pexels / Pinterest page, 2026-09-29) is saved as the PICTURE behind it,
     // so the cast never holds a page no render can read; a page with no reachable picture is refused here, saving nothing.
@@ -18665,14 +18810,14 @@ function memoryNoteVerdict(text) {
     await writeStore('heist.avatars.v1', [item, ...list].slice(0, 200));
     const warn = source !== 'generated' ? ' Saved as a real person: this is recorded as your confirmation that you are this person or have their consent, and that you take full, unlimited responsibility for their use (hermoso.ai/terms).' : '';
     return ok(`Saved “${item.name}” to the workspace cast — they now show up in list_creators and in the app’s creator picker. Star them in a finished ad with render_ad(creator: "${item.name}"), have them say a line with generate_video(creator: "${item.name}", speak: "…"), or re-cast them in a raw render by passing ${abs(item.image)} as generate_video.refImage / recast_motion.image (generate_avatar.image only for the animated-photo look, when asked for by name).${warn}`, { ok: true, id: item.id, creator: { id: item.id, name: item.name, image: abs(item.image), source } });
-  }));
+  })));
   server.registerTool('delete_creator', {
     title: 'Delete a creator',
     description: 'Remove a saved creator from this workspace’s cast by id (from list_creators). Records a cross-device delete so they don’t reappear on the user’s other devices. It only drops the roster entry — ads already rendered with that person are untouched — and the same portrait can be saved again with save_creator, so no confirm is needed.',
-    inputSchema: { id: z.string().describe('the creator id (from list_creators)') },
+    inputSchema: { ...STORE_BRAND, id: z.string().describe('the creator id (from list_creators)') },
     outputSchema: { ok: z.boolean().optional(), removed: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const id = String(a.id || '').trim(); if (!id) return { content: [{ type: 'text', text: 'Pass the creator id (from list_creators).' }], isError: true };
     let list = await readStore('heist.avatars.v1'); if (!Array.isArray(list)) list = [];
     const hit = list.find(x => x && x.id === id);
@@ -18680,11 +18825,11 @@ function memoryNoteVerdict(text) {
     await tombstone('heist.avatars.v1', id); // written BEFORE the content PUT so the union-merge already sees the delete
     await writeStore('heist.avatars.v1', list.filter(x => x && x.id !== id));
     return ok(`Removed “${hit.name || 'Creator'}” from the workspace cast.`, { ok: true, removed: true });
-  }));
+  })));
   server.registerTool('update_brand', {
     title: 'Update brand fields',
     description: 'Patch SPECIFIC fields of the workspace brand profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. Only pass the fields you’re changing.',
-    inputSchema: {
+    inputSchema: { ...STORE_BRAND,
       name: z.string().optional(), domain: z.string().optional().describe('website domain'), sells: z.string().optional().describe('what the brand sells'),
       summary: z.string().optional().describe('one-line description'), category: z.string().optional(), audience: z.string().optional(),
       positioning: z.string().optional(), voice: z.string().optional().describe('brand voice/tone'), style: z.string().optional().describe('visual style — palette, typography, aesthetic'), goal: z.string().optional().describe('current marketing goal'),
@@ -18692,8 +18837,8 @@ function memoryNoteVerdict(text) {
       pronunciations: z.record(z.string()).optional().describe('how PRODUCT names are said aloud, e.g. {"Power Cakes": "POW-er cakes"}. Merged into the saved ones; an empty string removes one.'),
     },
     outputSchema: { ok: z.boolean().optional(), updated: z.array(z.string()).optional(), brand: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async (a) => {
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, wrap(inBrand(async (a) => {
     const allow = ['name', 'domain', 'sells', 'summary', 'category', 'audience', 'positioning', 'voice', 'style', 'goal', 'pronounce'];
     const patch = {}; for (const k of allow) if (a[k] != null && String(a[k]).trim()) patch[k] = String(a[k]).slice(0, 400);
     let brand = await readStore('heist.brand.v1'); if (!brand || typeof brand !== 'object' || Array.isArray(brand)) brand = {};
@@ -18706,8 +18851,8 @@ function memoryNoteVerdict(text) {
     if (!Object.keys(patch).length) return { content: [{ type: 'text', text: 'Pass at least one brand field to change.' }], isError: true };
     const merged = { ...brand, ...patch };
     await writeStore('heist.brand.v1', merged); // the store PUT preserves server-side brand enrichments (playbook/pronounce)
-    return ok(`Updated brand (${Object.keys(patch).join(', ')}).`, { ok: true, updated: Object.keys(patch), brand: merged });
-  }));
+    return ok(`Updated ${merged.name ? `“${merged.name}”` : 'the brand'}${namedBrand(a) ? ` (the brand you named, ${namedBrand(a)})` : ''} — ${Object.keys(patch).join(', ')}.`, { ok: true, updated: Object.keys(patch), brand: merged });
+  })));
   server.registerTool('store_get', {
     title: 'Read a workspace store',
     description: 'Read one of this workspace’s data stores by key, for visibility into what the app holds — playbooks, swipefile, saved locations, avatars, creations, chats, brand, memory, skills. Read-only, free. Allowed keys: ' + STORE_GET_ALLOW.join(', ') + '. (The typed tools — list_memory / list_skills / get_brand — are friendlier for those; use store_get for the rest.)',
@@ -18747,7 +18892,7 @@ function memoryNoteVerdict(text) {
       watchEmail: z.boolean().optional().describe('weekly competitor-watch email on/off'),
     },
     outputSchema: { ok: z.boolean().optional(), changed: z.array(z.string()).optional(), language: z.string().optional(), theme: z.string().optional(), notifications: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     const body = {};
     if (a.language != null) body.language = a.language;
@@ -19022,7 +19167,7 @@ function memoryNoteVerdict(text) {
       accountIds: z.array(z.string()).describe('the ids (from list_connector_accounts) this brand may use — an empty array shares nothing'),
     },
     outputSchema: { ok: z.boolean().optional(), provider: z.string().optional(), selectedIds: z.array(z.string()).optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const p = CONN_ACCOUNT_PICKERS[a.provider];
     if (!p) return { content: [{ type: 'text', text: `set_connector_accounts covers: ${CONN_PICKER_IDS.join(', ')}.` }], isError: true };
@@ -19089,7 +19234,7 @@ function memoryNoteVerdict(text) {
       fields: z.record(z.string()).optional().describe('that provider\'s own field names and values, e.g. {"apiKey":"…"}; the names for each provider are in the description'),
     },
     outputSchema: { ok: z.boolean().optional(), provider: z.string().optional(), connected: z.boolean().optional(), label: z.string().nullable().optional(), status: z.string().nullable().optional(), warning: z.string().optional(), step: z.string().optional(), publicKey: z.string().optional(), setupToken: z.string().optional(), expiresInHours: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const refuse = (text) => ({ content: [{ type: 'text', text }], isError: true });
     const provider = String(a.provider || '').trim().toLowerCase();
@@ -19185,7 +19330,7 @@ function memoryNoteVerdict(text) {
       confirm: z.boolean().optional().describe('REQUIRED true — this invites a real person'),
     },
     outputSchema: { ok: z.boolean().optional(), invited: z.boolean().optional(), link: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.confirm !== true) return ok(`This will invite ${a.email || '(no email)'} as ${a.role || 'member'} to the workspace. Confirm with the user, then call again with confirm:true.`, { ok: false });
     const d = await apiPost('/api/team/invite', { email: a.email, role: a.role });
@@ -19233,7 +19378,7 @@ function memoryNoteVerdict(text) {
       confirm: z.boolean().optional().describe('REQUIRED true'),
     },
     outputSchema: { ok: z.boolean().optional(), email: z.string().optional(), role: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.confirm !== true) return ok(`This will set ${a.email || '(no email)'} to ${a.role}. Confirm with the user, then call again with confirm:true.`, { ok: false });
     // Naming somebody who is not a member 404s server-side and surfaces as an error here. On success the role we
@@ -19314,7 +19459,7 @@ function memoryNoteVerdict(text) {
       candidates: z.array(z.any()).optional().describe('discovered brands ({name, domain, kind, reason})'),
       diagnostics: z.any().optional().describe('discovery diagnostics (model usage, web grounding)'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ domain, mode = 'competitors' }) => {
     const d = await apiPost('/api/inspire/competitors', { domain, mode });
     const list = (d.candidates || []).map(c => `${c.name} (${c.domain || '—'}, ${c.kind})`).join('; ');
@@ -19345,7 +19490,7 @@ function memoryNoteVerdict(text) {
       google: z.any().optional().describe('Google results ({ads[], cursor} or {error}; null when not requested)'),
       linkedin: z.any().optional().describe('LinkedIn results ({ads[], cursor} or {error}; null when not requested)'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     // META ONLY, AND NOT BY REQUEST — BY CONSTRUCTION. `...a` used to spread the caller's own `platforms` OVER the
     // default, so the "default ['facebook']" was only ever a default for a caller who said nothing. Models did not:
@@ -19458,7 +19603,7 @@ function memoryNoteVerdict(text) {
       watching: z.array(z.string()).optional().describe('the brand names now under watch (empty = the watch is off)'),
       nextRunAt: z.number().optional().describe('epoch ms of the next scheduled check (0 = nothing scheduled)'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     // An OMITTED list is refused; an EMPTY one is the documented way to stop. Defaulting the omission to [] would
     // turn "I forgot the argument" into "delete this workspace's whole watch", silently.
@@ -19555,7 +19700,7 @@ function memoryNoteVerdict(text) {
       results: z.array(z.any()).optional().describe('the found ads/videos (normalized card objects with served URLs)'),
       actions: z.any().optional().describe('follow-up actions the research loop suggested'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ query, brand }) => {
     const brandObj = typeof brand === 'string' ? { name: brand } : brand || null;
     const d = await apiSSE('/api/explore/chat', { messages: [{ role: 'user', content: query }], brand: brandObj });
@@ -19646,7 +19791,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({page_name, body, cta, link, dates, media})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async (a) => {
     if (!a.query && !a.companyName && !a.pageId) throw new Error('Pass query (keyword) OR companyName/pageId (one advertiser).');
     const common = qp({ country: a.country, status: a.status, media_type: a.mediaType });
@@ -19699,7 +19844,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({advertiser, format, adUrl, image, firstShown, lastShown})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async (a) => {
     if (!a.domain && !a.advertiserId) throw Object.assign(new Error('Pass domain or advertiserId.'), { status: 400 }); // an authored refusal says so, or the error ledger files it as "could not tell"
     const d = await apiGet('/api/google/company-ads', qp({ domain: a.domain, advertiser_id: a.advertiserId, region: a.region, get_ad_details: 'false' }));
@@ -19723,7 +19868,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({advertiser, headline, description, cta, link, media, dates, impressions})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async (a) => {
     if (!a.company && !a.keyword && !a.companyId) throw new Error('Pass company, keyword, or companyId.');
     const d = await apiGet('/api/linkedin/search', qp({ company: a.company, keyword: a.keyword, companyId: a.companyId, countries: a.countries }));
@@ -19758,7 +19903,7 @@ function memoryNoteVerdict(text) {
       enrich: z.boolean().optional().describe('read follower counts for the top 6 (default true, ~1 credit each)'),
       marketplace: z.boolean().optional().describe('also search Instagram’s creator marketplace (Meta’s own creator directory, free) for the same niche; needs the Meta connector'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async (a) => {
     const d = await apiPost('/api/creators/search', a);
     const fmt = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}K` : String(v);
@@ -19780,7 +19925,7 @@ function memoryNoteVerdict(text) {
       limit: z.number().optional().describe('posts per platform, 1–60 (default 24)'),
       queries: z.number().optional().describe('query variants per platform, 1–4 (default 1); each is a paid search call'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async (a) => {
     const d = await apiPost('/api/posts/search', a);
     if (!d.shown) return ok(`${d.summary} Nothing matched — try broader words or add platforms.`, d);
@@ -19801,7 +19946,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total videos found'),
       videos: z.array(z.any()).optional().describe('the compact video objects ({desc, author, handle, plays, likes, link, cover}), ranked by plays'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/tiktok/search/keyword', query });
     const all = (d.search_item_list || []).map((x) => x.aweme_info).filter(Boolean).map((v) => {
@@ -19827,7 +19972,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total reels found'),
       reels: z.array(z.any()).optional().describe('the compact reel objects ({desc, author, handle, plays, likes, link, cover}), ranked by plays'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ query, limit }) => {
     let d;
     try { d = await apiGet('/api/sc/run', { __path: '/v2/instagram/reels/search', query }); }
@@ -19857,7 +20002,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total videos found'),
       videos: z.array(z.any()).optional().describe('the compact video objects ({desc, author, handle, plays, link, cover}), ranked by views'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/youtube/search', query });
     const all = (d.videos || []).filter((v) => (v.type || 'video') === 'video').map((v) => {
@@ -19878,7 +20023,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total posts found'),
       posts: z.array(z.any()).optional().describe('the compact post objects ({desc, subreddit, upvotes, comments, link})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ query, limit }) => {
     // `sort: 'relevance'` IS THE QUERY (measured live 2026-09-03): the ad-data provider's Reddit search honours the
     // query ONLY under relevance — `top` and `new` return the site-wide top/new feeds and ignore it entirely, so this
@@ -19905,7 +20050,7 @@ function memoryNoteVerdict(text) {
       found: z.number().optional().describe('total posts found'),
       posts: z.array(z.any()).optional().describe('the compact post objects ({desc, author, handle, likes, link, cover})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ query, limit }) => {
     const d = await apiGet('/api/sc/run', { __path: '/v1/threads/search', query });
     const all = (d.posts || d.results || []).map((p) => {
@@ -19928,7 +20073,7 @@ function memoryNoteVerdict(text) {
       params: z.object({}).passthrough().optional().describe("endpoint query params, e.g. {handle:'nike'}"),
     },
     outputSchema: {}, // deliberately empty — the raw provider payload (any shape, can be huge) stays in the text
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ path, params }) => {
     const d = await apiGet('/api/sc/run', { __path: path, ...qp(params || {}) });
     const raw = JSON.stringify(d);
@@ -19945,7 +20090,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('get_brand', {
     title: 'Get saved brand',
     description: 'What Hermoso ALREADY KNOWS for this account/workspace — the same saved brand profile (products, logos, palette, positioning) + learned memory the web Studio uses. Call it when you need to know whether a brand is on file: if hasBrand is true you can omit brand everywhere; if false, onboard with draft_brand. Not a required first step before a render: the create tools read the saved brand by themselves. 0 credits.',
-    inputSchema: {},
+    inputSchema: { ...STORE_BRAND },
     outputSchema: {
       hasBrand: z.boolean().optional().describe('whether a brand is saved for this workspace'),
       brand: z.any().optional().describe('the saved brand profile (name, domain, category, products, palette, …) or null'),
@@ -19954,7 +20099,7 @@ function memoryNoteVerdict(text) {
       personaNote: z.string().optional().describe('how to work for that kind of user (a creator wants organic content for their own feed, not ads by default; an explorer came to play with the models and needs no brand). Empty when persona is null.'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, wrap(async () => {
+  }, wrap(inBrand(async () => {
     const d = await apiGet('/api/brand/current');
     // WHO IS ASKING (2026-09-22): a creator's saved "brand" is their personal brand and an explorer has none on purpose,
     // so the text says so before it says what the create tools do with the profile — the same note the web Studio reads.
@@ -19965,7 +20110,7 @@ function memoryNoteVerdict(text) {
         ? `No saved brand for this workspace, and that is the user's choice: they picked "Just exploring". Make what they ask with no brand at all; a brand is optional (draft_brand, or the web Studio) and only worth mentioning if THEY ask for something about their own business.${who}`
         : `No saved brand for this workspace yet — onboard one with draft_brand (it saves automatically), or the user can onboard in the web Studio. Not a precondition: every tool works from what the user tells you.${who}`);
     return ok(text, d);
-  }));
+  })));
 
   server.registerTool('draft_brand', {
     title: 'Draft brand profile',
@@ -20104,7 +20249,7 @@ function memoryNoteVerdict(text) {
       transcript: z.string().nullable().optional().describe('verbatim voiceover + on-screen text with a beat list (null when silent/unreachable)'),
       words: z.array(z.any()).optional(), anchors: z.array(z.any()).optional(), cues: z.array(z.any()).optional(),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ url, frames, words, anchors }) => {
     const wantWords = words === true || words === 'only' || anchors != null;
     const wr = wantWords ? apiPost('/api/video/words', { url, ...(anchors ? { anchors } : {}) }).then(r => ({ r }), e => ({ e })) : null;
@@ -20173,7 +20318,7 @@ function memoryNoteVerdict(text) {
       top_fix: z.string().optional().describe('the single biggest improvement lever'),
       strengths: z.any().optional().describe('what the ad already does well'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ url, kind = 'image', intent = '' }) => {
     const d = await apiPost('/api/score/ad', { url, kind, intent, format: kind });
     if (!d) return ok('Could not score that ad.');
@@ -20475,7 +20620,7 @@ function memoryNoteVerdict(text) {
       teardown: z.any().optional().describe('the playbook — hook_taxonomy, campaigns, white_space, counter_plays, not_saying'),
       adCount: z.number().optional().describe('how many ads were analyzed'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ competitor, ads, language }) => {
     const name = String(competitor?.name || '').trim();
     if (!name) throw new Error('competitor.name is required.');
@@ -20511,7 +20656,7 @@ function memoryNoteVerdict(text) {
       findings: z.array(z.any()).optional().describe('flagged issues ({severity, issue, policy_quote, fix_suggestion, where_in_ad})'),
       anchors: z.array(z.any()).optional().describe('the Meta policy pages consulted ({url, …})'),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async ({ copy, claims, category, imageDescription }) => {
     const d = await apiPost('/api/policy/check', { copy, claims: claims || '', category: category || '', imageDescription: imageDescription || '' });
     const findings = (d.findings || []).map((f, i) => `${i + 1}. [${f.severity || 'issue'}] ${f.where_in_ad ? `"${f.where_in_ad}" — ` : ''}${f.issue || ''}\n   Meta: “${f.policy_quote || ''}”${f.fix_suggestion ? `\n   Fix: ${f.fix_suggestion}` : ''}`).join('\n');
@@ -20585,7 +20730,7 @@ function memoryNoteVerdict(text) {
     },
     // NOT read-only (2026-09-30, OpenAI's plugin scan): passing brandId switches this key's ACTIVE BRAND for every later
     // call, exactly like use_brand (activeBrand pins it server-side). That is a persisted, user-visible state change.
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ brandId, reviews, reviewsUrl, useOwnReviewsOnly }) => {
     const brand = await activeBrand(brandId);
     const own = {};
@@ -20647,7 +20792,7 @@ function memoryNoteVerdict(text) {
       unconfirmed: z.string().nullable().optional().describe('set when the save landed but the confirming read failed — neither saved nor failed; verify with list_product_photos'),
       saveError: z.string().nullable().optional().describe('set when the photo passed the check but could NOT be saved to the brand'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ imageUrl, source_note, brandId }) => {
     const brand = await activeBrand(brandId);
     const d = await apiPost('/api/product/set-image', { imageUrl, source_note: source_note || '', brand: brand || {} });

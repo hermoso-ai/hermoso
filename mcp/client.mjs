@@ -70,6 +70,26 @@ export const ENV_PREFIX = 'HERMOSO';
 // twice. Deliberately a per-call AsyncLocalStorage and not a module variable — concurrent tool calls interleave.
 export const toolCtx = new AsyncLocalStorage();
 
+// ── A BRAND NAMED ON ONE TOOL CALL SCOPES EVERY REQUEST THAT CALL MAKES (2026-09-30) ────────────────────────────
+// Measured on the hosted connector: `update_brand {brand:'pmuojpxnfrx0', voice:…}` wrote the voice onto the
+// connection's PINNED brand, a different one, because the store tools read and write through a key namespace resolved
+// from the pin and nothing on the wire named the brand the caller asked for. A store write is three requests (resolve
+// the workspace, read the store, write it back) plus whatever the tool calls on the way, and every one of them has to
+// land in the same brand — so the scope is set ONCE around the handler (tools.mjs `inBrand`) and applied HERE, at the
+// one seam every request passes through, rather than threaded by hand into each call where one can be forgotten.
+// It rides as `?brandId=`, the spelling the server belt (`brandRefOf`) reads on every method, which re-scopes that
+// request only and REFUSES a name that matches no brand or two. Never on /api/apple-ads/*, where `brandId` is Apple's.
+export const brandScope = new AsyncLocalStorage();
+const scopedBrand = (p) => {
+  const b = brandScope.getStore()?.brand;
+  return typeof b === 'string' && b.trim() && !/^\/api\/apple-ads\//.test(String(p || '')) ? b.trim() : '';
+};
+export const withBrandScope = (p) => {
+  const b = scopedBrand(p);
+  if (!b || /[?&]brandId=/.test(String(p))) return p;
+  return `${p}${String(p).includes('?') ? '&' : '?'}brandId=${encodeURIComponent(b)}`;
+};
+
 function headers(extra = {}) {
   const ctx = mcpCtx.getStore();
   // A HOSTED-CONNECTOR request (mcp/http.mjs) is a DIFFERENT TENANT from the process serving it, so its ctx is the
@@ -184,7 +204,7 @@ export async function apiGet(p, query) {
   // digit-strip reduced them to '' → GAQL "segments.date BETWEEN '' and ''". Drop empties before building the qs.
   const clean = query && Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''));
   const qs = clean && Object.keys(clean).length ? '?' + new URLSearchParams(clean).toString() : '';
-  const res = await fetchRead(`${API_BASE}${p}${qs}`, { headers: headers() });
+  const res = await fetchRead(`${API_BASE}${withBrandScope(`${p}${qs}`)}`, { headers: headers() });
   return unwrap(res);
 }
 
@@ -230,7 +250,7 @@ async function fetchWrite(url, init) {
 }
 
 export async function apiPost(p, body = {}) {
-  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
@@ -238,17 +258,17 @@ export async function apiPost(p, body = {}) {
 // "leave that field exactly as it was", so sending a whole object where a patch was meant would blank the fields
 // the caller never mentioned. Only ever send the keys that are actually changing.
 export async function apiPatch(p, body = {}) {
-  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
 export async function apiDelete(p) {
-  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'DELETE', headers: headers() });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'DELETE', headers: headers() });
   return unwrap(res);
 }
 
 export async function apiPut(p, body = {}) {
-  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
   return unwrap(res);
 }
 
@@ -281,6 +301,14 @@ async function fetchStoreSuffix() {
   return w.storeSuffix;
 }
 export async function storeSuffix() {
+  // A BRAND NAMED ON THIS CALL resolves its OWN suffix (the request carries `?brandId=` via withBrandScope) and is
+  // memoised on the per-call scope object only. Reading the pin's memo here is exactly how a named brand's write
+  // landed in the pinned brand's keys; falling back to the pin on a failed read would repeat it, so a failure throws.
+  const scope = brandScope.getStore();
+  if (scope && scopedBrand('/api/workspace')) {
+    if (scope._storeSuffix === undefined) scope._storeSuffix = await fetchStoreSuffix();
+    return scope._storeSuffix;
+  }
   const ctx = mcpCtx.getStore();
   if (ctx) {
     // HOSTED: memoize on the PER-REQUEST ctx object only. A module-level cache here would serve one customer's
@@ -347,7 +375,7 @@ export async function apiUpload(p, buf, { contentType = 'application/octet-strea
   if (buf && buf.length > UPLOAD_SINGLE_MAX && p === '/api/upload') return apiUploadInParts(buf, { contentType, fileName });
   const h = headers({ 'Content-Type': contentType });
   if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
-  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: h, body: buf });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'POST', headers: h, body: buf });
   return unwrap(res);
 }
 export async function apiUploadInParts(buf, { contentType = 'application/octet-stream', fileName = '' } = {}) {
@@ -384,13 +412,13 @@ export async function apiUploadUrl(p, url, { fileName = '' } = {}) {
   const h = headers({});
   delete h['Content-Type']; // a body-less POST must not claim one; the server sniffs the FETCHED bytes
   if (fileName) h['x-file-name'] = encodeURIComponent(fileName);
-  const res = await fetchWrite(`${API_BASE}${p}?url=${encodeURIComponent(url)}`, { method: 'POST', headers: h });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(`${p}?url=${encodeURIComponent(url)}`)}`, { method: 'POST', headers: h });
   return unwrap(res);
 }
 
 // /api/explore/chat streams Server-Sent-Events; collect to the terminal `done` payload {reply, results, actions}.
 export async function apiSSE(p, body = {}) {
-  const res = await fetchWrite(`${API_BASE}${p}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
+  const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
   if (!res.ok) { let e; try { e = (await res.json()).error; } catch {} throw Object.assign(new Error(e || `HTTP ${res.status}`), { status: res.status }); }
   const reader = res.body.getReader(); const dec = new TextDecoder();
   let buf = '', done = null, error = null; const progress = [];

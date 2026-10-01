@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**864 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**868 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
@@ -59,14 +59,18 @@ codex plugin marketplace add hermoso-ai/hermoso && codex plugin add hermoso@herm
 gemini extensions install https://github.com/hermoso-ai/hermoso
 ```
 
-**Grok Build and Grok Bot** (xAI), as a stdio MCP server:
+**Grok** (xAI) comes in three shapes, and each one connects differently:
 
-```bash
-grok mcp add hermoso -- npx -y hermoso mcp
-```
+- **grok.com and the Grok apps** take the hosted connector: open **Plugins → Connectors → New Connector → Custom**
+  (or go straight to grok.com/connectors), paste `https://app.hermoso.ai/mcp` and sign in with your Hermoso account.
+- **Grok Bot**: add the [Hermoso Marketing Bot template](https://x.ai/bot/THQqogUKuhn1whWU0hrmb). It arrives wired
+  to Hermoso and asks for a key, which you create in the app under **MCP & CLI → Terminal & API keys**.
+- **Grok Build**, xAI's terminal agent, runs a local MCP server. Sign in once, then add it:
 
-**Grok on grok.com** runs in a browser, so it takes the hosted connector: open grok.com/connectors, choose
-**New Connector → Custom**, paste `https://app.hermoso.ai/mcp` and sign in with your Hermoso account.
+  ```bash
+  npx -y hermoso auth login
+  grok mcp add hermoso -- npx -y hermoso mcp
+  ```
 
 **Cursor, OpenCode, GitHub Copilot, Windsurf and about 75 more agents**, through the open skills installer:
 
@@ -226,7 +230,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 864 tools cover
+### What the 868 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
