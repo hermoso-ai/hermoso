@@ -3924,7 +3924,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _motionLine = _mq(d.toolExamples?.motion) ? `\nRecast motion (recast_motion, billed per output second): tier pro (default) ${_mq(d.toolExamples.motion)}${_mq(d.toolExamples.motionStandard) ? `; tier standard ${_mq(d.toolExamples.motionStandard)}` : ''}` : '';
     // THE TALKING-AVATAR ENGINES (generate_avatar `engine`), priced live per second of speech — never a number here.
     const _avLine = (d.avatarEngines || []).length ? `\nTalking-avatar engines (generate_avatar engine): ${(d.avatarEngines || []).map(e => `${e.id}${e.default ? ' (default)' : ''} = ${e.label}${e.id === 'natural' ? ` · ${e.model}` : ''}, ~${e.creditsPerSecond}cr per second of speech, ${(e.resolutions || []).join('/')}${e.oneAtATime ? ', renders one video at a time (about ' + e.renderSecondsPerAudioSecond + 'x the speech length plus any wait), speech under 60s' : ''}`).join('; ')}` : '';
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\n${_pickLine}\n${_resLine}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
+    // EXTEND + RESTYLE, read off the same status (2026-10-02): which models continue a clip and by how much per call,
+    // and the one-tap looks restyle_video takes. Derived, never a hand list.
+    const _extLine = (d.options?.video?.models || []).filter(m => m.extend).map(m => `${m.id} +${m.extend.minSeconds}${m.extend.maxSeconds !== m.extend.minSeconds ? `-${m.extend.maxSeconds}` : ''}s`).join(', ');
+    const _rsLine = (d.restyleStyles || []).map(x => x.id).join(', ');
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}${_extLine ? `\nExtend a clip (generate_video extend:true + refVideo): ${_extLine}` : ''}${_rsLine ? `\nRestyle looks (restyle_video style): ${_rsLine}` : ''}\n${_pickLine}\n${_resLine}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
     return ok(text + connLine, d);
   }));
 
@@ -4427,7 +4431,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // brand, and the post reaches the brand's profile only when the brand accepts, which no agent could do before.
   server.registerTool('search_instagram_audio', {
     title: 'Trending or searched Instagram audio',
-    description: 'Audio the brand may legally put under a Reel — music or original sound — with title, artist, length, whether it is eligible for ads, a preview link and a download link. Omit the query for what is TRENDING right now; pass one to search. Everything returned is audio Instagram has authorized for third-party use. TO USE ONE, pass its `id` as `audioId` on post_to_meta or schedule_post (target instagram, a video): Instagram puts the track under the Reel itself. Download links expire after roughly 1.5 days. Read-only, free.',
+    description: 'Audio the brand may legally put under a Reel — music or original sound — with title, artist, length, whether it is eligible for ads, a preview link and a download link. Omit the query for what is TRENDING right now; pass one to search. Everything returned is audio Instagram has authorized for third-party use. Instagram offers this library only to an account linked to a Facebook Page and connected through Meta; an account connected through Instagram Login alone has none, and this says so. TO USE ONE, pass its `id` as `audioId` on post_to_meta or schedule_post (target instagram, a video): Instagram puts the track under the Reel itself. Download links expire after roughly 1.5 days. Read-only, free.',
     inputSchema: {
       audioType: z.enum(['music', 'original_sound']).optional().describe('default music'),
       query: z.string().optional().describe('omit for trending audio'),
@@ -5148,6 +5152,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       coverUrl: z.string().optional().describe('INSTAGRAM REEL COVER — a public image url Instagram fetches and uses as the cover in the Reels tab. REELS ONLY, and the alternative to `thumbOffset`: passing both is refused, since they are two answers to the same question. Run a local file through upload_file first.'),
       thumbOffset: z.number().optional().describe('INSTAGRAM REEL COVER, the other way — which frame becomes the cover, in MILLISECONDS from the start of the video. REELS ONLY. Use it instead of `coverUrl` when the right cover is already a frame of the clip.'),
       coverAtMs: z.number().optional().describe('THE VIDEO COVER for every target of this post, as ONE frame: milliseconds from the start (7000 = the frame at 7s). Instagram gets it as thumb_offset, Facebook as its uploaded cover (a Reel’s preferred thumbnail). Instagram’s own thumbOffset, or a Hermoso-hosted coverUrl, also becomes the Facebook cover.'),
+      // CAPTION ADD-ONS (2026-10-02). Instagram's Sep 28 changelog: a poll or a comment prompt on the container create,
+      // Facebook-Login accounts only, write-once. Refused by name where it cannot apply, never dropped.
+      instagramPoll: z.array(z.string()).optional().describe('INSTAGRAM — attach a POLL: 2 to 4 answers of 1–25 characters each, and the caption IS the question (so a caption is required). Feed photos, carousels and Reels only (never a story), one caption add-on per post (not with instagramCommentPrompt), and only on an account connected through Meta (a Facebook Page with a linked Instagram). WRITE-ONCE: Instagram cannot add, change or remove it after publishing, so show the user the answers first.'),
+      instagramPollExtended: z.boolean().optional().describe('INSTAGRAM — give that poll Instagram’s extended voting duration instead of its default 3 days (Instagram’s changelog says it then stays open indefinitely). Only with instagramPoll.'),
+      instagramCommentPrompt: z.boolean().optional().describe('INSTAGRAM — make the caption a COMMENT PROMPT that people answer in the comments. Same limits as instagramPoll, and never together with it.'),
       shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — true puts the Reel in the Feed grid as well as the Reels tab. REELS ONLY. Left unset it follows Instagram’s own default; Hermoso does not flip it either way on the user’s behalf.'),
       audioName: z.string().optional().describe('INSTAGRAM REEL — the name of the Reel’s audio track, which is what viewers tap through to. REELS ONLY.'),
       audioId: z.string().optional().describe('INSTAGRAM REEL — put one of Instagram’s OWN licensed music tracks under the Reel: the `id` search_instagram_audio returns. Instagram mixes it in when the Reel is published; nothing is downloaded or re-rendered. REELS ONLY, and only on an Instagram account connected through Meta (a Facebook Page with a linked Instagram), which is Instagram’s own rule — the Instagram connector cannot take it and is refused by name.'),
@@ -5175,7 +5184,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       crossreshareDarkMode: z.boolean().optional().describe('THREADS ONLY — render that Instagram Story in dark mode. Only meaningful alongside crossreshareToIg; on its own it is refused rather than silently ignored, because a parameter that never reaches the wire must not look accepted.'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (Instagram Reel: thumb_offset; Facebook video/Reel: an uploaded cover image) \u2014 and on Threads, which has no cover setting, a blank first frame is replaced on a copy sent to Threads only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     }).loose(),
-    outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), url: z.string().optional(), target: z.string().optional(), page: z.string().optional(), account: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), url: z.string().optional(), target: z.string().optional(), page: z.string().optional(), account: z.string().optional(), publishIssues: z.array(z.object({ field: z.string(), code: z.string(), text: z.string() })).optional(), publishIssuesNote: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/meta/post', a);
@@ -5187,7 +5196,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE COLLAB LINE IS THE READ-BACK, NEVER THE ASK. `collaboratorNote` is built from what Instagram said
     // about each invite; printing "posted with @x" off the request would tell the user their post is live on
     // an account that has not accepted it — and may never.
-    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}`, d);
+    // A PUBLISH CAN SUCCEED AND STILL DROP PART OF THE POST (Instagram's config_issue / caption add-on status): the note
+    // says what went out without its caption, tags, poll or prompt, so "it's live" is never the whole story told.
+    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}${d.publishIssuesNote ? ` ${d.publishIssuesNote}` : ''}`, d);
   }));
   // ── SCHEDULING (2026-07-30). ONE mechanism for every channel — our durable queue, not a per-platform special case.
   // Product feedback: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
@@ -5293,6 +5304,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       thumbOffset: z.number().optional().describe('INSTAGRAM REEL COVER, the other way — which frame becomes the cover, in MILLISECONDS from the start of the video. REELS ONLY. Use it instead of `coverUrl` when the right cover is already a frame of the clip.'),
       coverAtMs: z.number().optional().describe('THE VIDEO COVER on EVERY channel of this post, as ONE frame: milliseconds from the start (7000 = the frame at 7s). Instagram, TikTok, Facebook, LinkedIn Page, Pinterest, Telegram and YouTube all get that frame; X, Threads and Bluesky have no cover setting. A channel’s own field (thumbOffset, coverTimestampMs, coverUrl) wins there and otherwise counts as this.'),
       coverImageUrl: z.string().optional().describe('THE VIDEO COVER as a picture instead of a frame — a Hermoso-hosted image (upload_file). Every channel that takes a cover image gets it (Instagram, Facebook, LinkedIn Page, Pinterest, Telegram, YouTube); TikTok takes only a frame. Never together with coverAtMs.'),
+      // CAPTION ADD-ONS (2026-10-02). Instagram's Sep 28 changelog: a poll or a comment prompt on the container create,
+      // Facebook-Login accounts only, write-once. Refused by name where it cannot apply, never dropped.
+      instagramPoll: z.array(z.string()).optional().describe('INSTAGRAM — attach a POLL: 2 to 4 answers of 1–25 characters each, and the caption IS the question (so a caption is required). Feed photos, carousels and Reels only (never a story), one caption add-on per post (not with instagramCommentPrompt), and only on an account connected through Meta (a Facebook Page with a linked Instagram). WRITE-ONCE: Instagram cannot add, change or remove it after publishing, so show the user the answers first.'),
+      instagramPollExtended: z.boolean().optional().describe('INSTAGRAM — give that poll Instagram’s extended voting duration instead of its default 3 days (Instagram’s changelog says it then stays open indefinitely). Only with instagramPoll.'),
+      instagramCommentPrompt: z.boolean().optional().describe('INSTAGRAM — make the caption a COMMENT PROMPT that people answer in the comments. Same limits as instagramPoll, and never together with it.'),
       shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — true puts the Reel in the Feed grid as well as the Reels tab. REELS ONLY. Left unset it follows Instagram’s own default; Hermoso does not flip it either way on the user’s behalf.'),
       audioName: z.string().optional().describe('INSTAGRAM REEL — the name of the Reel’s audio track, which is what viewers tap through to. REELS ONLY.'),
       audioId: z.string().optional().describe('INSTAGRAM REEL — put one of Instagram’s OWN licensed music tracks under the Reel: the `id` search_instagram_audio returns. Instagram mixes it in when the Reel is published; nothing is downloaded or re-rendered. REELS ONLY, and only on an Instagram account connected through Meta (a Facebook Page with a linked Instagram), which is Instagram’s own rule — the Instagram connector cannot take it and is refused by name.'),
@@ -5455,6 +5471,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       thumbOffset: z.number().optional().describe('INSTAGRAM REEL — replaces the cover frame, in milliseconds; 0 removes it. Never together with coverUrl.'),
       coverAtMs: z.number().optional().describe('THE VIDEO COVER on every channel, as one frame in milliseconds (see schedule_post).'),
       coverImageUrl: z.string().optional().describe('THE VIDEO COVER on every channel, as a Hermoso-hosted picture (see schedule_post).'),
+      // CAPTION ADD-ONS (2026-10-02). Instagram's Sep 28 changelog: a poll or a comment prompt on the container create,
+      // Facebook-Login accounts only, write-once. Refused by name where it cannot apply, never dropped.
+      instagramPoll: z.array(z.string()).optional().describe('INSTAGRAM — attach a POLL: 2 to 4 answers of 1–25 characters each, and the caption IS the question (so a caption is required). Feed photos, carousels and Reels only (never a story), one caption add-on per post (not with instagramCommentPrompt), and only on an account connected through Meta (a Facebook Page with a linked Instagram). WRITE-ONCE: Instagram cannot add, change or remove it after publishing, so show the user the answers first.'),
+      instagramPollExtended: z.boolean().optional().describe('INSTAGRAM — give that poll Instagram’s extended voting duration instead of its default 3 days (Instagram’s changelog says it then stays open indefinitely). Only with instagramPoll.'),
+      instagramCommentPrompt: z.boolean().optional().describe('INSTAGRAM — make the caption a COMMENT PROMPT that people answer in the comments. Same limits as instagramPoll, and never together with it.'),
       shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — whether the Reel also shows in the Feed grid.'),
       audioName: z.string().optional().describe('INSTAGRAM REEL — replaces the audio track name; an empty string removes it.'),
       audioId: z.string().optional().describe('INSTAGRAM REEL — put one of Instagram’s OWN licensed music tracks under the Reel: the `id` search_instagram_audio returns. Instagram mixes it in when the Reel is published; nothing is downloaded or re-rendered. REELS ONLY; an empty string removes it, and only on an Instagram account connected through Meta (a Facebook Page with a linked Instagram), which is Instagram’s own rule — the Instagram connector cannot take it and is refused by name.'),
@@ -6580,17 +6601,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_youtube_comments', {
     title: 'Read comments on one of your YouTube videos',
-    description: 'Read the comments under a video on the connected channel — the questions, objections and exact wording real viewers use. Same raw material for ad copy that list_meta_comments gives you on Meta. Returns author, text, like count, timestamp and reply count, newest first. Read-only, 0 credits. Needs a connected YouTube channel.',
+    description: 'Read the comments under a video on the connected channel — the questions, objections and exact wording real viewers use. Same raw material for ad copy that list_meta_comments gives you on Meta. Returns author, text, like count, timestamp, reply count and comment id, newest first — plus `imageUrl` when a viewer attached an image or GIF to the comment (a signed YouTube link that expires six hours after the read, so download it then if it needs keeping). Read-only, 0 credits. Needs a connected YouTube channel.',
     inputSchema: { videoId: z.string().describe('the YouTube video id'), limit: z.number().optional().describe('max comments, default 25, cap 100') },
-    outputSchema: { videoId: z.string().optional(), count: z.number().optional(), comments: z.array(z.object({ id: z.string().optional(), author: z.string().optional(), text: z.string().optional(), likes: z.number().optional(), at: z.string().optional(), replies: z.number().optional() })).optional() },
+    outputSchema: { videoId: z.string().optional(), count: z.number().optional(), comments: z.array(z.object({ id: z.string().optional(), author: z.string().optional(), text: z.string().optional(), likes: z.number().optional(), at: z.string().optional(), replies: z.number().optional(), imageUrl: z.string().optional() })).optional(), imageUrlNote: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/comments', { videoId: a.videoId, ...(a.limit ? { limit: a.limit } : {}) });
     // The comments ARE the answer — "12 comments on abc123" is a receipt, not a read. Newlines inside a comment are
     // collapsed so one rambling reply cannot swamp the list, and each is capped; the untouched text stays in
     // structuredContent for anything that needs it verbatim.
-    const cl = (d.comments || []).map(c => `  • ${c.author || 'someone'}${c.likes ? ` (${c.likes} like${c.likes === 1 ? '' : 's'})` : ''}: ${String(c.text || '').replace(/\s+/g, ' ').trim().slice(0, 400)}${c.replies ? ` — ${c.replies} repl${c.replies === 1 ? 'y' : 'ies'}` : ''}`);
-    return ok(`${d.count} comment${d.count === 1 ? '' : 's'} on ${d.videoId}:\n${cl.join('\n') || '  (none)'}`, d);
+    const cl = (d.comments || []).map(c => `  • ${c.author || 'someone'}${c.likes ? ` (${c.likes} like${c.likes === 1 ? '' : 's'})` : ''}: ${String(c.text || '').replace(/\s+/g, ' ').trim().slice(0, 400)}${c.imageUrl ? ` [attached image: ${c.imageUrl}]` : ''}${c.replies ? ` — ${c.replies} repl${c.replies === 1 ? 'y' : 'ies'}` : ''}${c.id ? ` (id ${c.id})` : ''}`);
+    return ok(`${d.count} comment${d.count === 1 ? '' : 's'} on ${d.videoId}:\n${cl.join('\n') || '  (none)'}${d.imageUrlNote ? `\n${d.imageUrlNote}` : ''}`, d);
   }));
   server.registerTool('reply_to_youtube_comment', {
     title: 'Reply to a YouTube comment',
@@ -6880,6 +6901,82 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (d.action === 'remove_message') return ok(d.removed ? `Removed message ${d.messageId}.` : `X did not confirm removing ${d.messageId}.`, d);
     if (d.action === 'mute' || d.action === 'unmute') return ok(`${d.username || d.userId} is ${d.muted ? 'muted' : 'not muted'} in broadcast ${d.broadcastId}.`, d);
     return ok(`Chat moderators now: ${(d.moderatorIds || []).join(', ') || '(none)'}.`, d);
+  }));
+  // X CHAT (2026-10-02) — the /2/chat/* endpoints X's OpenAPI 2.169 added, as four tools; gates and payloads live in
+  // lib/x-chat.mjs on the server, so every refusal below is the server's own sentence and costs nothing. X Chat is
+  // END-TO-END ENCRYPTED: Hermoso holds no conversation key, so nothing here reads or writes message text or group names.
+  const XC_SCOPE_NOTE = ' Needs X connected with direct-message access: an X connection made before 2026-08-25 must be reconnected once under Workspace > Connectors > X (the tool says so without calling X). Costs credits (X bills per call).';
+  const xcSettingsLine = (s = {}) => `who can message: ${s.allowDmsFrom ?? '?'}${s.alwaysAllowSubscribers ? ' (subscribers always)' : ''}; quality filter ${s.qualityFilter == null ? '?' : s.qualityFilter ? 'on' : 'off'}; read receipts ${s.readReceipts == null ? '?' : s.readReceipts ? 'on' : 'off'}; calls ${s.callsEnabled == null ? '?' : s.callsEnabled ? 'on' : 'off'}`;
+  server.registerTool('x_chat_settings', {
+    title: 'Read the X Chat privacy settings',
+    description: "The connected X account's X Chat (direct message) PRIVACY SETTINGS: who can message the brand (allowDmsFrom: all / verified / following), whether subscribers can always message it, the low-quality request filter, read receipts, and audio/video call permissions. Use it before changing them with update_x_chat_settings, or to answer 'can customers DM us on X'. Read-only." + XC_SCOPE_NOTE,
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async () => {
+    const d = await apiGet('/api/x/chat/settings', {});
+    return ok(`X Chat settings: ${xcSettingsLine(d.settings)}. Cost ${d.costCredits ?? '?'} credits.`, d);
+  }));
+  server.registerTool('update_x_chat_settings', {
+    title: 'Change the X Chat privacy settings',
+    description: "Change the connected X account's X Chat privacy settings: the account-wide answer to 'open our DMs to everyone' or 'turn off read receipts'. Pass only what changes. allowDmsFrom: 'all' (anyone), 'verified' (verified accounts only) or 'following' (accounts the brand follows); narrowing it stops customers the brand does not follow from messaging it, so say that before changing it. Call settings are merged onto the stored ones (X does not promise a partial call setting keeps the rest). Returns the settings X stored, not what was sent. Reversible." + XC_SCOPE_NOTE,
+    inputSchema: {
+      allowDmsFrom: z.enum(['all', 'verified', 'following']).optional(),
+      alwaysAllowSubscribers: z.boolean().optional().describe('subscribers can always message the brand, whatever allowDmsFrom says'),
+      qualityFilter: z.boolean().optional().describe('true = low-quality message requests go to a separate folder'),
+      readReceipts: z.boolean().optional().describe('send and receive read receipts'),
+      callsEnabled: z.boolean().optional().describe('audio and video calls on or off'),
+      enhancedCallPrivacy: z.boolean().optional(),
+      acceptCallsFrom: z.object({ everyone: z.boolean().optional(), following: z.boolean().optional(), verified: z.boolean().optional(), addressBook: z.boolean().optional() }).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/x/chat/settings', a);
+    return ok(`X stored: ${xcSettingsLine(d.settings)}. Cost ${d.costCredits ?? '?'} credits.`, d);
+  }));
+  server.registerTool('list_x_chats', {
+    title: 'List X Chat conversations',
+    description: "The connected X account's X CHAT conversations: id (group ids start with g), type, muted, disappearing-message timer, screenshot controls, admins, members, PENDING join requests, which actions are admin-only, and the active invite link. X Chat is END-TO-END ENCRYPTED, so message text and group names cannot be read here (list_x_dms reads the plain direct-message history). view 'admin_requests' (id = a group the brand admins) lists who asked to become an admin; view 'invite' (inviteLink, or id + inviteToken) previews an invite link: group name, member count, whether the brand is in it. withMembers:true resolves member @handles, and each user X returns is billed. Read-only. Billed per conversation returned, so keep maxResults small." + XC_SCOPE_NOTE,
+    inputSchema: {
+      view: z.enum(['conversations', 'admin_requests', 'invite']).optional().describe("default 'conversations'"),
+      id: z.string().optional().describe('one conversation; for admin_requests, the group (g + digits)'),
+      maxResults: z.number().optional().describe('1-100, default 10; every conversation returned is billed'),
+      paginationToken: z.string().optional().describe('nextToken from a previous call'),
+      withMembers: z.boolean().optional().describe('also resolve member/admin @handles (each one billed)'),
+      inviteLink: z.string().optional().describe('an x.com/i/chat/group_join/... link, for view invite'),
+      inviteToken: z.string().optional().describe('the 10-character token, with id, for view invite'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiGet('/api/x/chats', a);
+    const cost = `Cost ${d.costCredits ?? '?'} credits.`;
+    if (d.view === 'invite') { const i = d.invite || {}; return ok(`Invite ${i.url || '?'}: "${i.groupName || '(no name)'}", ${i.memberCount ?? '?'} members, the brand is ${i.joinState || '?'}${i.expiresAt ? `, expires ${i.expiresAt}` : ''}. ${cost}`, d); }
+    if (d.view === 'admin_requests') return ok(`${d.count} admin request(s) in ${d.id}:\n` + (d.requests || []).map((u) => `- ${u.username || u.id} (${u.id})`).join('\n') + `\n${cost}`, d);
+    const rows = (d.conversations || []).slice(0, 25).map((c) => `- ${c.id} ${c.isGroup ? 'group' : '1:1'}${c.muted ? ', muted' : ''}${c.disappearAfterMs ? `, messages disappear after ${Math.round(c.disappearAfterMs / 3600e3)}h` : ''}${c.memberIds ? `, ${c.memberIds.length} members` : ''}${c.pendingJoinIds && c.pendingJoinIds.length ? `, ${c.pendingJoinIds.length} waiting to join` : ''}${c.invite && c.invite.url ? `, invite ${c.invite.url}` : ''}`);
+    return ok(`${d.count} X Chat conversation(s)${d.nextToken ? ' (more available, pass paginationToken)' : ''}:\n${rows.join('\n') || '(none)'}\n${d.note || ''} ${cost}`.trim(), d);
+  }));
+  server.registerTool('manage_x_chat', {
+    title: 'Manage an X Chat conversation',
+    description: "Manage one of the connected X account's X Chat conversations (id from list_x_chats). For the brand only: 'mute' / 'unmute'; 'delete' removes it from the brand's inbox for good while the others keep theirs (confirm:true). For everyone in it: 'set_disappearing' (disappearAfter like '24h' or '7d'), 'clear_disappearing', 'screen_capture' (blockScreenshots OR notifyOnScreenshot, one per call). GROUPS (id starts with g; the brand must be an admin): 'admin_settings' (adminOnly {addMember, editGroupInfo, sendMessage, startCall, editMessageTtl, blockScreenCapture}; sendMessage:true makes it announcement-only), 'add_admins' / 'remove_admins' (userIds), 'remove_members' (userIds, confirm:true), 'leave' (confirm:true), 'approve_admin_request' / 'reject_admin_request' (userId), 'reject_join_requests' (userIds; APPROVING a join re-keys the encrypted group, so it is done in the X app), 'enable_invite' (optional title, avatarUrl, welcomeMessage, expiresAt; X stores that preview UNENCRYPTED and shows it to anyone with the link), 'disable_invite' (the shared link dies for good: confirm:true). Confirm the exact conversation with the user before passing confirm:true; a refusal is free. The answer is X's own yes or no, never an echo." + XC_SCOPE_NOTE,
+    inputSchema: {
+      action: z.enum(['mute', 'unmute', 'delete', 'set_disappearing', 'clear_disappearing', 'screen_capture', 'admin_settings', 'add_admins', 'remove_admins', 'remove_members', 'leave', 'approve_admin_request', 'reject_admin_request', 'reject_join_requests', 'enable_invite', 'disable_invite']),
+      id: z.string().describe('conversation id from list_x_chats: g + digits for a group, or the other person\'s numeric id for a 1:1'),
+      userIds: z.array(z.string()).optional().describe('NUMERIC X account ids (add_admins, remove_admins, remove_members, reject_join_requests)'),
+      userId: z.string().optional().describe('NUMERIC X account id (approve_admin_request, reject_admin_request)'),
+      disappearAfter: z.string().optional().describe("set_disappearing: '24h', '7d', '90m' or a number of seconds"),
+      blockScreenshots: z.boolean().optional(), notifyOnScreenshot: z.boolean().optional(),
+      adminOnly: z.object({ addMember: z.boolean().optional(), editGroupInfo: z.boolean().optional(), sendMessage: z.boolean().optional(), startCall: z.boolean().optional(), editMessageTtl: z.boolean().optional(), blockScreenCapture: z.boolean().optional() }).optional().describe('admin_settings: true = only admins may'),
+      title: z.string().optional().describe('enable_invite: the group name shown on the link preview (stored unencrypted)'),
+      avatarUrl: z.string().optional().describe('enable_invite: https image for the preview'),
+      welcomeMessage: z.string().optional(),
+      expiresAt: z.string().optional().describe('enable_invite: ISO 8601 or epoch ms; omit for a link that does not expire'),
+      confirm: z.boolean().optional().describe('true only after the user approved this exact delete / leave / removal / link shutdown'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/x/chats/manage', a);
+    const cost = `Cost ${d.costCredits ?? '?'} credits.`;
+    if (d.action === 'enable_invite') return ok(d.confirmed ? `Invite link on: ${d.invite && d.invite.url}${d.invite && d.invite.expiresAt ? ` (expires ${d.invite.expiresAt})` : ''}. ${d.note || ''} ${cost}` : `X did not return an invite link. ${cost}`, d);
+    return ok(`${d.confirmed ? 'Done' : 'X did not confirm it'}: ${String(d.action).replace(/_/g, ' ')} on ${d.id}${d.userIds ? ` (${d.userIds.join(', ')})` : ''}. ${cost}`, d);
   }));
   server.registerTool('x_user', {
     title: 'Look up any public X account',
@@ -11185,7 +11282,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/openai-ads/campaigns', a);
-    const blk = (x) => `${x.servingIssues && x.servingIssues.length ? ` ⚠ not serving: ${x.servingIssues.map(i => i.meaning).join('; ')}` : ''}${x.phoneVerificationRequired ? ' ⚠ the advertiser must verify a phone number in Ads Manager before this can serve' : ''}`;
+    const blk = (x) => `${x.servingIssues && x.servingIssues.length ? ` ⚠ not serving: ${x.servingIssues.map(i => i.meaning).join('; ')}` : ''}${x.phoneVerificationRequired ? ' ⚠ the advertiser must verify a phone number in Ads Manager before this can serve' : ''}${x.geographicTargetingBlocked ? ' ⚠ OpenAI flags this one’s geographic targeting as blocked' : ''}`;
     if (d.level === 'ad') return ok(`${d.count} ad(s) in ChatGPT Ads ad group ${d.adGroupId}:\n${(d.ads || []).map(x => `• ${x.title || x.name} (${x.id}) — ${x.status}, review ${x.reviewStatus || 'unknown'}${x.appeal ? `, appeal ${x.appeal.status}` : ''}${x.targetUrl ? ` → ${x.targetUrl}` : ''}${blk(x)}`).join('\n') || '(none)'}`, d);
     if (d.level === 'adGroup') return ok(`${d.count} ad group(s) in ChatGPT Ads campaign ${d.campaignId}:\n${(d.adGroups || []).map(g => `• ${g.name} (${g.id}) — ${g.status}, ${g.contextHints} context hint(s)${g.maxBid != null ? `, max bid ${g.maxBid}` : ''}${(g.audienceBidMultipliers || []).length ? `, ${g.audienceBidMultipliers.length} audience bid multiplier(s)` : ''}${blk(g)}`).join('\n') || '(none)'}`, d);
     const acc = d.account;
@@ -11193,7 +11290,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('openai_ads_report', {
     title: 'ChatGPT Ads performance report',
-    description: 'Performance for ChatGPT Ads — impressions, clicks, spend, CTR, CPC, CPM, and CONVERSIONS with CPA, post-click conversion rate and attributed order sales / ROAS, in the ad account currency. OpenAI returns conversions only with granularity none or daily and with no segment or a country/device segment (never platform or product), and CPA, conversion rate and sales only with no segment at all; the report adds every column OpenAI allows for the shape you asked and its note names any it left out, so a missing column is their limit, not a zero. These conversions are CLICK-THROUGH (the ones CPA and bidding use); view-through lives only in openai_ads_conversions and is never added to them. The scope follows the id you pass: none = the whole ad account, or campaignId / adGroupId / adId. PRODUCT-FEED CAMPAIGNS serving in the multi-product CAROUSEL unit also report per-card numbers: ask for them in `fields` — carousel_product_card_impressions, carousel_product_card_clicks, product_impressions, product_clicks, product_spend, product_ctr, product_cpc, product_cpm plus product_title / product_price / product_feed_id and the other product_* fields (complete from 2026-08-20 on a rolling 30-day basis); they come back under each row’s `fields`. A card impression counts when a product card becomes viewable and is NOT a billable impression, so never add it to spend math. granularity is hourly, daily, monthly or none (default daily); the default window is the last 30 days; segment by country or device for a breakdown, and level rolls the rows up by campaign / ad group / ad. A report with NO rows genuinely means there was NO delivery in that window — say exactly that; never present zeros as measured performance. attributedEvents:true adds every event OpenAI attributed beyond the campaign goal (purchases on a sign-up campaign) for the same scope and days; never add those counts to conversions. Read-only and free, so run it FIRST after connecting: it proves the key works with zero spend risk.',
+    description: 'Performance for ChatGPT Ads — impressions, clicks, spend, CTR, CPC, CPM, and CONVERSIONS with CPA, post-click conversion rate and attributed order sales / ROAS, in the ad account currency. OpenAI returns conversions only with granularity none or daily and with no segment or a country/device segment (never platform or product), and CPA, conversion rate and sales only with no segment at all; the report adds every column OpenAI allows for the shape you asked and its note names any it left out, so a missing column is their limit, not a zero. Since OpenAI’s 2026-09-30 change these conversions count click-through PLUS view-through goal conversions within the reporting windows (default 30-day click, 1-day view, dated by the ad interaction); CPA uses them and post-click conversion rate uses click-through only. clickWindowDays (7, 14, 30), viewWindowDays (0 = clicks only, or 1) and attributionTimeBasis choose those windows for every conversion column and never change the campaign; use the same ones as Ads Manager when comparing, and the reply’s `attribution` names the windows used. The scope follows the id you pass: none = the whole ad account, or campaignId / adGroupId / adId. PRODUCT-FEED CAMPAIGNS serving in the multi-product CAROUSEL unit also report per-card numbers: ask for them in `fields` — carousel_product_card_impressions, carousel_product_card_clicks, product_impressions, product_clicks, product_spend, product_ctr, product_cpc, product_cpm plus product_title / product_price / product_feed_id and the other product_* fields (complete from 2026-08-20 on a rolling 30-day basis); they come back under each row’s `fields`. A card impression counts when a product card becomes viewable and is NOT a billable impression, so never add it to spend math. granularity is hourly, daily, monthly or none (default daily); the default window is the last 30 days; segment by country or device for a breakdown, and level rolls the rows up by campaign / ad group / ad. A report with NO rows genuinely means there was NO delivery in that window — say exactly that; never present zeros as measured performance. attributedEvents:true adds every event OpenAI attributed beyond the campaign goal (purchases on a sign-up campaign) for the same scope and days; never add those counts to conversions. Read-only and free, so run it FIRST after connecting: it proves the key works with zero spend risk.',
     inputSchema: {
       campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(),
       since: z.string().optional().describe('YYYY-MM-DD'), until: z.string().optional().describe('YYYY-MM-DD'),
@@ -12553,7 +12650,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('openai_ads_conversions', {
     title: 'ChatGPT Ads attributed conversions',
-    description: 'ATTRIBUTED CONVERSIONS for ChatGPT Ads — the number the whole pixel + conversion-event setup exists to produce, beyond what openai_ads_report shows: that report carries click-through conversions and CPA for the account, a campaign, ad group or ad, while this tool adds VIEW-THROUGH conversions, totals per id across many ids, and the received-event sample. Pass entityIds — the campaign / ad group / ad ids to report on — with a matching level; the default window is the last 30 days. NEVER ADD conversions AND viewThroughConversions TOGETHER: OpenAI states that "conversions is always equal to click_through_conversions" and that view-through is "a separate, supplemental metric" NOT added to that total, and that view-through is reporting-only because CPA, post-click CVR, bidding, billing and conversion optimization all remain click-through-based. NO ROWS means no attributed conversion was recorded, not that data is missing — say exactly that, and check that an event setting exists (list_openai_ads_conversion_events) and that its pixel snippet is actually live on the site. RECEIVED EVENTS: pass recentEvents:true (no ids needed) to read a recent SAMPLE of the events OpenAI actually received on the pixel — type, event time, receive time, API channel and the event id — which answers "did OpenAI get the signup at all?" when a conversion is missing. It is a sample, not a complete log, and receiving an event is not the same as attributing it. BEYOND THE GOAL (on by default): each row and the reply carry attributedEvents, every event OpenAI attributed whether or not it is the campaign’s goal (e.g. purchases on a sign-up campaign), with count and value; totals.orderSales is attributed purchase value. An event count already includes goal activity: NEVER add it to conversions; a null value is unknown, not zero. A current day is not final until OpenAI’s daily processing runs. Read-only, free.',
+    description: 'ATTRIBUTED CONVERSIONS for ChatGPT Ads — the number the whole pixel + conversion-event setup exists to produce, beyond what openai_ads_report shows: that report carries conversions and CPA for the account, a campaign, ad group or ad, while this tool adds the click-through / view-through split, totals per id across many ids, and the received-event sample. Pass entityIds — the campaign / ad group / ad ids to report on — with a matching level; the default window is the last 30 days. NEVER ADD viewThroughConversions TO conversions: since OpenAI’s 2026-09-30 change conversions already counts click-through PLUS view-through goal conversions within the chosen windows (their example: 3 click-through and 2 view-through give conversions 5), and the rows and totals carry clickThroughConversions and viewThroughConversions as its two parts. Post-click conversion rate stays click-through only. NO ROWS means no attributed conversion was recorded, not that data is missing — say exactly that, and check that an event setting exists (list_openai_ads_conversion_events) and that its pixel snippet is actually live on the site. RECEIVED EVENTS: pass recentEvents:true (no ids needed) to read a recent SAMPLE of the events OpenAI actually received on the pixel — type, event time, receive time, API channel and the event id — which answers "did OpenAI get the signup at all?" when a conversion is missing. It is a sample, not a complete log, and receiving an event is not the same as attributing it. BEYOND THE GOAL (on by default): each row and the reply carry attributedEvents, every event OpenAI attributed whether or not it is the campaign’s goal (e.g. purchases on a sign-up campaign), with count and value; totals.orderSales is attributed purchase value. An event count already includes goal activity: NEVER add it to conversions; a null value is unknown, not zero. A current day is not final until OpenAI’s daily processing runs. Read-only, free.',
     inputSchema: {
       level: z.enum(['ad_account', 'campaign', 'ad_group', 'ad']).optional().describe('inferred from which id you pass — default ad_account'),
       entityIds: z.array(z.string()).optional().describe('the campaign, ad group or ad ids to report on, required below the account level; omit for level ad_account, which sums every campaign'),
@@ -12834,6 +12931,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { campaignId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(), actorId: z.string().optional(), since: z.string().optional(), until: z.string().optional(), order: z.enum(['asc', 'desc']).optional(), limit: z.number().optional().describe('1-100, default 25'), after: z.string().optional(), before: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/audit-logs', a))));
+  server.registerTool('get_openai_ads_landing_page_crawl', {
+    title: 'What ChatGPT Ads’ crawler saw on an ad’s landing page', description: 'The saved evidence from OpenAI’s landing-page crawler for an ad’s submitted version: crawl status and failure code, the requested and final URL (a redirect shows here), capture time, whether robots.txt allowed the crawler and its user agent, and a screenshot of what it saw. Read it when an ad is rejected or reports a landing-page crawl serving issue. The screenshot link expires within 24 hours. available:false with pending:true means the capture is still running; available:false otherwise means OpenAI holds no capture (or the ad id is not on this account). The status is the crawl job’s, not the page’s HTTP status. Reading never starts a crawl. Read-only, 0 credits.',
+    inputSchema: { adId: z.string().describe('the ad, e.g. ad_… from list_openai_ads_campaigns with an adGroupId') },
+    outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), available: z.boolean().optional(), pending: z.boolean().optional(), snapshotId: z.string().nullable().optional(), status: z.string().optional(), sourceUrl: z.string().nullable().optional(), finalUrl: z.string().nullable().optional(), capturedAt: z.string().nullable().optional(), crawlProfile: z.string().nullable().optional(), failureCode: z.string().nullable().optional(), robotsTxtAllowed: z.boolean().nullable().optional(), robotsTxtReason: z.string().nullable().optional(), robotsTxtUrl: z.string().nullable().optional(), userAgent: z.string().nullable().optional(), screenshotUrl: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/landing-page-crawl', a))));
 
   server.registerTool('list_pinterest_ads_campaigns', {
     title: 'List Pinterest ad accounts / campaigns',
@@ -13179,13 +13282,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_reddit_ads_post', {
     title: 'Create the Reddit post an ad will promote',
-    description: 'Create the CREATIVE for a Reddit ad. This is the step people skip: a Reddit ad has no creative of its own — it points at a post — so a campaign and ad group with no post behind them can never serve. Types are TEXT (headline + body), IMAGE, VIDEO and CAROUSEL (up to 6 images). For image/video/carousel pass media[] with a PUBLIC mediaUrl; Reddit fetches and validates it itself (minimum 140×140), and a video also needs a thumbnailUrl. The destination for a click rides on the media entry’s destinationUrl, NOT on the ad. Reddit’s call-to-action values are human-readable strings with spaces and capitals — "Learn More", "Shop Now", "Sign Up" — not SCREAMING_SNAKE; the error lists all of them. The post is published on the profile immediately, so show the user the exact headline and body first.',
+    description: 'Create the CREATIVE for a Reddit ad. This is the step people skip: a Reddit ad has no creative of its own — it points at a post — so a campaign and ad group with no post behind them can never serve. Types are TEXT (headline + body), IMAGE, VIDEO and CAROUSEL (up to 6 images), and an IMAGE, VIDEO or CAROUSEL post can carry body text too. For image/video/carousel pass media[] with a PUBLIC mediaUrl; Reddit fetches and validates it itself (minimum 140×140), and a video also needs a thumbnailUrl. The destination for a click rides on the media entry’s destinationUrl, NOT on the ad. Reddit’s call-to-action values are human-readable strings with spaces and capitals — "Learn More", "Shop Now", "Sign Up" — not SCREAMING_SNAKE; the error lists all of them. The post is published on the profile immediately, so show the user the exact headline and body first. A post with body text under media, or a rich-text body, is built by Reddit in the background: the answer is usually the post, and when Reddit is still building it the answer says pending with a jobId, so call this again with redditProfileId and that jobId (never re-send the post, which would make a second one).',
     inputSchema: {
       adAccountId: z.string().optional(),
       redditProfileId: z.string().describe('the Reddit profile id (t2_…) to publish as — from list_reddit_ads_profiles'),
+      jobId: z.string().optional().describe('PICK UP a post Reddit was still building: the jobId from an earlier pending answer. Creates nothing new; every other field is ignored.'),
       type: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'CAROUSEL']).optional().describe('default TEXT'),
       headline: z.string().describe('the post title — this is the ad’s headline'),
-      body: z.string().optional().describe('body copy, TEXT posts'),
+      body: z.string().optional().describe('body copy: the text of a TEXT post, or text shown with an IMAGE, VIDEO or CAROUSEL post. Up to 40,000 characters.'),
+      textFormat: z.enum(['PLAIN_TEXT', 'RICH_TEXT_JSON']).optional().describe('how Reddit reads body: PLAIN_TEXT (the default) or RICH_TEXT_JSON, a Reddit rich-text JSON document serialized as a string. Cannot be changed after the post is created.'),
       media: z.array(z.object({
         mediaUrl: z.string().optional().describe('PUBLIC url of the image/video — Reddit fetches it, minimum 140×140'),
         destinationUrl: z.string().optional().describe('where a click goes — required for image and carousel posts'),
@@ -13197,11 +13302,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       thumbnailUrl: z.string().optional().describe('required for VIDEO posts'),
       allowComments: z.boolean().optional().describe('Reddit ads can carry a public comment thread — decide deliberately'),
     },
-    outputSchema: { id: z.string().optional(), type: z.string().optional(), headline: z.string().optional(), postUrl: z.string().nullable().optional(), note: z.string().optional() },
+    outputSchema: { id: z.string().optional(), type: z.string().optional(), headline: z.string().optional(), body: z.string().nullable().optional(), textFormat: z.string().nullable().optional(), postUrl: z.string().nullable().optional(), pending: z.boolean().optional(), jobId: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/posts', a);
-    return ok(`${d.note} Pass postId:"${d.id}" to create_reddit_ads_ad.`, d);
+    // A post Reddit is still building has no id yet: the note carries the jobId to pick it up with, and nothing here
+    // may tell the caller to hand an ad a post that does not exist.
+    return ok(d.pending ? d.note : `${d.note} Pass postId:"${d.id}" to create_reddit_ads_ad.`, d);
   }));
   server.registerTool('update_reddit_ads_post', {
     title: 'Turn comments on or off on a Reddit ad post',
@@ -13730,7 +13837,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_reddit_ads_lead_form', {
     title: 'Create a Reddit lead generation form',
-    description: 'REDDIT IS SUNSETTING THIS ON 2026-09-21 AND IT CANNOT BE REPLACED LIKE FOR LIKE. Reddit is removing onsite lead forms entirely — the API sunsets 2026-09-21 (their migration guide says 2026-09-30 for the same change; Hermoso stops creating on the earlier date so a form is never built that turns out not to work) and Reddit PAUSES every ad still using an onsite form on 2026-09-30. After that this tool refuses and says so. DO NOT BUILD A NEW FUNNEL ON IT: Reddit’s replacement is an OFFLINE form on the advertiser’s own landing page, measured with the Reddit Pixel or the Conversions API — list_reddit_ads_pixels and send_reddit_ads_conversions, both of which work here today. Create a lead generation form — the in-feed form redditors fill in without leaving Reddit, used by LEAD_GENERATION campaigns. Reddit requires a link to a real privacy policy on every form. Ask for the FEWEST fields that make a lead useful: every extra question costs completions. KNOW THE LIMIT BEFORE YOU PROMISE ANYTHING: Reddit exposes no way to attach a form to an ad through the API — there is no lead-form field on an ad, an ad group or a post — so the user picks this form in Reddit’s Ads Manager when building the creative, and downloads its leads from there. There is also no update and no delete, so get the questions right the first time. Free.',
+    description: 'REDDIT HAS RETIRED THIS, SO IT NOW REFUSES, AND IT CANNOT BE REPLACED LIKE FOR LIKE. Reddit removed onsite lead forms entirely: the API sunset on 2026-09-21 by Reddit’s changelog (their migration guide said 2026-09-30 for the same change; Hermoso stopped creating on the earlier date), Reddit’s API reference now marks the create call deprecated and it answers 410 Gone from 2026-09-30, and Reddit paused every ad still using an onsite form on 2026-09-30. So this tool refuses for free, before calling Reddit, and says what to do instead. DO NOT BUILD A NEW FUNNEL ON IT: Reddit’s replacement is an OFFLINE form on the advertiser’s own landing page, measured with the Reddit Pixel or the Conversions API — list_reddit_ads_pixels and send_reddit_ads_conversions, both of which work here today — inside an offsite lead generation campaign (create_reddit_ads_campaign with objective LEAD_GENERATION). Existing forms stay readable with list_reddit_ads_lead_forms. What it used to do: create a lead generation form — the in-feed form redditors fill in without leaving Reddit, used by LEAD_GENERATION campaigns. Reddit requires a link to a real privacy policy on every form. Ask for the FEWEST fields that make a lead useful: every extra question costs completions. KNOW THE LIMIT BEFORE YOU PROMISE ANYTHING: Reddit exposes no way to attach a form to an ad through the API — there is no lead-form field on an ad, an ad group or a post — so the user picks this form in Reddit’s Ads Manager when building the creative, and downloads its leads from there. There is also no update and no delete, so get the questions right the first time. Free.',
     inputSchema: {
       adAccountId: z.string().optional(),
       name: z.string().describe('internal name — redditors do not see it'),
@@ -17014,31 +17121,42 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('append_to_doc', {
     title: 'Append text to a Google Doc',
-    description: 'Append text to the end of a Google Doc Hermoso can reach — one it created (pass the documentId from create_doc) or one the user handed over with the Google file picker in the app (find its id with list_drive_files).',
+    description: 'Append text to the end of a Google Doc Hermoso can reach — one it created (pass the documentId from create_doc) or one the user handed over with the Google file picker in the app (find its id with list_drive_files). Optional `dropdown:{title, options:[2-50], selected}` appends a Google Docs dropdown chip after the text — e.g. text "Status: " + dropdown {title:"Status", options:["Draft","In review","Approved"]} gives a brief a status the team can click to change; the chip is confirmed by reading the doc back. Set it later with update_doc dropdowns.',
     inputSchema: {
       documentId: z.string().describe('the document id from create_doc'),
-      text: z.string().describe('text to append at the end of the doc'),
+      text: z.string().optional().describe('text to append at the end of the doc (optional when a dropdown is passed)'),
+      dropdown: z.object({
+        title: z.string().optional().describe('the dropdown title, e.g. "Status"'),
+        options: z.array(z.string()).describe('2 to 50 distinct options'),
+        selected: z.string().optional().describe('the option it starts on (default: the first)'),
+      }).optional().describe('a dropdown chip to append after the text'),
     },
-    outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), url: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), url: z.string().optional(), verified: z.boolean().nullable().optional(),
+      dropdown: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/docs/append', a);
-    return ok(`Appended text to the doc — ${d.url}`, d);
+    return ok(d.note || `Appended text to the doc — ${d.url}`, d);
   }));
   server.registerTool('read_doc', {
     title: 'Read a Google Doc',
-    description: 'Read the text of a Google Doc Hermoso can reach — one it created, or one the user handed over with the Google file picker in the app (that is how an EXISTING doc becomes readable; find its id with list_drive_files). Pass documentId (from create_doc) OR paste a Google Docs URL as docUrl. Under the drive.file scope it reaches nothing else in the user’s Drive; if Google answers that the file was not found, the user has not picked it yet — ask them to pick it in the app rather than retrying. Returns the plain text. Read-only, free.',
+    description: 'Read the text of a Google Doc Hermoso can reach — one it created, or one the user handed over with the Google file picker in the app (that is how an EXISTING doc becomes readable; find its id with list_drive_files). Pass documentId (from create_doc) OR paste a Google Docs URL as docUrl. Under the drive.file scope it reaches nothing else in the user’s Drive; if Google answers that the file was not found, the user has not picked it yet — ask them to pick it in the app rather than retrying. Returns the plain text of EVERY tab (each headed by its tab name when there are several), with smart chips (dropdowns, people, dates, rich links) shown as the text Docs displays, plus `dropdowns[]` — each chip with its title, current value and options, which is what update_doc dropdowns sets. Read-only, free.',
     inputSchema: {
       documentId: z.string().optional().describe('the document id (from create_doc)'),
       docUrl: z.string().optional().describe('a Google Docs URL to read — the document id is extracted from it'),
     },
-    outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), title: z.string().optional(), text: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), title: z.string().optional(), text: z.string().optional(),
+      tabs: z.array(z.object({ tabId: z.string().nullable().optional(), title: z.string().optional(), chars: z.number().optional() })).optional(),
+      dropdowns: z.array(z.object({ dropdownId: z.string().optional(), tabId: z.string().nullable().optional(), definitionId: z.string().nullable().optional(), title: z.string().optional(),
+        value: z.string().optional(), selectedOptionId: z.string().nullable().optional(), options: z.array(z.object({ optionId: z.string().optional(), value: z.string().optional() })).optional() })).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const id = (String(a.docUrl || '').match(/\/document\/d\/([\w-]+)/) || [])[1] || a.documentId;
     if (!id) return { content: [{ type: 'text', text: 'Pass a documentId or a Google Docs URL (docUrl).' }], isError: true };
     const d = await apiGet('/api/docs/read', { documentId: id });
-    return ok(`Read “${d.title || 'the doc'}” (${(d.text || '').length} chars):\n${(d.text || '').slice(0, 8000)}`, d);
+    const chips = (d.dropdowns || []).length ? `\nDropdowns: ${d.dropdowns.map(c => `${c.title ? `“${c.title}”` : '(untitled)'} = “${c.value}” [${c.dropdownId}; options: ${(c.options || []).map(o => o.value).join(' / ')}]`).join('; ')}` : '';
+    const tabs = (d.tabs || []).length > 1 ? ` across ${d.tabs.length} tabs` : '';
+    return ok(`Read “${d.title || 'the doc'}” (${(d.text || '').length} chars${tabs}):${chips}\n${(d.text || '').slice(0, 8000)}`, d);
   }));
 
   // ---------- The Sheets / Docs WRITE surface (2026-08-05) ----------
@@ -17126,16 +17244,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('update_doc', {
     title: 'Edit a Google Doc in place',
-    description: 'EDIT a Google Doc — the correction append_to_doc cannot make, which until now meant a doc could only ever grow and a wrong line stayed in it forever. Two shapes: `replacements:[{find, replace}]` rewrites specific text wherever it appears (call read_doc first and match the text EXACTLY; matchCase:false ignores case), or `rewrite:"…"` replaces the ENTIRE body (rewrite:"" empties it). Find/replace runs immediately and REPORTS how many occurrences changed — zero matches is reported as a FAILURE to match, never as a quiet success, because a text edit that silently does nothing is worse than one that visibly fails. A whole-body rewrite is destructive: call it without confirm first to get the character count, then confirm:true + confirmCells. Both are index-free by design — an agent cannot reliably compute Google’s character offsets, and a wrong offset deletes the wrong sentence.',
+    description: 'EDIT a Google Doc — the correction append_to_doc cannot make, which until now meant a doc could only ever grow and a wrong line stayed in it forever. Two shapes: `replacements:[{find, replace}]` rewrites specific text wherever it appears (call read_doc first and match the text EXACTLY; matchCase:false ignores case), or `rewrite:"…"` replaces the ENTIRE body (rewrite:"" empties it), or `dropdowns:[{title, value}]` sets a dropdown chip (e.g. Status → Approved — read_doc lists every chip with its options; pass dropdownId when two share a title; an unknown title or option is refused with the real list and nothing changes). Find/replace runs immediately and REPORTS how many occurrences changed — zero matches is reported as a FAILURE to match, never as a quiet success, because a text edit that silently does nothing is worse than one that visibly fails. A whole-body rewrite is destructive: call it without confirm first to get the character count, then confirm:true + confirmCells. Both are index-free by design — an agent cannot reliably compute Google’s character offsets, and a wrong offset deletes the wrong sentence.',
     inputSchema: {
       documentId: z.string().optional().describe('the document id (from create_doc, or list_drive_files for one the user picked)'),
       docUrl: z.string().optional().describe('a Google Docs URL — the id is extracted from it'),
       replacements: z.array(z.object({ find: z.string(), replace: z.string().optional(), matchCase: z.boolean().optional() })).optional().describe('find/replace pairs, applied in order'),
       rewrite: z.string().optional().describe('replace the WHOLE body with this text ("" empties the doc)'),
       confirm: z.boolean().optional(), confirmCells: z.number().optional().describe('echo back the character count the unconfirmed call reported (rewrite only)'),
+      dropdowns: z.array(z.object({ title: z.string().optional().describe('the dropdown title (from read_doc)'), dropdownId: z.string().optional().describe('when two dropdowns share a title'),
+        tabId: z.string().optional(), value: z.string().describe('the option to select, by its display text') })).optional().describe('dropdown chips to set'),
     },
     outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), title: z.string().optional(), url: z.string().optional(), occurrences: z.number().optional(), replacedChars: z.number().optional(), verified: z.boolean().nullable().optional(), text: z.string().nullable().optional(),
-      replacements: z.array(z.object({ find: z.string().optional(), replace: z.string().optional(), occurrences: z.number().optional() })).optional(), note: z.string().optional() },
+      replacements: z.array(z.object({ find: z.string().optional(), replace: z.string().optional(), occurrences: z.number().optional() })).optional(),
+      dropdowns: z.array(z.object({ dropdownId: z.string().optional(), title: z.string().optional(), from: z.string().optional(), to: z.string().optional(), changed: z.boolean().optional(), verified: z.boolean().nullable().optional() })).optional(),
+      note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/docs/update', a);
@@ -18828,7 +18950,7 @@ function memoryNoteVerdict(text) {
   })));
   server.registerTool('update_brand', {
     title: 'Update brand fields',
-    description: 'Patch SPECIFIC fields of the workspace brand profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. Only pass the fields you’re changing.',
+    description: 'Patch SPECIFIC fields of the workspace brand profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. If no brand is saved yet and you only INFERRED one from what the user is making, ask them to confirm it is their brand before saving it (they may be working for a client or just trying things). Only pass the fields you’re changing.',
     inputSchema: { ...STORE_BRAND,
       name: z.string().optional(), domain: z.string().optional().describe('website domain'), sells: z.string().optional().describe('what the brand sells'),
       summary: z.string().optional().describe('one-line description'), category: z.string().optional(), audience: z.string().optional(),
@@ -18951,11 +19073,7 @@ function memoryNoteVerdict(text) {
     // A feature whose permission Meta has not approved Hermoso's app for yet, read live by the server off Meta's own
     // answer about the app. It is the OPPOSITE instruction to the permission gap above: nothing the user does fixes
     // it, so it is never phrased as a reconnect. The sentence is the SERVER'S (`awaitingApprovalNote`).
-    const waiting = on.filter(c => c && String(c.awaitingApprovalNote || '').trim());
-    const waitingNote = waiting.length
-      ? '\n\n' + waiting.map(c => `ℹ ${c.provider}: ${c.awaitingApprovalNote}`).join('\n')
-        + '\nThose tools stay callable (they work for people with a role on the Hermoso app), but for this user Meta will refuse them until it approves Hermoso: say that plainly and never suggest reconnecting for it.'
-      : '';
+    const waitingNote = ''; // a feature not offered yet is not listed on the connection (owner decision, 2026-10-02)
     const lines = on.map(c => `  • ${c.provider}${c.agentLabel ? ` — ${c.agentLabel}` : ''} (${c.status || 'active'})${c.grantMode === 'posting' ? ' · POSTING ONLY' : ''}${c.scopeDrift?.status === 'missing' ? ` ⚠ missing ${c.scopeDrift.missing.length} permission(s) — needs a reconnect` : ''}`);
     const postingNote = posting.length
       ? '\n\n' + posting.map(c => `ℹ ${c.grantModeNote}`).join('\n')
@@ -20353,6 +20471,25 @@ function memoryNoteVerdict(text) {
   // neither can answer "make it nighttime" or "change the background to a city street". That is video-to-video, it has
   // been a job worker (`videoedit`) all along, and only `editVideoClip` in public/app.js ever submitted one — so a
   // headless caller's only route to a restyled clip was paying for a whole new render.
+  // ONE-TAP LOOKS (2026-10-02): the web menu's Restyle grid and the Studio's restyle_video, headless. A preset id (or a
+  // described look) runs as a video edit: same engines, same price, same free preservation read-back as edit_video.
+  server.registerTool('restyle_video', {
+    title: 'Restyle a video',
+    description: "RESTYLE an existing clip into a different LOOK in one step, keeping its shots, motion, timing and sound: claymation, anime, 80s VHS, film noir, an ancient fresco, a 1920s gangster film, 16-bit pixel art and more (the current list is `Restyle looks` in hermoso_capabilities), or describe your own look. A paid video edit, priced like edit_video (dryRun on the job quotes it). For changing ONE thing in the clip use edit_video.",
+    inputSchema: {
+      video: z.string().describe('the source video URL (a render, job result or list_library)'),
+      style: z.string().optional().describe('a look id from hermoso_capabilities (e.g. claymation, vhs-80s, film-noir)'),
+      describe: z.string().optional().describe('a look in the user’s own words, when no preset fits, or extra detail on top of a preset'),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async ({ video, style, describe }) => {
+    const note = String(describe || '').trim();
+    if (!String(style || '').trim() && !note) return { content: [{ type: 'text', text: 'Name a look (style, from hermoso_capabilities) or describe one.' }], isError: true };
+    const r = await renderJob('videoedit', { video, prompt: `Restyle as ${style || note}`, grammar: true, restyle: String(style || '').trim() || 'custom', ...(note ? { restyleNote: note } : {}) }, `Restyle · ${style || 'custom look'}`);
+    return okVideo(`Restyled video: ${r.url}`, r);
+  }));
+
   server.registerTool('edit_video', {
     title: 'Edit a video clip',
     description: "EDIT an existing clip from a plain instruction (video-to-video): the motion, timing, framing and cut stay, the named thing changes. 'change only the mug to red', 'make it nighttime', 'restyle it as claymation'. Your words are wrapped so the model keeps everything else identical, changes only what you named and repeats that lock; lighting is kept unless the change needs new light (set lighting to force either); literal:true sends your words as written. One change per call holds best. previewFirstFrame:true edits ONE still first (one image edit; previewAt picks the second) and quotes the clip; nothing else runs until you call again, ideally with previewStill. The reply scores how well the shot held outside the change (free) and flags an edit that touched more than asked. NOT for cuts/trims/end cards (post_edit), a new video (generate_video / render_ad), translation (dub_video) or a saved creator's face (recast_motion). Best on 3-15s clips.",
