@@ -5687,73 +5687,110 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost(`/api/schedule/${encodeURIComponent(id)}/duplicate`, rest);
     return ok(d.note || `Duplicated ${id} as ${d.id}.`, d);
   }));
-  // ── THE POSTING REFILL (2026-08-03) ───────────────────────────────────────────────────────────────────────────
-  // Keeping a calendar full is the part of "post three times a day" that nobody sustains by hand, and it was
-  // browser-only for about an hour. These three wrap the SAME routes the app uses; there is no second queue —
-  // every post the refill makes is an ordinary scheduled item that list_scheduled shows and cancel_scheduled cancels.
+  // ── THE POSTING REFILL / AUTOPOSTING (2026-08-03; fresh-only with two modes since 2026-10-05) ───────────────────
+  // Keeping a calendar full is the part of "post three times a day" that nobody sustains by hand. These wrap the SAME
+  // routes the app uses; there is no second queue — every post it schedules is an ordinary scheduled item that
+  // list_scheduled shows and cancel_scheduled cancels. It ALWAYS makes new content within the user's render budget and
+  // never re-posts the Library; in 'review' mode each batch waits as drafts until approved.
   server.registerTool('get_post_refill', {
-    title: 'Posting refill status',
-    description: 'Show the automatic posting refill for this profile: whether it is on, whether it is in dry-run (preview) mode, how many days ahead it fills, its render budget, when it next runs, and how many posts are queued right now. It also names the channels that CANNOT be posted to and why. Read-only, free.',
+    title: 'Autoposting status',
+    description: 'Show autoposting (the posting refill) for this profile: whether it is on, its mode (review = each batch of fresh posts waits as drafts for approval; auto = fresh posts are scheduled straight away), its render budget, when it next runs, how many posts are queued, and the DRAFTS waiting for approval (id, time, channels, caption, the new image or video). It also names the channels that CANNOT be posted to and why. Read-only, free.',
     inputSchema: {},
     outputSchema: {
-      enabled: z.boolean().optional(), dryRun: z.boolean().optional(), daysAhead: z.number().optional(),
+      enabled: z.boolean().optional(), mode: z.string().optional(), daysAhead: z.number().optional(),
       postsPerDay: z.number().optional(), running: z.boolean().optional(), nextRunAt: z.number().optional(),
-      queuedPosts: z.number().optional(), postingSchedule: z.any().optional(), excluded: z.any().optional(),
+      queuedPosts: z.number().optional(), drafts: z.array(z.any()).optional(), zeroBudget: z.boolean().optional(),
+      postingSchedule: z.any().optional(), excluded: z.any().optional(),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/schedule/refill', {});
     const cadence = d.postsPerDay > 0 ? d.postsPerDay : (d.postingSchedule?.slots || []).length;
-    const state = !d.enabled ? 'OFF' : (d.dryRun ? 'ON, but in DRY RUN — it plans and previews, it queues nothing' : 'ON and LIVE — it queues real posts');
-    return ok(`Posting refill: ${state}.\n${cadence} post(s) a day at ${(d.postingSchedule?.slots || []).join(', ') || 'no posting times set'} ${d.postingSchedule?.timezone || 'UTC'}, filling ${d.daysAhead} day(s) ahead. ${d.queuedPosts} post(s) queued now.\nRender budget: ${d.maxImagesPerDay || 0} image(s) + ${d.maxVideosPerDay || 0} video(s) a day, ${d.maxCreditsPerDay || 0} credit ceiling — at 0 it reuses the Library and spends nothing on creative.\nCannot post to: ${Object.entries(d.excluded || {}).map(([c, why]) => `${c} — ${why}`).join('\n  ') || 'nothing'}`, d);
+    const state = !d.enabled ? 'OFF' : (d.mode === 'auto' ? 'ON, AUTO-PUBLISH — each run makes fresh posts and schedules them' : 'ON, REVIEW — each run makes fresh posts and keeps them as drafts until you approve them');
+    const drafts = Array.isArray(d.drafts) ? d.drafts : [];
+    const draftLines = drafts.slice(0, 20).map((x, i) => `  ${i + 1}. ${x.id} · ${x.at} → ${(x.channels || []).join(', ')} · ${x.kind}\n     ${String(x.message || '').replace(/\n+/g, ' / ').slice(0, 200)}\n     ${x.media || '(no file)'}`);
+    return ok([
+      `Autoposting: ${state}.${d.note ? `\n${d.note}` : ''}`,
+      `${cadence} post(s) a day at ${(d.postingSchedule?.slots || []).join(', ') || 'no posting times set'} ${d.postingSchedule?.timezone || 'UTC'}, filling ${d.daysAhead} day(s) ahead. ${d.queuedPosts} post(s) queued now.`,
+      `Render budget: ${d.maxImagesPerDay || 0} image(s) + ${d.maxVideosPerDay || 0} video(s) a day, ${d.maxCreditsPerDay || 0} credits a day${d.maxCreditsPerWeek ? ` and ${d.maxCreditsPerWeek} a week` : ''} at most. Every post is a new render made for it.${d.zeroBudget ? ` ${d.budgetNote}` : ''} Used: ${d.spend?.today || 0} credits today, ${d.spend?.week || 0} this week.`,
+      `Brief: goal ${d.brief?.goal || 'not set (required to switch it on)'}${d.brief?.goalNote ? ` (${d.brief.goalNote})` : ''} · format ${d.brief?.formats || 'mix'}${(d.brief?.pillars || []).length ? ` · pillars: ${d.brief.pillars.join('; ')}` : (d.suggestedPillars || []).length ? ` · no pillars yet; suggested from the brand: ${d.suggestedPillars.join('; ')}` : ''}${(d.brief?.avoid || []).length ? ` · avoid: ${d.brief.avoid.join('; ')}` : ''}`,
+      d.suggestAuto ? `${d.approvedBatches} review batches approved so far: auto-publish (mode "auto") is available if the user wants posts to go out without a review step. Ask; never switch it yourself.` : '',
+      drafts.length ? `Drafts waiting for approval (${drafts.length}):\n${draftLines.join('\n')}${drafts.length > 20 ? `\n  …and ${drafts.length - 20} more` : ''}\nApprove, edit or discard them with run_post_refill (approve / edit / discard).` : 'No drafts waiting for approval.',
+      `Cannot post to: ${Object.entries(d.excluded || {}).map(([c, why]) => `${c} — ${why}`).join('\n  ') || 'nothing'}`,
+    ].filter(Boolean).join('\n'), d);
   }));
   server.registerTool('set_post_refill', {
-    title: 'Configure the posting refill',
-    description: 'Turn the automatic posting refill on or off and set how it behaves. PASS ONLY WHAT CHANGES. `enabled:false` is the PAUSE — it removes the recurring job outright, and posts already queued are left alone (cancel those with cancel_scheduled if you want them gone). It starts in dryRun, which plans and previews without queueing; set dryRun:false only once a human has read a preview from run_post_refill. THE CADENCE IS THE BRAND’S POSTING TIMES, not a number here: three posting times means three posts a day. Raising maxImagesPerDay / maxVideosPerDay / maxCreditsPerDay above 0 lets it SPEND on new creative — at 0 (the default) it only reuses renders already in the Library and costs nothing.',
+    title: 'Configure autoposting',
+    description: 'Turn autoposting (the posting refill) on or off and set how it behaves. PASS ONLY WHAT CHANGES. It always makes NEW posts (a fresh image, carousel or video for each) within the render budget, and never re-posts the Library, so turning it on needs a budget: maxImagesPerDay and/or maxVideosPerDay above 0 plus a maxCreditsPerDay or maxCreditsPerWeek ceiling — with a 0 budget it is refused. SWITCHING IT ON ASKS THE BRIEF ONCE: a goal (followers / sales / launch / other) is required; content pillars (get_post_refill suggests some from the brand), formats (mix / video / carousel / image) and an avoid list are optional. Posts are written from the brief, the brand profile, what has worked on each channel (compared only within a channel), the brand’s skills and playbooks and the ads it saved. Ask the user for anything missing (goal, mode, budget) rather than guessing. `mode` picks what happens to each batch: "review" (the default) keeps the fresh posts as drafts until a human approves them (run_post_refill approve), "auto" schedules them straight away. `enabled:false` is the PAUSE — it removes the recurring job outright, and posts already queued are left alone (cancel those with cancel_scheduled). THE CADENCE IS THE BRAND’S POSTING TIMES, not a number here: three posting times means three posts a day.',
     inputSchema: {
-      enabled: z.boolean().optional().describe('on/off. false PAUSES it: the recurring job is deleted and nothing new is queued. Already-queued posts are untouched.'),
-      dryRun: z.boolean().optional().describe('true (the default) = plan and preview only, queue nothing. Set false ONLY after a human has read a preview.'),
+      enabled: z.boolean().optional().describe('on/off. true needs a render budget (refused at 0). false PAUSES it: the recurring job is deleted and nothing new is made. Already-queued posts are untouched.'),
+      mode: z.enum(['review', 'auto']).optional().describe('"review" (default): each batch of fresh posts waits as drafts for approval. "auto": fresh posts are scheduled to publish automatically.'),
       daysAhead: z.number().optional().describe('how far ahead to keep the queue full, 1–30 (default 7)'),
       postsPerDay: z.number().optional().describe('cap the posts per day BELOW the number of posting times. 0 (default) = use every posting time, which is where "3 a day" comes from. To post MORE per day, add posting times instead.'),
-      assetCooldownDays: z.number().optional().describe('how long before a Library render may be posted again (default 30). It never repeats one inside this window — it queues fewer posts and says so.'),
-      maxImagesPerDay: z.number().optional().describe('how many NEW images a day it may render when the Library runs dry. 0 (default) = none, spend nothing.'),
-      maxVideosPerDay: z.number().optional().describe('how many NEW videos a day it may render. 0 (default) = none. Video is the expensive one — hundreds of credits each.'),
-      maxCreditsPerDay: z.number().optional().describe('a hard credit ceiling per day, checked BEFORE any render starts. It binds independently of the counts above.'),
+      maxImagesPerDay: z.number().optional().describe('how many NEW images a day it may render, one per post. 0 = none.'),
+      maxVideosPerDay: z.number().optional().describe('how many NEW short videos a day it may render. 0 = none. Video is the expensive one.'),
+      maxCreditsPerDay: z.number().optional().describe('a hard credit ceiling per day, checked BEFORE any render starts. It binds independently of the counts above, and 0 means it makes nothing.'),
+      maxCreditsPerWeek: z.number().optional().describe('a credit ceiling per week (0 = none). With it, each day may use what the week has left, within any daily cap.'),
+      goal: z.enum(['followers', 'sales', 'launch', 'other']).optional().describe('THE BRIEF: what the posts are for — grow followers, drive sales, promote a launch, or other (say what in goalNote). Required to switch it on.'),
+      goalNote: z.string().optional().describe('THE BRIEF: a line about the goal (e.g. the launch date and what is launching).'),
+      pillars: z.array(z.string()).optional().describe('THE BRIEF: content pillars / topics, up to 8 short lines. Every post belongs to one. get_post_refill suggests some from the brand profile.'),
+      formats: z.enum(['mix', 'video', 'carousel', 'image']).optional().describe('THE BRIEF: what to make — mix (images with a short video now and then, the default), video (short videos only; needs maxVideosPerDay), carousel (3 new images per post; needs maxImagesPerDay ≥ 3), image.'),
+      avoid: z.array(z.string()).optional().describe('THE BRIEF: never mention or show these — topics, claims, competitors, faces.'),
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).optional().describe('restrict it to these channels. Omit (or send an empty list) to use every connected channel that can carry each post.'),
       boardId: z.string().optional().describe('PINTEREST — which board Pins go on (list_pinterest_boards). Without one, Pinterest is skipped: a Pin on the wrong board is a public mistake, so it is never guessed.'),
       chatId: z.string().optional().describe('TELEGRAM — which chat, group or channel posts go to (@username or numeric id). Without one, telegram is skipped: there is no default chat and posting to the wrong one is a public mistake.'),
       linkedinOrganizationId: z.string().optional().describe('LINKEDIN — which company Page to post as (list_linkedin_pages). A single shared Page is used automatically; a Page that is not shared with this profile is ignored rather than failing the whole post.'),
       pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — which connected Page to publish from (list_meta_pages). Omit for the brand’s only Page.'),
     },
-    outputSchema: { enabled: z.boolean().optional(), dryRun: z.boolean().optional(), running: z.boolean().optional(), daysAhead: z.number().optional() },
+    outputSchema: { enabled: z.boolean().optional(), mode: z.string().optional(), running: z.boolean().optional(), daysAhead: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPut('/api/schedule/refill', a);
+    const { goal, goalNote, pillars, formats, avoid, ...rest } = a;
+    const brief = Object.fromEntries(Object.entries({ goal, goalNote, pillars, formats, avoid }).filter(([, v]) => v !== undefined));
+    const d = await apiPut('/api/schedule/refill', { ...rest, ...(Object.keys(brief).length ? { brief } : {}) });
     return ok(d.enabled
-      ? `Posting refill is ON${d.dryRun ? ' in DRY RUN — it will preview a plan each day and queue nothing. Run run_post_refill to see the plan, and only set dryRun:false once a human has read one.' : ' and LIVE — it will queue real posts every day.'}`
-      : 'Posting refill is OFF. The recurring job is gone and nothing new will be queued. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.', d);
+      ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} Budget: ${d.maxImagesPerDay || 0} image(s) + ${d.maxVideosPerDay || 0} video(s) a day, ${d.maxCreditsPerDay || 0} credits at most. Run run_post_refill (a free preview by default) to see a plan.`
+      : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.', d);
   }));
   server.registerTool('run_post_refill', {
-    title: 'Run the posting refill',
-    description: 'Run the refill NOW instead of waiting for its daily turn. DRY BY DEFAULT: it returns the exact posts it WOULD queue — the caption, the creative, the channels and the per-channel visibility — without queueing anything or spending anything on creative. Pass dryRun:false to actually queue them. SHOW THE PREVIEW TO THE USER BEFORE EVER PASSING dryRun:false; these go onto real public accounts. Every caption is screened against the brand’s own voice rules and a failing one is dropped, so a plan can legitimately come back shorter than the cadence — the reason is in the notes.',
+    title: 'Run autoposting / review its drafts',
+    description: 'Run autoposting NOW instead of waiting for its daily turn, or act on the drafts it made. PREVIEW BY DEFAULT: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first; get_post_refill lists them. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
     inputSchema: {
-      dryRun: z.boolean().optional().describe('default TRUE (preview only). false actually queues the posts.'),
-      force: z.boolean().optional().describe('plan even while the refill is switched off — useful for showing someone what it would do before they turn it on. Combined with dryRun:false it still respects a stored dryRun.'),
+      dryRun: z.boolean().optional().describe('default TRUE (a preview: nothing rendered, nothing queued). false renders fresh creative and schedules or drafts it per the mode.'),
+      force: z.boolean().optional().describe('plan a preview even while autoposting is switched off — useful for showing someone what it would do before they turn it on.'),
+      approve: z.array(z.string()).optional().describe('REVIEW: draft ids to schedule, or ["all"]. A draft whose time has passed moves to the next free posting slot.'),
+      discard: z.array(z.string()).optional().describe('REVIEW: draft ids to delete, or ["all"]. Nothing is posted for them.'),
+      edit: z.array(z.object({ id: z.string(), message: z.string().optional(), captions: z.record(z.string()).optional(), title: z.string().optional(), at: z.string().optional().describe('ISO time, at least 5 minutes ahead'), channels: z.array(z.string()).optional().describe('narrow to some of the draft’s own channels') })).optional().describe('REVIEW: change drafts before approving them. Edited copy is screened by the voice rules.'),
     },
     outputSchema: {
-      enabled: z.boolean().optional(), dryRun: z.boolean().optional(), summary: z.string().optional(),
-      posts: z.array(z.any()).optional(), queued: z.array(z.any()).optional(), skippedSlots: z.array(z.any()).optional(),
+      enabled: z.boolean().optional(), mode: z.string().optional(), dryRun: z.boolean().optional(), summary: z.string().optional(),
+      posts: z.array(z.any()).optional(), queued: z.array(z.any()).optional(), drafts: z.array(z.any()).optional(), skippedSlots: z.array(z.any()).optional(),
       notes: z.array(z.string()).optional(), spend: z.any().optional(), perChannel: z.any().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
+    const reviewing = (a.approve && a.approve.length) || (a.discard && a.discard.length) || (a.edit && a.edit.length);
+    if (reviewing) {
+      const d = await apiPost('/api/schedule/refill/drafts', { approve: a.approve || [], discard: a.discard || [], edit: a.edit || [] });
+      const okQ = (d.queued || []).filter(q => q && q.id), badQ = (d.queued || []).filter(q => q && q.error);
+      return ok([
+        okQ.length ? `Scheduled ${okQ.length} draft(s): ${okQ.map(q => `${q.draftId} → ${q.id} at ${q.at}${q.moved ? ' (moved to the next free slot)' : ''}`).join(' · ')}. Pull any of them before it goes out with cancel_scheduled.` : '',
+        badQ.length ? `Could not schedule ${badQ.length}: ${badQ.map(q => `${q.draftId} — ${q.error}`).join(' · ')}` : '',
+        d.discarded ? `Discarded ${d.discarded} draft(s).` : '',
+        d.edited ? `Edited ${d.edited} draft(s).` : '',
+        (d.editErrors || []).length ? `Edits refused: ${d.editErrors.map(x => `${x.draftId} — ${x.error}`).join(' · ')}` : '',
+        (d.unknown || []).length ? `No such draft: ${d.unknown.join(', ')}` : '',
+        `${d.remaining} draft(s) still waiting for approval.`,
+      ].filter(Boolean).join('\n'), d);
+    }
     const d = await apiPost('/api/schedule/refill/run', { dryRun: a.dryRun === false ? false : true, force: !!a.force });
-    const lines = (d.posts || []).map((p, i) => `  ${i + 1}. ${p.at} → ${(p.channels || []).map(c => `${c}[${(p.visibilityByChannel || {})[c] || 'public'}]`).join(', ')}\n     ${String(p.message || '').replace(/\n+/g, ' / ').slice(0, 220)}\n     creative: ${p.kind} · ${p.asset?.model || 'Library render'} (${p.asset?.credits || 0} credits)`);
+    const lines = (d.posts || []).map((p, i) => `  ${i + 1}. ${p.at} → ${(p.channels || []).map(c => `${c}[${(p.visibilityByChannel || {})[c] || 'public'}]`).join(', ')}\n     ${String(p.message || '').replace(/\n+/g, ' / ').slice(0, 220)}\n     new ${p.kind}: ${p.media || `(made when it runs live) ${String(p.asset?.scene || '').slice(0, 160)}`} · ${p.asset?.credits || 0} credits`);
     const q = (d.queued || []).filter(x => x && x.id).length, qFail = (d.queued || []).filter(x => x && x.error);
     return ok([
       d.summary || '',
       lines.length ? `\nThe posts:\n${lines.join('\n')}` : '',
-      d.dryRun ? '\nNOTHING WAS QUEUED AND NOTHING WAS SPENT — this was a preview. Show it to the user; call again with dryRun:false only if they say yes.' : `\n${q} post(s) queued.`,
+      (d.noChannels || d.zeroBudget || (d.enabled === false && !(d.posts || []).length)) ? '' : d.dryRun ? '\nNOTHING WAS RENDERED, QUEUED OR SPENT — this was a preview. Show it to the user; call again with dryRun:false only if they say yes.'
+        : (d.mode === 'auto' ? `\n${q} post(s) scheduled. Pull any of them before it goes out with cancel_scheduled.` : `\n${(d.drafts || []).length} draft(s) waiting for approval — approve, edit or discard them with run_post_refill.`),
       qFail.length ? `\n${qFail.length} could not be queued: ${qFail.map(x => `${x.at} — ${x.error}`).join(' · ')}` : '',
       (d.notes || []).length ? `\nNotes: ${d.notes.join(' · ')}` : '',
     ].filter(Boolean).join('\n'), d);
@@ -13258,8 +13295,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { limit: z.number().optional(), after: z.string().optional() }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/feeds', a))));
   server.registerTool('create_openai_ads_feed', {
-    title: 'Create a ChatGPT Ads product feed', description: 'Create an EMPTY product feed on ChatGPT Ads with a name and the countries it serves (ISO codes). Fill it with update_openai_ads_feed_products, or set up SFTP bulk delivery with set_openai_ads_feed_sftp.',
-    inputSchema: { name: z.string(), countries: z.array(z.string()).optional() }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    title: 'Create a ChatGPT Ads product feed', description: 'Create an EMPTY product feed on ChatGPT Ads with a name and the countries it serves (ISO codes). Fill it with update_openai_ads_feed_products, or set up SFTP bulk delivery with set_openai_ads_feed_sftp. inventoryType:"hotel" creates a HOTEL property feed instead (schema hotel_property_v1, filled with a full property snapshot over SFTP; an OpenAI limited beta for approved pilot advertisers, so an account outside the pilot is refused by OpenAI).',
+    inputSchema: { name: z.string(), countries: z.array(z.string()).optional(), inventoryType: z.enum(['product', 'hotel']).optional().describe('default product; hotel = a Hotel property feed (limited beta)') }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/feed', a))));
   server.registerTool('list_openai_ads_feed_uploads', {
     title: 'List ChatGPT Ads feed uploads', description: 'Recent product-feed UPLOADS across the account with per-upload status, rows accepted / rejected / ads-eligible and OpenAI’s DIAGNOSTICS (code, severity, field and rows affected, e.g. invalid_value on price) — the way to learn why products are not serving. Per-product review status (why ONE product was rejected) is shown only in ChatGPT Ads Manager > Products: OpenAI does not expose it through the API, so say that rather than guessing. Read-only, 0 credits.',
@@ -13303,6 +13340,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), available: z.boolean().optional(), pending: z.boolean().optional(), snapshotId: z.string().nullable().optional(), status: z.string().optional(), sourceUrl: z.string().nullable().optional(), finalUrl: z.string().nullable().optional(), capturedAt: z.string().nullable().optional(), crawlProfile: z.string().nullable().optional(), failureCode: z.string().nullable().optional(), robotsTxtAllowed: z.boolean().nullable().optional(), robotsTxtReason: z.string().nullable().optional(), robotsTxtUrl: z.string().nullable().optional(), userAgent: z.string().nullable().optional(), screenshotUrl: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiGet('/api/openai-ads/landing-page-crawl', a))));
+  server.registerTool('openai_ads_hotel_report', {
+    title: 'ChatGPT Ads Hotel Insights (per property)', description: 'Delivery per HOTEL PROPERTY for a ChatGPT Ads Hotel feed: impressions, clicks, spend, CTR, CPC and CPM per property (hotel id, name, brand, city, star rating), optionally per day or month and broken down by campaign, ad group or ad; timeseries:true returns daily totals across the selected properties instead. Filter by campaignIds / adGroupIds / adIds, exact properties [{feedId, hotelId}], or filters on hotel_name / hotel_brand / hotel_category / hotel_city / hotel_region / hotel_country_code (IN) and impressions / clicks / spend / ctr / cpc / cpm (GREATER_THAN / LESS_THAN). OpenAI’s rules, said in every reply: impressions and clicks mix settled and estimated data, spend and cost rates are settled only, and the coverage block decides whether an empty or short answer is real. No conversions and no attribution windows exist here. Hotel Insights is an OpenAI limited beta for accounts enrolled in Hotel reporting; others are refused by OpenAI. Read-only, 0 credits.',
+    inputSchema: {
+      since: z.string().describe('YYYY-MM-DD, account timezone'), until: z.string().describe('YYYY-MM-DD, account timezone, no later than today'),
+      timeseries: z.boolean().optional().describe('true = daily totals across the selected properties'),
+      granularity: z.enum(['none', 'daily', 'monthly']).optional(),
+      breakdown: z.enum(['campaign', 'ad_group', 'ad']).optional().describe('expand each property into hierarchy rows; each row repeats its property total under `property`'),
+      campaignIds: z.array(z.string()).optional(), adGroupIds: z.array(z.string()).optional(), adIds: z.array(z.string()).optional(),
+      properties: z.array(z.object({ feedId: z.string(), hotelId: z.string() })).optional().describe('exact feed/property pairs'),
+      filters: z.array(z.object({ field: z.string(), operator: z.enum(['IN', 'GREATER_THAN', 'LESS_THAN']), value: z.any() })).optional(),
+      includeZeroActivity: z.boolean().optional().describe('also list active properties with no delivery'),
+      sortField: z.enum(['impressions', 'clicks', 'spend', 'ctr', 'cpc', 'cpm']).optional(), sortDirection: z.enum(['asc', 'desc']).optional(),
+      limit: z.number().optional().describe('property/time-bucket groups per page, up to 2000'), after: z.string().optional(), includeTotalCount: z.boolean().optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/hotel-insights', a))));
 
   server.registerTool('list_pinterest_ads_campaigns', {
     title: 'List Pinterest ad accounts / campaigns',
@@ -13806,11 +13859,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_reddit_ads_max_campaign', {
     title: 'Build a Reddit Max campaign (paused)',
-    description: 'Build a Reddit MAX campaign in one call: an automated campaign (campaign budget optimization, automatic bidding), its one automated ad group (seed targeting) and its one template ad, from which Reddit GENERATES the ads out of your creative-library assets. ALL CREATED PAUSED: nothing spends until the user approves and set_reddit_ads_status(confirm:true) runs on the campaign, the ad group and the template ad. Before calling, upload at least 3 HEADLINE and 2 IMAGE or VIDEO assets with upload_reddit_ads_assets (5 to 45 in total, all ACTIVE) and pass their ids, and take redditProfileId from list_reddit_ads_profiles. Every asset is read and counted by type before anything is created. Objectives: CLICKS, CONVERSIONS, APP_INSTALLS. Bid strategies: BIDLESS (default), MAXIMIZE_VOLUME, TARGET_CPX (needs bidAmount). MAXIMIZE_VALUE and TARGET_ROAS cannot be set: Reddit exposes them only as read-only values. If a later step fails, what this call created is ARCHIVED and the reply says so. The reply says whether Reddit finished generating the ads (materialization); poll with get_reddit_ads_max_template.',
+    description: 'Build a Reddit MAX campaign in one call: an automated campaign (campaign budget optimization, automatic bidding), its one automated ad group (seed targeting) and its one template ad, from which Reddit GENERATES the ads out of your creative-library assets. ALL CREATED PAUSED: nothing spends until the user approves and set_reddit_ads_status(confirm:true) runs on the campaign, the ad group and the template ad. Before calling, upload at least 3 HEADLINE and 2 IMAGE or VIDEO assets with upload_reddit_ads_assets (5 to 45 in total, all ACTIVE) and pass their ids, and take redditProfileId from list_reddit_ads_profiles. Every asset is read and counted by type before anything is created. Objectives: CLICKS, SALES, LEAD_GENERATION, APP_INSTALLS (and the legacy CONVERSIONS, Reddit’s old name for SALES). spendCap puts a lifetime ceiling on a DAILY_SPEND campaign. Bid strategies: BIDLESS (default), MAXIMIZE_VOLUME, TARGET_CPX (needs bidAmount). MAXIMIZE_VALUE and TARGET_ROAS cannot be set: Reddit exposes them only as read-only values. If a later step fails, what this call created is ARCHIVED and the reply says so. The reply says whether Reddit finished generating the ads (materialization); poll with get_reddit_ads_max_template.',
     inputSchema: {
       adAccountId: z.string().optional(),
       name: z.string().describe('campaign name, 3 to 500 characters'),
-      objective: z.enum(['CLICKS', 'CONVERSIONS', 'APP_INSTALLS']).optional().describe('default CLICKS'),
+      objective: z.enum(['CLICKS', 'SALES', 'LEAD_GENERATION', 'APP_INSTALLS', 'CONVERSIONS']).optional().describe('default CLICKS; CONVERSIONS is the legacy name of SALES'),
       budget: z.number().describe('campaign budget in the ad account’s currency (a Max budget lives on the campaign)'),
       goalType: z.enum(['DAILY_SPEND', 'LIFETIME_SPEND']).optional().describe('default DAILY_SPEND; LIFETIME_SPEND needs endTime'),
       startTime: z.string().describe('ISO 8601, e.g. 2026-09-20T00:00:00Z'),
@@ -13818,7 +13871,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       bidStrategy: z.enum(['BIDLESS', 'MAXIMIZE_VOLUME', 'TARGET_CPX']).optional().describe('default BIDLESS'),
       bidType: z.enum(['CPC', 'CPM', 'CPV6', 'CPV15']).optional().describe('default CPC for CLICKS; required for the other objectives'),
       bidAmount: z.number().optional().describe('target cost per result in the ad account’s currency; required for TARGET_CPX'),
-      optimizationGoal: z.string().optional().describe('default CLICKS for CLICKS; required for CONVERSIONS (e.g. PURCHASE, SIGN_UP, LEAD, ADD_TO_CART, or CUSTOM_EVENT for a custom pixel event, which Reddit switches on per ad account) and APP_INSTALLS; cannot change later'),
+      optimizationGoal: z.string().optional().describe('default CLICKS for CLICKS; required otherwise: SALES / CONVERSIONS take e.g. PURCHASE, ADD_TO_CART, SIGN_UP, LEAD or CUSTOM_EVENT (a custom pixel event Reddit switches on per ad account), LEAD_GENERATION takes LEAD or SIGN_UP, APP_INSTALLS a MOBILE_CONVERSION_ goal; cannot change later'),
+      spendCap: z.number().optional().describe('lifetime spend ceiling in the ad account’s currency; DAILY_SPEND only, at or above the daily budget'),
+      invoiceLabel: z.string().optional().describe('up to 80 characters on the invoice; ignored on card-funded accounts'),
       conversionPixelId: z.string().optional().describe('only needed when the ad account has more than one pixel'),
       appId: z.string().optional().describe('App Store or Google Play id; required for APP_INSTALLS'),
       specialAdCategories: z.array(z.enum(['HOUSING_EMPLOYMENT_CREDIT', 'NONE'])).optional().describe('cannot change after publishing'),
@@ -13998,16 +14053,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('list_reddit_ads_assets', {
     title: 'List the Reddit asset library',
-    description: 'The IMAGE and VIDEO assets stored on a Reddit profile, with status, dimensions and media urls; filter by type and name, paginate with pageToken. Reddit’s list is media-only: HEADLINE and CTA assets are stored but never listed here — read those by id with get_reddit_ads_asset (ids come from upload_reddit_ads_assets). Free.',
+    description: 'The IMAGE and VIDEO assets stored on a Reddit profile, with status, dimensions and media urls; filter by type and name, paginate with pageToken. Reddit’s list is media-only: HEADLINE and CTA assets are stored but never listed here — read those by id with get_reddit_ads_asset (ids come from upload_reddit_ads_assets). OR pass postId (t3_…) to list the assets ONE POST uses, every type, each with its role (HEADLINE, IMAGE, VIDEO, CTA, THUMBNAIL, CAROUSEL_ITEM, HERO, SECONDARY_IMAGE) and image crop: those asset ids are what reddit_ads_report’s ASSET_ID breakdown reports on. Free.',
     inputSchema: {
       adAccountId: z.string().optional().describe('Reddit ad account id (a2_…) — omit when only one is shared'),
-      redditProfileId: z.string().describe('the Reddit profile id (t2_…) from list_reddit_ads_profiles — assets hang off a profile, and it must be on the shared ad account'),
+      redditProfileId: z.string().optional().describe('the Reddit profile id (t2_…) from list_reddit_ads_profiles — assets hang off a profile, and it must be on the shared ad account. Required unless postId is given'),
+      postId: z.string().optional().describe('a post id (t3_…) from list_reddit_ads_posts: list the assets that post uses, with role and crop, instead of the profile library'),
       types: z.array(z.enum(['IMAGE', 'VIDEO'])).optional().describe('Reddit lists media only'),
       name: z.string().optional().describe('filter by asset name'),
       limit: z.number().optional().describe('1–100, default 25'),
       pageToken: z.string().optional(),
     },
-    outputSchema: { profileId: z.string().optional(), count: z.number().optional(), assets: z.array(z.any()).optional(), nextPageToken: z.string().nullable().optional(), note: z.string().optional() },
+    outputSchema: { profileId: z.string().optional(), postId: z.string().optional(), count: z.number().optional(), assets: z.array(z.any()).optional(), nextPageToken: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/reddit-ads/assets', a); return ok(d.note, d); }));
 
@@ -17610,7 +17666,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('update_doc', {
     title: 'Edit a Google Doc in place',
-    description: 'EDIT a Google Doc — the correction append_to_doc cannot make, which until now meant a doc could only ever grow and a wrong line stayed in it forever. Two shapes: `replacements:[{find, replace}]` rewrites specific text wherever it appears (call read_doc first and match the text EXACTLY; matchCase:false ignores case), or `rewrite:"…"` replaces the ENTIRE body (rewrite:"" empties it), or `dropdowns:[{title, value}]` sets a dropdown chip (e.g. Status -> Approved — read_doc lists every chip with its options; pass dropdownId when two share a title; an unknown title or option is refused with the real list and nothing changes). Find/replace runs immediately and REPORTS how many occurrences changed — zero matches is reported as a FAILURE to match, never as a quiet success, because a text edit that silently does nothing is worse than one that visibly fails. A whole-body rewrite is destructive: call it without confirm first to get the character count, then confirm:true + confirmCells. Both are index-free by design — an agent cannot reliably compute Google’s character offsets, and a wrong offset deletes the wrong sentence.',
+    description: 'EDIT a Google Doc — the correction append_to_doc cannot make, which until now meant a doc could only ever grow and a wrong line stayed in it forever. Two shapes: `replacements:[{find, replace}]` rewrites specific text wherever it appears (call read_doc first and match the text EXACTLY; matchCase:false ignores case), or `rewrite:"…"` replaces the ENTIRE body (rewrite:"" empties it), or `dropdowns:[{title, value}]` sets a dropdown chip (e.g. Status -> Approved — read_doc lists every chip with its options; pass dropdownId when two share a title; an unknown title or option is refused with the real list and nothing changes); the same entry with options:[…] (the COMPLETE new list, 2–50) and/or newTitle changes the dropdown itself for every chip built from it, and an option you drop that a chip shows needs replace:{"Old":"New"}. Find/replace runs immediately and REPORTS how many occurrences changed — zero matches is reported as a FAILURE to match, never as a quiet success, because a text edit that silently does nothing is worse than one that visibly fails. A whole-body rewrite is destructive: call it without confirm first to get the character count, then confirm:true + confirmCells. Both are index-free by design — an agent cannot reliably compute Google’s character offsets, and a wrong offset deletes the wrong sentence.',
     inputSchema: {
       documentId: z.string().optional().describe('the document id (from create_doc, or list_drive_files for one the user picked)'),
       docUrl: z.string().optional().describe('a Google Docs URL — the id is extracted from it'),
@@ -17618,11 +17674,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       rewrite: z.string().optional().describe('replace the WHOLE body with this text ("" empties the doc)'),
       confirm: z.boolean().optional(), confirmCells: z.number().optional().describe('echo back the character count the unconfirmed call reported (rewrite only)'),
       dropdowns: z.array(z.object({ title: z.string().optional().describe('the dropdown title (from read_doc)'), dropdownId: z.string().optional().describe('when two dropdowns share a title'),
-        tabId: z.string().optional(), value: z.string().describe('the option to select, by its display text') })).optional().describe('dropdown chips to set'),
+        tabId: z.string().optional(), value: z.string().optional().describe('the option to select, by its display text'),
+        options: z.array(z.string()).optional().describe('change the dropdown itself: the COMPLETE new option list (2–50) by display text; existing options keep their colour; shared by every chip built from it'),
+        newTitle: z.string().optional().describe('rename the dropdown'),
+        replace: z.record(z.string()).optional().describe('for an option you remove that a chip shows: {"Old": "New"}') })).optional().describe('dropdown chips to set, or dropdowns to change'),
     },
     outputSchema: { ok: z.boolean().optional(), documentId: z.string().optional(), title: z.string().optional(), url: z.string().optional(), occurrences: z.number().optional(), replacedChars: z.number().optional(), verified: z.boolean().nullable().optional(), text: z.string().nullable().optional(),
       replacements: z.array(z.object({ find: z.string().optional(), replace: z.string().optional(), occurrences: z.number().optional() })).optional(),
       dropdowns: z.array(z.object({ dropdownId: z.string().optional(), title: z.string().optional(), from: z.string().optional(), to: z.string().optional(), changed: z.boolean().optional(), verified: z.boolean().nullable().optional() })).optional(),
+      definitions: z.array(z.object({ definitionId: z.string().optional(), title: z.string().optional(), previousTitle: z.string().optional(), options: z.array(z.string()).nullable().optional(), previousOptions: z.array(z.string()).optional(), chips: z.number().optional(), verified: z.boolean().nullable().optional() })).optional(),
       note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
