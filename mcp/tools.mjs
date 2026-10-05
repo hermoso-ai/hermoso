@@ -5694,7 +5694,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // never re-posts the Library; in 'review' mode each batch waits as drafts until approved.
   server.registerTool('get_post_refill', {
     title: 'Autoposting status',
-    description: 'Show autoposting (the posting refill) for this profile: whether it is on, its mode (review = each batch of fresh posts waits as drafts for approval; auto = fresh posts are scheduled straight away), its render budget, when it next runs, how many posts are queued, and the DRAFTS waiting for approval (id, time, channels, caption, the new image or video). It also names the channels that CANNOT be posted to and why. Read-only, free.',
+    description: 'Show autoposting (the posting refill) for this profile: whether it is on, its mode (review = each batch of fresh posts waits as drafts for approval; auto = fresh posts are scheduled straight away), WHICH CHANNELS it posts to with each one’s posts per day and posting times, roughly what it costs a day, when it next runs, how many posts are queued, and the DRAFTS waiting for approval (id, time, channels, caption, the new image or video). It also names the channels that CANNOT be posted to and why. Read-only, free.',
     inputSchema: {},
     outputSchema: {
       enabled: z.boolean().optional(), mode: z.string().optional(), daysAhead: z.number().optional(),
@@ -5705,14 +5705,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async () => {
     const d = await apiGet('/api/schedule/refill', {});
-    const cadence = d.postsPerDay > 0 ? d.postsPerDay : (d.postingSchedule?.slots || []).length;
     const state = !d.enabled ? 'OFF' : (d.mode === 'auto' ? 'ON, AUTO-PUBLISH — each run makes fresh posts and schedules them' : 'ON, REVIEW — each run makes fresh posts and keeps them as drafts until you approve them');
     const drafts = Array.isArray(d.drafts) ? d.drafts : [];
     const draftLines = drafts.slice(0, 20).map((x, i) => `  ${i + 1}. ${x.id} · ${x.at} → ${(x.channels || []).join(', ')} · ${x.kind}\n     ${String(x.message || '').replace(/\n+/g, ' / ').slice(0, 200)}\n     ${x.media || '(no file)'}`);
     return ok([
       `Autoposting: ${state}.${d.note ? `\n${d.note}` : ''}`,
-      `${cadence} post(s) a day at ${(d.postingSchedule?.slots || []).join(', ') || 'no posting times set'} ${d.postingSchedule?.timezone || 'UTC'}, filling ${d.daysAhead} day(s) ahead. ${d.queuedPosts} post(s) queued now.`,
-      `Render budget: ${d.maxImagesPerDay || 0} image(s) + ${d.maxVideosPerDay || 0} video(s) a day, ${d.maxCreditsPerDay || 0} credits a day${d.maxCreditsPerWeek ? ` and ${d.maxCreditsPerWeek} a week` : ''} at most. Every post is a new render made for it.${d.zeroBudget ? ` ${d.budgetNote}` : ''} Used: ${d.spend?.today || 0} credits today, ${d.spend?.week || 0} this week.`,
+      `Posting times: ${(d.postingTimes || []).join(', ') || 'none set (add some on the Schedule tab)'} ${d.postingSchedule?.timezone || 'UTC'}. It fills ${d.daysAhead} day(s) ahead; ${d.queuedPosts} post(s) queued now.`,
+      (d.channelsView || []).length ? `Channels:\n${d.channelsView.map((c) => `  ${c.on ? '[on] ' : '[off]'} ${c.label} (${c.channel}): ${c.on ? `${c.postsPerDay} a day${c.times.length ? ` at ${c.times.join(', ')}` : ''}` : 'not posting'}${c.note ? ` · ${c.note}` : ''}`).join('\n')}` : (d.connectedUnreadable ? 'Channels: could not be read just now.' : 'Channels: none connected — autopilot has nowhere to post. Connect one under Workspace ▸ Connectors.'),
+      `Makes ${d.postsPerDayMade || 0} new post(s) a day, every one a fresh render made for it${d.estCreditsPerDay != null && d.postsPerDayMade ? `, about ${d.estCreditsPerDay} credits a day at today's prices` : ''}.${d.zeroBudget ? ` ${d.budgetNote}` : ''} Used: ${d.spend?.today || 0} credits today, ${d.spend?.week || 0} this week.`,
       `Brief: goal ${d.brief?.goal || 'not set (required to switch it on)'}${d.brief?.goalNote ? ` (${d.brief.goalNote})` : ''} · format ${d.brief?.formats || 'mix'}${(d.brief?.pillars || []).length ? ` · pillars: ${d.brief.pillars.join('; ')}` : (d.suggestedPillars || []).length ? ` · no pillars yet; suggested from the brand: ${d.suggestedPillars.join('; ')}` : ''}${(d.brief?.avoid || []).length ? ` · avoid: ${d.brief.avoid.join('; ')}` : ''}`,
       d.suggestAuto ? `${d.approvedBatches} review batches approved so far: auto-publish (mode "auto") is available if the user wants posts to go out without a review step. Ask; never switch it yourself.` : '',
       drafts.length ? `Drafts waiting for approval (${drafts.length}):\n${draftLines.join('\n')}${drafts.length > 20 ? `\n  …and ${drafts.length - 20} more` : ''}\nApprove, edit or discard them with run_post_refill (approve / edit / discard).` : 'No drafts waiting for approval.',
@@ -5721,20 +5721,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_post_refill', {
     title: 'Configure autoposting',
-    description: 'Turn autoposting (the posting refill) on or off and set how it behaves. PASS ONLY WHAT CHANGES. It always makes NEW posts (a fresh image, carousel or video for each) within the render budget, and never re-posts the Library, so turning it on needs a budget: maxImagesPerDay and/or maxVideosPerDay above 0 plus a maxCreditsPerDay or maxCreditsPerWeek ceiling — with a 0 budget it is refused. SWITCHING IT ON ASKS THE BRIEF ONCE: a goal (followers / sales / launch / other) is required; content pillars (get_post_refill suggests some from the brand), formats (mix / video / carousel / image) and an avoid list are optional. Posts are written from the brief, the brand profile, what has worked on each channel (compared only within a channel), the brand’s skills and playbooks and the ads it saved. Ask the user for anything missing (goal, mode, budget) rather than guessing. `mode` picks what happens to each batch: "review" (the default) keeps the fresh posts as drafts until a human approves them (run_post_refill approve), "auto" schedules them straight away. `enabled:false` is the PAUSE — it removes the recurring job outright, and posts already queued are left alone (cancel those with cancel_scheduled). THE CADENCE IS THE BRAND’S POSTING TIMES, not a number here: three posting times means three posts a day.',
+    description: 'Turn autoposting (the posting refill) on or off and set how it behaves. PASS ONLY WHAT CHANGES. It always makes NEW posts (a fresh image, carousel or video for each) and never re-posts the Library. WHERE: every connected channel by default (channels narrows it); HOW OFTEN: the brand’s posting times, and channelPostsPerDay sets fewer on a channel (e.g. {"x":1}). There are no credit limits to set — get_post_refill shows roughly what it costs a day. Switching it on is refused when no channel is connected or nothing a day would be made. SWITCHING IT ON ASKS THE BRIEF ONCE: a goal (followers / sales / launch / other) is required; content pillars (get_post_refill suggests some from the brand), formats (mix / video / carousel / image) and an avoid list are optional. Posts are written from the brief, the brand profile, what has worked on each channel (compared only within a channel), the brand’s skills and playbooks and the ads it saved. Ask the user for anything missing (goal, mode, channels) rather than guessing. `mode` picks what happens to each batch: "review" (the default) keeps the fresh posts as drafts until a human approves them (run_post_refill approve), "auto" schedules them straight away. `enabled:false` is the PAUSE — it removes the recurring job outright, and posts already queued are left alone (cancel those with cancel_scheduled). Three posting times means up to three posts a day; to post MORE per day, add posting times on the Schedule tab.',
     inputSchema: {
-      enabled: z.boolean().optional().describe('on/off. true needs a render budget (refused at 0). false PAUSES it: the recurring job is deleted and nothing new is made. Already-queued posts are untouched.'),
+      enabled: z.boolean().optional().describe('on/off. true needs a connected channel and a goal (refused otherwise). false PAUSES it: the recurring job is deleted and nothing new is made. Already-queued posts are untouched.'),
       mode: z.enum(['review', 'auto']).optional().describe('"review" (default): each batch of fresh posts waits as drafts for approval. "auto": fresh posts are scheduled to publish automatically.'),
       daysAhead: z.number().optional().describe('how far ahead to keep the queue full, 1–30 (default 7)'),
       postsPerDay: z.number().optional().describe('cap the posts per day BELOW the number of posting times. 0 (default) = use every posting time, which is where "3 a day" comes from. To post MORE per day, add posting times instead.'),
-      maxImagesPerDay: z.number().optional().describe('how many NEW images a day it may render, one per post. 0 = none.'),
-      maxVideosPerDay: z.number().optional().describe('how many NEW short videos a day it may render. 0 = none. Video is the expensive one.'),
-      maxCreditsPerDay: z.number().optional().describe('a hard credit ceiling per day, checked BEFORE any render starts. It binds independently of the counts above, and 0 means it makes nothing.'),
-      maxCreditsPerWeek: z.number().optional().describe('a credit ceiling per week (0 = none). With it, each day may use what the week has left, within any daily cap.'),
+      channelPostsPerDay: z.record(z.number()).optional().describe('per channel, how many posts a day (the first N of the posting times), e.g. {"x":1,"instagram":3}. 0 turns a channel off; null resets it to every posting time. Merged into what is saved.'),
       goal: z.enum(['followers', 'sales', 'launch', 'other']).optional().describe('THE BRIEF: what the posts are for — grow followers, drive sales, promote a launch, or other (say what in goalNote). Required to switch it on.'),
       goalNote: z.string().optional().describe('THE BRIEF: a line about the goal (e.g. the launch date and what is launching).'),
       pillars: z.array(z.string()).optional().describe('THE BRIEF: content pillars / topics, up to 8 short lines. Every post belongs to one. get_post_refill suggests some from the brand profile.'),
-      formats: z.enum(['mix', 'video', 'carousel', 'image']).optional().describe('THE BRIEF: what to make — mix (images with a short video now and then, the default), video (short videos only; needs maxVideosPerDay), carousel (3 new images per post; needs maxImagesPerDay ≥ 3), image.'),
+      formats: z.enum(['mix', 'video', 'carousel', 'image']).optional().describe('THE BRIEF: what to make — mix (images with a short video now and then, the default), video (short videos only), carousel (3 new images per post), image.'),
       avoid: z.array(z.string()).optional().describe('THE BRIEF: never mention or show these — topics, claims, competitors, faces.'),
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).optional().describe('restrict it to these channels. Omit (or send an empty list) to use every connected channel that can carry each post.'),
       boardId: z.string().optional().describe('PINTEREST — which board Pins go on (list_pinterest_boards). Without one, Pinterest is skipped: a Pin on the wrong board is a public mistake, so it is never guessed.'),
@@ -5749,7 +5746,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const brief = Object.fromEntries(Object.entries({ goal, goalNote, pillars, formats, avoid }).filter(([, v]) => v !== undefined));
     const d = await apiPut('/api/schedule/refill', { ...rest, ...(Object.keys(brief).length ? { brief } : {}) });
     return ok(d.enabled
-      ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} Budget: ${d.maxImagesPerDay || 0} image(s) + ${d.maxVideosPerDay || 0} video(s) a day, ${d.maxCreditsPerDay || 0} credits at most. Run run_post_refill (a free preview by default) to see a plan.`
+      ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} get_post_refill lists the channels it posts to and what it costs a day. Run run_post_refill (a free preview by default) to see a plan.`
       : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.', d);
   }));
   server.registerTool('run_post_refill', {
@@ -7636,6 +7633,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     endTime: z.string().optional().describe('REQUIRED with lifetimeBudgetUsd'),
     adsetSchedule: z.array(z.object({ startMinute: z.number(), endMinute: z.number(), days: z.array(z.number()) })).optional().describe('dayparting — minutes from midnight (0–1440), days 0=Sunday…6=Saturday'),
     attributionSpec: z.array(z.any()).optional().describe('e.g. [{event_type:"CLICK_THROUGH",window_days:7}]'),
+    dsaBeneficiary: z.string().optional().describe("EU AD TRANSPARENCY: the person or organisation this ad promotes (Meta shows it on the ad). Meta requires it whenever the ad set reaches the EU; omit it and Hermoso uses the ad account's own default, else this profile's brand name, else the Page name, and the summary says which was used"),
+    dsaPayor: z.string().optional().describe('EU AD TRANSPARENCY: who pays for the ads (Meta shows it on the ad). Omit it and it matches dsaBeneficiary'),
   };
   server.registerTool('create_meta_ad', {
     title: 'Build a full Meta ad (campaign -> ad set -> ad, paused)',
@@ -17182,13 +17181,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED']).optional().describe('ACTIVE starts spend (needs confirm:true); PAUSED / ARCHIVED are safe'),
       dailyBudgetUsd: z.number().optional().describe('new daily budget in USD (1–10000; ad-set or campaign level)'),
       targeting: z.record(z.any()).optional().describe('replacement targeting spec (ad sets) — a Meta targeting object'),
+      dsaBeneficiary: z.string().optional().describe("ad sets: EU ad transparency, who the ad promotes. Meta requires it once targeting reaches the EU; retarget into the EU without it and the ad account default, else the profile's brand name, else the Page name is used"),
+      dsaPayor: z.string().optional().describe('ad sets: EU ad transparency, who pays (defaults to dsaBeneficiary)'),
       confirm: z.boolean().optional().describe('REQUIRED true ONLY to set status ACTIVE (real spend)'),
     },
-    outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), updated: z.array(z.string()).optional() },
+    outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), updated: z.array(z.string()).optional(), euTransparency: z.string().optional().describe('the EU advertiser / payer names set on this edit, and where they came from') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/object/update', a);
-    return ok(`Updated ${a.objectId} (${(d.updated || []).join(', ')}).`, d);
+    return ok(`Updated ${a.objectId} (${(d.updated || []).join(', ')}).${d.euTransparency ? ` ${d.euTransparency}` : ''}`, d);
   }));
   // ── LINKEDIN LEAD SYNC (2026-09-04): forms + leads read, notification webhooks managed. Standard Tier granted
   // to app 257800418 that day; the consent dialog was probed for the scope BEFORE a line was written. Needs
@@ -18180,11 +18181,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().optional().describe('the generated text'),
       model: z.string().optional().describe('the writing model label'),
       creditsUsed: z.number().optional().describe('credits billed for this generation'),
+      modelRequested: z.string().optional().describe('present only when the model you named is no longer offered: the id you asked for'),
+      modelNote: z.string().optional().describe('present only when the model you named is no longer offered: says the default ran instead'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ prompt, model, raw }) => {
     const d = await apiPost('/api/models/llm', { prompt, ...(model ? { model } : {}), ...(raw === true ? { raw: true } : {}) });
-    return ok(`${d.text}${d.model ? `\n\n— ${d.model}` : ''}`, d);
+    return ok(`${d.text}${d.model ? `\n\n— ${d.model}` : ''}${d.modelNote ? `\n\n${d.modelNote}` : ''}`, d);
   }));
 
   // ---------- video / avatar / stitch (job-based, polled to completion) ----------
