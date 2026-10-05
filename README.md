@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**892 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**896 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
@@ -231,7 +231,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 892 tools cover
+### What the 896 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -288,6 +288,14 @@ ig.me link gets an answer, with optional link buttons, a public comment reply, a
 `list_instagram_dm_automations` / `delete_instagram_dm_automation` read each rule's stats and send log or remove
 it. Each person gets one reply per post, Meta allows a private reply within 7 days of the comment, and no AI runs
 on the send path, so it costs no credits.
+
+**Automate DMs on Facebook and X too** — `save_dm_automation` (with `test_dm_automation`, `list_dm_automations` and
+`delete_dm_automation`) takes a `channel`: `instagram`, `facebook` (a keyword comment on a Page post or an ad gets a
+private reply in Messenger; a Messenger keyword or an m.me link gets an answer) or `x` (a keyword @mention or a reply
+under your post gets a public reply; a DM keyword gets a DM back). X only allows an automated DM after the person has
+DMed you, and a DM saying STOP opts that person out. Facebook is free like Instagram. X bills us per call, so an X
+automation is charged in credits for every mention, reply or DM X delivers plus each reply or DM sent, and running out
+of credits stops its X rules.
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
 change confirm-gated, on **twelve** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
