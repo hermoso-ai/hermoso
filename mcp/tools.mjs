@@ -4025,7 +4025,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _resLine = 'RESOLUTION: each model\'s `resolutions` list is its REAL enum (and `creditsByRes` prices every tier). Ask for a tier a model does not list and the render is delivered at that model\'s best available tier instead — the reply does not say so — so read `resolutions` here before promising anyone 1080p or 4k.';
     // recast_motion's two tiers, priced off the same live quote the app's costs page reads (toolExamples), never a number here.
     const _mq = (q) => (q ? Object.entries(q).map(([s, c]) => `${s}s=${c}cr`).join(' ') : null);
-    const _motionLine = _mq(d.toolExamples?.motion) ? `\nRecast motion (recast_motion, billed per output second): tier pro (default) ${_mq(d.toolExamples.motion)}${_mq(d.toolExamples.motionStandard) ? `; tier standard ${_mq(d.toolExamples.motionStandard)}` : ''}` : '';
+    const _motionLine = _mq(d.toolExamples?.motion) ? `\nRecast motion (recast_motion, billed per output second): tier pro (default) ${_mq(d.toolExamples.motion)}${_mq(d.toolExamples.motionStandard) ? `; tier standard ${_mq(d.toolExamples.motionStandard)}` : ''}${d.toolExamples.motionH3 ? `; engine h3 (a person clip recast with people) 720p ${_mq(d.toolExamples.motionH3['720p'])}, 1080p ${_mq(d.toolExamples.motionH3['1080p'])}` : ''}` : '';
     // THE TALKING-AVATAR ENGINES (generate_avatar `engine`), priced live per second of speech — never a number here.
     const _avLine = (d.avatarEngines || []).length ? `\nTalking-avatar engines (generate_avatar engine): ${(d.avatarEngines || []).map(e => `${e.id}${e.default ? ' (default)' : ''} = ${e.label}${e.id === 'natural' ? ` · ${e.model}` : ''}, ~${e.creditsPerSecond}cr per second of speech, ${(e.resolutions || []).join('/')}${e.oneAtATime ? ', renders one video at a time (about ' + e.renderSecondsPerAudioSecond + 'x the speech length plus any wait), speech under 60s' : ''}`).join('; ')}` : '';
     // EXTEND + RESTYLE, read off the same status (2026-10-02): which models continue a clip and by how much per call,
@@ -5746,14 +5746,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const brief = Object.fromEntries(Object.entries({ goal, goalNote, pillars, formats, avoid }).filter(([, v]) => v !== undefined));
     const d = await apiPut('/api/schedule/refill', { ...rest, ...(Object.keys(brief).length ? { brief } : {}) });
     return ok(d.enabled
-      ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} get_post_refill lists the channels it posts to and what it costs a day. Run run_post_refill (a free preview by default) to see a plan.`
+      ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} get_post_refill lists the channels it posts to and what it costs a day. Run run_post_refill (a preview by default: it renders and queues nothing, and writing its copy costs a few credits) to see a plan.`
       : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.', d);
   }));
   server.registerTool('run_post_refill', {
     title: 'Run autoposting / review its drafts',
-    description: 'Run autoposting NOW instead of waiting for its daily turn, or act on the drafts it made. PREVIEW BY DEFAULT: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first; get_post_refill lists them. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
+    description: 'Run autoposting NOW instead of waiting for its daily turn, or act on the drafts it made. PREVIEW BY DEFAULT: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. The preview still WRITES the scenes and copy with a model, which bills a few credits (the reply says how many). dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first; get_post_refill lists them. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
     inputSchema: {
-      dryRun: z.boolean().optional().describe('default TRUE (a preview: nothing rendered, nothing queued). false renders fresh creative and schedules or drafts it per the mode.'),
+      dryRun: z.boolean().optional().describe('default TRUE (a preview: nothing rendered, nothing queued; the copy it writes bills a few credits). false renders fresh creative and schedules or drafts it per the mode.'),
       force: z.boolean().optional().describe('plan a preview even while autoposting is switched off — useful for showing someone what it would do before they turn it on.'),
       approve: z.array(z.string()).optional().describe('REVIEW: draft ids to schedule, or ["all"]. A draft whose time has passed moves to the next free posting slot.'),
       discard: z.array(z.string()).optional().describe('REVIEW: draft ids to delete, or ["all"]. Nothing is posted for them.'),
@@ -5786,7 +5786,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok([
       d.summary || '',
       lines.length ? `\nThe posts:\n${lines.join('\n')}` : '',
-      (d.noChannels || d.zeroBudget || (d.enabled === false && !(d.posts || []).length)) ? '' : d.dryRun ? '\nNOTHING WAS RENDERED, QUEUED OR SPENT — this was a preview. Show it to the user; call again with dryRun:false only if they say yes.'
+      (d.noChannels || d.zeroBudget || (d.enabled === false && !(d.posts || []).length)) ? '' : d.dryRun ? `\nNOTHING WAS RENDERED OR QUEUED — this was a preview${d.copyCredits ? ` (writing its copy cost ${d.copyCredits} credit(s))` : ''}. Show it to the user; call again with dryRun:false only if they say yes.`
         : (d.mode === 'auto' ? `\n${q} post(s) scheduled. Pull any of them before it goes out with cancel_scheduled.` : `\n${(d.drafts || []).length} draft(s) waiting for approval — approve, edit or discard them with run_post_refill.`),
       qFail.length ? `\n${qFail.length} could not be queued: ${qFail.map(x => `${x.at} — ${x.error}`).join(' · ')}` : '',
       (d.notes || []).length ? `\nNotes: ${d.notes.join(' · ')}` : '',
@@ -21108,14 +21108,14 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('recast_motion', {
     title: 'Recast motion',
-    description: "Motion transfer: re-perform a clip's motion, camera and timing with YOUR character, product, clothes or place; the clip's sound is kept. image (+ images, named @Image1, @Image2… in prompt) supply who and what. engine auto (default): seedance (Seedance 2.5, ≤9 pictures, 4-30s, keeps the set and every beat; a person clip needs it to be our render or faceRoute, else wan ≤15s / kling). kling = Kling Motion Control (ONE picture, its background becomes the set, 3-30s); wan = Wan 3.0 Prime (≤9 pictures, keeps the set, ≤15s). Billed per output second; ~5 min for 5s; dryRun quotes it.",
+    description: "Motion transfer: re-perform a clip's motion, camera and timing with YOUR character, product, clothes or place; the clip's sound is kept. image (+ images, named @Image1, @Image2… in prompt) supply who and what. engine auto (default): a person clip recast with photos of people -> h3 (H3 Max Recast: ≤4 photos, one per person, 5-30s, no shot over 15s, keeps the set, light, cuts and every beat); otherwise seedance (Seedance 2.5, ≤9 pictures, 4-30s, keeps the set and every beat; a person clip needs it to be our render or faceRoute, else wan ≤15s / kling). kling = Kling Motion Control (ONE picture, its background becomes the set, 3-30s); wan = Wan 3.0 Prime (≤9 pictures, keeps the set, ≤15s). Billed per output second; ~5 min for 5s; dryRun quotes it.",
     inputSchema: {
       image: z.string().optional().describe('who performs it: the actor/character image URL (@Image1). Required on kling. ' + LIKENESS_TERMS),
       images: z.array(z.string()).max(8).optional().describe('seedance/wan: more pictures, @Image2…: a character, product, outfit or place'),
       video: z.string().describe('the reference video whose motion to re-perform'),
       prompt: z.string().optional().describe("optional, e.g. 'same moves, new location: Tokyo at night'"),
-      engine: z.enum(['auto', 'seedance', 'wan', 'kling']).optional().describe('default auto'),
-      resolution: z.enum(['480p', '720p', '1080p']).optional().describe('seedance and wan; default 1080p'),
+      engine: z.enum(['auto', 'h3', 'seedance', 'wan', 'kling']).optional().describe('default auto'),
+      resolution: z.enum(['480p', '720p', '1080p']).optional().describe('seedance and wan default 1080p; h3 takes 720p or 1080p, default the clip’s own'),
       orientation: z.enum(['video', 'image']).optional().describe("kling only: which aspect to keep: the video's (default) or the image's"),
       faceRoute: z.enum(['face_lane']).optional().describe(FACE_ROUTE_CLIP_DESC),
       tier: z.enum(['pro', 'standard']).optional().describe("kling only: 'pro' (default): 1080p and real hand-object interaction. 'standard': about 25% fewer credits and faster, but 720p, and it tends to mime a held object with empty hands. hermoso_capabilities lists the exact credits for both"),
