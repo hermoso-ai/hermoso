@@ -129,7 +129,7 @@ async function main() {
         // profile" and it died with the `brand draft` usage line instead — the first command a new user copies off
         // the CLI page. It is get_brand, run through the same handler the MCP twins use.
         if (!sub) { const reg = await import('../mcp/registry.mjs'); return await runTool(reg, 'get_brand', flags, []); }
-        if (sub !== 'draft') return die('usage: hermoso brand            the saved brand profile\n       hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');
+        if (sub !== 'draft') return die('usage: hermoso brand            the saved profile (a brand, creator or personal workspace)\n       hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');
         const body = flags.domain ? { domain: flags.domain } : flags.description ? { description: flags.description } : flags.social ? { socialHandle: flags.social, platform: flags.platform || 'instagram' } : null;
         if (!body) return die('give --domain, --description, or --social');
         const d = await api.apiPost('/api/brand/draft', body); const p = d.profile || d;

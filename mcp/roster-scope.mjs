@@ -72,6 +72,7 @@ export const TOOL_PROVIDER_RULES = [
   [/_microsoft_ads_|^microsoft_ads_|_microsoft_merchant_/, 'microsoft_ads'],
   [/_apple_ads_|^apple_ads_/, 'apple_ads'],
   [/_openai_ads_|^openai_ads_/, 'openai_ads'],
+  [/applovin/, 'applovin_ads'],   // AppLovin Ads (2026-10-04) has no posting sibling, so the bare name is unambiguous
   // Google Ads owns Merchant Center + the Ads↔Analytics link (both are Google Ads API surfaces, not GA4 ones).
   [/_google_ads_|^google_ads_|_merchant_|^merchant_|^list_merchant_|link_google_ads_to_analytics/, 'google_ads'],
   // ── LinkedIn: ads and posting share ONE connection (the Advertising API grant carries w_organization_social —
@@ -142,6 +143,7 @@ export const INSTAGRAM_LOGIN_TOOLS = new Set([
   'list_meta_comments', 'reply_to_meta_comment', 'moderate_meta_comment', 'like_instagram',
   'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
   'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',
+  'list_instagram_dm_automations', 'save_instagram_dm_automation', 'test_instagram_dm_automation', 'delete_instagram_dm_automation', // DM automation sends through dmaCtx, which takes the Login token when there is no Page (2026-10-04)
 ]);
 // THE SAME SHAPE FOR WHATSAPP (2026-09-15: "do we properly explain to users when they need the meta connector vs
 // individuals like instagram or whatsapp? and when they need both?"). Every whatsapp tool maps to 'meta' above because a

@@ -14,7 +14,7 @@ Hermoso is marketing on autopilot, run from your own AI agent. This extension ad
 Everything runs through the `hermoso` CLI in the shell, so no tool list is loaded into the session and nothing costs context until it runs.
 
 1. Sign in once: `npx -y hermoso auth login` opens a browser. On a machine with no browser, create a key in the app under MCP & CLI and run `npx -y hermoso auth login --token <key>`.
-2. No account yet? Sign up at https://app.hermoso.ai and onboard a brand (one website is enough).
+2. No account yet? Sign up at https://app.hermoso.ai and set up a profile (a website, a social handle or a short description is enough).
 
 ## How to work
 

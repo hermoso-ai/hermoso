@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS } from './tools.mjs';
+import { chatgptExtAsked } from './openai-extensions.mjs';
 import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
@@ -380,6 +381,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // `?src=<surface>` on the published URL (registry / glama / smithery / cursor / readme …) — attribution only. It may
   // not change auth, scope or spend, and an unrecognisable value is simply dropped. The OAuth resource metadata is
   // path-based (RFC 9728), so a query on the pasted URL changes nothing about the handshake.
+  // `?ext=1` asks for the ChatGPT extensions app (the Library panel + sidebar). Only a REQUEST: registerTools turns it
+  // on only for a widget host on a process with HERMOSO_CHATGPT_EXT=1 (chatgptExtOn in openai-extensions.mjs), so on
+  // the published URL, or with the flag unset, the roster is exactly what it was. Presentation only, like `?tools=`.
+  const extAsked = (req) => chatgptExtAsked(req.query?.ext);
   const srcOf = (req) => { const v = String(req.query?.src || '').trim().toLowerCase(); return /^[a-z0-9][a-z0-9_.-]{0,39}$/.test(v) ? v : null; };
   const methodsOf = (body) => (Array.isArray(body) ? body : [body]).map((m) => m && m.method).filter(Boolean);
 
@@ -402,7 +407,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // every one of those the roster IS the product description. Serving them the core set would publish Hermoso as
     // a 22-tool server on ~430 directory pages. So an UNSTATED scope here resolves to the full pre-core-first
     // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
-    registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost, hosted: true }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost, hosted: true, ext: extAsked(req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     // WHO PROBES US WITHOUT A TOKEN, BY NAME (2026-09-25). A host's add-connector dialog decides "sign-in needed or
     // not" from THIS answer: ChatGPT probes with an empty body and gets the 401; claude.ai's dialog sends a real
     // tokenless initialize (UA python-httpx) and our 200 made it pre-select "No sign-in". The UA alone cannot tell
@@ -517,7 +522,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
       const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req);
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost, hosted: true, client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost, hosted: true, ext: extAsked(req), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),

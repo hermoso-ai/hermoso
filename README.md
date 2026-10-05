@@ -5,21 +5,22 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**874 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**892 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
-and insights, comments and DMs, connectors, brand profiles and team seats are **free on every plan**, with no
+and insights, comments and DMs, connectors, profiles and team seats are **free on every plan**, with no
 per-post or per-channel fee and no seat pricing. Credits are spent only on running an AI model (image, video,
 voice, text, planning, post-production) and on Ad Spy research, and posting an ad you already rendered is never a
 second charge. The one exception is X (Twitter), where posting and reads bill a few credits per call because X
 charges per API request.
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
-Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads, plus product feeds in
-Google Merchant Center. Publishing and scheduling — **ten** channels: Facebook, Instagram, Threads, TikTok,
-YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. Messaging: WhatsApp (you message a person, so it is not an
-eleventh publishing channel). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
+Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads, plus
+product feeds in Google Merchant Center. Publishing and scheduling — **ten** channels: Facebook, Instagram,
+Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. Messaging: WhatsApp (you message a
+person, so it is not an eleventh publishing channel) and Instagram DM automations (a keyword comment, a DM, a
+story reply or an ig.me link gets an automatic private reply). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
 Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
 connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
 
@@ -200,7 +201,7 @@ into your sessions. If you want the connector: `claude mcp add --transport http 
 and `claude mcp list` reports `! Needs authentication` until you run `claude mcp login hermoso` once and approve in
 your browser (`--no-browser` prints the link on a headless machine). Measured against Claude Code 2.1.282 on 2026-09-25.
 
-Your agent now has the full studio **with your workspace's context**: the brand profile, products, logos and
+Your agent now has the full studio **with your profile's context**: the brand details, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
 `plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits, at the same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics are free on every plan (posting to X and reading X data are the one per-call exception, managing X ads is free).
 
@@ -230,7 +231,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 874 tools cover
+### What the 892 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -280,10 +281,20 @@ anything pending: **Hermoso does not receive WhatsApp webhooks, so there is no m
 not an inbox surface and `list_inbox` does not cover it — and **outside the 24-hour window that opens when the
 customer messages first, WhatsApp accepts an APPROVED template and nothing else.**
 
+**Automate Instagram DMs** — `save_instagram_dm_automation` sets up a rule that answers people for the brand: a
+comment with a keyword on one post, the next post or any post gets a private reply, and a DM, a story reply or an
+ig.me link gets an answer, with optional link buttons, a public comment reply, a follow gate and a dry run.
+`test_instagram_dm_automation` shows exactly what a sample comment or DM would send without sending it, and
+`list_instagram_dm_automations` / `delete_instagram_dm_automation` read each rule's stats and send log or remove
+it. Each person gets one reply per post, Meta allows a private reply within 7 days of the comment, and no AI runs
+on the send path, so it costs no credits.
+
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
-change confirm-gated, on **eleven** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
+change confirm-gated, on **twelve** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
 **Pinterest Ads**, **Microsoft Advertising**, **ChatGPT Ads** (OpenAI's Advertiser API), **X Ads**, **TikTok Ads**,
-**Snapchat Ads** and **Apple Ads** (Apple Search Ads on the App Store). Each has list + report + create + budget/status tools
+**Snapchat Ads**, **Apple Ads** (Apple Search Ads on the App Store) and **AppLovin Ads** (reporting and the website
+pixel on the keys every account has; campaign building once AppLovin enables Campaign Management API access on the
+account, and server-side conversion events with the Conversion API key AppLovin issues on request). Each has list + report + create + budget/status tools
 (e.g. `list_google_ads_campaigns`, `google_ads_report`, `create_google_ads_campaign`, `set_google_ads_budget`,
 `set_google_ads_status`). *Snapchat needs one extra step the others do not: an ad points at a CREATIVE, and every
 Snapchat creative must carry a Public Profile id — build it with `upload_snapchat_ads_creative`.*
@@ -314,8 +325,8 @@ property holds 50 event-scoped ones.*
 `create_drive_folder`), Google Sheets (`create_sheet`, `append_to_sheet`, `read_sheet`), Google Docs
 (`create_doc`, `append_to_doc`), and OneDrive (`save_to_onedrive` + full CRUD).
 
-**Workspace & account** — brand workspaces (`list_brands`, `create_brand`, `use_brand`, `update_brand`,
-`delete_brand` — one account holds many brands, so an agency runs every client through here), memory
+**Workspace & account** — profiles (`list_brands`, `create_brand`, `use_brand`, `update_brand`,
+`delete_brand`; one account holds many profiles, each a brand, a client, a creator or a personal workspace, so an agency runs every client through here), memory
 (`remember`, `forget`, `list_memory`), custom skills (`save_skill`, `get_skill`, `list_skills`,
 `delete_skill` — the one library, which absorbed the old AI-Employee personas), team (`list_team`, `invite_member`, `remove_member`,
 `set_role`), settings (`get_settings`, `update_settings` — including the **language** every ad, script and plan
@@ -324,7 +335,7 @@ is written in), connectors (`list_connectors`, `list_connector_accounts`, `set_c
 `set_auto_reload`), plus `list_jobs` / `get_job` for async renders.
 
 **Connector accounts are picked, not guessed.** One person often administers several Facebook Pages, Google Ads
-customers or LinkedIn company Pages. Only the accounts ticked for a brand are usable — enforced server-side, and
+customers or LinkedIn company Pages. Only the accounts ticked for a profile are usable — enforced server-side, and
 an empty selection shares nothing. Linking a *new* account is the one step that is not headless (it is an OAuth
 consent screen, so the user does it in the app).
 
@@ -400,8 +411,8 @@ The skills pick themselves. These are whole prompts, not commands:
 | --- | --- |
 | `HERMOSO_API_BASE` | The Hermoso API origin (default `https://app.hermoso.ai` — set `http://localhost:3000` if you run the app yourself) |
 | `HERMOSO_TOKEN` | Bearer agent key (`hmk_…`) — required against the hosted app |
-| `HERMOSO_PROFILE` | Brand-workspace id, for accounts with multiple brand profiles |
-| `HERMOSO_OWNER` | Only for a brand **another account shared with you** (a team workspace): the owning account id. Set it together with `HERMOSO_PROFILE`, and set `HERMOSO_PROFILE` to that workspace's **profileUuid** — a brand's short slug is refused. Run `list_brands` (or `hermoso list_brands` from the CLI) to print both values for every workspace you can enter. The server re-authorizes the pair on every request, so a wrong value is refused, never trusted. |
+| `HERMOSO_PROFILE` | Profile id, for accounts with multiple profiles |
+| `HERMOSO_OWNER` | Only for a profile **another account shared with you** (a team workspace): the owning account id. Set it together with `HERMOSO_PROFILE`, and set `HERMOSO_PROFILE` to that workspace's **profileUuid** (a profile's short slug is refused). Run `list_brands` (or `hermoso list_brands` from the CLI) to print both values for every workspace you can enter. The server re-authorizes the pair on every request, so a wrong value is refused, never trusted. |
 
 `mcp/http.mjs` is the hosted remote-connector transport (paste-a-URL into Claude.ai → Connectors). It ships in
 this repo for transparency and refuses to mount without authenticated identity — no anonymous spend, ever.

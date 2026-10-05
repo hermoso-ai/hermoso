@@ -48,7 +48,7 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 - Show the exact caption and the exact target account before publishing, and get a yes. Never rewrite or truncate what the user wrote: a channel that cannot take it refuses and says so.
 
 ### 4. Paid campaigns
-- Eleven ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads and ChatGPT Ads. Find the tool with `hermoso tools --group ads --search <platform>`.
+- Twelve ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads. Find the tool with `hermoso tools --group ads --search <platform>`.
 - Campaigns are created **paused** and read back from the platform. Report what the platform returned, never what you sent. Activating one spends real money, so it is confirm-gated and the user has to say yes.
 - `check_ad_policy` before you spend, and `score_ad` on the creative, so a rejection costs nothing.
 
@@ -62,6 +62,6 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 - Publishing, scheduling, campaign management and analytics cost no credits. Credits are spent on running a model and on research. State a render's or a fix's exact cost before you run it, from a live quote (`dryRun: true` on render_ad, generate_video, edit_image, fix_beat or post_edit), never from memory. A fix is an edit, not a full re-render.
 - Text baked into an AI video frame comes out garbled, so `render_ad` composites it in post. Captions, end cards and brand lockups are **opt-in**: leave them off unless the user asked for them.
 - One real product photo is enough. `--ref` on an image render, or `list_product_photos` / `set_product_image` to manage the brand's own.
-- `get_brand` shows what the workspace already knows, and omitting `brand` on a create call uses it.
+- `get_brand` shows what the active profile already knows, and omitting `brand` on a create call uses it.
 - `upload_file` turns any local or external file into a URL that every publish, schedule and ad-build tool accepts, so the user's own creative goes out through the same path.
 - Report the served URL for anything rendered, and offer one concrete next step.

@@ -226,7 +226,40 @@ export async function apiGet(p, query) {
 const TRANSPORT_RE = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|network|terminated/i;
 const isTransport = (e) => !!e && e.name === 'TypeError' && TRANSPORT_RE.test(String(e.message || '') + ' ' + String(e.cause?.code || e.cause?.message || ''));
 
-async function fetchRead(url, init) {
+// ── THE PLATFORM'S OWN 429 NEVER REACHED US, SO IT IS RETRIED HERE (2026-10-04) ───────────────────────────────
+// Polling a job every 10 seconds from the CLI answered HTTP 429, and it was not a limit of ours: the app has no limiter
+// on GET /api/jobs/:id, and /v1 reads allow 300 a minute per key. Every one of those 429s in the Cloud Run request log
+// (36 between 18:35 and 18:39Z, on /api/credits, GET / and webhooks as much as on job polls) is the platform's "The
+// request was aborted because there was no available instance": a plain-text body, latency 0s, refused before the
+// container saw it, while the one instance's CPU sat pegged by local renders at 2-7 concurrent requests. The browser's
+// api() has retried that answer since 2026-09-06; the CLI and the stdio MCP read it as a failed call, so one busy
+// second ended a render wait. A refusal that never reached the app ran nothing, so it is retried for ANY method; the
+// app's own refusals always answer JSON and pass through untouched (their rules are theirs). A read also rides out a
+// plain-text 502/503/504 (a rollover seen from outside); a write does not, because those can come back after the app
+// already had the request. Waits are env-tunable so a check can run the real loop in milliseconds.
+export const FRONT_DOOR_WAITS_MS = [2000, 5000, 10000];
+const frontDoorWaits = () => { const v = String(process.env.HERMOSO_FRONT_DOOR_WAITS_MS || '').split(',').map(Number).filter((n) => Number.isFinite(n) && n >= 0); return v.length ? v : FRONT_DOOR_WAITS_MS; };
+/** Did the PLATFORM refuse this before it reached the app? Pure: our routes always answer JSON. */
+export function isFrontDoorRefusal(status, contentType, { read = false } = {}) {
+  const st = Number(status);
+  if (/json/i.test(String(contentType || ''))) return false;
+  return st === 429 || (read && (st === 502 || st === 503 || st === 504));
+}
+export const FRONT_DOOR_MESSAGE = 'Hermoso\u2019s server was briefly too busy to take the request and turned it away before the app saw it (HTTP 429). It was retried and the server was still busy. Nothing ran and nothing was charged: try again in a minute.';
+async function throughFrontDoor(send, { read }) {
+  let res = await send();
+  for (const ms of frontDoorWaits()) {
+    if (!isFrontDoorRefusal(res.status, res.headers?.get?.('content-type'), { read })) return res;
+    try { await res.arrayBuffer(); } catch { /* drain, so the socket is reused */ }
+    await new Promise((r) => setTimeout(r, ms));
+    res = await send();
+  }
+  if (isFrontDoorRefusal(res.status, res.headers?.get?.('content-type'), { read })) throw Object.assign(new Error(FRONT_DOOR_MESSAGE), { status: res.status, _frontDoor: true });
+  return res;
+}
+
+async function fetchRead(url, init) { return throughFrontDoor(() => fetchReadOnce(url, init), { read: true }); }
+async function fetchReadOnce(url, init) {
   try { return await fetch(url, init); }
   catch (e) {
     if (!isTransport(e)) throw e;
@@ -239,7 +272,8 @@ async function fetchRead(url, init) {
   }
 }
 
-async function fetchWrite(url, init) {
+async function fetchWrite(url, init) { return throughFrontDoor(() => fetchWriteOnce(url, init), { read: false }); }
+async function fetchWriteOnce(url, init) {
   try { return await fetch(url, init); }
   catch (e) {
     if (!isTransport(e)) throw e;
@@ -469,7 +503,8 @@ export const JOB_MISS_GRACE_MS = 30_000;
 export function pollMissVerdict(status, { startedAt, now = Date.now(), deadline = Infinity, graceMs = JOB_MISS_GRACE_MS } = {}) {
   const st = Number(status);
   if (st === 404) return (now - startedAt < graceMs && now < deadline) ? 'retry' : 'final';
-  if ((st === 502 || st === 503 || st === 504) && now < deadline) return 'retry';
+  // a throttle is not news about the render: a poll that was turned away waits and asks again (2026-10-04)
+  if ((st === 429 || st === 502 || st === 503 || st === 504) && now < deadline) return 'retry';
   return 'throw';
 }
 export function jobMissMessage(id) {

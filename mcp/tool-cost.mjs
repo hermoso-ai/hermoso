@@ -41,7 +41,7 @@
 // Reads inside `create`. Each is a lookup or a poll: it returns something we already hold and runs no model.
 export const CREATE_FREE_READS = Object.freeze([
   'get_job', 'list_library', 'fetch_asset', 'list_skills', 'get_skill',
-  'list_product_photos', 'fetch_app_screens', 'list_hooks',
+  'list_product_photos', 'fetch_app_screens', 'list_hooks', 'list_templates', 'face_check',
   'list_meta_posts', 'list_published_posts', 'post_performance', 'diagnose_posts', 'backfill_posts',
 ]);
 // Reads inside `research`. `find_competitors` says "0 credits" in its own description (it is the discovery model,
