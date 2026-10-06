@@ -19445,15 +19445,16 @@ function memoryNoteVerdict(text) {
   })));
   server.registerTool('update_brand', {
     title: 'Update profile fields',
-    description: 'Patch SPECIFIC fields of the active profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, logo, light logo, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. If no brand is saved yet and you only INFERRED one from what the user is making, ask them to confirm it is their brand before saving it (they may be working for a client or just trying things). Only pass the fields you’re changing.',
+    description: 'Patch SPECIFIC fields of the active profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, logos, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. If no brand is saved yet and you only INFERRED one from what the user is making, ask them to confirm it is their brand before saving it (they may be working for a client or just trying things). Only pass the fields you’re changing.',
     inputSchema: { ...STORE_BRAND,
       name: z.string().optional(), domain: z.string().optional().describe('website domain'), sells: z.string().optional().describe('what the brand sells'),
       summary: z.string().optional().describe('one-line description'), category: z.string().optional(), audience: z.string().optional(),
       positioning: z.string().optional(), voice: z.string().optional().describe('brand voice/tone'), style: z.string().optional().describe('visual style — palette, typography, aesthetic'), goal: z.string().optional().describe('current marketing goal'),
       pronounce: z.string().optional().describe('how the brand NAME is said aloud, as a simple respelling with the stressed syllable in capitals (e.g. "KOH-dee-ak"). Videos use it as a delivery note beside the spoken line; set it when a render mispronounced the name.'),
       pronunciations: z.record(z.string()).optional().describe('how PRODUCT names are said aloud, e.g. {"Power Cakes": "POW-er cakes"}. Merged into the saved ones; an empty string removes one.'),
-      logo: z.string().optional().describe('logo image URL or path'),
-      logoLight: z.string().optional().describe('light logo for dark pictures; "none" removes'),
+      logo: z.string().optional(),
+      logoLight: z.string().optional().describe('for dark pictures; "none" removes'),
+      logoDark: z.string().optional().describe('for light pictures'),
     },
     outputSchema: { ok: z.boolean().optional(), updated: z.array(z.string()).optional(), brand: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -19469,11 +19470,11 @@ function memoryNoteVerdict(text) {
     }
     // THE LOGO FILES (2026-10-06): the logo, and the optional light version laid on when the original would not read on a
     // dark or busy background. A local path is uploaded first (toRef); only a raster file is kept (an SVG cannot be laid on).
-    for (const k of ['logo', 'logoLight']) {
+    for (const k of ['logo', 'logoLight', 'logoDark']) {
       if (a[k] == null || !String(a[k]).trim()) continue;
-      if (k === 'logoLight' && /^(none|remove|off)$/i.test(String(a[k]).trim())) { patch.logoLight = ''; continue; }
+      if (k !== 'logo' && /^(none|remove|off)$/i.test(String(a[k]).trim())) { patch[k] = ''; continue; }
       const ref = await toRef(String(a[k]).trim());
-      if (!ref || !/^(https?:\/\/|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(ref) || /\.svg(\?|$)/i.test(ref)) return { content: [{ type: 'text', text: `The ${k === 'logo' ? 'logo' : 'light logo'} must be a PNG, JPEG or WebP image (a URL or a local file). Nothing was changed.` }], isError: true };
+      if (!ref || !/^(https?:\/\/|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(ref) || /\.svg(\?|$)/i.test(ref)) return { content: [{ type: 'text', text: `The ${k === 'logo' ? 'logo' : k === 'logoLight' ? 'light logo' : 'dark logo'} must be a PNG, JPEG or WebP image (a URL or a local file). Nothing was changed.` }], isError: true };
       patch[k] = ref;
     }
     if (!Object.keys(patch).length) return { content: [{ type: 'text', text: 'Pass at least one brand field to change.' }], isError: true };
