@@ -454,6 +454,8 @@ export async function apiUploadUrl(p, url, { fileName = '' } = {}) {
 export async function apiSSE(p, body = {}) {
   const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
   if (!res.ok) { let e; try { e = (await res.json()).error; } catch {} throw Object.assign(new Error(e || `HTTP ${res.status}`), { status: res.status }); }
+  // A server that answered with plain JSON (an older revision) is read as JSON, never as an empty stream.
+  if (!/text\/event-stream/i.test(res.headers.get('content-type') || '')) { const j = await res.json(); return j && Object.prototype.hasOwnProperty.call(j, 'data') ? j.data : j; }
   const reader = res.body.getReader(); const dec = new TextDecoder();
   let buf = '', done = null, error = null; const progress = [];
   for (;;) {

@@ -5788,7 +5788,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     if (a.redo && a.redo.id) {
       const r = a.redo;
-      const d = await apiPost('/api/schedule/refill/redo', { id: r.id, feedback: r.feedback || '', part: r.change || 'both', remember: r.remember !== false, confirm: r.confirm === true });
+      const d = await (r.confirm === true ? apiSSE : apiPost)('/api/schedule/refill/redo', { id: r.id, feedback: r.feedback || '', part: r.change || 'both', remember: r.remember !== false, confirm: r.confirm === true }); // streamed when it renders: past the edge's 100s limit (2026-10-06)
       if (d.needsConfirm) return ok(`${d.summary}\nAsk the user before spending; call run_post_refill again with redo.confirm:true only on a yes.`, d);
       return ok([d.summary || '', d.draft ? `The new version (${d.draft.id}, ${d.draft.kind}, ${d.draft.at}):\n  ${String(d.draft.message || '').replace(/\n+/g, ' / ').slice(0, 300)}\n  ${d.draft.media || ''}\nIt is still a draft: approve it with run_post_refill approve.` : ''].filter(Boolean).join('\n'), d);
     }
@@ -5802,12 +5802,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
         d.discarded ? `Discarded ${d.discarded} draft(s).` : '',
         d.edited ? `Edited ${d.edited} draft(s).` : '',
         (d.editErrors || []).length ? `Edits refused: ${d.editErrors.map(x => `${x.draftId} — ${x.error}`).join(' · ')}` : '',
+        (d.editNotes || []).length ? d.editNotes.map(x => `${x.draftId}: ${x.note}`).join('\n') : '',
         (d.unknown || []).length ? `No such draft: ${d.unknown.join(', ')}` : '',
         (d.learned || []).length ? `Saved for future batches: ${d.learned.map((x) => `"${x}"`).join(', ')}.` : '',
         `${d.remaining} draft(s) still waiting for approval.`,
       ].filter(Boolean).join('\n'), d);
     }
-    const d = await apiPost('/api/schedule/refill/run', { dryRun: a.dryRun === false ? false : true, force: !!a.force });
+    const d = await (a.dryRun === false ? apiSSE : apiPost)('/api/schedule/refill/run', { dryRun: a.dryRun === false ? false : true, force: !!a.force }); // a live run renders for minutes: streamed past the edge's 100s limit (2026-10-06)
     const lines = (d.posts || []).map((p, i) => `  ${i + 1}. ${p.at} → ${(p.channels || []).map(c => `${c}[${(p.visibilityByChannel || {})[c] || 'public'}]`).join(', ')}\n     ${String(p.message || '').replace(/\n+/g, ' / ').slice(0, 220)}\n     new ${p.kind}: ${p.media || `(made when it runs live) ${String(p.asset?.scene || '').slice(0, 160)}`} · ${p.asset?.credits || 0} credits`);
     const q = (d.queued || []).filter(x => x && x.id).length, qFail = (d.queued || []).filter(x => x && x.error);
     return ok([
@@ -17989,24 +17990,26 @@ function buildTools(rawServer, opts = {}, sink = null) {
       model: z.string().optional().describe('image model id from hermoso_capabilities. A model whose `refs.mode` is "edit" there (gpt-image-2.5) takes your refImages on ITS OWN editor, up to its `refs.max`, instead of the default compositor'),
       imageSize: z.string().optional().describe('pixel-size preset for models that support it: 1K/2K, and 4K on the models hermoso_capabilities lists with a 4K imageSize price (a 4K ask on any other model is refused, free) — omit for the default'),
       fixLabel: z.boolean().optional().describe('default true: when the saved brand\'s product photo rides in this render, the product\'s label on the finished image is READ and compared with the photo, and re-printed from the photo at close range ONLY if it came out wrong (a label that is already right costs only the check, a credit or two; a re-print adds about ten). The reply says whether the label was checked, fixed or left as rendered (`labelPass`). Pass false when the user wants the packaging left exactly as generated: nothing is checked or re-printed.'),
+      logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay: the real logo file laid flat (lockup, corner). in_scene: ON something in the scene (cup, shirt, sign, moving or angled), from the file, then checked. auto (default): from the prompt, none unless asked'),
       mask: z.string().optional().describe('MASKED EDIT — change ONE region of an image and keep the rest: a local path or URL of a mask image for refImages[0] (the image being edited). Either convention works and the reply says which it read: TRANSPARENT pixels = change, or, on a mask with no transparency, WHITE = change and black = keep. Any size; it is scaled to the image. The mask GUIDES the edit rather than stencilling it: the new content can blend a little past its edge. Runs on the model hermoso_capabilities marks `refs.mask` (gpt-image-2.5): leave `model` empty or name that one — any other named model is refused, free. Needs refImages; the result keeps the source image\'s own frame, so aspectRatio is not applied.'),
     },
     outputSchema: {
       image: z.string().optional().describe('the served absolute URL of the finished image'),
       model: z.string().optional().describe('the product-facing label of the model that rendered it'),
       productCheck: z.any().optional().describe('present when the brand\'s product photo was attached: {verdict: match|mismatch|unclear|absent, wordmark, issues[]} — the render compared against the real product photo. mismatch/absent means the product in the image is NOT the brand\'s product; say so, never present it as done'),
+      logoCheck: z.any().optional().describe('after an in_scene logo: {verdict: match|drift|absent|unclear, where, issues[], note}'),
       labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your ad image…', 'Ad image ready'),
-  }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel }) => {
+  }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel, logoPlacement }) => {
     const refs = refImages?.length ? (await Promise.all(refImages.map(toRef))).filter(Boolean) : undefined;
     const maskRef = mask ? await toRef(mask) : undefined; // a local mask file travels the same way a local reference does
     // `raw === true` only — a raw render is opt-in and must be stated properly, so a truthy stray value never
     // silently turns off the brand pipeline on an on-brand ad (the same rule lib/raw-passthrough.mjs's predicate uses).
     // A MASKED EDIT IS AN EDIT OF THE CALLER'S OWN IMAGE: the saved brand's product photos must not be hydrated in front
     // of it, so a mask implies useBrand:false (the server also refuses a mask with no refImages, free).
-    const _imgBody = { prompt, refImages: refs, useBrand: maskRef ? false : useBrand !== false, aspectRatio, model, imageSize, ...(maskRef ? { mask: maskRef } : {}), ...(raw === true ? { raw: true } : {}), ...(fixLabel === false ? { fixLabel: false } : {}) }; // fixLabel:false only when stated: the label check is ON by default
+    const _imgBody = { prompt, refImages: refs, useBrand: maskRef ? false : useBrand !== false, aspectRatio, model, imageSize, ...(maskRef ? { mask: maskRef } : {}), ...(raw === true ? { raw: true } : {}), ...(fixLabel === false ? { fixLabel: false } : {}), ...(logoPlacement ? { logoPlacement } : {}) }; // fixLabel:false only when stated: the label check is ON by default
     // A CALLER WITH A WAIT BUDGET GETS A QUEUED JOB (2026-09-21, R321). Only `/v1/tools/generate_image?wait=` sets
     // `waitMs`; every other caller renders inside the request exactly as before. The server does the same brand-photo
     // handling either way, then queues the ordinary image job; awaitRenderJob waits what the caller allowed and hands
@@ -18147,6 +18150,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       restrainedGrade: z.boolean().optional().describe('true for a calm / premium / muted look instead of the default punchy poster grade'),
       logo: z.string().optional().describe('a brand logo URL or path to place into the composition'),
       logo3d: z.boolean().optional().describe('first turn the flat logo into a volumetric 3D render (one extra billed image), then composite that'),
+      logoPlacement: z.enum(['auto', 'overlay', 'in_scene']).optional().describe('overlay: the real logo file laid flat, exact. in_scene: placed into the composition from the file, then checked. auto (default): in_scene with logo3d, else overlay'),
       split: z.object({ mode: z.enum(['plain', 'before_after', 'versus', 'custom']), panels: z.array(z.string()).optional() }).passthrough().optional().describe('split/panel LAYOUT — only when the user asks for one ("split", "before/after", "versus screen"). "X vs Y" as a SCENE stays one unified frame'),
       reference: z.object({}).passthrough().optional().describe("fields YOU extracted by eye from a reference thumbnail. Extract ALL of: brief (one dense sentence on the concept), subject (pose/action generically, NEVER a specific identity), elements, location, composition, background, split (boolean), split_count, person_count (0-3), emotion (one of the 11 presets or 'other'), emotion_detail (one vivid sentence covering eyes, brows, mouth, head angle). emotion + emotion_detail carry the reference's actual facial performance, which is the single biggest CTR lever on a face; split/split_count reproduce its panel structure. The reference image itself is never sent to the model"),
       tweak: z.object({ kind: z.string(), value: z.string() }).describe('surgical pixel-faithful edit of a FINISHED thumbnail (needs sourceImage): kind emotion / background / background_color / rim_light, or any other kind with the edit in words as value').optional(),
@@ -21275,6 +21279,7 @@ function memoryNoteVerdict(text) {
       brandId: z.string().optional().describe('a profile id/name from list_brands; omit for the active profile (passing it pins it like use_brand)'),
       plan: z.array(z.any()).optional().describe('the `plan` (or `remaining`) a previous call returned: render exactly those ads, no new planning'),
       dryRun: z.boolean().optional().describe('true = plan and quote only, nothing rendered'),
+      logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay (default): the real logo file laid flat on each ad. in_scene: printed on something in the ad, then checked. none. auto: from each visual'),
     },
     outputSchema: {
       plan: z.array(z.any()).optional().describe('[{product, image, variants:[{angle, headline, supporting, cta, prompt}]}]'),
@@ -21286,7 +21291,7 @@ function memoryNoteVerdict(text) {
       notes: z.array(z.string()).optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ products, count, aspectRatios, brief, angles, language, model, brandId, plan, dryRun }) => {
+  }, wrap(async ({ products, count, aspectRatios, brief, angles, language, model, brandId, plan, dryRun, logoPlacement }) => {
     const brand = await activeBrand(brandId);
     const ratios = normalizeRatios(aspectRatios);
     const notes = [];
@@ -21319,6 +21324,11 @@ function memoryNoteVerdict(text) {
     const { now, later } = splitForQueue(list);
     const heroImg = heroImageOf(brand);
     const logo = typeof brand?.logo === 'string' && /^https?:\/\//i.test(brand.logo) && !/\.svg(\?|#|$)/i.test(brand.logo) ? brand.logo : '';
+    // THE LOGO, PER AD (2026-10-06): overlay by default (a flat lockup of the real file); in_scene puts it on something in
+    // the ad from the real file and checks it; none leaves it off; auto reads each ad's visual. Never handed over as a
+    // plain reference for the model to re-draw.
+    const lmode = !logo || logoPlacement === 'none' ? 'none' : 'overlay';
+    const lbody = lmode === 'none' ? (logo ? { logoPlacement: 'none' } : {}) : { brandLogo: true, logoPlacement: logoPlacement || 'overlay' };
     const jobs = [];
     let stoppedAt = null;
     for (let i = 0; i < now.length; i++) {
@@ -21326,11 +21336,11 @@ function memoryNoteVerdict(text) {
       const isHero = it.image ? it.image === heroImg : true;
       let body;
       if (isHero && (it.image || brand)) {
-        body = { prompt: staticAdPrompt(it.variant, { logo: 'server' }), useBrand: true }; // the server attaches the hero photo + the real logo
+        body = { prompt: staticAdPrompt(it.variant, { logo: lmode }), useBrand: true, ...lbody }; // the server attaches the hero photo and puts the real logo in the way lmode says
       } else if (it.image) {
-        body = { prompt: staticAdPrompt(it.variant, { logo: logo ? 'attached' : 'none', productPhoto: true }), refImages: [it.image, ...(logo ? [logo] : [])], useBrand: true };
+        body = { prompt: staticAdPrompt(it.variant, { logo: lmode, productPhoto: true }), refImages: [it.image], useBrand: true, ...lbody };
       } else {
-        body = logo ? { prompt: staticAdPrompt(it.variant, { logo: 'attached' }), refImages: [logo], useBrand: true } : { prompt: staticAdPrompt(it.variant, { logo: 'none' }), useBrand: false };
+        body = logo ? { prompt: staticAdPrompt(it.variant, { logo: lmode }), useBrand: true, ...lbody } : { prompt: staticAdPrompt(it.variant, { logo: 'none' }), useBrand: false };
       }
       try {
         const q = await apiPost('/api/generate/image', { ...body, aspectRatio: it.aspectRatio, ...(model ? { model } : {}), queue: true });

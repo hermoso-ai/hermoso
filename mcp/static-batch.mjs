@@ -125,7 +125,7 @@ export function plannerBrief(product, { brief = '', angles = [] } = {}) {
   ].filter(Boolean).join('\n');
 }
 
-// One render's prompt: the planner's visual brief, then the exact words, then the logo rule. The words are QUOTED so
+// One render's prompt: the planner's visual brief, then the exact words, then (with no logo on file) the no-logo rule. The words are QUOTED so
 // the model prints them as given; a static whose headline is misspelled is not finished.
 export function staticAdPrompt(v, { logo = 'server', productPhoto = false } = {}) {
   const x = v && typeof v === 'object' ? v : {};
@@ -137,9 +137,10 @@ export function staticAdPrompt(v, { logo = 'server', productPhoto = false } = {}
   ].filter(Boolean);
   if (words.length) lines.push(`On-image text, spelled exactly as given and nothing else: ${words.join(', ')}. Bold ad typography with a clear hierarchy, crisp and correctly spelled. A finished, ready-to-run static ad.`);
   if (productPhoto) lines.push('The first reference image is the REAL product: keep its shape, colours and label exactly.');
-  if (logo === 'attached') lines.push("The LAST reference image is the brand's REAL logo. Place exactly that logo, unchanged, small and clean in the layout. Never redraw or re-letter it.");
-  else if (logo === 'server') lines.push("Place the brand's real logo small and clean in the layout.");
-  else lines.push('Do not draw or invent any logo or wordmark.');
+  // THE LOGO IS LAID ON, NEVER PAINTED (2026-10-06): 'overlay' (and the old 'attached' / 'server') add nothing here. The
+  // render goes with brandLogo:true, and the image route tells the model to keep a corner clear and lays the brand's real
+  // logo file over the finished ad (lib/logo-intent.mjs). The model is never handed the logo to re-draw.
+  if (!['overlay', 'attached', 'server'].includes(logo)) lines.push('Do not draw or invent any logo or wordmark.');
   return lines.filter(Boolean).join('\n\n');
 }
 
