@@ -5725,6 +5725,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const draftLines = drafts.slice(0, 20).map((x, i) => `  ${i + 1}. ${x.id} · ${x.at} → ${(x.channels || []).join(', ')} · ${x.kind}\n     ${String(x.message || '').replace(/\n+/g, ' / ').slice(0, 200)}\n     ${x.media || '(no file)'}`);
     return ok([
       `Autoposting: ${state}.${d.note ? `\n${d.note}` : ''}`,
+      d.creditNote || '',
       `Posting times: ${(d.postingTimes || []).join(', ') || 'none set (add some on the Schedule tab)'} ${d.postingSchedule?.timezone || 'UTC'}. It fills ${d.daysAhead} day(s) ahead; ${d.queuedPosts} post(s) queued now.`,
       (d.channelsView || []).length ? `Channels:\n${d.channelsView.map((c) => `  ${c.on ? '[on] ' : '[off]'} ${c.label} (${c.channel}): ${c.on ? `${c.postsPerDay} a day${c.times.length ? ` at ${c.times.join(', ')}` : ''}` : 'not posting'}${c.note ? ` · ${c.note}` : ''}`).join('\n')}` : (d.connectedUnreadable ? 'Channels: could not be read just now.' : 'Channels: none connected — autopilot has nowhere to post. Connect one under Workspace ▸ Connectors.'),
       `Makes ${d.postsPerDayMade || 0} new post(s) a day, every one a fresh render made for it${d.estCreditsPerDay != null && d.postsPerDayMade ? `, about ${d.estCreditsPerDay} credits a day at today's prices` : ''}.${d.zeroBudget ? ` ${d.budgetNote}` : ''} Used: ${d.spend?.today || 0} credits today, ${d.spend?.week || 0} this week.`,
@@ -5763,9 +5764,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const { goal, goalNote, pillars, formats, avoid, learnings, forgetCaptionEdits, ...rest } = a;
     const brief = Object.fromEntries(Object.entries({ goal, goalNote, pillars, formats, avoid, learnings, ...(forgetCaptionEdits ? { editExamples: [] } : {}) }).filter(([, v]) => v !== undefined));
     const d = await apiPut('/api/schedule/refill', { ...rest, ...(Object.keys(brief).length ? { brief } : {}) });
-    return ok(d.enabled
+    return ok((d.enabled
       ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} get_post_refill lists the channels it posts to and what it costs a day. Run run_post_refill (a preview by default: it renders and queues nothing, and writing its copy costs a few credits) to see a plan.`
-      : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.', d);
+      : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.') + (d.creditNote ? `\n${d.creditNote}` : ''), d);
   }));
   server.registerTool('run_post_refill', {
     title: 'Run autoposting / review its drafts',
@@ -5814,7 +5815,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok([
       d.summary || '',
       lines.length ? `\nThe posts:\n${lines.join('\n')}` : '',
-      (d.noChannels || d.zeroBudget || (d.enabled === false && !(d.posts || []).length)) ? '' : d.dryRun ? `\nNOTHING WAS RENDERED OR QUEUED — this was a preview${d.copyCredits ? ` (writing its copy cost ${d.copyCredits} credit(s))` : ''}. Show it to the user; call again with dryRun:false only if they say yes.`
+      (d.noChannels || d.zeroBudget || (d.outOfCredits && !(d.posts || []).length) || (d.enabled === false && !(d.posts || []).length)) ? '' : d.dryRun ? `\nNOTHING WAS RENDERED OR QUEUED — this was a preview${d.copyCredits ? ` (writing its copy cost ${d.copyCredits} credit(s))` : ''}. Show it to the user; call again with dryRun:false only if they say yes.`
         : (d.mode === 'auto' ? `\n${q} post(s) scheduled. Pull any of them before it goes out with cancel_scheduled.` : ((d.drafts || []).length ? `\n${d.drafts.length} new draft(s) waiting for approval — approve, edit or discard them with run_post_refill.` : '\nNo new drafts were made by this run (get_post_refill lists any drafts already waiting).')),
       qFail.length ? `\n${qFail.length} could not be queued: ${qFail.map(x => `${x.at} — ${x.error}`).join(' · ')}` : '',
       (d.notes || []).length ? `\nNotes: ${d.notes.join(' · ')}` : '',
@@ -17990,7 +17991,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       model: z.string().optional().describe('image model id from hermoso_capabilities. A model whose `refs.mode` is "edit" there (gpt-image-2.5) takes your refImages on ITS OWN editor, up to its `refs.max`, instead of the default compositor'),
       imageSize: z.string().optional().describe('pixel-size preset for models that support it: 1K/2K, and 4K on the models hermoso_capabilities lists with a 4K imageSize price (a 4K ask on any other model is refused, free) — omit for the default'),
       fixLabel: z.boolean().optional().describe('default true: when the saved brand\'s product photo rides in this render, the product\'s label on the finished image is READ and compared with the photo, and re-printed from the photo at close range ONLY if it came out wrong (a label that is already right costs only the check, a credit or two; a re-print adds about ten). The reply says whether the label was checked, fixed or left as rendered (`labelPass`). Pass false when the user wants the packaging left exactly as generated: nothing is checked or re-printed.'),
-      logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay: the real logo file laid flat (lockup, corner). in_scene: ON something in the scene (cup, shirt, sign, moving or angled), from the file, then checked. auto (default): from the prompt, none unless asked'),
+      logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay: real logo file laid flat. in_scene: on something in the scene, from the file, checked. auto (default): from the prompt'),
       mask: z.string().optional().describe('MASKED EDIT — change ONE region of an image and keep the rest: a local path or URL of a mask image for refImages[0] (the image being edited). Either convention works and the reply says which it read: TRANSPARENT pixels = change, or, on a mask with no transparency, WHITE = change and black = keep. Any size; it is scaled to the image. The mask GUIDES the edit rather than stencilling it: the new content can blend a little past its edge. Runs on the model hermoso_capabilities marks `refs.mask` (gpt-image-2.5): leave `model` empty or name that one — any other named model is refused, free. Needs refImages; the result keeps the source image\'s own frame, so aspectRatio is not applied.'),
     },
     outputSchema: {
@@ -18150,7 +18151,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       restrainedGrade: z.boolean().optional().describe('true for a calm / premium / muted look instead of the default punchy poster grade'),
       logo: z.string().optional().describe('a brand logo URL or path to place into the composition'),
       logo3d: z.boolean().optional().describe('first turn the flat logo into a volumetric 3D render (one extra billed image), then composite that'),
-      logoPlacement: z.enum(['auto', 'overlay', 'in_scene']).optional().describe('overlay: the real logo file laid flat, exact. in_scene: placed into the composition from the file, then checked. auto (default): in_scene with logo3d, else overlay'),
+      logoPlacement: z.enum(['auto', 'overlay', 'in_scene']).optional().describe('overlay (exact, flat) | in_scene (from the file, checked); auto: in_scene with logo3d'),
       split: z.object({ mode: z.enum(['plain', 'before_after', 'versus', 'custom']), panels: z.array(z.string()).optional() }).passthrough().optional().describe('split/panel LAYOUT — only when the user asks for one ("split", "before/after", "versus screen"). "X vs Y" as a SCENE stays one unified frame'),
       reference: z.object({}).passthrough().optional().describe("fields YOU extracted by eye from a reference thumbnail. Extract ALL of: brief (one dense sentence on the concept), subject (pose/action generically, NEVER a specific identity), elements, location, composition, background, split (boolean), split_count, person_count (0-3), emotion (one of the 11 presets or 'other'), emotion_detail (one vivid sentence covering eyes, brows, mouth, head angle). emotion + emotion_detail carry the reference's actual facial performance, which is the single biggest CTR lever on a face; split/split_count reproduce its panel structure. The reference image itself is never sent to the model"),
       tweak: z.object({ kind: z.string(), value: z.string() }).describe('surgical pixel-faithful edit of a FINISHED thumbnail (needs sourceImage): kind emotion / background / background_color / rim_light, or any other kind with the edit in words as value').optional(),
@@ -19444,13 +19445,15 @@ function memoryNoteVerdict(text) {
   })));
   server.registerTool('update_brand', {
     title: 'Update profile fields',
-    description: 'Patch SPECIFIC fields of the active profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. If no brand is saved yet and you only INFERRED one from what the user is making, ask them to confirm it is their brand before saving it (they may be working for a client or just trying things). Only pass the fields you’re changing.',
+    description: 'Patch SPECIFIC fields of the active profile (name, domain, sells, summary, category, audience, positioning, voice, style, goal, logo, light logo, and how the brand and product names are pronounced) WITHOUT overwriting the rest — a read-modify-write on the saved brand. Use for “change our voice to playful”, “we sell to dentists now”. To onboard a brand from scratch, use draft_brand. If no brand is saved yet and you only INFERRED one from what the user is making, ask them to confirm it is their brand before saving it (they may be working for a client or just trying things). Only pass the fields you’re changing.',
     inputSchema: { ...STORE_BRAND,
       name: z.string().optional(), domain: z.string().optional().describe('website domain'), sells: z.string().optional().describe('what the brand sells'),
       summary: z.string().optional().describe('one-line description'), category: z.string().optional(), audience: z.string().optional(),
       positioning: z.string().optional(), voice: z.string().optional().describe('brand voice/tone'), style: z.string().optional().describe('visual style — palette, typography, aesthetic'), goal: z.string().optional().describe('current marketing goal'),
       pronounce: z.string().optional().describe('how the brand NAME is said aloud, as a simple respelling with the stressed syllable in capitals (e.g. "KOH-dee-ak"). Videos use it as a delivery note beside the spoken line; set it when a render mispronounced the name.'),
       pronunciations: z.record(z.string()).optional().describe('how PRODUCT names are said aloud, e.g. {"Power Cakes": "POW-er cakes"}. Merged into the saved ones; an empty string removes one.'),
+      logo: z.string().optional().describe('logo image URL or path'),
+      logoLight: z.string().optional().describe('light logo for dark pictures; "none" removes'),
     },
     outputSchema: { ok: z.boolean().optional(), updated: z.array(z.string()).optional(), brand: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -19463,6 +19466,15 @@ function memoryNoteVerdict(text) {
       const cur = { ...((brand.pronunciations && typeof brand.pronunciations === 'object' && !Array.isArray(brand.pronunciations)) ? brand.pronunciations : {}) };
       for (const [k, v] of Object.entries(a.pronunciations).slice(0, 30)) { const n = String(k || '').trim().slice(0, 60); if (!n) continue; const say = String(v || '').trim().slice(0, 60); if (say) cur[n] = say; else delete cur[n]; }
       patch.pronunciations = cur;
+    }
+    // THE LOGO FILES (2026-10-06): the logo, and the optional light version laid on when the original would not read on a
+    // dark or busy background. A local path is uploaded first (toRef); only a raster file is kept (an SVG cannot be laid on).
+    for (const k of ['logo', 'logoLight']) {
+      if (a[k] == null || !String(a[k]).trim()) continue;
+      if (k === 'logoLight' && /^(none|remove|off)$/i.test(String(a[k]).trim())) { patch.logoLight = ''; continue; }
+      const ref = await toRef(String(a[k]).trim());
+      if (!ref || !/^(https?:\/\/|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(ref) || /\.svg(\?|$)/i.test(ref)) return { content: [{ type: 'text', text: `The ${k === 'logo' ? 'logo' : 'light logo'} must be a PNG, JPEG or WebP image (a URL or a local file). Nothing was changed.` }], isError: true };
+      patch[k] = ref;
     }
     if (!Object.keys(patch).length) return { content: [{ type: 'text', text: 'Pass at least one brand field to change.' }], isError: true };
     const merged = { ...brand, ...patch };
@@ -21281,7 +21293,7 @@ function memoryNoteVerdict(text) {
       plan: z.array(z.any()).optional().describe('the `plan` (or `remaining`) a previous call returned: render exactly those ads, no new planning'),
       batchId: z.string().optional().describe('the batchId a previous call returned, so the rest lands in the same batch'),
       dryRun: z.boolean().optional().describe('true = plan and quote only, nothing rendered'),
-      logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay (default): the real logo file laid flat on each ad. in_scene: printed on something in the ad, then checked. none. auto: from each visual'),
+      logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay (default) | in_scene (on something, checked) | none | auto'),
     },
     outputSchema: {
       batchId: z.string().optional(),
