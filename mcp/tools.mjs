@@ -26,6 +26,8 @@ import { withHints, videoChoiceText, videoChoiceHints, neutralCreditsText, credi
 // behind HERMOSO_CHATGPT_EXT=1 + `?ext=1` on a widget host — see registerChatGPTExtensions() below and
 // ./openai-extensions.mjs. Same twin-safe specifier rule.
 import { registerLibraryApp, installEntrypointIcons, chatgptExtOn, EXT_PREFS_KEY } from './openai-extensions.mjs';
+// STATIC ADS AT SCALE (2026-10-06): the pure catalog/plan/prompt helpers behind make_static_ads. Same twin-safe specifier rule.
+import { STATIC_BATCH, resolveProducts, heroImageOf, normalizeRatios, clampCount, plannerBrief, staticAdPrompt, renderList, splitForQueue, planFromItems, perAdCredits } from './static-batch.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 // /generated/x.mp4 → a URL THE CALLER can open. `API_BASE` is the base this layer CALLS the app on, and on the hosted
@@ -2094,7 +2096,9 @@ export const TOOL_GROUP_NAMES = ['core', ...Object.keys(TOOL_GROUPS)];
 // create RE-MEASURED 2026-09-24 (26000 → 42000): edit_timeline (the open edit primitive, 11,026 by this method, about
 // 2,500 on the wire) and video_frames joined it. Both are on-demand (ON_DEMAND_TOOLS), so they only cost a session that
 // names `create` (or all); this figure is what that session pays.
-export const TOOL_GROUP_TOKENS = { core: 4300, research: 6600, create: 42000, channels: 37100, channel_admin: 66300, analytics: 39100, files: 10600, workspace: 9200, ads: 246700 };
+// create RE-MEASURED 2026-10-06 (42000 → 55000, measured 54,974 by tools/tool-group-truth-check.mjs): make_static_ads
+// joined it (on-demand), on top of the create tools added since 09-24 that had used up the 1.3× tolerance.
+export const TOOL_GROUP_TOKENS = { core: 4300, research: 6600, create: 55000, channels: 37100, channel_admin: 66300, analytics: 39100, files: 10600, workspace: 9200, ads: 246700 };
 
 // THE DEFAULT ROSTER IS EVERYTHING EXCEPT `ads` AND `analytics`. Paid-campaign management across every ad platform
 // is ~236K tokens on its own — more than everything else put together — because each platform carries a full
@@ -2265,7 +2269,7 @@ export const widgetHostHides = (name, widgetHost) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft']); // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine)
+export const ON_DEMAND_TOOLS = new Set(['edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads']); // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine)
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -4996,7 +5000,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // status, and /api/errors/report will not read a marker off an untrusted reporter — see toRef in client.mjs,
       // which this sentence is the model for.
       if (isRemote()) throw Object.assign(new Error('`path` only works when Hermoso runs on your own machine (stdio/CLI). On the hosted connector I can\'t read your files — put the file at a public https URL and pass `url`, or pass `dataUri` for something small.'), { status: 400, _userInput: true });
-      buf = await readFile(a.path);
+      try { buf = await readFile(a.path); }
+      catch (e) {
+        // A PATH THAT IS NOT THERE IS THE CALLER'S TO FIX, AND THE MESSAGE HAS TO SAY HOW (2026-10-06, fp 59547e05-39a:
+        // a bare "ENOENT: no such file or directory, open '/tmp/p04boss.mp4'" 22 times from one agent in five hours,
+        // filed as `unknown`). The usual cause is an agent in a SANDBOX: its /tmp is not the /tmp this process reads.
+        // Authored 400 + _userInput, so the ledger files it as the caller's and the agent is told exactly what to change.
+        const why = { ENOENT: 'there is no file at that path', EACCES: 'this process is not allowed to read it', EPERM: 'this process is not allowed to read it', EISDIR: 'that path is a folder, not a file' }[e?.code];
+        if (!why) throw e;
+        throw Object.assign(new Error(`Can't read \`${String(a.path).slice(0, 300)}\`: ${why} on the machine Hermoso runs on (working folder ${process.cwd()}). If you wrote the file from a sandboxed tool, its temp folder is probably not this one: save it somewhere both can read and pass that absolute path, or pass \`url\` (a public link) or \`dataUri\` instead. Retrying the same path will fail the same way.`), { status: 400, _userInput: true });
+      }
       fileName = fileName || String(a.path).split(/[\\/]/).pop();
       contentType = EXT_MIME[(fileName.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
     }
@@ -5801,7 +5814,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       d.summary || '',
       lines.length ? `\nThe posts:\n${lines.join('\n')}` : '',
       (d.noChannels || d.zeroBudget || (d.enabled === false && !(d.posts || []).length)) ? '' : d.dryRun ? `\nNOTHING WAS RENDERED OR QUEUED — this was a preview${d.copyCredits ? ` (writing its copy cost ${d.copyCredits} credit(s))` : ''}. Show it to the user; call again with dryRun:false only if they say yes.`
-        : (d.mode === 'auto' ? `\n${q} post(s) scheduled. Pull any of them before it goes out with cancel_scheduled.` : `\n${(d.drafts || []).length} draft(s) waiting for approval — approve, edit or discard them with run_post_refill.`),
+        : (d.mode === 'auto' ? `\n${q} post(s) scheduled. Pull any of them before it goes out with cancel_scheduled.` : ((d.drafts || []).length ? `\n${d.drafts.length} new draft(s) waiting for approval — approve, edit or discard them with run_post_refill.` : '\nNo new drafts were made by this run (get_post_refill lists any drafts already waiting).')),
       qFail.length ? `\n${qFail.length} could not be queued: ${qFail.map(x => `${x.at} — ${x.error}`).join(' · ')}` : '',
       (d.notes || []).length ? `\nNotes: ${d.notes.join(' · ')}` : '',
     ].filter(Boolean).join('\n'), d);
@@ -11549,7 +11562,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const alOut = { ok: z.boolean().optional(), id: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() };
   server.registerTool('list_applovin_ads_campaigns', {
     title: 'List AppLovin Ads campaigns',
-    description: 'The brand’s AppLovin Ads campaigns: id, name, LIVE/PAUSED, daily budget, goal, countries, landing page. Read-only, free.' + AL_CM_NOTE,
+    description: 'The brand’s AppLovin Ads campaigns: id, name, LIVE/PAUSED, daily budget, goal, countries, landing page. Rename or edit one with update_applovin_ads_campaign; pause or go live with set_applovin_ads_status. Read-only, free.' + AL_CM_NOTE,
     inputSchema: { campaignIds: alIds.describe('only these ids (up to 100)'), page: z.number().optional().describe('from 1'), size: z.number().optional().describe('1–100, default 100') },
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), campaigns: z.array(z.any()).optional(), page: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
@@ -11581,7 +11594,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/campaign', a); return ok(d.note, d); }));
   server.registerTool('update_applovin_ads_campaign', {
     title: 'Update an AppLovin Ads campaign',
-    description: 'Change an AppLovin campaign’s name, budget, goal value, countries, end date or landing page, read back. On a LIVE campaign a budget, goal, country or end-date change needs confirm:true. Status is set_applovin_ads_status; goal type, bidding and start date cannot change.' + AL_CM_NOTE,
+    description: 'Rename an AppLovin campaign or change its budget, goal value, countries, US states or metros, end date or landing page, read back. On a LIVE campaign a budget, goal, country or end-date change needs confirm:true. Status is set_applovin_ads_status; goal type, bidding and start date cannot change.' + AL_CM_NOTE,
     inputSchema: {
       campaignId: z.string(), name: z.string().optional(), dailyBudget: z.number().optional(), countryBudgets: z.record(z.number()).optional(),
       goalValue: z.number().optional(), countryGoals: z.record(z.number()).optional(), countries: alIds, usRegions: alIds, usMetros: alIds,
@@ -11606,7 +11619,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/applovin-ads/creative-sets', { ...a, ...(a.creativeSetIds ? { creativeSetIds: a.creativeSetIds.join(',') } : {}) });
-    return ok([d.note, ...(d.creativeSets || []).map(c => `• ${c.name} (${c.id}) — ${c.status || '?'}: ${(c.assets || []).map(x => `${x.type || x.resourceType} ${x.id} ${x.status}`).join('; ')}`)].join('\n'), d);
+    return ok([d.note, ...(d.creativeSets || []).map(c => `• ${c.name} (${c.id}) — ${c.status || '?'}, in campaign(s) ${[...new Set([...(c.campaignIds || []), ...(c.campaignId ? [c.campaignId] : [])])].join(', ') || 'none'}: ${(c.assets || []).map(x => `${x.type || x.resourceType} ${x.id} ${x.status}`).join('; ')}`)].join('\n'), d);
   }));
   server.registerTool('create_applovin_ads_creative_set', {
     title: 'Create an AppLovin creative set (paused)',
@@ -11622,6 +11635,27 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), removedFrom: z.array(z.string()).optional(), stillIn: z.array(z.string()).optional(), verdict: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/creative-set/remove', a); return ok(d.note, d); }));
+  server.registerTool('update_applovin_ads_creative_set', {
+    title: 'Edit an AppLovin creative set',
+    description: 'Edit an AppLovin creative set, read back: rename it, change its countries or languages (an empty list means all), its landing page (url; "" falls back to the campaign’s), replace its assets (assetIds, checked against AppLovin’s own asset types first), or add it to more campaigns (addToCampaignIds, up to 20). Adding a LIVE set to a LIVE campaign needs confirm:true. Status is set_applovin_ads_status.' + AL_CM_NOTE,
+    inputSchema: { creativeSetId: z.string(), name: z.string().optional(), countries: alIds.describe('ISO codes; [] = all countries'), languages: alIds.describe('e.g. ENGLISH; [] = all'), url: z.string().optional().describe('landing page for this set; "" = the campaign’s'), assetIds: alIds.describe('REPLACES the set’s assets'), addToCampaignIds: alIds.describe('also run it in these campaigns (up to 20)'), confirm: z.boolean().optional().describe('required to add a LIVE set to a LIVE campaign') },
+    outputSchema: { ...alOut, changed: z.array(z.string()).optional(), creativeSet: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/creative-set/update', a); return ok(d.note, d); }));
+  server.registerTool('clone_applovin_ads_creative_set', {
+    title: 'Copy an AppLovin creative set into another campaign (paused)',
+    description: 'Copy an AppLovin creative set into another campaign, born PAUSED and read back. AppLovin only clones a set that already belongs to a campaign.' + AL_CM_NOTE,
+    inputSchema: { creativeSetId: z.string(), campaignId: z.string().describe('the campaign to copy it into') },
+    outputSchema: { ...alOut, sourceId: z.string().optional(), campaignId: z.string().optional(), version: z.string().optional(), creativeSet: z.any().optional(), pausedAfterCreate: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/creative-set/clone', a); return ok(d.note, d); }));
+  server.registerTool('list_applovin_ads_catalogs', {
+    title: 'List AppLovin catalogs',
+    description: 'The AppLovin account’s product catalogs and their variant sets: the catalogId and variantSetId a dynamic-ads campaign (create_applovin_ads_campaign) needs. Website accounts. Read-only, free.' + AL_CM_NOTE,
+    inputSchema: {},
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), catalogs: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async () => { const d = await apiGet('/api/applovin-ads/catalogs', {}); return ok(d.note, d); }));
   server.registerTool('list_applovin_ads_assets', {
     title: 'List AppLovin assets',
     description: 'Assets on the AppLovin account: id, type (VID_LONG_P, VID_SHORT_P, IMG_INTER_P, IMG_BANNER, HOSTED_HTML), review status and rejection reasons. Read-only, free.' + AL_CM_NOTE,
@@ -11646,7 +11680,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       since: z.string().optional().describe('YYYY-MM-DD, default 7 days ago'), until: z.string().optional().describe('YYYY-MM-DD, default today'),
       columns: alIds.describe('e.g. day, campaign, campaign_id_external, creative_set, country, impressions, clicks, ctr, cost, sales, roas_7d, chka_usd_7d'),
       attribution: z.enum(['click', 'click_and_view']).optional().describe('web only, default click'), filters: z.record(z.array(z.string())).optional().describe('column -> values'),
-      cohort: z.boolean().optional().describe('attribute to impression day'), limit: z.number().optional().describe('1–10000, default 1000'), offset: z.number().optional(),
+      cohort: z.boolean().optional().describe('attribute to impression day'), notZero: z.boolean().optional().describe('drop rows whose metrics are all zero'), limit: z.number().optional().describe('1–10000, default 1000'), offset: z.number().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), type: z.string().optional(), since: z.string().optional(), until: z.string().optional(), columns: z.array(z.string()).optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
@@ -18686,7 +18720,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. ONE generation = one continuous clip up to the model’s longest listed duration — the longest-clip model in the catalog today renders a full multi-beat spot of up to 30 SECONDS in ONE unbroken take with native synchronized audio, so never assume a generic 8–10s cap and never stitch something that fits one clip; durationSeconds must be one of the model’s durations from hermoso_capabilities, which is the live list. TO GET A SPECIFIC MODEL, NAME IT in `model`: an unnamed render is routed by the server’s own auto-pool, which is narrower than the catalog, so the longest-clip and highest-resolution models are reached by naming them. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. AUDIO IS NOT FREE AND NOT OPTIONAL BY DEFAULT: a clip delivered with no audio of its own gets a music bed composed and CHARGED on top of the render (see musicMood and audio) — on a cheap short draft the bed can cost as much as the clip. Pass refVideo (a clip URL) to EDIT an existing video instead — the omni engine transforms that clip per your prompt, inheriting its canvas + length (aspectRatio/durationSeconds are ignored for an edit). RAW MODEL ACCESS: by default a few small guards are appended (packaging/label safety with no reference image, a negative prompt where the model takes one, reference-binding lines) and hex colour codes become colour names; ' + RAW_TOOL_NOTE + ' Spends credits (Starter plan is video-blocked server-side).',
     inputSchema: {
       prompt: z.string().optional().describe('the video prompt / shot description (for a refVideo edit, this is the transformation instruction); optional with `shots`'),
-      raw: z.boolean().optional().describe('RAW MODEL ACCESS: dispatch this prompt to the model BYTE-IDENTICAL — no appended packaging/label guidance, no negative prompt, no reference-binding lines, no hex-to-colour-name rewrite. Use it when you want the model itself rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence. Billing, durable delivery and per-model validation are unchanged.'),
+      raw: z.boolean().optional().describe('RAW MODEL ACCESS: dispatch this prompt to the model BYTE-IDENTICAL — no appended packaging/label guidance, no negative prompt, no reference-binding lines, no hex-to-colour-name rewrite. Use it when you want the model itself rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence (on Veo it is refused with the length and the cap instead). Billing, durable delivery and per-model validation are unchanged.'),
       refImage: z.string().optional().describe('local path or URL to anchor the first frame. ' + LIKENESS_TERMS),
       speak: z.string().optional().describe('A PERSON SAYING THESE EXACT WORDS TO CAMERA — the default for any "make my photo talk" / spokesperson / talk-to-camera ask. Pass with `creator` or a portrait as `refImage`: the video model films them saying it in their own voice, matched to who they are, and the length follows the words (leave durationSeconds out). `prompt` is then the staging (e.g. "natural", "walking in a park"). Real footage, not an animated photo; generate_avatar is the animated-photo look, only when asked for by name'),
       creator: z.string().optional().describe('STAR A SAVED CREATOR in this clip — their id from list_creators, or the name you know them by, or a PRESET AI creator from list_creators presets (exact name or id; free, no generation). Their saved portrait rides first among the references as the on-camera person, with their saved consent, exactly as render_ad casts them; a real person saved from a photo keeps their real face on camera. An unknown name is refused by name, nothing charged.'),
@@ -21202,7 +21236,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('plan_variations', {
     title: 'Plan ad variations',
-    description: "Fan a brief into N DISTINCT ad angles (different hooks/mechanics/audiences), each with its own headline + visual brief — then render each with generate_image and rank with score_ad. LLM planning only; renders nothing itself.",
+    description: "Fan a brief into N DISTINCT ad angles (different hooks/mechanics/audiences), each with its own headline + visual brief — then render each with generate_image and rank with score_ad. LLM planning only; renders nothing itself. To plan AND render a batch of finished static ads for one or several products in one call (up to 20 per product), use make_static_ads.",
     inputSchema: {
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object; OMIT to use the workspace’s saved brand'),
       product: z.string().describe('what to advertise'),
@@ -21220,6 +21254,96 @@ function memoryNoteVerdict(text) {
     const vars = d?.variants || d?.angles || [];
     const text = vars.map((v, i) => `${i + 1}. ${v.name || v.angle || 'Variant'} — ${v.hook || v.headline || ''}`).join('\n') || 'No variants returned.';
     return ok(text, d);
+  }));
+
+  // STATIC ADS AT SCALE (2026-10-06). The ads-studio shape in one call: products × count → finished statics,
+  // each a different selling angle with its headline and CTA on the image. Planning runs on the same batch planner the
+  // web Studio's make_variations fans out from (/api/batch/plan); every render is the ordinary QUEUED image job
+  // (/api/generate/image queue:true), so brand photos, the product check and the label pass behave exactly as in
+  // generate_image and nothing is held inside this request. Pure half: ./static-batch.mjs.
+  server.registerTool('make_static_ads', {
+    title: 'Make static ads at scale',
+    description: "Make a BATCH of finished static image ads for one or several products in one call: each ad a genuinely different selling angle (offer, material or ingredient story, how it is used, a lifestyle moment, an objection, proof the brand really has) with its headline, supporting line and CTA printed on the image, the brand's real product photo and logo composited in. `products` names products from the saved brand's catalog (get_brand lists them; ['all'] takes every product with a photo; omit for the hero product; a name not in the catalog is still advertised, drawn from its words). `count` is ads PER PRODUCT (1-20). `aspectRatios` any of 1:1, 4:5, 9:16 (each ad is rendered natively once per ratio). `brief` steers (a sale, a season, an audience) and is never turned into a price, discount or claim the brand does not state; `angles` names the angles to spread across. ALWAYS PRICED FIRST: dryRun:true returns the plan and the quote for the planning call only; then pass that `plan` back (no dryRun) to render exactly it without planning again. Renders are QUEUED jobs, at most " + STATIC_BATCH.QUEUE_PER_CALL + " per call: anything past that comes back as `remaining`, to send again as `plan` once some finish. Read each job with get_job; never describe an ad before its URL arrives. For variants of ONE finished ad use headline_variants / resize_ad; to copy a competitor's static use clone_static.",
+    inputSchema: {
+      products: z.array(z.string()).optional().describe("product names from the saved brand's catalog (get_brand), ['all'] for every product with a photo, or omit for the hero product"),
+      count: z.number().int().min(1).max(STATIC_BATCH.COUNT_MAX).optional().describe(`ads per product, 1-${STATIC_BATCH.COUNT_MAX} (default ${STATIC_BATCH.COUNT_DEFAULT})`),
+      aspectRatios: z.array(z.enum(['1:1', '4:5', '9:16'])).optional().describe("canvases; every ad is rendered once per ratio (default ['4:5'])"),
+      brief: z.string().optional().describe('what to lean into: a sale the brand is really running, a season, an audience, a tone'),
+      angles: z.array(z.string()).optional().describe("the selling angles to spread across, e.g. ['price or offer', 'material story', 'how it is used', 'lifestyle moment']; omit and the planner picks a spread"),
+      language: z.string().optional().describe('language of the on-image copy (default English)'),
+      model: z.string().optional().describe('image model id from hermoso_capabilities; omit for the default'),
+      brandId: z.string().optional().describe('a profile id/name from list_brands; omit for the active profile (passing it pins it like use_brand)'),
+      plan: z.array(z.any()).optional().describe('the `plan` (or `remaining`) a previous call returned: render exactly those ads, no new planning'),
+      dryRun: z.boolean().optional().describe('true = plan and quote only, nothing rendered'),
+    },
+    outputSchema: {
+      plan: z.array(z.any()).optional().describe('[{product, image, variants:[{angle, headline, supporting, cta, prompt}]}]'),
+      jobs: z.array(z.any()).optional().describe('one queued image job per ad × ratio: {id, product, angle, headline, aspectRatio}'),
+      remaining: z.array(z.any()).optional().describe('the part of the plan not queued this call — pass it back as `plan`'),
+      perAdCredits: z.number().nullable().optional(),
+      totalCredits: z.number().nullable().optional(),
+      dryRun: z.boolean().optional(),
+      notes: z.array(z.string()).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async ({ products, count, aspectRatios, brief, angles, language, model, brandId, plan, dryRun }) => {
+    const brand = await activeBrand(brandId);
+    const ratios = normalizeRatios(aspectRatios);
+    const notes = [];
+    let thePlan = Array.isArray(plan) && plan.length ? plan.filter((p) => p && Array.isArray(p.variants) && p.variants.length) : null;
+    if (!thePlan) {
+      const targets = resolveProducts(brand, products);
+      if (!targets.length) throw Object.assign(new Error('Name the product to advertise in `products` (or save a brand first with draft_brand). Nothing was charged.'), { _userInput: true });
+      const n = clampCount(count);
+      thePlan = [];
+      for (const t of targets) {
+        if (!t.matched && !t.hero) notes.push(`"${t.name}" is not in the brand's catalog, so its ads are drawn from its name with no product photo of its own.`);
+        const d = await apiPost('/api/batch/plan', { product: plannerBrief(t.name, { brief, angles }), count: n, language: language || '' });
+        const vs = (d?.variants || []).slice(0, n).map((v) => ({ angle: v.angle || '', headline: v.headline || '', supporting: v.supporting || '', cta: v.cta || '', prompt: v.prompt || '' }));
+        thePlan.push({ product: t.name, image: t.image || '', hero: !!t.hero, variants: vs });
+      }
+    }
+    const list = renderList(thePlan, ratios);
+    let status = null; try { status = await apiGet('/api/generate/status'); } catch {}
+    const per = perAdCredits(status, model);
+    const total = per == null ? null : per * list.length;
+    const quote = per == null ? 'the per-ad price could not be read just now (each render reserves its own price when queued)' : `about ${per} credits per ad, plus about 3 where the product label is checked · about ${total}-${total + 3 * list.length} for ${list.length}`;
+    const lines = thePlan.flatMap((p) => p.variants.map((v, i) => `${p.product} #${i + 1} [${v.angle}] "${v.headline}" · ${v.cta}`));
+    if (dryRun) {
+      return { content: [{ type: 'text', text: `PLAN (nothing rendered): ${list.length} ad${list.length === 1 ? '' : 's'} (${ratios.join(', ')}).\n${lines.join('\n')}\nQuote: ${quote}.${notes.length ? '\n' + notes.join('\n') : ''}\nTo render exactly these, call make_static_ads again with plan set to this plan and the same aspectRatios.` }], structuredContent: { plan: thePlan, perAdCredits: per, totalCredits: total, dryRun: true, ...(notes.length ? { notes } : {}) } };
+    }
+    if (total != null) {
+      let bal = null; try { bal = (await apiGet('/api/credits'))?.balance; } catch {}
+      if (bal != null && Number.isFinite(+bal) && +bal < total) throw Object.assign(new Error(`This batch needs about ${total} credits (${list.length} ads at about ${per}) and the balance is ${bal}. Nothing was charged. Ask for fewer ads, or top up (buy_credits).`), { status: 402, _userInput: true });
+    }
+    const { now, later } = splitForQueue(list);
+    const heroImg = heroImageOf(brand);
+    const logo = typeof brand?.logo === 'string' && /^https?:\/\//i.test(brand.logo) && !/\.svg(\?|#|$)/i.test(brand.logo) ? brand.logo : '';
+    const jobs = [];
+    let stoppedAt = null;
+    for (let i = 0; i < now.length; i++) {
+      const it = now[i];
+      const isHero = it.image ? it.image === heroImg : true;
+      let body;
+      if (isHero && (it.image || brand)) {
+        body = { prompt: staticAdPrompt(it.variant, { logo: 'server' }), useBrand: true }; // the server attaches the hero photo + the real logo
+      } else if (it.image) {
+        body = { prompt: staticAdPrompt(it.variant, { logo: logo ? 'attached' : 'none', productPhoto: true }), refImages: [it.image, ...(logo ? [logo] : [])], useBrand: true };
+      } else {
+        body = logo ? { prompt: staticAdPrompt(it.variant, { logo: 'attached' }), refImages: [logo], useBrand: true } : { prompt: staticAdPrompt(it.variant, { logo: 'none' }), useBrand: false };
+      }
+      try {
+        const q = await apiPost('/api/generate/image', { ...body, aspectRatio: it.aspectRatio, ...(model ? { model } : {}), queue: true });
+        jobs.push({ id: q.jobId, product: it.product, angle: it.variant.angle, headline: it.variant.headline, aspectRatio: it.aspectRatio });
+      } catch (e) {
+        if (e && (e.status === 429 || e.status === 402) && jobs.length) { stoppedAt = i; notes.push(e.status === 429 ? 'The render queue is full, so the rest was not queued.' : String(e.message || '')); break; }
+        throw e;
+      }
+    }
+    const left = [...(stoppedAt == null ? [] : now.slice(stoppedAt)), ...later];
+    const remaining = left.length ? planFromItems(left) : [];
+    const text = `Queued ${jobs.length} static ad${jobs.length === 1 ? '' : 's'} (${quote}).\n${jobs.map((j, i) => `${i + 1}. ${j.product} [${j.angle}] "${j.headline}" ${j.aspectRatio} → job ${j.id}`).join('\n')}${remaining.length ? `\n${left.length} more not queued yet: call make_static_ads again with plan set to \`remaining\` and the same aspectRatios once some of these finish.` : ''}${notes.length ? '\n' + notes.join('\n') : ''}\nRead each with get_job until it reports done; there is no image until then.`;
+    return { content: [{ type: 'text', text }], structuredContent: { plan: thePlan, jobs, ...(remaining.length ? { remaining } : {}), perAdCredits: per, totalCredits: total, ...(notes.length ? { notes } : {}) } };
   }));
 
   // ---------- research analysis & creative remix (webapp Create-chat parity — the last four app-only chat tools, now headless) ----------

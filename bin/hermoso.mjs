@@ -43,15 +43,26 @@ async function saveConfig(c) {
 }
 
 // ---- minimal arg parser: positionals + --flags (--flag value | --flag=value | boolean --flag) ----
+// `--json` MEANS TWO THINGS, AND GIVEN BOTH WAYS THE PAYLOAD MUST SURVIVE (2026-10-06). On `call`, `--json '{…}'` is the
+// arguments; everywhere, a bare `--json` asks for machine output. `call make_static_ads --json '{"dryRun":true}' --json`
+// used to keep only the LAST one — `true` — so the arguments were dropped in silence and the tool ran with none: a
+// paid tool queued four renders nobody asked for, dryRun and all. A repeated --json now keeps the object as the
+// arguments and records the bare one as the output request (`__jsonOut`), whichever order they came in.
 function parse(argv) {
   const pos = [], flags = {};
+  const set = (k, v) => {
+    if (k === 'json' && Object.prototype.hasOwnProperty.call(flags, 'json') && (flags.json === true) !== (v === true)) {
+      flags.json = v === true ? flags.json : v; flags.__jsonOut = true; return;
+    }
+    flags[k] = v;
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
       const eq = a.indexOf('=');
-      if (eq >= 0) { flags[a.slice(2, eq)] = a.slice(eq + 1); }
-      else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) { flags[a.slice(2)] = argv[++i]; }
-      else { flags[a.slice(2)] = true; }
+      if (eq >= 0) { set(a.slice(2, eq), a.slice(eq + 1)); }
+      else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) { set(a.slice(2), argv[++i]); }
+      else { set(a.slice(2), true); }
     } else pos.push(a);
   }
   return { pos, flags };
@@ -296,7 +307,15 @@ add --json to any command for machine output.`);
 // `--raw` is a real property on generate_image / generate_text / generate_video, and reserving it would make three
 // tools uncallable from the shorthand. A tool that ever needs a `--json` or `--args` argument can still pass it
 // inside --args '{"json":…}'.
-const CALL_FLAGS = new Set(['json', 'args', 'args-file', 'structured']);
+const CALL_FLAGS = new Set(['json', 'args', 'args-file', 'structured', '__jsonOut']); // __jsonOut: a second, bare --json beside a --json payload (see parse)
+
+// How long `call` waits for a tool, in ms: 20 minutes unless HERMOSO_CALL_TIMEOUT_MS names a positive number. Pure, so
+// tools/cli-call-timeout-check.mjs lifts and runs it; a garbled value falls back rather than becoming "no wait".
+const CLI_CALL_TIMEOUT_MS = 20 * 60 * 1000;
+function cliCallTimeoutMs(env) {
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : CLI_CALL_TIMEOUT_MS;
+}
 
 async function readArgsPayload(flags) {
   let src = null;
@@ -376,9 +395,16 @@ async function runTool(reg, name, flags, extraPos = [], preset = null) {
     if (extraPos.length) bad.push(`unexpected value${extraPos.length > 1 ? 's' : ''} ${extraPos.map((v) => JSON.stringify(v)).join(', ')} . Every argument is a --flag or goes inside --json`);
     if (bad.length) return die(`${bad.join('\n  ')}\n  Run: hermoso tools ${name}`);
 
-    const res = await client.callTool({ name, arguments: args });
+    // THE SDK'S 60-SECOND DEFAULT IS NOT OUR TIMEOUT (2026-10-06). client.callTool() with no options gives up after
+    // DEFAULT_REQUEST_TIMEOUT_MSEC (60s) and throws "MCP error -32001: Request timed out" — while the tool, running in
+    // this same process, carries on, finishes and BILLS. Measured: `hermoso call generate_image` on the default model
+    // took ~100s, printed the timeout and exited, and both images were then sitting in the Library, paid for. The
+    // registry is in-process, so the only clock that should bound a call is the tool's own (render tools wait up to
+    // their job timeout and then hand back a job id). HERMOSO_CALL_TIMEOUT_MS overrides; it is not a --flag because
+    // every --flag here is a tool argument.
+    const res = await client.callTool({ name, arguments: args }, undefined, { timeout: cliCallTimeoutMs(process.env.HERMOSO_CALL_TIMEOUT_MS) });
     const text = (res.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-    if (flags.json === true) console.log(JSON.stringify(res, null, 2));
+    if (flags.json === true || flags.__jsonOut === true) console.log(JSON.stringify(res, null, 2));
     else if (flags.structured) console.log(JSON.stringify(res.structuredContent ?? null, null, 2));
     else if (text) console.log(text);
     else console.log(JSON.stringify(res.structuredContent ?? res, null, 2));
