@@ -238,6 +238,26 @@ async function main() {
         const rows = inv.filter((t) => (!wantGroup || t.group === wantGroup)
           && (!q || t.name.includes(q) || t.description.toLowerCase().includes(q) || (t.title || '').toLowerCase().includes(q)))
           .sort((a, b) => order(a.group) - order(b.group) || a.name.localeCompare(b.name));
+        // A PHRASE IS SEARCHED BY MEANING WHEN NO TOOL CONTAINS IT LITERALLY (2026-10-06). `--search` is a substring
+        // grep, so "switch autopilot to auto-publish" and "when someone comments guide send them a dm" found NOTHING
+        // while set_post_refill and save_dm_automation do exactly that. The words go to find_tools — the same ranked
+        // search (synonyms, stems, typos) the hosted connector uses — and its rows are printed instead of a dead end.
+        if (!rows.length && q && /\s/.test(q.trim())) {
+          const { client, close } = await reg.openRegistry();
+          try {
+            const r = await client.callTool({ name: 'find_tools', arguments: { query: q, limit: 8, ...(wantGroup ? { group: wantGroup } : {}) } }, undefined, { timeout: cliCallTimeoutMs(process.env.HERMOSO_CALL_TIMEOUT_MS) });
+            const hits = (r.structuredContent?.tools || []).map((t) => t.name);
+            if (hits.length) {
+              if (flags.names) return console.log(hits.join('\n'));
+              if (flags.json === true) return console.log(JSON.stringify(hits.map((n) => inv.find((t) => t.name === n)).filter(Boolean), null, 2));
+              const byName = new Map(inv.map((t) => [t.name, t]));
+              console.log(`No tool contains "${q}" word for word; closest by meaning:`);
+              for (const n of hits) { const t = byName.get(n); console.log(`  ${n}${t ? `  (${t.group})  ${String(t.title || t.description || '').split(/(?<=[.!?])\s/)[0].slice(0, 110)}` : ''}`); }
+              console.log(`\nRead one with: hermoso tools <name>`);
+              return;
+            }
+          } finally { await close(); }
+        }
         if (flags.json === true) return console.log(JSON.stringify(rows, null, 2));
         if (flags.names) return console.log(rows.map((t) => t.name).join('\n'));
         if (!rows.length) return console.log(`No tool matches${wantGroup ? ` in ${wantGroup}` : ''}${q ? ` "${q}"` : ''}. Try: hermoso tools`);
