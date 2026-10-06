@@ -1256,7 +1256,7 @@ export const neutralNote = (t) => {
 // sweeps and drift watches queued for later (measured on a fresh local account: one `agentidle` "nudge", queued for
 // tomorrow, would have shown as "1 render in progress"). Mirrors server.js JOB_TYPES_HIDDEN_FROM_V1, and the check
 // fails if that list gains a type this one lacks. A job queued for LATER is not in progress either.
-export const PANEL_HIDDEN_JOB_TYPES = Object.freeze(['purge', 'agentidle', 'agentsetupmail', 'uploadretention', 'connectordrift', 'falwatch', 'faceassetsweep', 'searchvis', 'mcpcanary', 'welcomeads', 'lifecycleedu', 'connhealth']);
+export const PANEL_HIDDEN_JOB_TYPES = Object.freeze(['purge', 'agentidle', 'agentsetupmail', 'uploadretention', 'connectordrift', 'falwatch', 'faceassetsweep', 'searchvis', 'mcpcanary', 'welcomeads', 'lifecycleedu', 'connhealth', 'chargednothing', 'emailfeedback']);
 const ageText = (h) => (h == null || !Number.isFinite(+h) ? '' : +h < 1 ? 'just now' : +h < 48 ? `${Math.round(+h)}h ago` : `${Math.round(+h / 24)}d ago`);
 const VIDEO_RE = /\.(mp4|webm|mov|m4v)([?#]|$)/i;
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
