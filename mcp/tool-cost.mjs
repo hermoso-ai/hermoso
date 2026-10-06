@@ -43,6 +43,9 @@ export const CREATE_FREE_READS = Object.freeze([
   'get_job', 'list_library', 'fetch_asset', 'list_skills', 'get_skill',
   'list_product_photos', 'fetch_app_screens', 'list_hooks', 'list_templates', 'face_check',
   'list_meta_posts', 'list_published_posts', 'post_performance', 'diagnose_posts', 'backfill_posts',
+  // The product catalog (2026-10-06): a store read or write, and a product page read with curl and parsed locally (no
+  // model; POST /api/products answers creditsUsed: 0). Each says "Free" / "0 credits" in its own description.
+  'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product',
 ]);
 // Reads inside `research`. `find_competitors` says "0 credits" in its own description (it is the discovery model,
 // billed to us, not a paid ad-data call); the watch tools only write and read a stored preference — the weekly
