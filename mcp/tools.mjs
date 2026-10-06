@@ -315,7 +315,7 @@ export const MCP_INSTRUCTIONS = [
   // instead of a render, once after being told in terms to pass an image and run generate_video. A "do X first" that
   // is not actually required is a trap in an instruction an agent reads before acting, and this one was not
   // required: `model` is OPTIONAL on generate_image, generate_video and render_ad, and an unnamed render resolves to
-  // GEN_MODELS.<kind>[0] in workImage/workVideo, which is the catalog's `best: true` row (nano-banana-pro for image)
+  // GEN_MODELS.<kind>[0] in workImage/workVideo, which is the catalog's `best: true` row (nano-banana-2.1 for image since 2026-10-06)
   // and, for video, model-belt.mjs's AUTO_VIDEO_DEFAULT (seedance-2.5, also `video[0]`). The prose below says "the
   // server's own default" rather than "the best row" on purpose: hermoso_capabilities' own _pickLine states as a RULE
   // that neither `best` nor the longest-clip row decides where an unnamed ask lands, and two shipped sentences that

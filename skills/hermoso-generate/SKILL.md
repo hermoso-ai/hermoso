@@ -21,7 +21,7 @@ You drive the **Hermoso CLI** (`hermoso`) to render images and videos. Always re
 
 ## Procedure
 1. **Always run `hermoso capabilities` first.** It lists the valid image/video **model ids**, their credit costs, aspect ratios, video durations, and the recipe ids. Never guess a model id.
-2. Pick a **high-quality default** (quality over cost is the house rule): for images prefer the model marked `★best` (e.g. `nano-banana-pro`); for product composites pass the real product image with `--ref`. For video, use a featured model and a sensible duration.
+2. Pick a **high-quality default** (quality over cost is the house rule): for images prefer the model marked `★best` (e.g. `nano-banana-2.1`); for product composites pass the real product image with `--ref`. For video, use a featured model and a sensible duration.
 3. Generate:
    - Image: `hermoso generate image --prompt "<full prompt incl. any on-image text>" [--ref ./product.png] [--model <id>] [--aspect 1:1]`
    - Video: `hermoso generate video --prompt "<shot description>" [--ref ./frame.png] [--duration 8] [--aspect 9:16] [--model <id>] [--tts "<voiceover>"] [--voice Rachel] --wait`
