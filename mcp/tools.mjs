@@ -5696,7 +5696,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // never re-posts the Library; in 'review' mode each batch waits as drafts until approved.
   server.registerTool('get_post_refill', {
     title: 'Autoposting status',
-    description: 'Show autoposting (the posting refill) for this profile: whether it is on, its mode (review = each batch of fresh posts waits as drafts for approval; auto = fresh posts are scheduled straight away), WHICH CHANNELS it posts to with each one’s posts per day and posting times, roughly what it costs a day, when it next runs, how many posts are queued, and the DRAFTS waiting for approval (id, time, channels, caption, the new image or video). It also names the channels that CANNOT be posted to and why. Read-only, free.',
+    description: 'Show autoposting (the posting refill) for this profile: whether it is on, its mode (review = each batch of fresh posts waits as drafts for approval; auto = fresh posts are scheduled straight away), WHICH CHANNELS it posts to with each one’s posts per day and posting times, roughly what it costs a day, when it next runs, how many posts are queued, the DRAFTS waiting for approval (id, time, channels, caption, the new image or video), and the notes it learned from reviews. It also names the channels that CANNOT be posted to and why. Read-only, free.',
     inputSchema: {},
     outputSchema: {
       enabled: z.boolean().optional(), mode: z.string().optional(), daysAhead: z.number().optional(),
@@ -5716,8 +5716,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       (d.channelsView || []).length ? `Channels:\n${d.channelsView.map((c) => `  ${c.on ? '[on] ' : '[off]'} ${c.label} (${c.channel}): ${c.on ? `${c.postsPerDay} a day${c.times.length ? ` at ${c.times.join(', ')}` : ''}` : 'not posting'}${c.note ? ` · ${c.note}` : ''}`).join('\n')}` : (d.connectedUnreadable ? 'Channels: could not be read just now.' : 'Channels: none connected — autopilot has nowhere to post. Connect one under Workspace ▸ Connectors.'),
       `Makes ${d.postsPerDayMade || 0} new post(s) a day, every one a fresh render made for it${d.estCreditsPerDay != null && d.postsPerDayMade ? `, about ${d.estCreditsPerDay} credits a day at today's prices` : ''}.${d.zeroBudget ? ` ${d.budgetNote}` : ''} Used: ${d.spend?.today || 0} credits today, ${d.spend?.week || 0} this week.`,
       `Brief: goal ${d.brief?.goal || 'not set (required to switch it on)'}${d.brief?.goalNote ? ` (${d.brief.goalNote})` : ''} · format ${d.brief?.formats || 'mix'}${(d.brief?.pillars || []).length ? ` · pillars: ${d.brief.pillars.join('; ')}` : (d.suggestedPillars || []).length ? ` · no pillars yet; suggested from the brand: ${d.suggestedPillars.join('; ')}` : ''}${(d.brief?.avoid || []).length ? ` · avoid: ${d.brief.avoid.join('; ')}` : ''}`,
+      (d.brief?.learnings || []).length || (d.brief?.editExamples || []).length ? `Learned from reviews (every batch follows these): ${(d.brief.learnings || []).map((x) => `"${x}"`).join('; ') || 'no notes'}${(d.brief.editExamples || []).length ? ` · imitates the user's last ${d.brief.editExamples.length} caption rewrite(s)` : ''}. Edit the list with set_post_refill learnings.` : '',
       d.suggestAuto ? `${d.approvedBatches} review batches approved so far: auto-publish (mode "auto") is available if the user wants posts to go out without a review step. Ask; never switch it yourself.` : '',
-      drafts.length ? `Drafts waiting for approval (${drafts.length}):\n${draftLines.join('\n')}${drafts.length > 20 ? `\n  …and ${drafts.length - 20} more` : ''}\nApprove, edit or discard them with run_post_refill (approve / edit / discard).` : 'No drafts waiting for approval.',
+      drafts.length ? `Drafts waiting for approval (${drafts.length}):\n${draftLines.join('\n')}${drafts.length > 20 ? `\n  …and ${drafts.length - 20} more` : ''}\nApprove, edit (caption or time) or discard them with run_post_refill (approve / edit / discard); give feedback with learn (free, teaches future batches) or redo one with a note (redo, quoted first, paid).` : 'No drafts waiting for approval.',
       `Cannot post to: ${Object.entries(d.excluded || {}).map(([c, why]) => `${c} — ${why}`).join('\n  ') || 'nothing'}`,
     ].filter(Boolean).join('\n'), d);
   }));
@@ -5735,6 +5736,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pillars: z.array(z.string()).optional().describe('THE BRIEF: content pillars / topics, up to 8 short lines. Every post belongs to one. get_post_refill suggests some from the brand profile.'),
       formats: z.enum(['mix', 'video', 'carousel', 'image']).optional().describe('THE BRIEF: what to make — mix (images with a short video now and then, the default), video (short videos only), carousel (3 new images per post), image.'),
       avoid: z.array(z.string()).optional().describe('THE BRIEF: never mention or show these — topics, claims, competitors, faces.'),
+      learnings: z.array(z.string()).optional().describe('notes learned from reviews; REPLACES the list'),
+      forgetCaptionEdits: z.boolean().optional(),
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).optional().describe('restrict it to these channels. Omit (or send an empty list) to use every connected channel that can carry each post.'),
       boardId: z.string().optional().describe('PINTEREST — which board Pins go on (list_pinterest_boards). Without one, Pinterest is skipped: a Pin on the wrong board is a public mistake, so it is never guessed.'),
       chatId: z.string().optional().describe('TELEGRAM — which chat, group or channel posts go to (@username or numeric id). Without one, telegram is skipped: there is no default chat and posting to the wrong one is a public mistake.'),
@@ -5744,8 +5747,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { enabled: z.boolean().optional(), mode: z.string().optional(), running: z.boolean().optional(), daysAhead: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const { goal, goalNote, pillars, formats, avoid, ...rest } = a;
-    const brief = Object.fromEntries(Object.entries({ goal, goalNote, pillars, formats, avoid }).filter(([, v]) => v !== undefined));
+    const { goal, goalNote, pillars, formats, avoid, learnings, forgetCaptionEdits, ...rest } = a;
+    const brief = Object.fromEntries(Object.entries({ goal, goalNote, pillars, formats, avoid, learnings, ...(forgetCaptionEdits ? { editExamples: [] } : {}) }).filter(([, v]) => v !== undefined));
     const d = await apiPut('/api/schedule/refill', { ...rest, ...(Object.keys(brief).length ? { brief } : {}) });
     return ok(d.enabled
       ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} get_post_refill lists the channels it posts to and what it costs a day. Run run_post_refill (a preview by default: it renders and queues nothing, and writing its copy costs a few credits) to see a plan.`
@@ -5753,13 +5756,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('run_post_refill', {
     title: 'Run autoposting / review its drafts',
-    description: 'Run autoposting NOW instead of waiting for its daily turn, or act on the drafts it made. PREVIEW BY DEFAULT: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. The preview still WRITES the scenes and copy with a model, which bills a few credits (the reply says how many). dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first; get_post_refill lists them. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
+    description: 'Run autoposting NOW instead of waiting for its daily turn, or act on the drafts it made. PREVIEW BY DEFAULT: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. The preview still WRITES the scenes and copy with a model, which bills a few credits (the reply says how many). dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first (a new `at` reschedules it); get_post_refill lists them. learn saves notes future batches follow (free). redo remakes ONE draft from a note: PAID, so without confirm:true it returns only the price; confirm only on the user’s yes. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
     inputSchema: {
       dryRun: z.boolean().optional().describe('default TRUE (a preview: nothing rendered, nothing queued; the copy it writes bills a few credits). false renders fresh creative and schedules or drafts it per the mode.'),
       force: z.boolean().optional().describe('plan a preview even while autoposting is switched off — useful for showing someone what it would do before they turn it on.'),
       approve: z.array(z.string()).optional().describe('REVIEW: draft ids to schedule, or ["all"]. A draft whose time has passed moves to the next free posting slot.'),
       discard: z.array(z.string()).optional().describe('REVIEW: draft ids to delete, or ["all"]. Nothing is posted for them.'),
       edit: z.array(z.object({ id: z.string(), message: z.string().optional(), captions: z.record(z.string()).optional(), title: z.string().optional(), at: z.string().optional().describe('ISO time, at least 5 minutes ahead'), channels: z.array(z.string()).optional().describe('narrow to some of the draft’s own channels') })).optional().describe('REVIEW: change drafts before approving them. Edited copy is screened by the voice rules.'),
+      learn: z.array(z.string()).optional().describe('notes for future batches, e.g. "too salesy". Free.'),
+      redo: z.object({ id: z.string(), feedback: z.string().optional(), change: z.enum(['both', 'caption', 'picture']).optional().describe('caption keeps the picture'), remember: z.boolean().optional().describe('save the note too (default true)'), confirm: z.boolean().optional().describe('omit for the price only') }).optional(),
     },
     outputSchema: {
       enabled: z.boolean().optional(), mode: z.string().optional(), dryRun: z.boolean().optional(), summary: z.string().optional(),
@@ -5768,9 +5773,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const reviewing = (a.approve && a.approve.length) || (a.discard && a.discard.length) || (a.edit && a.edit.length);
+    if (a.redo && a.redo.id) {
+      const r = a.redo;
+      const d = await apiPost('/api/schedule/refill/redo', { id: r.id, feedback: r.feedback || '', part: r.change || 'both', remember: r.remember !== false, confirm: r.confirm === true });
+      if (d.needsConfirm) return ok(`${d.summary}\nAsk the user before spending; call run_post_refill again with redo.confirm:true only on a yes.`, d);
+      return ok([d.summary || '', d.draft ? `The new version (${d.draft.id}, ${d.draft.kind}, ${d.draft.at}):\n  ${String(d.draft.message || '').replace(/\n+/g, ' / ').slice(0, 300)}\n  ${d.draft.media || ''}\nIt is still a draft: approve it with run_post_refill approve.` : ''].filter(Boolean).join('\n'), d);
+    }
+    const reviewing = (a.approve && a.approve.length) || (a.discard && a.discard.length) || (a.edit && a.edit.length) || (a.learn && a.learn.length);
     if (reviewing) {
-      const d = await apiPost('/api/schedule/refill/drafts', { approve: a.approve || [], discard: a.discard || [], edit: a.edit || [] });
+      const d = await apiPost('/api/schedule/refill/drafts', { approve: a.approve || [], discard: a.discard || [], edit: a.edit || [], learn: a.learn || [] });
       const okQ = (d.queued || []).filter(q => q && q.id), badQ = (d.queued || []).filter(q => q && q.error);
       return ok([
         okQ.length ? `Scheduled ${okQ.length} draft(s): ${okQ.map(q => `${q.draftId} → ${q.id} at ${q.at}${q.moved ? ' (moved to the next free slot)' : ''}`).join(' · ')}. Pull any of them before it goes out with cancel_scheduled.` : '',
@@ -5779,6 +5790,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         d.edited ? `Edited ${d.edited} draft(s).` : '',
         (d.editErrors || []).length ? `Edits refused: ${d.editErrors.map(x => `${x.draftId} — ${x.error}`).join(' · ')}` : '',
         (d.unknown || []).length ? `No such draft: ${d.unknown.join(', ')}` : '',
+        (d.learned || []).length ? `Saved for future batches: ${d.learned.map((x) => `"${x}"`).join(', ')}.` : '',
         `${d.remaining} draft(s) still waiting for approval.`,
       ].filter(Boolean).join('\n'), d);
     }
