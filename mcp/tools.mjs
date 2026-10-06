@@ -27,7 +27,7 @@ import { withHints, videoChoiceText, videoChoiceHints, neutralCreditsText, credi
 // ./openai-extensions.mjs. Same twin-safe specifier rule.
 import { registerLibraryApp, installEntrypointIcons, chatgptExtOn, EXT_PREFS_KEY } from './openai-extensions.mjs';
 // STATIC ADS AT SCALE (2026-10-06): the pure catalog/plan/prompt helpers behind make_static_ads. Same twin-safe specifier rule.
-import { STATIC_BATCH, resolveProducts, heroImageOf, normalizeRatios, clampCount, plannerBrief, staticAdPrompt, renderList, splitForQueue, planFromItems, perAdCredits } from './static-batch.mjs';
+import { STATIC_BATCH, normalizeRatios, renderList } from './static-batch.mjs';
 
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
 // /generated/x.mp4 → a URL THE CALLER can open. `API_BASE` is the base this layer CALLS the app on, and on the hosted
@@ -329,7 +329,7 @@ export const MCP_INSTRUCTIONS = [
   '• CREATE (finished ads): render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar render on their own; plan_ad authors a board first when the ad wants one and render_ad takes it; get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) manage the saved brand, which the create tools hydrate by themselves; list_creators / save_creator / delete_creator (the reusable saved CAST — re-cast the same face instead of generating a new person every time; render_ad’s `creator` stars one of them in the ad); make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); clone_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / hook_variants / stitch_video; plan_variations + score_ad.',
   '• RAW MODEL PLAYGROUND: generate_image / generate_video (useBrand:false) for prompt-only renders, generate_voice for text-to-speech, generate_text for the writing models — against any of 30+ image / video / voice / writing model ids (exact costs in hermoso_capabilities), no ad framing.',
   '• ACCOUNT & WORKSPACES: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job; list_brands / create_brand / use_brand / delete_brand (one account holds MANY profiles: brands, clients or creators, so an agency runs every client through here, each with its own brand details, memory, Library and connectors; create_brand → draft_brand onboards a new one, delete_brand is confirm-gated); get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it — plus app appearance and the weekly competitor-watch email); list_team / invite_member / remove_member / set_role.',
-  '• PUBLISH & MANAGE YOUR CHANNELS (the user’s connected accounts, over this MCP): Meta — post_to_meta (FB/IG/Threads), upload_file (post ANY external/local file), list_meta_ads + meta_insights (read campaigns/ad sets/ads + performance, broken down by age/gender/placement/country), preview_meta_ad (see the real ad per placement, 24h links), estimate_meta_reach (audience size before you spend), list_meta_audiences / create_meta_audience (retargeting + lookalikes), create_meta_campaign / create_meta_ad / upload_meta_asset (build), update_meta_object / delete_meta_object / set_meta_campaign_status (edit/delete/activate — spend + deletes confirm-gated), manage_meta_post (edit/delete a post); Instagram DM automations — save_instagram_dm_automation / test_instagram_dm_automation / list_instagram_dm_automations / delete_instagram_dm_automation (a keyword comment, DM, story reply or ig.me link gets an automatic private reply); DM automations on Instagram, Facebook (Page comments, ads, Messenger) and X — save_dm_automation / test_dm_automation / list_dm_automations / delete_dm_automation (X is billed in credits per event and send); X — x_chat_settings / update_x_chat_settings (who may DM the brand on X); Microsoft Advertising (Bing Ads) — list_microsoft_ads_campaigns, microsoft_ads_report, microsoft_ads_geo_search, create_microsoft_ads_campaign / create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords (all created Paused), set_microsoft_ads_budget / set_microsoft_ads_status (spend confirm-gated); ChatGPT Ads (OpenAI Advertiser API) — list_openai_ads_campaigns, openai_ads_report, openai_ads_geo_search, create_openai_ads_campaign / create_openai_ads_ad_group / create_openai_ads_ad (all created PAUSED), update_openai_ads_object, set_openai_ads_budget / set_openai_ads_status (spend + archive confirm-gated). Connected by pasting an API key; ONE creative format, a text plus image card — no video; Pinterest — list_pinterest_boards then post_to_pinterest (the user picks the board); Google Business Profile — list_business_locations, post_to_google_business, list_google_business_posts, delete_google_business_post, google_business_insights, get_business_location / update_business_location (read and CHANGE what the listing says — hours, phone, website, description, categories, name, address; the edit is live on Search and Maps, so the unconfirmed call writes nothing and shows the before-and-after), google_business_account (whose account it is on and whether that role can edit it); Google Drive (ONE connection covering Drive, Sheets and Docs) — save_to_drive, list_drive_files, get_drive_file, update_drive_file, delete_drive_file, create_drive_folder, plus create_sheet / append_to_sheet / read_sheet and create_doc / append_to_doc / read_doc (Hermoso-created files, plus any file the user hands over with the Google file picker in the app); Microsoft OneDrive — save_to_onedrive, list_onedrive_files, get_onedrive_file, update_onedrive_file, delete_onedrive_file, create_onedrive_folder (full CRUD over the user’s OneDrive); MANAGING THE CONNECTIONS — list_connectors, list_connector_accounts + set_connector_accounts (which Pages / ad accounts / company Pages this profile may post to and spend from — fails closed, an empty choice shares nothing), leave_connector (remove just YOUR OWN account from a connector several teammates have each joined — theirs keep working) · disconnect_connector (confirm-gated: reconnecting needs a browser). Full read+write control over the user’s own channels, not just generation. LINKING a NEW account is the one step that is not headless (an OAuth consent screen) — send the user to Workspace ▸ Connectors in the app.',
+  '• PUBLISH & MANAGE YOUR CHANNELS (the user’s connected accounts, over this MCP): Meta — post_to_meta (FB/IG/Threads), upload_file (post ANY external/local file), list_meta_ads + meta_insights (read campaigns/ad sets/ads + performance, broken down by age/gender/placement/country), preview_meta_ad (see the real ad per placement, 24h links), estimate_meta_reach (audience size before you spend), list_meta_audiences / create_meta_audience (retargeting + lookalikes), create_meta_campaign / create_meta_ad / upload_meta_asset (build), update_meta_object / delete_meta_object / set_meta_campaign_status (edit/delete/activate — spend + deletes confirm-gated), manage_meta_post (edit/delete a post); DM automations (a keyword comment, DM, story reply or ig.me link gets an automatic private reply) — save_dm_automation / test_dm_automation / list_dm_automations / delete_dm_automation on Instagram, Facebook (Page comments, ads, Messenger) and X (X billed in credits per event and send), and the Instagram-only save_instagram_dm_automation / test_instagram_dm_automation / list_instagram_dm_automations / delete_instagram_dm_automation; X — x_chat_settings / update_x_chat_settings (who may DM the brand on X); Microsoft Advertising (Bing Ads) — list_microsoft_ads_campaigns, microsoft_ads_report, microsoft_ads_geo_search, create_microsoft_ads_campaign / create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords (all created Paused), set_microsoft_ads_budget / set_microsoft_ads_status (spend confirm-gated); ChatGPT Ads (OpenAI Advertiser API) — list_openai_ads_campaigns, openai_ads_report, openai_ads_geo_search, create_openai_ads_campaign / create_openai_ads_ad_group / create_openai_ads_ad (all created PAUSED), update_openai_ads_object, set_openai_ads_budget / set_openai_ads_status (spend + archive confirm-gated). Connected by API key; ONE creative format (a text + image card, no video); Pinterest — list_pinterest_boards then post_to_pinterest (the user picks the board); Google Business Profile — list_business_locations, post_to_google_business, list_google_business_posts, delete_google_business_post, google_business_insights, get_business_location / update_business_location (read and CHANGE what the listing says — hours, phone, website, description, categories, name, address; the edit is live on Search and Maps, so the unconfirmed call writes nothing and shows the before-and-after), google_business_account (whose account it is on and whether that role can edit it); Google Drive (ONE connection covering Drive, Sheets and Docs) — save_to_drive, list_drive_files, get_drive_file, update_drive_file, delete_drive_file, create_drive_folder, plus create_sheet / append_to_sheet / read_sheet and create_doc / append_to_doc / read_doc (Hermoso-created files, plus any file the user hands over with the Google file picker in the app); Microsoft OneDrive — save_to_onedrive, list_onedrive_files, get_onedrive_file, update_onedrive_file, delete_onedrive_file, create_onedrive_folder; MANAGING THE CONNECTIONS — list_connectors, list_connector_accounts + set_connector_accounts (which Pages / ad accounts / company Pages this profile may post to and spend from — fails closed, an empty choice shares nothing), leave_connector (remove just YOUR OWN account from a connector several teammates have each joined — theirs keep working) · disconnect_connector (confirm-gated: reconnecting needs a browser). LINKING a NEW account is the one step that is not headless (an OAuth consent screen) — send the user to Workspace ▸ Connectors in the app.',
   'YOUR ROSTER IS CORE-FIRST, AND NOTHING IS MISSING OR UNFINISHED. What you are LISTED is the core tools plus whatever this connection asked for or you have switched on; the rest of the product \u2014 hundreds of tools across research, creation, publishing, paid campaigns, analytics and channel administration \u2014 is held out of the LIST on SIZE ALONE. IT IS ALL CALLABLE RIGHT NOW. find_tools({query}) searches EVERY tool, listed or not, and each row carries its parameters, its credit cost and its recent health; call_tool({name, args}) then runs it through the same handler, the same account and the same permissions; a direct tools/call to a name you already know works too. This route needs no reload and works on every host, including claude.ai and ChatGPT, which fix their tool list when the connection is made. enable_tools({groups:[\u2026]}) additionally LISTS a group for hosts that re-list \u2014 free and instant: the MOMENT the user asks to build, budget, target, report on or change a campaign, enable_tools({groups:[\'ads\']}); for sessions, conversions, revenue by channel or how their site ranks, enable_tools({groups:[\'analytics\']}); to read, moderate, reply to, measure or delete something ALREADY on a channel, enable_tools({groups:[\'channel_admin\']}). IF THE TOOLS DO NOT APPEAR after that call \u2014 some clients cache their tool list for the whole conversation \u2014 do NOT tell the user the capability does not exist and do not keep retrying: just use call_tool, which does not depend on the roster changing at all. Reconnecting with `?tools=all` on the server URL lists everything at connect time. NEVER tell a user Hermoso cannot manage their campaigns or read their analytics, cannot read a comment, answer a DM or pull a channel\u2019s numbers, because you cannot see the tool \u2014 look it up with find_tools and run it with call_tool. The full set of group names is: core, research, create, channels, channel_admin, analytics, files, workspace, ads \u2014 or \'all\'.',
   // HINTS (2026-09-17). The advice was always in the prose; this says the keyed copy exists so a client that
   // prefers structure does not have to parse a sentence to find it.
@@ -2269,7 +2269,7 @@ export const widgetHostHides = (name, widgetHost) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads']); // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine)
+export const ON_DEMAND_TOOLS = new Set(['edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product']); // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine)
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -21260,30 +21260,33 @@ function memoryNoteVerdict(text) {
     return ok(text, d);
   }));
 
-  // STATIC ADS AT SCALE (2026-10-06). The ads-studio shape in one call: products × count → finished statics,
-  // each a different selling angle with its headline and CTA on the image. Planning runs on the same batch planner the
-  // web Studio's make_variations fans out from (/api/batch/plan); every render is the ordinary QUEUED image job
-  // (/api/generate/image queue:true), so brand photos, the product check and the label pass behave exactly as in
-  // generate_image and nothing is held inside this request. Pure half: ./static-batch.mjs.
+  // STATIC ADS AT SCALE (2026-10-06). The ads-studio shape in one call: products × count → finished statics, each a
+  // different selling angle AND a different layout (the server assigns every ad in a batch a distinct layout archetype,
+  // type treatment and CTA style before planning — lib/static-variety.mjs), headline and CTA on the image. ONE
+  // implementation: POST /api/static-ads, the same route the web Ads Studio page calls, so the catalog match, the
+  // fresh-price rule, the layouts and the queue behave identically on every surface. Pure half: ./static-batch.mjs.
   server.registerTool('make_static_ads', {
     title: 'Make static ads at scale',
-    description: "Make a BATCH of finished static image ads for one or several products in one call: each ad a genuinely different selling angle (offer, material or ingredient story, how it is used, a lifestyle moment, an objection, proof the brand really has) with its headline, supporting line and CTA printed on the image, the brand's real product photo and logo composited in. `products` names products from the saved brand's catalog (get_brand lists them; ['all'] takes every product with a photo; omit for the hero product; a name not in the catalog is still advertised, drawn from its words). `count` is ads PER PRODUCT (1-20). `aspectRatios` any of 1:1, 4:5, 9:16 (each ad is rendered natively once per ratio). `brief` steers (a sale, a season, an audience) and is never turned into a price, discount or claim the brand does not state; `angles` names the angles to spread across. ALWAYS PRICED FIRST: dryRun:true returns the plan and the quote for the planning call only; then pass that `plan` back (no dryRun) to render exactly it without planning again. Renders are QUEUED jobs, at most " + STATIC_BATCH.QUEUE_PER_CALL + " per call: anything past that comes back as `remaining`, to send again as `plan` once some finish. Read each job with get_job; never describe an ad before its URL arrives. For variants of ONE finished ad use headline_variants / resize_ad; to copy a competitor's static use clone_static.",
+    description: "Make a BATCH of finished static image ads for one or several products in one call: each ad a genuinely different selling angle (offer, material or ingredient story, how it is used, a lifestyle moment, an objection, proof the brand really has) AND a different layout (editorial still life, poster headline, packshot on colour, in hand, flat lay, split compare, native phone photo and more; never one look repeated across a batch), with its headline, supporting line and CTA printed on the image and the product's real photo and the brand's real logo composited in. `products` names products from the brand's product catalog by id or name (list_products; add one from its page link with add_product; ['all'] takes every product with a photo; omit for the hero product). A product's price is printed only when it was read from its live page within the last hour: older rows are re-read first, and a page that cannot be read means no price on that ad. `count` is ads PER PRODUCT (1-20). `aspectRatios` any of 1:1, 4:5, 9:16 (each ad is composed natively once per ratio, so the ratios are different pictures with the same words; for one picture in several sizes render one ratio and use resize_ad). `brief` steers (a sale, a season, an audience) and is never turned into a price, discount or claim the brand does not state; `angles` names the angles to spread across; `layouts` (free words) replaces the layout set. ALWAYS PRICED FIRST: dryRun:true returns the plan and the quote; then pass that `plan` (and its `batchId`) back to render exactly it without planning again. Renders are QUEUED jobs, at most " + STATIC_BATCH.QUEUE_PER_CALL + " per call: the rest comes back as `remaining`, to send again as `plan` once some finish. Read each job with get_job; never describe an ad before its URL arrives. For variants of ONE finished ad use headline_variants / resize_ad; to copy a competitor's static use clone_static.",
     inputSchema: {
-      products: z.array(z.string()).optional().describe("product names from the saved brand's catalog (get_brand), ['all'] for every product with a photo, or omit for the hero product"),
+      products: z.array(z.string()).optional().describe("product ids or names from list_products, ['all'] for every product with a photo, or omit for the hero product"),
       count: z.number().int().min(1).max(STATIC_BATCH.COUNT_MAX).optional().describe(`ads per product, 1-${STATIC_BATCH.COUNT_MAX} (default ${STATIC_BATCH.COUNT_DEFAULT})`),
       aspectRatios: z.array(z.enum(['1:1', '4:5', '9:16'])).optional().describe("canvases; every ad is rendered once per ratio (default ['4:5'])"),
       brief: z.string().optional().describe('what to lean into: a sale the brand is really running, a season, an audience, a tone'),
       angles: z.array(z.string()).optional().describe("the selling angles to spread across, e.g. ['price or offer', 'material story', 'how it is used', 'lifestyle moment']; omit and the planner picks a spread"),
+      layouts: z.array(z.string()).optional().describe('your own layout descriptions in words, used slot by slot instead of the built-in layout set'),
       language: z.string().optional().describe('language of the on-image copy (default English)'),
       model: z.string().optional().describe('image model id from hermoso_capabilities; omit for the default'),
       brandId: z.string().optional().describe('a profile id/name from list_brands; omit for the active profile (passing it pins it like use_brand)'),
       plan: z.array(z.any()).optional().describe('the `plan` (or `remaining`) a previous call returned: render exactly those ads, no new planning'),
+      batchId: z.string().optional().describe('the batchId a previous call returned, so the rest lands in the same batch'),
       dryRun: z.boolean().optional().describe('true = plan and quote only, nothing rendered'),
       logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay (default): the real logo file laid flat on each ad. in_scene: printed on something in the ad, then checked. none. auto: from each visual'),
     },
     outputSchema: {
-      plan: z.array(z.any()).optional().describe('[{product, image, variants:[{angle, headline, supporting, cta, prompt}]}]'),
-      jobs: z.array(z.any()).optional().describe('one queued image job per ad × ratio: {id, product, angle, headline, aspectRatio}'),
+      batchId: z.string().optional(),
+      plan: z.array(z.any()).optional().describe('[{productId, product, image, price, variants:[{angle, headline, supporting, cta, prompt, layout}]}]'),
+      jobs: z.array(z.any()).optional().describe('one queued image job per ad × ratio: {id, product, angle, headline, layout, aspectRatio}'),
       remaining: z.array(z.any()).optional().describe('the part of the plan not queued this call — pass it back as `plan`'),
       perAdCredits: z.number().nullable().optional(),
       totalCredits: z.number().nullable().optional(),
@@ -21291,69 +21294,92 @@ function memoryNoteVerdict(text) {
       notes: z.array(z.string()).optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ products, count, aspectRatios, brief, angles, language, model, brandId, plan, dryRun, logoPlacement }) => {
-    const brand = await activeBrand(brandId);
-    const ratios = normalizeRatios(aspectRatios);
-    const notes = [];
-    let thePlan = Array.isArray(plan) && plan.length ? plan.filter((p) => p && Array.isArray(p.variants) && p.variants.length) : null;
-    if (!thePlan) {
-      const targets = resolveProducts(brand, products);
-      if (!targets.length) throw Object.assign(new Error('Name the product to advertise in `products` (or save a brand first with draft_brand). Nothing was charged.'), { _userInput: true });
-      const n = clampCount(count);
-      thePlan = [];
-      for (const t of targets) {
-        if (!t.matched && !t.hero) notes.push(`"${t.name}" is not in the brand's catalog, so its ads are drawn from its name with no product photo of its own.`);
-        const d = await apiPost('/api/batch/plan', { product: plannerBrief(t.name, { brief, angles }), count: n, language: language || '' });
-        const vs = (d?.variants || []).slice(0, n).map((v) => ({ angle: v.angle || '', headline: v.headline || '', supporting: v.supporting || '', cta: v.cta || '', prompt: v.prompt || '' }));
-        thePlan.push({ product: t.name, image: t.image || '', hero: !!t.hero, variants: vs });
-      }
+  }, wrap(async ({ products, count, aspectRatios, brief, angles, layouts, language, model, brandId, plan, batchId, dryRun, logoPlacement }) => {
+    if (brandId) await activeBrand(brandId);
+    const d = await apiPost('/api/static-ads', { products, count, aspectRatios, brief, angles, layouts, language, model, plan, batchId, dryRun: !!dryRun, ...(logoPlacement ? { logoPlacement } : {}) });
+    const thePlan = Array.isArray(d?.plan) ? d.plan : [];
+    const ratios = Array.isArray(d?.aspectRatios) ? d.aspectRatios : normalizeRatios(aspectRatios);
+    const per = d?.perAdCredits ?? null, total = d?.totalCredits ?? null;
+    const adsN = d?.ads ?? renderList(thePlan, ratios).length;
+    const quote = per == null ? 'the per-ad price could not be read just now (each render reserves its own price when queued)' : `about ${per} credits per ad, plus about 3 where the product label is checked · about ${total}-${d?.totalCreditsHigh ?? total} for ${adsN}`;
+    const notes = Array.isArray(d?.notes) ? d.notes : [];
+    const lines = thePlan.flatMap((p) => (p.variants || []).map((v, i) => `${p.product}${p.price ? ` (${p.price})` : ''} #${i + 1} ${v.layout?.label ? `{${v.layout.label}} ` : ''}[${v.angle}] "${v.headline}" · ${v.cta}`));
+    if (d?.dryRun) {
+      return { content: [{ type: 'text', text: `PLAN (nothing rendered): ${adsN} ad${adsN === 1 ? '' : 's'} (${ratios.join(', ')}), batch ${d.batchId}.\n${lines.join('\n')}\nQuote: ${quote}.${notes.length ? '\n' + notes.join('\n') : ''}\nTo render exactly these, call make_static_ads again with plan set to this plan, batchId ${d.batchId} and the same aspectRatios.` }], structuredContent: { batchId: d.batchId, plan: thePlan, perAdCredits: per, totalCredits: total, dryRun: true, ...(notes.length ? { notes } : {}) } };
     }
-    const list = renderList(thePlan, ratios);
-    let status = null; try { status = await apiGet('/api/generate/status'); } catch {}
-    const per = perAdCredits(status, model);
-    const total = per == null ? null : per * list.length;
-    const quote = per == null ? 'the per-ad price could not be read just now (each render reserves its own price when queued)' : `about ${per} credits per ad, plus about 3 where the product label is checked · about ${total}-${total + 3 * list.length} for ${list.length}`;
-    const lines = thePlan.flatMap((p) => p.variants.map((v, i) => `${p.product} #${i + 1} [${v.angle}] "${v.headline}" · ${v.cta}`));
-    if (dryRun) {
-      return { content: [{ type: 'text', text: `PLAN (nothing rendered): ${list.length} ad${list.length === 1 ? '' : 's'} (${ratios.join(', ')}).\n${lines.join('\n')}\nQuote: ${quote}.${notes.length ? '\n' + notes.join('\n') : ''}\nTo render exactly these, call make_static_ads again with plan set to this plan and the same aspectRatios.` }], structuredContent: { plan: thePlan, perAdCredits: per, totalCredits: total, dryRun: true, ...(notes.length ? { notes } : {}) } };
-    }
-    if (total != null) {
-      let bal = null; try { bal = (await apiGet('/api/credits'))?.balance; } catch {}
-      if (bal != null && Number.isFinite(+bal) && +bal < total) throw Object.assign(new Error(`This batch needs about ${total} credits (${list.length} ads at about ${per}) and the balance is ${bal}. Nothing was charged. Ask for fewer ads, or top up (buy_credits).`), { status: 402, _userInput: true });
-    }
-    const { now, later } = splitForQueue(list);
-    const heroImg = heroImageOf(brand);
-    const logo = typeof brand?.logo === 'string' && /^https?:\/\//i.test(brand.logo) && !/\.svg(\?|#|$)/i.test(brand.logo) ? brand.logo : '';
-    // THE LOGO, PER AD (2026-10-06): overlay by default (a flat lockup of the real file); in_scene puts it on something in
-    // the ad from the real file and checks it; none leaves it off; auto reads each ad's visual. Never handed over as a
-    // plain reference for the model to re-draw.
-    const lmode = !logo || logoPlacement === 'none' ? 'none' : 'overlay';
-    const lbody = lmode === 'none' ? (logo ? { logoPlacement: 'none' } : {}) : { brandLogo: true, logoPlacement: logoPlacement || 'overlay' };
-    const jobs = [];
-    let stoppedAt = null;
-    for (let i = 0; i < now.length; i++) {
-      const it = now[i];
-      const isHero = it.image ? it.image === heroImg : true;
-      let body;
-      if (isHero && (it.image || brand)) {
-        body = { prompt: staticAdPrompt(it.variant, { logo: lmode }), useBrand: true, ...lbody }; // the server attaches the hero photo and puts the real logo in the way lmode says
-      } else if (it.image) {
-        body = { prompt: staticAdPrompt(it.variant, { logo: lmode, productPhoto: true }), refImages: [it.image], useBrand: true, ...lbody };
-      } else {
-        body = logo ? { prompt: staticAdPrompt(it.variant, { logo: lmode }), useBrand: true, ...lbody } : { prompt: staticAdPrompt(it.variant, { logo: 'none' }), useBrand: false };
-      }
-      try {
-        const q = await apiPost('/api/generate/image', { ...body, aspectRatio: it.aspectRatio, ...(model ? { model } : {}), queue: true });
-        jobs.push({ id: q.jobId, product: it.product, angle: it.variant.angle, headline: it.variant.headline, aspectRatio: it.aspectRatio });
-      } catch (e) {
-        if (e && (e.status === 429 || e.status === 402) && jobs.length) { stoppedAt = i; notes.push(e.status === 429 ? 'The render queue is full, so the rest was not queued.' : String(e.message || '')); break; }
-        throw e;
-      }
-    }
-    const left = [...(stoppedAt == null ? [] : now.slice(stoppedAt)), ...later];
-    const remaining = left.length ? planFromItems(left) : [];
-    const text = `Queued ${jobs.length} static ad${jobs.length === 1 ? '' : 's'} (${quote}).\n${jobs.map((j, i) => `${i + 1}. ${j.product} [${j.angle}] "${j.headline}" ${j.aspectRatio} → job ${j.id}`).join('\n')}${remaining.length ? `\n${left.length} more not queued yet: call make_static_ads again with plan set to \`remaining\` and the same aspectRatios once some of these finish.` : ''}${notes.length ? '\n' + notes.join('\n') : ''}\nRead each with get_job until it reports done; there is no image until then.`;
-    return { content: [{ type: 'text', text }], structuredContent: { plan: thePlan, jobs, ...(remaining.length ? { remaining } : {}), perAdCredits: per, totalCredits: total, ...(notes.length ? { notes } : {}) } };
+    const jobs = Array.isArray(d?.jobs) ? d.jobs : [];
+    const remaining = Array.isArray(d?.remaining) ? d.remaining : [];
+    const text = `Queued ${jobs.length} static ad${jobs.length === 1 ? '' : 's'} in batch ${d?.batchId} (${quote}).\n${jobs.map((j, i) => `${i + 1}. ${j.product} {${j.layout || 'Static'}} [${j.angle}] "${j.headline}" ${j.aspectRatio} → job ${j.id}`).join('\n')}${remaining.length ? `\n${d.remainingAds || 'Some'} more not queued yet: call make_static_ads again with plan set to \`remaining\`, batchId ${d.batchId} and the same aspectRatios once some of these finish (the web Ads Studio page also queues them while it is open).` : ''}${notes.length ? '\n' + notes.join('\n') : ''}\nRead each with get_job until it reports done; there is no image until then.`;
+    return { content: [{ type: 'text', text }], structuredContent: { batchId: d?.batchId, plan: thePlan, jobs, ...(remaining.length ? { remaining } : {}), perAdCredits: per, totalCredits: total, ...(notes.length ? { notes } : {}) } };
+  }));
+
+  // THE PRODUCT CATALOG (2026-10-06): a cache of each product's live page — title, link, price, currency, description,
+  // photos and its own selling points, with when it was last read there. Free (plain page reads, no model). The page
+  // always wins: a re-read overwrites what we held (except what the user typed), and a failed read is said, never
+  // treated as fresh. Same routes as the web Ads Studio page's product grid.
+  const productLine = (p) => `${p.id} · ${p.title}${p.priceLabel ? ` · ${p.priceLabel}${p.priceCurrent ? '' : ' (not current)'}` : ''} · ${p.images?.length || 0} photo${p.images?.length === 1 ? '' : 's'} · ${p.checked}${p.lastError ? ` · last read FAILED: ${p.lastError}` : ''}${p.url ? ` · ${p.url}` : ''}`;
+  const productsText = (d, head) => `${head}\n${(d?.products || []).map(productLine).join('\n') || 'No products yet: add one from its page link with add_product, or refresh_products with sync:true to import the store catalog.'}`;
+  server.registerTool('list_products', {
+    title: 'List the product catalog',
+    description: "The brand's product catalog: each product's id, title, page link, price (and whether it is current), photos, its own selling points and audience, and when it was last checked against its live page. Free. `refresh:'stale'` re-reads rows older than a day first, `refresh:'all'` re-reads every page. Use the ids with make_static_ads.",
+    inputSchema: { refresh: z.enum(['stale', 'all']).optional().describe("re-read product pages before listing: 'stale' (older than a day) or 'all'"), brandId: z.string().optional().describe('a profile id/name from list_brands; omit for the active profile') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ refresh, brandId }) => {
+    if (brandId) await activeBrand(brandId);
+    const d = await apiGet(`/api/products${refresh ? `?refresh=${refresh}` : ''}`);
+    return ok(productsText(d, `${d?.count || 0} product${d?.count === 1 ? '' : 's'}. A price prints on an ad only when it was read from the live page within ${d?.freshForPricesMinutes || 60} minutes.${(d?.failed || []).length ? ` ${d.failed.length} page${d.failed.length === 1 ? '' : 's'} could not be re-read.` : ''}`), d);
+  }));
+  server.registerTool('add_product', {
+    title: 'Add a product from a link',
+    description: "Add a product to the brand's catalog from its product-page link: reads the page's own data (name, every photo, price and currency, description, its bullet-point selling points), no model, 0 credits. Re-adding a link updates the row (the live page wins). Without a url, `title` adds one by hand. `audience` and `sellingPoints` you pass are kept through later re-reads.",
+    inputSchema: {
+      url: z.string().optional().describe('the product page link'),
+      title: z.string().optional().describe('to add a product by hand (no link)'),
+      images: z.array(z.string()).optional().describe('photo urls for a hand-added product'),
+      price: z.string().optional().describe('hand-added only; never printed as current unless read from a page'),
+      currency: z.string().optional(),
+      description: z.string().optional(),
+      sellingPoints: z.array(z.string()).optional(),
+      audience: z.string().optional().describe('who this product is for'),
+      brandId: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ brandId, ...a }) => {
+    if (brandId) await activeBrand(brandId);
+    const d = await apiPost('/api/products', a);
+    const p = d?.product;
+    return ok(p ? `Added: ${productLine(p)}${p.sellingPoints?.length ? `\nSelling points: ${p.sellingPoints.join('; ')}` : ''}${d.changed?.length ? `\nChanged since last read: ${d.changed.join(', ')}` : ''}` : 'Nothing added.', d);
+  }));
+  server.registerTool('refresh_products', {
+    title: 'Re-check products against their pages',
+    description: "Re-read product pages now (all products with a page, or `ids`) and update the catalog: the live page wins, a failed read is recorded and said. `sync:true` instead imports the whole store catalog (the brand's connected Shopify store, else its website's public catalog), merging into existing rows. Free.",
+    inputSchema: { ids: z.array(z.string()).optional(), sync: z.boolean().optional().describe('import the store catalog instead of re-reading pages'), brandId: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ ids, sync, brandId }) => {
+    if (brandId) await activeBrand(brandId);
+    const d = sync ? await apiPost('/api/products/sync', {}) : await apiPost('/api/products/refresh', ids && ids.length ? { ids } : {});
+    const head = sync ? `Imported ${d?.synced || 0} products from ${d?.from || 'the store'}.` : `Re-read ${(d?.refreshed || []).length} page${(d?.refreshed || []).length === 1 ? '' : 's'}${(d?.refreshed || []).filter((r) => r.changed?.length).length ? ` (${d.refreshed.filter((r) => r.changed?.length).map((r) => `${r.id}: ${r.changed.join(', ')}`).join('; ')})` : ', nothing changed'}.${(d?.failed || []).length ? ` FAILED: ${d.failed.map((f) => `${f.title}: ${f.error}`).join('; ')}` : ''}${d?.noPage ? ` ${d.noPage} product${d.noPage === 1 ? ' has' : 's have'} no page to re-read.` : ''}`;
+    return ok(productsText(d, head), d);
+  }));
+  server.registerTool('update_product', {
+    title: 'Edit a product',
+    description: "Edit a catalog product's title, description, selling points, audience or page link. What you set here is kept through later page re-reads. Free.",
+    inputSchema: { id: z.string(), title: z.string().optional(), description: z.string().optional(), sellingPoints: z.array(z.string()).optional(), audience: z.string().optional(), url: z.string().optional(), brandId: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async ({ id, brandId, ...a }) => {
+    if (brandId) await activeBrand(brandId);
+    const d = await apiPost(`/api/products/${encodeURIComponent(id)}`, a);
+    return ok(`Updated: ${productLine(d.product)}`, d);
+  }));
+  server.registerTool('remove_product', {
+    title: 'Remove a product',
+    description: "Remove one product from the brand's catalog (its ads already made stay in the Library). Free.",
+    inputSchema: { id: z.string(), brandId: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async ({ id, brandId }) => {
+    if (brandId) await activeBrand(brandId);
+    const d = await apiDelete(`/api/products/${encodeURIComponent(id)}`);
+    return ok(`Removed ${id}. ${d?.count ?? 0} product${d?.count === 1 ? '' : 's'} left.`, d);
   }));
 
   // ---------- research analysis & creative remix (webapp Create-chat parity — the last four app-only chat tools, now headless) ----------

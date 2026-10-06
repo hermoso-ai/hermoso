@@ -125,22 +125,32 @@ export function plannerBrief(product, { brief = '', angles = [] } = {}) {
   ].filter(Boolean).join('\n');
 }
 
-// One render's prompt: the planner's visual brief, then the exact words, then (with no logo on file) the no-logo rule. The words are QUOTED so
-// the model prints them as given; a static whose headline is misspelled is not finished.
-export function staticAdPrompt(v, { logo = 'server', productPhoto = false } = {}) {
+// One render's prompt: the planner's visual brief, then the slot's layout (when the batch assigned one), then the
+// exact words, then the product and logo rules. The words are QUOTED so the model prints them as given; a static
+// whose headline is misspelled is not finished. `layout` = {directive, type, cta} from lib/static-variety.mjs (the
+// server assigns it); without one the old single generic typography line is used.
+// ONE PRODUCT, TWO HANDS (2026-10-06): the first live batch put two sticks in one frame (one in hand, one floating)
+// and gave a 9:16 a third hand. Both are image-MODEL failures a sensible plan cannot prevent, so they are stated once
+// here, not in the planner: one unit of the product unless the layout is a flat lay or a set, and every hand belongs
+// to a visible arm, at most two per person.
+export function staticAdPrompt(v, { logo = 'server', productPhoto = false, layout = null, ratioNote = '' } = {}) {
   const x = v && typeof v === 'object' ? v : {};
   const lines = [String(x.prompt || x.visual || '').trim()];
+  const L = layout && typeof layout === 'object' ? layout : null;
+  if (L && L.directive) lines.push(`Layout: ${String(L.directive).trim()}.${L.type ? ` Headline set in ${String(L.type).trim()}, in the brand's colours.` : ''}${L.cta ? ` Set ${String(L.cta).trim()}.` : ''}${ratioNote ? ` ${ratioNote}` : ''}`);
+  else if (ratioNote) lines.push(ratioNote);
   const words = [
     x.headline ? `headline "${String(x.headline).trim()}"` : '',
     x.supporting ? `supporting line "${String(x.supporting).trim()}"` : '',
     x.cta ? `call to action "${String(x.cta).trim()}"` : '',
   ].filter(Boolean);
-  if (words.length) lines.push(`On-image text, spelled exactly as given and nothing else: ${words.join(', ')}. Bold ad typography with a clear hierarchy, crisp and correctly spelled. A finished, ready-to-run static ad.`);
+  if (words.length) lines.push(`On-image text, spelled exactly as given and nothing else: ${words.join(', ')}.${L ? '' : ' Bold ad typography with a clear hierarchy, crisp and correctly spelled.'} A finished, ready-to-run static ad.`);
+  if (L) lines.push('Show the product once (one unit as it is sold) unless the layout is a flat lay or a set of its range; any person has at most two hands and every hand in frame belongs to a visible arm.');
   if (productPhoto) lines.push('The first reference image is the REAL product: keep its shape, colours and label exactly.');
   // THE LOGO IS LAID ON, NEVER PAINTED (2026-10-06): 'overlay' (and the old 'attached' / 'server') add nothing here. The
   // render goes with brandLogo:true, and the image route tells the model to keep a corner clear and lays the brand's real
   // logo file over the finished ad (lib/logo-intent.mjs). The model is never handed the logo to re-draw.
-  if (!['overlay', 'attached', 'server'].includes(logo)) lines.push('Do not draw or invent any logo or wordmark.');
+  if (!['overlay', 'in_scene', 'auto', 'attached', 'server'].includes(logo)) lines.push('Do not draw or invent any logo or wordmark.');
   return lines.filter(Boolean).join('\n\n');
 }
 
