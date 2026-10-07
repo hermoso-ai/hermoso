@@ -21186,7 +21186,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('recast_motion', {
     title: 'Recast motion',
-    description: "Motion transfer: re-perform a clip's motion, camera and timing with YOUR character, product, clothes or place; sound kept. image (+ images, @Image1, @Image2… in prompt) = who and what. engine auto (default), a person clip recast with people: ≤15s carried by one face (talking/close-up, one person, one photo) or an AI person made from words -> wan (follows every blink and mouth shape); dance, full-body, a group or >15s -> h3 (H3 Max Recast: ≤4 photos, one per person, 5-30s, no shot over 15s, keeps set, light, cuts); otherwise seedance (Seedance 2.5, ≤9 pictures, 4-30s, keeps set and beats; a person clip only if our render or faceRoute, else wan/kling). kling = Kling Motion Control (ONE picture, its background becomes the set, 3-30s); wan = Wan 3.0 Prime (≤9 pictures, keeps the set, ≤15s). Billed per output second, ~5 min per 5s; dryRun quotes.",
+    description: "Motion transfer: re-perform a clip's motion, camera and timing with YOUR character, product, clothes or place; sound kept. image (+ images, @Image1, @Image2… in prompt) = who and what. engine auto (default), a person clip recast with people: one photo (talking, dance or full-body) or an AI person made from words, ≤15s -> wan (on the beat, keeps set and framing, follows every blink and mouth shape); several photos (one per person) or >15s -> h3 (H3 Max Recast: ≤4 photos, one per person, 5-30s, no shot over 15s, keeps set, light, cuts; engine h3 picks it by name); otherwise seedance (Seedance 2.5, ≤9 pictures, 4-30s, keeps set and beats; a person clip only if our render or faceRoute, else wan/kling). kling = Kling Motion Control (ONE picture, its background becomes the set, 3-30s); wan = Wan 3.0 Prime (≤9 pictures, keeps the set, ≤15s). Billed per output second, ~5 min per 5s; dryRun quotes.",
     inputSchema: {
       image: z.string().optional().describe('who performs it: the actor/character image URL (@Image1). Required on kling. No one yet: generate_image a portrait of an AI person from words (no reference photo) and pass its url, or a saved / preset creator’s portrait (list_creators). ' + LIKENESS_TERMS),
       images: z.array(z.string()).max(8).optional().describe('seedance/wan: more pictures, @Image2…: a character, product, outfit or place'),
@@ -21196,14 +21196,19 @@ function memoryNoteVerdict(text) {
       resolution: z.enum(['480p', '720p', '1080p']).optional().describe('seedance and wan default 1080p; h3 takes 720p or 1080p, default the clip’s own'),
       orientation: z.enum(['video', 'image']).optional().describe("kling only: which aspect to keep: the video's (default) or the image's"),
       faceRoute: z.enum(['face_lane']).optional().describe(FACE_ROUTE_CLIP_DESC),
+      dryRun: z.boolean().optional().describe('return the credits this exact job would hold and the engine auto picks, without rendering'),
       tier: z.enum(['pro', 'standard']).optional().describe("kling only: 'pro' (default): 1080p and real hand-object interaction. 'standard': about 25% fewer credits and faster, but 720p, and it tends to mime a held object with empty hands. hermoso_capabilities lists the exact credits for both"),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ image, images, video, prompt = '', engine, resolution, orientation = 'video', tier, faceRoute }) => {
+  }, wrap(async ({ image, images, video, prompt = '', engine, resolution, orientation = 'video', tier, faceRoute, dryRun }) => {
     const more = Array.isArray(images) ? (await Promise.all(images.slice(0, 8).map(toRef))).filter(Boolean) : [];
     if (!image && !more.length && !String(prompt || '').trim()) return { content: [{ type: 'text', text: 'Pass image (who performs it), images, or a prompt saying who or what performs the clip.' }], isError: true };
-    const r = await renderJob('motion', { ...(image ? { image: await toRef(image) } : {}), ...(more.length ? { images: more } : {}), video, prompt, orientation, engine: engine || 'auto', ...(resolution ? { resolution } : {}), ...(tier ? { tier } : {}), ...(faceRoute === 'face_lane' ? { faceRoute } : {}) }, 'Motion recast');
+    const _in = { ...(image ? { image: await toRef(image) } : {}), ...(more.length ? { images: more } : {}), video, prompt, orientation, engine: engine || 'auto', ...(resolution ? { resolution } : {}), ...(tier ? { tier } : {}), ...(faceRoute === 'face_lane' ? { faceRoute } : {}) };
+    // dryRun (2026-10-06): the description has promised "dryRun quotes" while the schema had no such field, so zod dropped
+    // it and an agent asking for a price got a PAID render. Now a quote: the worker's own hold, nothing queued.
+    if (dryRun) { const q = await quoteJob('motion', _in); return ok(`${quoteText(q, 'This motion recast')}${q?.label ? ` Engine: ${String(q.label).replace(/^Motion transfer · /, '')}.` : ''}`, { raw: q }); }
+    const r = await renderJob('motion', _in, 'Motion recast');
     const p = renderPayload(r) || {};
     return okVideo(`Recast video: ${r.url}${r.model ? `  (${r.model})` : ''}${p.note ? `\n${p.note}` : ''}`, r);
   }));
