@@ -18068,6 +18068,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: {
       image: z.string().optional().describe('the served absolute URL of the edited image'),
       model: z.string().optional().describe('the model label that rendered it'),
+      editUnchanged: z.boolean().optional().describe('true when the returned picture matches the one sent: the edit changed nothing (productNote says what to try)'),
+      productNote: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ image, instruction, removal, mask, dryRun, fixLabel }) => {
@@ -18077,7 +18079,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (dryRun) { const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), ...fl, dryRun: true }); return ok(quoteText(d && d.quote, 'This image edit (a change to the existing image, not a new render)'), {}); }
     const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), ...fl });
     const img = await imageBlock(abs(d.image));
-    return { content: [{ type: 'text', text: `Edited image: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
+    // editUnchanged (2026-10-06): the server compared the result with the picture sent and nothing changed, so this
+    // never says "Edited image" over it; productNote opens with the plain sentence and what to try instead.
+    return { content: [{ type: 'text', text: `${d.editUnchanged ? 'The edit came back UNCHANGED, nothing was fixed. Returned image' : 'Edited image'}: ${abs(d.image)}${d.model ? `  (${d.model})` : ''}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
   server.registerTool('headline_variants', {
     title: 'Headline variants of a static ad',
