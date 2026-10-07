@@ -1,12 +1,16 @@
-# Hermoso — MCP, CLI & Skills
+# Hermoso: MCP, CLI & Skills
 
-Run your whole marketing operation from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
+**Marketing on autopilot**, run from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
 scripts. Research the ads already winning in a market, generate finished image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
 **906 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
+
+**A Chrome extension too.** [Hermoso: save and clone ads](https://chromewebstore.google.com/detail/hermoso-save-and-clone-ad/kmknkbldeilchhblbfddfnfbadmgcklc)
+saves any ad to your swipefile in one click, clones it for your brand, and pulls any company's ads from its
+website.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
 and insights, comments and DMs, connectors, profiles and team seats are **free on every plan**, with no
@@ -19,8 +23,8 @@ charges per API request.
 Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads, plus
 product feeds in Google Merchant Center. Publishing and scheduling — **ten** channels: Facebook, Instagram,
 Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. Messaging: WhatsApp (you message a
-person, so it is not an eleventh publishing channel) and Instagram DM automations (a keyword comment, a DM, a
-story reply or an ig.me link gets an automatic private reply). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
+person, so it is not an eleventh publishing channel) and DM automations on Instagram, Facebook Pages and
+Messenger, and X (a keyword comment, a DM, a story reply or an ig.me / m.me link gets an automatic reply). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
 Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
 connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
 
@@ -254,9 +258,18 @@ take** with native synchronized audio. `hermoso_capabilities` is the live list �
 exact credit cost of every tier — and naming that model in `model` is how you get it, since an unnamed render is
 routed by a narrower auto-pool.
 
+**Ads Studio** (`make_static_ads`): pick products and a count and get a batch of finished static ads in one call,
+each a different selling angle and a different layout, with your real product photo and logo laid on. The product
+catalog it draws from (`list_products`, `add_product`, `refresh_products`, `update_product`, `remove_product`) is a
+cache of each product's live page, so names, photos and prices come from the page itself.
+
+**Swap a person into any video** (`recast_hook`, `recast_motion`): keep the scene, the cuts and the sound and change
+who is on screen, using your own photo, a saved creator or an AI person (in the web Studio you can describe a presenter in words).
+Real faces from your own photos need a paid plan; AI people work on every plan.
+
 **Raw model playground** — the full catalog (30+ image / video / voice / writing models, each with its exact
 per-render credit cost) with no ad framing: `generate_image` / `generate_video` with `useBrand:false`,
-`generate_voice`, `generate_text`.
+`generate_voice`, `generate_text`. The image default is Nano Banana 2.1.
 
 **Publish to your own channels** — **ten** of them: Facebook, Instagram and Threads (`post_to_meta`), TikTok
 (`post_to_tiktok`), YouTube (`post_to_youtube` + `update_youtube_video`, `youtube_video_insights`, comments
@@ -296,6 +309,12 @@ under your post gets a public reply; a DM keyword gets a DM back). X only allows
 DMed you, and a DM saying STOP opts that person out. Facebook is free like Instagram. X bills us per call, so an X
 automation is charged in credits for every mention, reply or DM X delivers plus each reply or DM sent, and running out
 of credits stops its X rules.
+
+**Autopilot posting** (`set_post_refill`, `get_post_refill`, `run_post_refill`): say how often, where and what
+about ("2 posts a day on Instagram and Bluesky about our slow-morning routine, let me review first") and Hermoso
+makes new posts from your brand and fills your calendar. Pick review first (each batch waits for your approval,
+edit or redo) or post automatically (straight onto the schedule, still pullable). It follows the notes you leave and
+writes from what has worked on each channel. Credits are used only when a post is made.
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
 change confirm-gated, on **twelve** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
