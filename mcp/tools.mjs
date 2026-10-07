@@ -4389,7 +4389,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // workspace outright, so no argument here can point the write at somebody else's account.
   server.registerTool('create_brand', {
     title: 'Create a profile',
-    description: 'Add a NEW profile (a brand, client, creator or personal workspace) and switch to it. Each has its OWN brand details, memory, swipefile, Library, avatars, skills, playbooks and connectors; nothing leaks between them. Use draft_brand to FILL it and update_brand to edit it. Re-running with the same name returns the existing profile instead of a duplicate. Free (the ~50-credit research cascade only starts when you then run draft_brand).',
+    description: 'Add a NEW profile (a brand, client, creator or personal workspace) and switch to it. Each has its OWN brand details, memory, swipefile, Library, avatars, skills, playbooks and connectors; nothing leaks between them. Use draft_brand to FILL it and update_brand to edit it. Re-running with the same name returns the existing profile instead of a duplicate. Creating it is free. Drafting a NEW brand into it (draft_brand) needs the credits for its research on the balance, about 100; with fewer, draft_brand refuses before anything runs or is charged and says how many it needs and how many the account has.',
     inputSchema: {
       name: z.string().describe('the name for the new profile (a brand, client or creator name)'),
       activate: z.boolean().optional().describe('switch this connection to the new profile (default true); everything you do next scopes to it'),
@@ -4988,15 +4988,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // it is a caller with two different intentions and picking one would upload a file they did not mean to send.
     if (a.getUploadUrl) {
       const conflict = ['url', 'path', 'dataUri'].filter(k => String(a[k] || '').trim());
-      if (conflict.length) throw new Error(`\`getUploadUrl\` asks for a link to send bytes to; \`${conflict.join('` and `')}\` is a file to upload right now. Do one or the other.`);
+      if (conflict.length) throw Object.assign(new Error(`\`getUploadUrl\` asks for a link to send bytes to; \`${conflict.join('` and `')}\` is a file to upload right now. Do one or the other.`), { status: 400, _userInput: true });
       const t = await apiPost('/api/upload/ticket', {});
       return ok(`PUT the file's raw bytes to this url and it answers with the durable Hermoso url:\n\n${t.uploadUrl}\n\n${t.howto}`, { uploadUrl: t.uploadUrl, expiresAt: t.expiresAt, maxBytes: t.maxBytes, ...(t.partMaxBytes ? { partMaxBytes: t.partMaxBytes } : {}) });
     }
     // EXACTLY ONE SOURCE. Two is an ERROR: a caller who passes both has two different files in mind, and quietly
     // preferring one of them ingests the wrong file and reports success.
     const given = ['url', 'path', 'dataUri'].filter(k => String(a[k] || '').trim());
-    if (given.length > 1) throw new Error(`Give exactly ONE source — you passed \`${given.join('` and `')}\`. Two sources mean two different files, so I won't pick one for you.`);
-    if (!given.length) throw new Error('Provide exactly one source: `url` (a public http(s) link — works everywhere, including the hosted connector), `path` (a local file, stdio/CLI only) or `dataUri` (base64).');
+    if (given.length > 1) throw Object.assign(new Error(`Give exactly ONE source — you passed \`${given.join('` and `')}\`. Two sources mean two different files, so I won't pick one for you.`), { status: 400, _userInput: true });
+    // AN AUTHORED REFUSAL CARRIES ITS MARK (2026-10-07): bare, the error ledger filed it as "no status and no marker".
+    if (!given.length) throw Object.assign(new Error('Provide exactly one source: `url` (a public http(s) link — works everywhere, including the hosted connector), `path` (a local file, stdio/CLI only) or `dataUri` (base64).'), { status: 400, _userInput: true });
     const fileName0 = a.name || '';
     if (a.url) {
       // The SERVER fetches it, so the bytes never cross this transport and the SSRF guard runs on our side, on
@@ -8079,7 +8080,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'READ the product tags on a post the brand has already published, or ADD/MOVE tags on it. Pass `tags` to update: Meta\'s own behaviour is "updates coordinates if the product is already tagged; otherwise adds new tag" — so it is ADD-OR-MOVE, never replace-all, and it CANNOT be used to take a tag off. THERE IS NO WAY TO REMOVE A PRODUCT TAG: Meta documents Creating, Reading and Updating on this edge and no delete at all, so Hermoso will not guess at one — deleting the post is the only thing that removes its tags, and the reply says so rather than implying otherwise. The answer is always READ BACK from Instagram, and it separates tags that are STORED from tags that will actually be SHOWN — only an "approved" product ever appears on a published post. Read is free; the update costs 0 credits too. Whether Meta has approved Hermoso\'s app for the permission this needs is read LIVE from Meta: when it has not, list_connectors says so under Meta and this tool\'s refusal says Meta hasn\'t approved Hermoso for it yet. That is Meta\'s decision about Hermoso, not the user\'s connection, so never tell them to reconnect for it.',
     inputSchema: {
       mediaId: z.string().describe('the numeric Instagram media id, from list_instagram_media'),
-      tags: z.array(z.object({ product_id: z.string(), x: z.number(), y: z.number() })).optional().describe('ADD or MOVE these tags. x and y are FRACTIONS of the image, 0.0 (left/top) to 1.0 (right/bottom) — 0.5,0.5 is the middle. Omit to just read. Max 20 on a feed post.'),
+      tags: z.array(z.object({ product_id: z.string(), x: z.number().optional(), y: z.number().optional() })).optional().describe('ADD or MOVE these tags. Omit to just read. ON A PHOTO each tag is {product_id, x, y}: x and y are FRACTIONS of the image, 0.0 (left/top) to 1.0 (right/bottom), 0.5,0.5 is the middle, and both are required. ON A REEL OR VIDEO it is {product_id} ALONE: Instagram takes no position on a video tag, so coordinates sent for one are not used and the reply says so. Max 20 on a photo or feed video, 30 on a Reel. A carousel is tagged on its SLIDES: pass the slide’s own media id.'),
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { mediaId: z.string().optional(), updated: z.boolean().optional(), count: z.number().nullable().optional(), tags: z.array(z.any()).optional(), summary: z.string().optional(), removal: z.string().optional() },
@@ -17986,6 +17987,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     }
     const brief = [`Recreate the reference video for this brand${product ? ` — advertising ${product}` : ''}: keep its hook device, structure, cuts and pacing, but make every word, face, setting and product this brand's own`, changes ? `What the user wants changed or kept: ${changes}` : ''].filter(Boolean).join('. ');
     const d = await apiSSE('/api/create', { stream: true, brand: brandObj, product: brief, format: 'video', reference: { url: link }, matchReferenceLength: !_len, ...(_len ? { durationSeconds: _len } : {}), language: language || '', userAsk: brief });
+    // A clone the balance cannot cover streams back {choice} instead of a creative (priced on the ORIGINAL's length
+    // since 2026-10-07): raise it as the 402 wrap() already spells, never as an empty "Clone plan".
+    if (d?.data?.choice && typeof d.data.choice === 'object') throw Object.assign(new Error(String(d.data.choice.message || 'This video does not fit your balance.')), { status: 402, videoChoice: d.data.choice, _viaApi: true });
     const c = d?.data?.creative || d?.creative || d;
     if (brandObj && !c.brand) c.brand = { name: brandObj.name || '', domain: brandObj.domain || '', logo: brandObj.logo || '', sells: brandObj.sells || '', palette: (brandObj.palette || []).slice(0, 4), productImages: (brandObj.productImages || []).slice(0, 4) };
     const planned = Math.round(+c.render_plan?.duration_seconds || (c.video_storyboard?.scenes || []).reduce((s, x) => s + (+x.seconds || 0), 0) || 0);

@@ -92,7 +92,8 @@ export function videoChoiceText(tool, choice, opts = {}) {
   const c = choice && typeof choice === 'object' ? choice : {}, o = c.options || {};
   const d = o.draft && o.draft.model ? o.draft : null;
   const lines = [
-    `${c.seconds ? `A ${c.seconds}s video` : 'This video'} would cost about ${c.videoCredits ?? '?'} credits and the account has ${c.balance ?? '?'} (${c.short ?? '?'} short). Nothing was planned, rendered or charged. Tell the user and let them choose — never switch the format for them:`,
+    // A clone names which length it priced (lengthBasis, 2026-10-07) and any post lookup reading that length cost.
+    `${c.seconds ? `A ${c.seconds}s video${c.lengthBasis === 'source' ? ' (the original’s length)' : ''}` : 'This video'} would cost about ${c.videoCredits ?? '?'} credits and the account has ${c.balance ?? '?'} (${c.short ?? '?'} short).${c.lengthBasis === 'estimate' && c.seconds ? ` That price ASSUMES ${c.seconds}s: the original’s length could not be read before planning, and the clone will match its real length, so say it is an estimate.` : ''} ${Number(c.lookupCredits) > 0 ? `Nothing was planned or rendered; reading the original’s length cost ${Math.round(Number(c.lookupCredits))} credit${Math.round(Number(c.lookupCredits)) === 1 ? '' : 's'} (the post lookup the clone reuses).` : 'Nothing was planned, rendered or charged.'} Tell the user and let them choose — never switch the format for them:`,
     `  1. Make it as an image instead (~${o.image?.credits ?? '?'} credits): ${videoChoiceImageCall(tool)}.`,
     // A WIDGET HOST (ChatGPT) GETS NO PURCHASE ROUTE (2026-09-30): its plugin guidelines let a plugin explain that a
     // feature needs more credits and link an informational page, never a checkout. `o.topup.url` is a checkout link.

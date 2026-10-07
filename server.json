@@ -3,7 +3,7 @@
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
   "description": "AI marketing agent and AI ad generator: 906 tools, usable alone. Ads on 12 platforms, posts on 10.",
-  "version": "0.1.405",
+  "version": "0.1.406",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.405",
+      "version": "0.1.406",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
