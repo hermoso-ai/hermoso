@@ -1,6 +1,6 @@
 # Hermoso: MCP, CLI & Skills
 
-**Marketing on autopilot**, run from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
+**The AI marketing agent with an AI ad generator built in**, run from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
 scripts. Research the ads already winning in a market, generate finished image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.

@@ -1,6 +1,6 @@
 # Hermoso
 
-Hermoso is marketing on autopilot, run from your own AI agent. This extension adds five Hermoso skills to Gemini CLI, and they drive the `hermoso` CLI so you can run a brand's marketing from the terminal.
+Hermoso is an AI marketing agent and AI ad generator, run from your own AI agent. This extension adds five Hermoso skills to Gemini CLI, and they drive the `hermoso` CLI so you can run a brand's marketing from the terminal.
 
 ## What it does
 
