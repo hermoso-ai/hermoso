@@ -21156,20 +21156,24 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('dub_video', {
     title: 'Dub video',
-    description: "Localize a finished video into another language WITHOUT re-rendering it: the spoken track is transcribed, translated, re-voiced and lip-synced back onto the SAME footage, so the visuals, timing and edit are untouched. Just pass the video and the language — the script is read off the source automatically (pass `script` only to override what it heard). Paid; returns the served URL of the localized video.",
+    description: "Localize a finished video into another language WITHOUT re-rendering it: each spoken line is said where it was said, in a native voice, lip-synced, background kept. Pass the video and the language; the script is read off the source (`script` only overrides it). Paid by length; dryRun quotes. Returns the localized video URL.",
     inputSchema: {
       video: z.string().describe('the source video URL'),
       language: z.string().describe("target language, e.g. 'Spanish', 'de', 'French (Canada)'"),
       script: z.string().optional().describe('OPTIONAL override for the original spoken words. Leave this out — the source video is transcribed automatically. Only pass it when you already know the exact script and the auto-transcript got it wrong.'),
-      voice: z.string().optional().describe("optional target voice preset, e.g. 'Aria' (warm female) or 'George' (confident male). Defaults to a voice matching the source speaker's register."),
+      voice: z.string().optional().describe("optional, e.g. 'Aria' (woman) or 'George' (man): a native voice of that sex speaks. Default: the source speaker's sex."),
+      dryRun: z.boolean().optional().describe('quote only'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ video, language, script, voice }) => {
+  }, wrap(async ({ video, language, script, voice, dryRun }) => {
     // Forward `script` ONLY when the caller actually supplied one. Sending '' used to hit the worker's
     // empty-script guard, so the documented {video, language} call could never succeed.
-    const r = await renderJob('dub', { video, language, ...(String(script || '').trim() ? { script } : {}), ...(voice ? { voice } : {}) }, `Dub → ${language}`);
-    return okVideo(`Localized video (${language}): ${r.url}`, r);
+    const _in = { video, language, ...(String(script || '').trim() ? { script } : {}), ...(voice ? { voice } : {}) };
+    if (dryRun) { const q = await quoteJob('dub', _in); return ok(quoteText(q, `This dub into ${language}`), { raw: q }); }
+    const r = await renderJob('dub', _in, `Dub → ${language}`);
+    const p = renderPayload(r) || {};
+    return okVideo(`Localized video (${language}): ${r.url}${p.note ? `\n${p.note}` : ''}`, r);
   }));
 
   server.registerTool('change_voice', {
