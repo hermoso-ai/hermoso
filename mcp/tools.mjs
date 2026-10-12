@@ -18795,8 +18795,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     // A PROMPT OR SHOTS, EITHER ONE (2026-10-05). `shots` replaces `prompt` (Kling sends multi_prompt and no prompt at all),
     // so the schema leaves prompt optional and the one refusal lives here: neither is nothing to render. Free, no network.
+    // `speak` alone is a whole request too (2026-10-08): the talk-to-camera lane writes its own staging when prompt is
+    // empty (lib/talking-video.mjs talkingVideoPrompt), and this refusal had been turning every speak-only call away.
     const _hasShots = Array.isArray(a.shots) && a.shots.length > 0;
-    if (!String(a.prompt || '').trim() && !_hasShots) return ok('NOTHING WAS RENDERED and nothing was charged. Say what the clip should show: send `prompt`, or `shots` (a list of {prompt, seconds}) for a multi-shot clip on a model with multiShot true in hermoso_capabilities.', { refused: 'missing_prompt' });
+    const _hasSpeak = !!String(a.speak || '').trim();
+    if (!String(a.prompt || '').trim() && !_hasShots && !_hasSpeak) return ok('NOTHING WAS RENDERED and nothing was charged. Say what the clip should show: send `prompt`, or `shots` (a list of {prompt, seconds}) for a multi-shot clip on a model with multiShot true in hermoso_capabilities.', { refused: 'missing_prompt' });
     // NEVER SILENTLY TRUNCATE A LENGTH ASK. One generation = ONE continuous clip, and workVideo resolves an
     // over-long ask by picking the longest clip the model has — so a 40s generate_video call used to render 15s and
     // report success. A refusal that names the real ceiling and the real alternative is the honest answer, and it

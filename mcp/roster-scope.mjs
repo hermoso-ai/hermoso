@@ -95,6 +95,8 @@ export const TOOL_PROVIDER_RULES = [
   // collide with Hermoso billing, which is buy_credits / billing_status / upgrade_plan and never says "stripe".
   [/stripe/, 'stripe'],
   [/hubspot/, 'hubspot'],
+  // Intercom (2026-10-12): the brand's OWN support inbox, offered only to a workspace that connected it.
+  [/intercom/, 'intercom'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],

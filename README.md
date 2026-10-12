@@ -21,9 +21,9 @@ charges per API request.
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
 Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads, plus
-product feeds in Google Merchant Center. Publishing and scheduling — **ten** channels: Facebook, Instagram,
-Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. Messaging: WhatsApp (you message a
-person, so it is not an eleventh publishing channel) and DM automations on Instagram, Facebook Pages and
+product feeds in Google Merchant Center. Publishing and scheduling — **eleven** channels: Facebook, Instagram,
+Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky, Telegram and Google Business Profile. Messaging: WhatsApp (you message a
+person, so it is not a twelfth publishing channel) and DM automations on Instagram, Facebook Pages and
 Messenger, and X (a keyword comment, a DM, a story reply or an ig.me / m.me link gets an automatic reply). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
 Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
 connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
@@ -271,21 +271,27 @@ Real faces from your own photos need a paid plan; AI people work on every plan.
 per-render credit cost) with no ad framing: `generate_image` / `generate_video` with `useBrand:false`,
 `generate_voice`, `generate_text`. The image default is Nano Banana 2.1.
 
-**Publish to your own channels** — **ten** of them: Facebook, Instagram and Threads (`post_to_meta`), TikTok
+**Publish to your own channels** — **eleven** of them: Facebook, Instagram and Threads (`post_to_meta`), TikTok
 (`post_to_tiktok`), YouTube (`post_to_youtube` + `update_youtube_video`, `youtube_video_insights`, comments
 read/reply), X (`post_to_x`, `x_post_metrics`, `x_post_insights`, `x_mentions`, `list_x_dms`, `send_x_dm`),
 LinkedIn profile **and** company Pages (`post_to_linkedin`, `post_to_linkedin_page`), Pinterest
 (`post_to_pinterest` + boards), Bluesky (`post_to_bluesky`, `delete_bluesky_post`, `bluesky_post_metrics`, plus
 `list_bluesky_convos` / `read_bluesky_dm` / `send_bluesky_dm`) and Telegram (`post_to_telegram`,
-`delete_telegram_message`, `list_telegram_chats`). `schedule_post` / `list_scheduled` / `cancel_scheduled` give
+`delete_telegram_message`, `list_telegram_chats`) and Google Business Profile (below). `schedule_post` / `list_scheduled` / `cancel_scheduled` give
 you one content calendar over exactly that set. `upload_file` brings in any external or local media, not just
 Hermoso renders.
 *X posting bills credits per API call (X charges per request); a post containing a link costs 13× one without.*
-*Held back, and named rather than hidden:* **Google Business Profile** is built (`post_to_google_business`,
-reviews, Q&A, insights) and is not offered — Google allowlists that API per project and ours reads 0 QPM, so
-every call would 403 for every user. It is in `schedule_post`'s channel enum and refused at enqueue.
+**Google Business Profile** is the panel a business shows on Google Search and Maps. `post_to_google_business`
+publishes a Post with text, optionally one photo, and a call-to-action button (Google takes no video in Posts, so
+a schedule with only a video is refused for that channel); `list_google_business_posts` and
+`delete_google_business_post` manage what is showing. `list_google_business_reviews` finds the reviews with no
+answer yet and `reply_to_google_business_review` answers one as the business. `google_business_insights` reports
+search and Maps impressions, calls, website clicks and direction requests, and `google_business_search_keywords`
+the words people searched to find the listing. `list_business_locations`, `get_business_location` and
+`update_business_location` read and edit the listing itself: hours, phone, website, description, categories.
+Business Profile Q&A is not offered: Google retired it on 2025-11-03.
 
-**Message customers on WhatsApp** — messaging, not an eleventh publishing channel: you message a person, and
+**Message customers on WhatsApp** — messaging, not a twelfth publishing channel: you message a person, and
 nothing here posts to a feed. `list_whatsapp_accounts` finds the Business Account and its
 numbers, `list_whatsapp_templates` / `create_whatsapp_template` / `delete_whatsapp_template` manage the templates
 Meta reviews, and `send_whatsapp_message` sends one — confirm-gated, because it reaches a real phone and Meta

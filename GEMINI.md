@@ -6,7 +6,7 @@ Hermoso is an AI marketing agent and AI ad generator, run from your own AI agent
 
 - Research the ads already winning: competitor teardowns, ad libraries across Meta, Google, LinkedIn and TikTok, organic search on TikTok, Instagram, YouTube, Reddit and Threads, creator search.
 - Create on-brand image and video ads: plan, render, remix, dub, reframe, upscale, stitch.
-- Publish and schedule to the user's own channels: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky and Telegram. Message people on WhatsApp.
+- Publish and schedule to the user's own channels: Facebook, Instagram, Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky, Telegram and Google Business Profile. Message people on WhatsApp.
 - Build and manage paid campaigns on Meta, Google Ads, TikTok, LinkedIn, Reddit, X, Pinterest, Snapchat, Microsoft Advertising, Apple Search Ads and ChatGPT Ads. Everything is created paused and read back before it is reported.
 
 ## Setup
