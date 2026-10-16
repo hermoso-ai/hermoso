@@ -97,6 +97,8 @@ export const TOOL_PROVIDER_RULES = [
   [/hubspot/, 'hubspot'],
   // Intercom (2026-10-12): the brand's OWN support inbox, offered only to a workspace that connected it.
   [/intercom/, 'intercom'],
+  // Vercel (2026-10-16): the brand's OWN websites, offered only to a workspace that connected Vercel.
+  [/vercel/, 'vercel'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],

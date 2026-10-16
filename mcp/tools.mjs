@@ -89,7 +89,7 @@ const creatorLine = (c) => {
 // import ../lib, so the words live here.
 // "I OWN THE RIGHTS TO THIS FACE" (2026-09-29): the first choice a flagged face offers (server lib/likeness-refusal.mjs).
 const FACE_ROUTE_CLIP_DESC = "'face_lane' = the user's \"I own the rights to this face\" for a real person in the source clip (paid plans). Only on the user's say-so, never on your own.";
-const FACE_ROUTE_DESC = "ONLY after a render came back saying the video model's safety check flagged a person's face: 'face_lane' is the user's choice \"I own the rights to this face\". Send the SAME request again with it and the same face is rendered on Seedance through the face library, at the normal price. Sending it is the user's confirmation that they have the rights to that face (paid plans, like every real face). Never set it on your own; the other choices that refusal names are a different model (`model`) or another creator (`creator`).";
+const FACE_ROUTE_DESC = "'face_lane' records the user's statement \"I own the rights to this face\" for the real person in their reference (paid plans; the likeness terms apply). Set it only when the user picked that option after a render said it could not use that face, and send the same request again; it then renders through Hermoso's face library at the normal price. Never set it on your own. The other options are a different `model` or one of the user's saved `creator`s.";
 const LIKENESS_TERMS = 'Using a real person’s face, likeness or voice confirms you are them or have their consent, take full, unlimited responsibility for its use and will cover any claim against Hermoso (hermoso.ai/terms). Paid plan only; recorded.';
 function rowLines(rows, max = 40) {
   const all = Array.isArray(rows) ? rows : [];
@@ -189,6 +189,7 @@ export const INDEPENDENCE = 'INDEPENDENT AREAS, NOT A PIPELINE — research, cre
 export const KEY_CONNECTORS = {
   applovin_ads: { label: 'AppLovin Ads', route: 'applovin-ads', fields: { reportKey: 's', eventKey: '', apiKey: 's', capiKey: 's', accountId: '' }, how: 'the Reporting Key and the AppLovin Event Key from the AppLovin dashboard ▸ your account, top right ▸ Keys; plus apiKey (the Campaign Management key) and capiKey (the Conversion API key) when AppLovin has enabled those for the account (accountId only for an app account)' },
   stripe: { label: 'Stripe', route: 'stripe', fields: { apiKey: 'rs' }, how: 'a secret (sk_) or restricted (rk_) key from Stripe ▸ Developers ▸ API keys' },
+  vercel: { label: 'Vercel', route: 'vercel', fields: { token: 'rs', team: '' }, how: 'an access token from vercel.com/account/tokens (Settings ▸ Tokens ▸ Create); team is the team id (team_…) or slug when the token was made for a team' },
   openai_ads: { label: 'ChatGPT Ads', route: 'openai-ads', fields: { apiKey: 'rs' }, how: 'an Advertiser API key from ChatGPT Ads Manager ▸ Settings ▸ General ▸ API Keys ▸ Create New Key' },
   apple_ads: { label: 'Apple Ads', route: 'apple-ads', fields: { clientId: '', teamId: '', keyId: '', privateKey: 's', setupToken: 's', orgId: '' }, how: 'clientId, teamId and keyId (Apple Ads ▸ Account Settings ▸ API shows all three once a public key is saved there), plus privateKey for a key already registered with Apple, or setupToken from a first call with no fields, which generates the key pair' },
   bluesky: { label: 'Bluesky', route: 'bluesky', fields: { identifier: 'r', appPassword: 'rs', pds: '' }, how: 'the handle and an APP password from Bluesky ▸ Settings ▸ Privacy and Security ▸ App Passwords (pds only for a self-hosted server)' },
@@ -10949,6 +10950,92 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const rows = (d.profiles || []).slice(0, 40).map(pr => `• ${pr.distinctId} — ${Object.entries(pr.properties || {}).slice(0, 6).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')}`);
     return ok([head, ...rows, d.note || '', d.pageNote || ''].filter(Boolean).join('\n'), d);
   }));
+  // ---------- Vercel (2026-10-16): the brand's OWN websites — projects, deployments, domains, Web Analytics, and a landing page deployed from files ----------
+  const VC_NEEDS = ' Needs Vercel connected (Settings > Connectors > Vercel, or connect_connector with an access token).';
+  server.registerTool('list_vercel_projects', {
+    title: 'List Vercel projects',
+    description: "The brand's Vercel projects (its websites): name, id, framework, production URL and state, the latest deployment (URL, state, target, when), the linked git repo, and whether Web Analytics and Speed Insights are on. search filters by project name. Read-only, free." + VC_NEEDS,
+    inputSchema: { search: z.string().optional().describe('part of a project name'), limit: z.number().optional().describe('1-50, default 20'), cursor: z.string().optional().describe('nextCursor from a previous call') },
+    outputSchema: { account: z.string().optional(), count: z.number().optional(), projects: z.array(z.any()).optional(), nextCursor: z.string().nullable().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiGet('/api/vercel/projects', a);
+    return ok(d.count ? `${d.count} Vercel project(s) on ${d.account}:\n` + (d.projects || []).map(p => `- ${p.name} (${p.id})${p.framework ? `, ${p.framework}` : ''}${p.productionUrl ? `, ${p.productionUrl}` : ', no production deployment'}${p.latestDeployment ? `, latest ${p.latestDeployment.state || '?'} ${p.latestDeployment.target}` : ''}, analytics ${p.webAnalytics}`).join('\n') + (d.nextCursor ? `\n(more: cursor ${d.nextCursor})` : '') : `No Vercel projects${a.search ? ' match that name' : ''} on ${d.account}. That is a real empty list, not a failed read.`, d);
+  }));
+  server.registerTool('list_vercel_deployments', {
+    title: 'List Vercel deployments',
+    description: "Deployments on the brand's Vercel account, newest first: URL, state (READY, BUILDING, QUEUED, ERROR, CANCELED...), target (production or preview), when it was created and became ready, the commit message and Vercel's inspector link. Filter by projectId, target or state, or pass deploymentId (an id or a deployment URL) to read one, e.g. to see whether a page you just deployed is READY. Read-only, free." + VC_NEEDS,
+    inputSchema: {
+      projectId: z.string().optional().describe('project id or name'),
+      deploymentId: z.string().optional().describe('read ONE deployment by id or URL'),
+      target: z.enum(['production', 'preview', 'staging']).optional(),
+      state: z.enum(['BLOCKED', 'BUILDING', 'CANCELED', 'DELETED', 'ERROR', 'INITIALIZING', 'QUEUED', 'READY']).optional(),
+      limit: z.number().optional().describe('1-50, default 20'),
+    },
+    outputSchema: { account: z.string().optional(), count: z.number().optional(), deployments: z.array(z.any()).optional(), nextCursor: z.string().nullable().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiGet('/api/vercel/deployments', a);
+    return ok(d.count ? `${d.count} deployment(s):\n` + (d.deployments || []).map(x => `- ${x.url || x.id}, ${x.state || '?'}, ${x.target}, ${x.name}${x.createdAt ? `, ${String(x.createdAt).slice(0, 16).replace('T', ' ')}` : ''} (${x.id})${x.error ? `: ${x.error}` : ''}`).join('\n') : 'No deployments match. That is a real empty list, not a failed read.', d);
+  }));
+  server.registerTool('list_vercel_domains', {
+    title: 'List Vercel domains',
+    description: "The domains on the brand's Vercel account (verified or not, when they expire), or with projectId the domains assigned to one project (and any redirect or git branch on them). Read-only, free." + VC_NEEDS,
+    inputSchema: { projectId: z.string().optional().describe("project id or name, for that project's domains"), limit: z.number().optional().describe('1-50, default 20') },
+    outputSchema: { account: z.string().optional(), scope: z.string().optional(), projectId: z.string().optional(), count: z.number().optional(), domains: z.array(z.any()).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiGet('/api/vercel/domains', a);
+    return ok(d.count ? `${d.count} domain(s)${d.scope === 'project' ? ` on project ${d.projectId}` : ''}:\n` + (d.domains || []).map(x => `- ${x.name}${x.verified === false ? ', NOT verified' : x.verified ? ', verified' : ''}${x.redirect ? `, redirects to ${x.redirect}` : ''}${x.expiresAt ? `, expires ${String(x.expiresAt).slice(0, 10)}` : ''}`).join('\n') : 'No domains here. That is a real empty list, not a failed read.', d);
+  }));
+  server.registerTool('vercel_web_analytics', {
+    title: 'Vercel Web Analytics',
+    description: "Vercel WEB ANALYTICS for one project: page views and unique visitors over a window (default the last 30 days, production traffic), and with `by` a breakdown by requestPath (which pages), referrerHostname (where visitors came from), country, deviceType, osName, browserName, route, utmSource / utmMedium / utmCampaign / utmContent / utmTerm (which campaigns and ads brought them), or a time step (day, week, month). Use it to see which landing pages and ad campaigns actually bring traffic. Needs Web Analytics turned on for the project in Vercel. Read-only, free." + VC_NEEDS,
+    inputSchema: {
+      projectId: z.string().describe('project id or name (list_vercel_projects)'),
+      by: z.enum(['requestPath', 'referrerHostname', 'country', 'deviceType', 'osName', 'browserName', 'route', 'utmSource', 'utmMedium', 'utmCampaign', 'utmContent', 'utmTerm', 'environment', 'hour', 'day', 'week', 'month', 'year']).optional(),
+      days: z.number().optional().describe('1-366, default 30'),
+      since: z.string().optional().describe('YYYY-MM-DD (instead of days)'),
+      until: z.string().optional().describe('YYYY-MM-DD (default now)'),
+      limit: z.number().optional().describe('rows in the breakdown, 1-50, default 10'),
+      filter: z.string().optional().describe("Vercel's OData filter, e.g. utmSource eq 'facebook'"),
+    },
+    outputSchema: { account: z.string().optional(), projectId: z.string().optional(), since: z.string().optional(), until: z.string().optional(), totals: z.any().optional(), by: z.string().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/vercel/analytics', a);
+    const t = d.totals || {};
+    return ok(`Vercel Web Analytics for ${d.projectId}, ${String(d.since).slice(0, 10)} to ${String(d.until).slice(0, 10)}: ${t.pageviews ?? '?'} page views, ${t.visitors ?? '?'} visitors.${d.rows ? `\nBy ${d.by}:\n` + d.rows.map(r => `- ${r.key ?? '(none)'}: ${r.pageviews ?? '?'} views${r.visitors != null ? `, ${r.visitors} visitors` : ''}`).join('\n') : ''}${d.note ? `\n${d.note}` : ''}`, d);
+  }));
+  server.registerTool('deploy_vercel_page', {
+    title: 'Deploy a page to Vercel',
+    description: "Publish a STATIC landing page to the brand's Vercel account from HTML (it becomes index.html) or a few files [{file, data, encoding:'utf-8'|'base64'}], up to 50 files and 4 MB. project names the Vercel project (created if it does not exist; it becomes part of the URL). target 'preview' (default) makes a new preview URL and leaves the live site alone; 'production' REPLACES what the project's domains serve. WITHOUT confirm:true nothing is sent and you get the exact preview to show the user; call again with confirm:true only after they say yes. The answer is Vercel's own deployment row (URL and state); a new deployment is QUEUED or BUILDING for a moment, so read it back with list_vercel_deployments deploymentId until READY. Free." + VC_NEEDS,
+    inputSchema: {
+      project: z.string().describe('Vercel project name, e.g. spring-sale'),
+      html: z.string().optional().describe('the full HTML of the page'),
+      files: z.array(z.object({ file: z.string(), data: z.string(), encoding: z.enum(['utf-8', 'base64']).optional() })).optional().describe('instead of (or as well as) html: relative paths with their content'),
+      target: z.enum(['preview', 'production']).optional().describe('default preview'),
+      confirm: z.boolean().optional().describe('true only after the user approved this exact deploy'),
+    },
+    outputSchema: { account: z.string().optional(), dryRun: z.boolean().optional(), preview: z.any().optional(), deployment: z.any().optional(), confirmed: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/vercel/deploy', a);
+    if (d.dryRun) return ok(d.note, d);
+    const x = d.deployment || {};
+    return ok(`${d.confirmed ? 'Deployed' : 'Vercel did not return a deployment URL'}: ${x.url || x.id} (${x.state || 'queued'}, ${x.target}). ${d.note || ''}`.trim(), d);
+  }));
+  server.registerTool('delete_vercel_deployment', {
+    title: 'Delete a Vercel deployment',
+    description: "PERMANENTLY delete one Vercel deployment: its URL stops working and Vercel has no undo. Without confirm:true nothing is deleted and you get the deployment it would delete (URL, target, state) to show the user; a production deployment the domains still serve takes the site down. Call again with confirm:true only after the user says yes to that exact deployment. Free." + VC_NEEDS,
+    inputSchema: { deploymentId: z.string().describe('from list_vercel_deployments'), confirm: z.boolean().optional().describe('true only after the user approved deleting this exact deployment') },
+    outputSchema: { account: z.string().optional(), dryRun: z.boolean().optional(), deployment: z.any().optional(), deleted: z.string().nullable().optional(), confirmed: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const { deploymentId, ...rest } = a;
+    const d = await apiPost(`/api/vercel/deployments/${encodeURIComponent(String(deploymentId || ''))}/delete`, rest);
+    return ok(d.note, d);
+  }));
   // ---------- Stripe (2026-09-09): the brand's OWN revenue, read-only via a restricted key ----------
   server.registerTool('stripe_report', {
     title: 'Stripe revenue report',
@@ -17870,12 +17957,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('plan_ad', {
     title: 'Plan an ad concept',
-    description: 'Industry briefs: list_templates. Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. Spends credits.',
+    description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. Spends credits.',
     inputSchema: {
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name, or a brand profile object {name,domain,category,palette,products,…}. OMIT to use the workspace’s SAVED brand + memory automatically (see get_brand); use draft_brand to onboard a new one'),
       product: z.string().describe('what to advertise + any angle/offer the user specified'),
       format: z.enum(['auto', 'image', 'video']).optional().describe("'image', 'video', or 'auto' when unspecified"),
-      durationSeconds: z.number().optional().describe('VIDEO ONLY — the total spot length the user explicitly asked for, in seconds, copied verbatim (30 for "a 30 second ad"). The planner authors the storyboard TO it: the scenes’ seconds sum to it and the script is word-budgeted for it. Supported range 4–180; anything outside is CLAMPED to it (the reply says so). A length that fits ONE clip of the render model renders as a single continuous pass; anything longer is STITCHED from acts filled to that model’s clip maximum with the remainder last (on a 15s-clip model, 40 -> 15+15+10 and 17 -> 13+4) — never time-compressed. The maximum is the model’s own: 15s on most, 30s on the longest-clip model, so a 30s ad can be one unbroken take rather than two acts. Omit when the user named no length; do NOT pass a guess: an omitted value is the default, a 15s spot in one take, or 30s for a two-person format such as a street interview (2026-10-14), and a length the user names always wins.'),
+      durationSeconds: z.number().optional().describe('VIDEO ONLY — the total spot length the user explicitly asked for, in seconds, copied verbatim (30 for "a 30 second ad"). The planner authors the storyboard TO it: the scenes’ seconds sum to it and the script is word-budgeted for it. Supported range 4–180; anything outside is CLAMPED to it (the reply says so). A length that fits ONE clip of the render model renders as a single continuous pass; anything longer is STITCHED from acts filled to that model’s clip maximum with the remainder last (on a 15s-clip model, 40 -> 15+15+10 and 17 -> 13+4) — never time-compressed. The maximum is the model’s own: 15s on most, 30s on the longest-clip model, so a 30s ad can be one unbroken take rather than two acts. Omit when the user named no length; do NOT pass a guess: when it is omitted the planner picks a length suited to the format, and a length the user names always wins.'),
       hook: z.string().optional().describe('force the VISUAL scroll-stop mechanic the opening beat is built on — a hook id from list_hooks (e.g. "direct_callout", "mid_problem", "macro_asmr"). Omit to let the planner pick. A hook that cannot be delivered in this brief is DROPPED with the reason rather than rendered wrongly — an on-screen-text hook on an authentic/UGC ad is the one that bites, because that register carries zero on-screen text.'),
       setting: z.string().optional().describe('force the WHERE — a setting id from list_hooks (e.g. "kitchen", "gym", or a surreal one like "volcano_rim" / "airplane_wing", which are played 100% straight and never acknowledged). Omit for a neutral setting.'),
       recipe: z.string().optional().describe('a recipe id from hermoso_capabilities to force an archetype'),
@@ -18762,7 +18849,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. ONE generation = one continuous clip up to the model’s longest listed duration — the longest-clip model in the catalog today renders a full multi-beat spot of up to 30 SECONDS in ONE unbroken take with native synchronized audio, so never assume a generic 8–10s cap and never stitch something that fits one clip; durationSeconds must be one of the model’s durations from hermoso_capabilities, which is the live list. TO GET A SPECIFIC MODEL, NAME IT in `model`: an unnamed render is routed by the server’s own auto-pool, which is narrower than the catalog, so the longest-clip and highest-resolution models are reached by naming them. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. AUDIO IS NOT FREE AND NOT OPTIONAL BY DEFAULT: a clip delivered with no audio of its own gets a music bed composed and CHARGED on top of the render (see musicMood and audio) — on a cheap short draft the bed can cost as much as the clip. Pass refVideo (a clip URL) to EDIT an existing video instead — the omni engine transforms that clip per your prompt, inheriting its canvas + length (aspectRatio/durationSeconds are ignored for an edit). RAW MODEL ACCESS: by default a few small guards are appended (packaging/label safety with no reference image, a negative prompt where the model takes one, reference-binding lines) and hex colour codes become colour names; ' + RAW_TOOL_NOTE + ' Spends credits (Starter plan is video-blocked server-side).',
     inputSchema: {
       prompt: z.string().optional().describe('the video prompt / shot description (for a refVideo edit, this is the transformation instruction); optional with `shots`'),
-      raw: z.boolean().optional().describe('RAW MODEL ACCESS: dispatch this prompt to the model BYTE-IDENTICAL — no appended packaging/label guidance, no negative prompt, no reference-binding lines, no hex-to-colour-name rewrite. Use it when you want the model itself rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence (on Veo it is refused with the length and the cap instead). Billing, durable delivery and per-model validation are unchanged.'),
+      raw: z.boolean().optional().describe('Send the prompt to the model exactly as written, without the wording Hermoso usually adds (packaging and label guidance, reference lines, colour names for hex codes, quality hints). Use it when you want the model\'s own interpretation rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence (on Veo it is refused with the length and the cap instead). Billing, durable delivery and per-model validation are unchanged.'),
       refImage: z.string().optional().describe('local path or URL to anchor the first frame. ' + LIKENESS_TERMS),
       speak: z.string().optional().describe('A PERSON SAYING THESE EXACT WORDS TO CAMERA — the default for any "make my photo talk" / spokesperson / talk-to-camera ask. Pass with `creator` or a portrait as `refImage`: the video model films them saying it in their own voice, matched to who they are, and the length follows the words (leave durationSeconds out). `prompt` is then the staging (e.g. "natural", "walking in a park"). Real footage, not an animated photo; generate_avatar is the animated-photo look, only when asked for by name'),
       creator: z.string().optional().describe('STAR A SAVED CREATOR in this clip — their id from list_creators, or the name you know them by, or a PRESET AI creator from list_creators presets (exact name or id; free, no generation). Their saved portrait rides first among the references as the on-camera person, with their saved consent, exactly as render_ad casts them; a real person saved from a photo keeps their real face on camera. An unknown name is refused by name, nothing charged.'),
@@ -19582,7 +19669,7 @@ function memoryNoteVerdict(text) {
   }));
   server.registerTool('list_connectors', {
     title: 'List connectors',
-    description: 'List the third-party accounts connected to this workspace (Meta, Google Ads, Google Drive/Sheets/Docs, YouTube, LinkedIn, OneDrive, Slack, …) — provider, status and the connected account label — PLUS which providers are available to connect. IT ALSO FLAGS A CONNECTION WHOSE PERMISSIONS ARE OUT OF DATE: a provider writes its granted permission set into the token at consent time, so a connection authorized before a permission was approved does not carry it and never will \u2014 those calls are refused by the provider and no retry or wait can change it. Check this FIRST when a connected provider starts refusing things. The fix is a browser: the user reconnects under Workspace > Connectors. A paste-a-key account needs no browser at all: connect_connector connects it from here if the user prefers that to the app. Read-only, free.',
+    description: 'List the third-party accounts connected to this workspace (Meta, Google Ads, Google Drive/Sheets/Docs, YouTube, LinkedIn, OneDrive, Slack, …) — provider, status and the connected account label — PLUS which providers are available to connect. IT ALSO FLAGS A CONNECTION WHOSE PERMISSIONS ARE OUT OF DATE: a provider writes its granted permission set into the token at consent time, so a connection authorized before a permission was approved does not carry it and never will \u2014 those calls are refused by the provider and no retry or wait can change it. Check this FIRST when a connected provider starts refusing things. The fix is a browser: the user reconnects under Workspace > Connectors. Read-only, free.',
     inputSchema: {},
     outputSchema: { connectors: z.array(z.any()).optional(), providers: z.array(z.string()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },

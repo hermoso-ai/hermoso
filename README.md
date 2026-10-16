@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate finished image &
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**906 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**912 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **A Chrome extension too.** [Hermoso: save and clone ads](https://chromewebstore.google.com/detail/hermoso-save-and-clone-ad/kmknkbldeilchhblbfddfnfbadmgcklc)
@@ -235,7 +235,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 906 tools cover
+### What the 912 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
