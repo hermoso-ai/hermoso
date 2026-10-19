@@ -5191,7 +5191,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       hide: z.boolean().optional().describe('false to UNHIDE (default true)'),
     },
     outputSchema: { ok: z.boolean().optional(), hidden: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/threads/reply/hide', { replyId: a.replyId, hide: a.hide });
     return ok(`Reply ${a.replyId} ${d.hidden ? 'hidden' : 'unhidden'}.`, d);
@@ -9236,7 +9236,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       instoreProductLocation: z.string().nullable().optional().describe('local only, max 20 bytes'),
     },
     outputSchema: { merchantCenterId: z.string().optional(), kind: z.string().optional(), key: z.string().optional(), productKey: z.string().optional(), replaced: z.boolean().optional(), preserved: z.array(z.string()).optional(), cleared: z.array(z.string()).optional(), attributes: z.any().optional(), warning: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/merchant/inventory', a);
     return ok(d.note, d);
@@ -9723,7 +9723,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), changed: z.boolean().optional(), networks: z.object({}).passthrough().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/networks', a);
     return ok(d.note || `campaign ${a.campaignId} networks updated.`, d);
@@ -11498,7 +11498,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Subscribe a Stripe customer (cus_…) to a price (price_…), optional quantity and trialDays. THIS CHARGES THE CUSTOMER'S SAVED PAYMENT METHOD when there is no trial, so it ALWAYS needs confirm:true (test keys included) after you show the user exactly what will be created. Read back; an INCOMPLETE status means no chargeable card is on file. Needs Stripe connected (Settings > Connectors > Stripe, or connect_connector).",
     inputSchema: { customerId: z.string(), priceId: z.string(), quantity: z.number().optional(), trialDays: z.number().optional(), metadata: z.record(z.any()).optional(), confirm: z.boolean().optional() },
     outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/stripe/subscription', a); return ok(d.note, d); }));
   server.registerTool('cancel_stripe_subscription', {
     title: 'cancel stripe subscription',
@@ -11512,7 +11512,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Refund a Stripe charge (ch_… or a pi_… payment intent): the full refundable amount, or a partial `amount` in major units; optional reason duplicate / fraudulent / requested_by_customer. ALWAYS needs confirm:true, test keys included. Read back. Needs Stripe connected (Settings > Connectors > Stripe, or connect_connector).",
     inputSchema: { chargeId: z.string(), amount: z.number().optional(), reason: z.string().optional(), confirm: z.boolean().optional() },
     outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/stripe/refund', a); return ok(d.note, d); }));
   // ---------- HubSpot (2026-09-09): the brand's OWN CRM — contacts, an upsert by email, lead forms → contacts, deals ----------
   server.registerTool('list_hubspot_contacts', {
@@ -11923,7 +11923,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       update: z.array(z.object({ criterionId: z.string(), bidAdjustment: z.number().describe('whole percent, -90 to 900') })).optional(),
       confirm: z.boolean().optional().describe('REQUIRED true when the campaign is ACTIVE'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/microsoft-ads/profile-targeting', a); return ok(d.note, d); }));
   server.registerTool('set_microsoft_ads_budget', {
     title: 'Set a Microsoft Advertising daily budget',
@@ -12196,7 +12196,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       clickUrl: z.string().optional(), impressionUrl: z.string().optional(), confirm: z.boolean().optional().describe('required for a spend change on a LIVE campaign'),
     },
     outputSchema: { ...alOut, changed: z.array(z.string()).optional(), campaign: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/campaign/update', a); return ok(d.note, d); }));
   server.registerTool('set_applovin_ads_status', {
     title: 'Turn an AppLovin campaign or creative set live or paused',
@@ -12220,7 +12220,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Create an AppLovin creative set from uploaded asset ids, born PAUSED, optionally inside a campaign. It must hold EITHER an HTML playable OR a portrait image (IMG_INTER_P) plus a video; Hermoso checks that against AppLovin’s own asset types before creating it.' + AL_CM_NOTE,
     inputSchema: { name: z.string(), assetIds: z.array(z.string()).describe('AppLovin asset ids'), campaignId: z.string().optional(), countries: alIds, languages: alIds.describe('e.g. ENGLISH'), url: z.string().optional().describe('landing page for this set only (WEB)') },
     outputSchema: { ...alOut, creativeSet: z.any().optional(), pausedAfterCreate: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/creative-set', a); return ok(d.note, d); }));
   server.registerTool('remove_applovin_ads_creative_set', {
     title: 'Remove an AppLovin creative set from its campaigns',
@@ -12234,14 +12234,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Edit an AppLovin creative set, read back: rename it, change its countries or languages (an empty list means all), its landing page (url; "" falls back to the campaign’s), replace its assets (assetIds, checked against AppLovin’s own asset types first), or add it to more campaigns (addToCampaignIds, up to 20). Adding a LIVE set to a LIVE campaign needs confirm:true. Status is set_applovin_ads_status.' + AL_CM_NOTE,
     inputSchema: { creativeSetId: z.string(), name: z.string().optional(), countries: alIds.describe('ISO codes; [] = all countries'), languages: alIds.describe('e.g. ENGLISH; [] = all'), url: z.string().optional().describe('landing page for this set; "" = the campaign’s'), assetIds: alIds.describe('REPLACES the set’s assets'), addToCampaignIds: alIds.describe('also run it in these campaigns (up to 20)'), confirm: z.boolean().optional().describe('required to add a LIVE set to a LIVE campaign') },
     outputSchema: { ...alOut, changed: z.array(z.string()).optional(), creativeSet: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/creative-set/update', a); return ok(d.note, d); }));
   server.registerTool('clone_applovin_ads_creative_set', {
     title: 'Copy an AppLovin creative set into another campaign (paused)',
     description: 'Copy an AppLovin creative set into another campaign, born PAUSED and read back. AppLovin only clones a set that already belongs to a campaign.' + AL_CM_NOTE,
     inputSchema: { creativeSetId: z.string(), campaignId: z.string().describe('the campaign to copy it into') },
     outputSchema: { ...alOut, sourceId: z.string().optional(), campaignId: z.string().optional(), version: z.string().optional(), creativeSet: z.any().optional(), pausedAfterCreate: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/creative-set/clone', a); return ok(d.note, d); }));
   server.registerTool('list_applovin_ads_catalogs', {
     title: 'List AppLovin catalogs',
@@ -12770,7 +12770,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       budgetOrderIds: z.array(z.string()).optional().describe('budget order id(s) from list_apple_ads_budget_orders to assign this campaign to — a budget order is a spend CEILING SHARED across every campaign assigned to it, and it works ALONGSIDE dailyBudget rather than instead of it. Without this a budget order can never be drawn from.'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/update', a); return ok(`Apple Ads ${d.level} ${d.id} updated (verified: ${d.verified}):\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('set_apple_ads_status', {
@@ -13060,7 +13060,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true. Without it nothing changes and the refusal states the campaign and the exact budget or CPA change.'),
     },
     outputSchema: { ok: z.boolean().optional(), type: z.string().optional(), id: z.string().optional(), state: z.string().optional(), campaignId: z.string().nullable().optional(), armsSpend: z.boolean().optional(), verified: z.boolean().optional(), applied: z.any().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/recommendation/apply', a); return ok(`Apple Ads ${d.type} recommendation ${d.id} — ${d.verified ? 'APPLIED' : 'NOT CONFIRMED'}:\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('dismiss_apple_ads_recommendation', {
@@ -13147,7 +13147,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       invoiceName: z.string().optional(), orderNumber: z.string().optional(), clientName: z.string().optional(), primaryBuyerName: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/budget-order', a); return ok(`Apple Ads budget order created:\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('update_apple_ads_budget_order', {
@@ -13166,7 +13166,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       primaryBuyerName: z.string().optional(), primaryBuyerEmail: z.string().optional(), billingEmail: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), requested: z.any().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/budget-order/update', a); return ok(`Apple Ads budget order ${d.id} updated (verified: ${d.verified}):\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('bulk_apple_ads_keywords', {
@@ -13181,7 +13181,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('Required only when the target ad group or campaign is already ENABLED, where the new keywords could serve immediately.'),
     },
     outputSchema: { ok: z.boolean().optional(), kind: z.string().optional(), op: z.string().optional(), requested: z.number().optional(), succeeded: z.number().optional(), failed: z.number().optional(), verified: z.boolean().optional(), results: z.array(z.any()).optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/keywords/bulk', a); return ok(`${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('search_apple_ads_geo', {
@@ -13267,7 +13267,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       purchaseOrderNumber: z.string().optional(),
     },
     outputSchema: { accountId: z.string().optional(), campaignId: z.string().optional(), updated: z.array(z.string()).optional(), changed: z.number().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/campaign-update', a); return ok(d.note, d); }));
   server.registerTool('update_x_ads_line_item', {
     title: 'Change an X line item (ad group)',
@@ -13283,7 +13283,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       totalBudget: z.number().optional().describe('only if the campaign is not budget-optimised'),
     },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), updated: z.array(z.string()).optional(), changed: z.number().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/line-item-update', a); return ok(d.note, d); }));
   server.registerTool('list_x_ads_promoted_tweets', {
     title: 'List X promoted posts',
@@ -13504,7 +13504,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       expectedRevision: z.union([z.number(), z.string()]).optional().describe('REQUIRED for replace, optional for add/remove — membershipRevision from get_openai_ads_audience'),
     },
     outputSchema: { operationId: z.string().optional(), audienceId: z.string().optional(), operation: z.string().optional(), status: z.string().optional(), membersSent: z.number().optional(), rejected: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/audience/members', a); return ok(d.note, d); }));
   server.registerTool('list_openai_ads_audience_operations', {
     title: 'List ChatGPT Ads audience membership operations',
@@ -13653,7 +13653,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       products: z.array(z.record(z.any())).describe('[{id, variants:[{id, title?, price?:{amount:int minor units, currency}, availability?:{available:bool}|{status:"in_stock"|"out_of_stock"}}]}]'),
     },
     outputSchema: { feedId: z.string().optional(), accepted: z.boolean().optional(), products: z.number().optional(), variants: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/openai-ads/feed-products', a); return ok(d.note, d); }));
   server.registerTool('update_openai_ads_object', {
     title: 'Edit a ChatGPT Ads campaign / ad group / ad',
@@ -13677,7 +13677,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to change budget / bid / creative on a LIVE object'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), object: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/update', a);
     return ok(d.note, d);
@@ -13853,7 +13853,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/lead-form/update', a))));
   server.registerTool('publish_openai_ads_lead_form', {
     title: 'Publish a ChatGPT Ads lead form', description: 'Publish the current draft of a ChatGPT Ads lead form so Business Agents can use it. expectedDraftRevisionId is the draftRevisionId you last read. Show the user the fields before publishing: the form is what real people will see.',
-    inputSchema: { leadFormId: z.string(), expectedDraftRevisionId: z.string() }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    inputSchema: { leadFormId: z.string(), expectedDraftRevisionId: z.string() }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/lead-form/publish', a))));
   server.registerTool('archive_openai_ads_lead_form', {
     title: 'Archive a ChatGPT Ads lead form', description: 'Archive a ChatGPT Ads lead form. Not reversible through the API, and refused by ChatGPT Ads while a PUBLISHED Business Agent references it. confirm:true is required; without it nothing changes and the reply says what would.',
@@ -13890,7 +13890,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       businessAgentId: z.string().optional().describe('replace THIS agent’s configuration instead of creating a new one'),
       name: z.string(), instructions: z.string(), description: z.string().optional(), privacyPolicyUrl: z.string().optional(),
       conversationStarters: z.array(z.string()).optional(), productFeedIds: z.array(z.string()).optional(), connectorIds: z.array(z.string()).optional(), toolIds: z.array(z.string()).optional(), leadFormId: z.string().optional(),
-    }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/business-agent', a))));
   server.registerTool('get_openai_ads_business_agent', {
     title: 'Read a ChatGPT Ads Business Agent', description: 'One Business Agent with its full configuration and publish state. Read-only, 0 credits.',
@@ -13902,7 +13902,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/business-agent/preview', a))));
   server.registerTool('publish_openai_ads_business_agent', {
     title: 'Publish a ChatGPT Ads Business Agent', description: 'Publish a Business Agent’s draft so every campaign referencing it serves this version to real users. confirm:true required; show the user the instructions first.',
-    inputSchema: { businessAgentId: z.string(), confirm: z.boolean().optional() }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    inputSchema: { businessAgentId: z.string(), confirm: z.boolean().optional() }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/business-agent/publish', a))));
   server.registerTool('list_openai_ads_spend_windows', {
     title: 'List ChatGPT Ads account spending limits', description: 'Account-level SPENDING LIMITS on ChatGPT Ads, both kinds: the date-range SPEND-LIMIT WINDOWS (a ceiling on what the whole account may spend between an inclusive start date and an exclusive end date, with amount and spent so far) and the DAILY LIMIT (a per-day ceiling that renews at midnight in the account timezone, with what is spent and left today). Also returns the configuration `revision` that set_openai_ads_daily_spend_limit and remove_openai_ads_daily_spend_limit need as expectedRevision, and the earliest date a new daily limit may start. A limit caps spend; it never makes anything spend. OpenAI serves account spending limits only to ad accounts on postpaid INVOICE billing, and every spending-limit request, reads included, needs billing-management permission: a card-billed account is refused (a 403 that says only admins can do it) from any key, including one its own admin created. Read-only, 0 credits.',
@@ -13911,7 +13911,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('set_openai_ads_spend_window', {
     title: 'Create or edit a ChatGPT Ads spend-limit window', description: 'Create (no windowId) or edit (windowId) an account-level spend-limit window on ChatGPT Ads: startDate YYYY-MM-DD inclusive, endDate YYYY-MM-DD EXCLUSIVE (the window ends the day before), amount in the account currency (sent as micros), optional name and insertion-order id (ioId). A window is a CEILING on what the whole account may spend in that range; it never makes anything spend, and campaign budgets still apply underneath it. On edit, pass only the fields that change; a window whose canEdit is false (already started, per OpenAI) cannot be edited. Raising the amount lets campaigns spend up to their budgets, so show the user the old and new amounts. Reply carries the stored window (amount, spent so far, status). The live API serves this path since at least 2026-09-12 (it answered "Invalid URL" on 2026-09-03). It needs postpaid INVOICE billing and billing-management permission; a card-billed account is refused whatever key is used.',
     inputSchema: { windowId: z.string().optional(), startDate: z.string().optional(), endDate: z.string().optional(), amount: z.number().optional(), name: z.string().optional(), ioId: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/spend-window', a))));
   server.registerTool('delete_openai_ads_spend_window', {
     title: 'Delete a ChatGPT Ads spend-limit window', description: 'Delete an active or scheduled spend-limit window before it ends — this REMOVES a spending ceiling. confirm:true required.',
@@ -14128,7 +14128,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to change bid / budget / campaign on a LIVE ad group'),
     },
     outputSchema: { ok: z.boolean().optional(), adAccountId: z.string().optional(), campaignId: z.string().optional(), adGroupId: z.string().optional(), changed: z.array(z.string()).optional(), adGroup: z.record(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-ad-group/update', a); return ok(d.note, d); }));
   server.registerTool('update_pinterest_ads_ad', {
     title: 'Edit a Pinterest ad',
@@ -14156,7 +14156,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pinId: z.string().optional().describe('DRAFT ads only — Pinterest refuses it on any other status'),
     },
     outputSchema: { ok: z.boolean().optional(), adAccountId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().optional(), changed: z.array(z.string()).optional(), reviewStatus: z.string().optional(), ad: z.record(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-ad/update', a); return ok(d.note, d); }));
   server.registerTool('set_pinterest_ads_budget', {
     title: 'Set a Pinterest campaign budget',
@@ -14379,7 +14379,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       allowComments: z.boolean().describe('REQUIRED — Reddit demands allow_comments on every post update, and it is the only field it permits'),
     },
     outputSchema: { id: z.string().optional(), headline: z.string().optional(), allowComments: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/posts/update', a);
     return ok(d.note, d);
@@ -14475,7 +14475,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       schedule: z.array(z.any()).optional(),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), budget: z.number().nullable().optional(), productSetId: z.string().nullable().optional(), shoppingType: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ad-groups/update', a);
     return ok(d.note, d);
@@ -14568,7 +14568,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       supplementaryText: z.string().optional().describe('up to 100 characters'),
       userGeneratedContent: z.enum(['OPT_IN', 'OPT_OUT']).optional(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/reddit-ads/max-template/update', a); return ok(d.note, d); }));
   server.registerTool('update_reddit_ads_ad', {
     title: 'Edit a Reddit ad',
@@ -14581,7 +14581,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       clickUrl: z.string().optional().describe('pass an empty string to clear it'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ads/update', a);
     return ok(d.note, d);
@@ -14600,7 +14600,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endTime: z.string().optional(),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/campaign/update', a);
     return ok(d.note, d);
@@ -14814,7 +14814,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       })).describe('up to 2,500 rows; every row must carry the same fields'),
     },
     outputSchema: { ok: z.boolean().optional(), customAudienceId: z.string().optional(), action: z.string().optional(), rows: z.number().optional(), sizeUpper: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/audiences/users', a);
     return ok(d.note, d);
@@ -14867,7 +14867,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       targeting: z.record(z.any()).optional().describe('REPLACES the existing targeting'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), activeAdGroups: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/saved-audiences/update', a);
     return ok(d.note, d);
@@ -15848,7 +15848,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       leadSource: z.string().optional().describe('INSTANT_FORM (default) or DIRECT_MESSAGE'),
     },
     outputSchema: { action: z.string().optional(), advertiserId: z.string().optional(), leadSource: z.string().optional(), leadId: z.string().nullable().optional(), pageId: z.string().nullable().optional(), campaignId: z.string().nullable().optional(), adgroupId: z.string().nullable().optional(), adId: z.string().nullable().optional(), leadData: z.any().optional(), deleted: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/test-lead', a);
     return ok(`${d.action === 'delete' ? `Test lead ${d.leadId} deleted.` : d.leadId ? `Test lead ${d.leadId} on form ${d.pageId}: ${JSON.stringify(d.leadData)}` : 'No test lead exists on that form.'} ${d.note}`, d);
@@ -16244,7 +16244,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       operation: z.enum(['HIDDEN', 'PUBLIC']).describe('HIDDEN takes them out of public view; PUBLIC puts them back'),
     },
     outputSchema: { advertiserId: z.string().optional(), commentIds: z.array(z.string()).optional(), operation: z.string().optional(), applied: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/comment-moderate', a);
     return ok(d.note, d);
@@ -16364,7 +16364,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true only to turn coverAllObjectives ON for the first time, because that is irreversible'),
     },
     outputSchema: { advertiserId: z.string().optional(), applied: z.boolean().optional(), before: z.any().optional(), after: z.any().optional(), changed: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/brand-safety', a);
     return ok(d.note, d);
@@ -16477,7 +16477,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirmScope: z.string().optional().describe('required in the same case — the scope token the refusal prints, computed from the version being sent'),
     },
     outputSchema: { advertiserId: z.string().optional(), ruleId: z.string().optional(), klass: z.string().optional(), canSpend: z.boolean().optional(), armingActions: z.array(z.string()).optional(), rule: z.any().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/rule-update', a);
     return ok(d.note, d);
@@ -16888,7 +16888,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       sendNotification: z.boolean().optional().describe('default false'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), campaignId: z.string().optional(), handleNames: z.array(z.string()).optional(), advertiserIds: z.array(z.string()).optional(), added: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/tto-campaign-update', a);
     return ok(d.note, d);
@@ -17310,7 +17310,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endTime: z.string().optional().describe('ISO 8601'),
     },
     outputSchema: { id: z.string().optional(), adAccountId: z.string().optional(), campaignId: z.string().optional(), name: z.string().optional(), status: z.string().optional(), optimizationGoal: z.string().optional(), dailyBudget: z.number().nullable().optional(), dailyBudgetMicro: z.number().nullable().optional(), currency: z.string().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/adsquad', a);
     const money = d.dailyBudget != null ? ` Daily budget ${d.dailyBudget} ${d.currency || ''} (${d.dailyBudgetMicro} micro).` : '';

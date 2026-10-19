@@ -1810,7 +1810,7 @@ export function libraryToolDefs() {
         campaignId: z.string().max(80).describe('the campaign id'),
         status: z.enum(['active', 'paused']).describe("'paused' stops it; 'active' turns it on and starts spending"),
       },
-      annotations: { title: 'Pause or turn on a campaign', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      annotations: { title: 'Pause or turn on a campaign', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       _meta: { ...APP_ONLY },
     },
   };
