@@ -137,7 +137,7 @@ export function signInMessage(status, body, msg, isSignedOut = signedOut()) {
 }
 
 // unwrap the {data}|{error} envelope; throw a clean Error (with .status) on failure
-async function unwrap(res) {
+async function unwrap(res, { read = false } = {}) {
   let body = null;
   try { body = await res.json(); } catch {}
   if (!res.ok) {
@@ -151,7 +151,15 @@ async function unwrap(res) {
   // WHAT THIS CALL WAS CHARGED (2026-10-19). A paid route answers {data, creditsUsed}, and the unwrap below drops the
   // sibling, so a synchronous paid tool's reply could never say what it cost. It is added to the running tool call's
   // tally (toolCtx), which wrap() in tools.mjs states once at the end of the reply. Free routes answer 0 or nothing.
-  try { const c = body && typeof body === 'object' ? Number(body.creditsUsed) : NaN; const st = toolCtx.getStore(); if (st && Number.isFinite(c) && c > 0) st.apiCharged = (st.apiCharged || 0) + c; } catch {}
+  // Two shapes, both measured: a sibling {data, creditsUsed} (the research routes) and creditsUsed INSIDE data (generate_voice
+  // and the other generate routes; the first live run of this tally printed nothing on the CLI because of it). Inside-data
+  // counts only on a write: a GET that returns a record may carry a past charge, which is not this call's.
+  try {
+    const sib = body && typeof body === 'object' ? Number(body.creditsUsed) : NaN;
+    const inner = !read && body && body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? Number(body.data.creditsUsed) : NaN;
+    const c = Number.isFinite(sib) ? sib : inner;
+    const st = toolCtx.getStore(); if (st && Number.isFinite(c) && c > 0) st.apiCharged = (st.apiCharged || 0) + c;
+  } catch {}
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
 }
 
@@ -209,7 +217,7 @@ export async function apiGet(p, query) {
   const clean = query && Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''));
   const qs = clean && Object.keys(clean).length ? '?' + new URLSearchParams(clean).toString() : '';
   const res = await fetchRead(`${API_BASE}${withBrandScope(`${p}${qs}`)}`, { headers: headers() });
-  return unwrap(res);
+  return unwrap(res, { read: true });
 }
 
 // ── A TRANSPORT FAILURE IS NOT A DEFECT, AND IT MUST NOT READ LIKE ONE (2026-08-31) ────────────────────────────
