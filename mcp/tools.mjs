@@ -2188,6 +2188,49 @@ export const CORE_FIRST_HEADLINE = Object.freeze([
   'schedule_post', 'list_library', 'upload_file', 'post_performance', 'analyze_campaigns',
 ]);
 export const CORE_FIRST_EXTRA = Object.freeze(['get_brand', 'get_job', 'list_jobs', 'list_connectors', 'list_scheduled', ...CORE_FIRST_HEADLINE]);
+// CHATGPT CARRIES MORE THAN THE SHORT LIST (2026-10-16, the owner: "eventually make all the features available"). A widget
+// host may not use the generic executor (OpenAI's rule, EXECUTOR_TOOLS), so a tool ChatGPT does not LIST, it cannot
+// reach at all: publishing straight to one channel, managing the schedule and running the brand's own campaigns
+// were simply absent there. They ride in the ChatGPT roster by name. Connector-gated ones still list only for an
+// account that has connected that provider. Each new name goes through OpenAI's own scan before it is live.
+export const WIDGET_HOST_EXTRA = Object.freeze([
+  'post_to_meta', 'post_to_x', 'post_to_linkedin', 'post_to_linkedin_page', 'post_to_tiktok', 'post_to_youtube',
+  'post_to_pinterest', 'post_to_bluesky', 'post_to_telegram', 'post_to_google_business',
+  'reschedule_post', 'cancel_scheduled', 'list_connector_accounts', 'search_meta_ads',
+  'list_meta_ads', 'meta_insights', 'set_meta_campaign_status',
+  'list_google_ads_campaigns', 'google_ads_report', 'set_google_ads_status',
+  // Second batch (2026-10-16): build, run and report campaigns on every ad platform, the inbox and comments,
+  // and channel analytics, plus the account/page/targeting lookups those tools name as their inputs.
+  'create_meta_campaign', 'create_meta_adset', 'create_meta_ad', 'upload_meta_asset', 'update_meta_object',
+  'preview_meta_ad', 'estimate_meta_reach', 'list_meta_audiences', 'create_meta_audience',
+  'create_google_ads_campaign', 'create_google_ads_ad_group', 'create_google_ads_ad', 'set_google_ads_budget',
+  'list_tiktok_ads_campaigns', 'tiktok_ads_report', 'create_tiktok_ads_campaign', 'create_tiktok_ads_ad_group',
+  'create_tiktok_ads_ad', 'set_tiktok_ads_status', 'set_tiktok_ads_budget', 'list_linkedin_ads_campaigns',
+  'linkedin_ads_report', 'create_linkedin_ads_campaign_group', 'create_linkedin_ads_campaign',
+  'create_linkedin_ads_creative', 'set_linkedin_ads_status', 'set_linkedin_ads_budget',
+  'list_pinterest_ads_campaigns', 'pinterest_ads_report', 'create_pinterest_ads_campaign',
+  'create_pinterest_ads_ad_group', 'create_pinterest_ads_ad', 'set_pinterest_ads_status',
+  'set_pinterest_ads_budget', 'list_reddit_ads_campaigns', 'reddit_ads_report', 'create_reddit_ads_campaign',
+  'create_reddit_ads_ad_group', 'create_reddit_ads_ad', 'set_reddit_ads_status', 'list_microsoft_ads_campaigns',
+  'microsoft_ads_report', 'create_microsoft_ads_campaign', 'create_microsoft_ads_ad_group',
+  'create_microsoft_ads_ad', 'set_microsoft_ads_status', 'set_microsoft_ads_budget', 'list_openai_ads_campaigns',
+  'openai_ads_report', 'create_openai_ads_campaign', 'create_openai_ads_ad_group', 'create_openai_ads_ad',
+  'set_openai_ads_status', 'set_openai_ads_budget', 'list_snapchat_ads_campaigns', 'snapchat_ads_report',
+  'create_snapchat_ads_campaign', 'create_snapchat_ads_ad_squad', 'create_snapchat_ads_ad',
+  'set_snapchat_ads_status', 'set_snapchat_ads_budget', 'list_x_ads_campaigns', 'x_ads_report',
+  'create_x_ads_campaign', 'create_x_ads_line_item', 'create_x_ads_promoted_tweet', 'set_x_ads_status',
+  'list_inbox', 'reply_to_inbox_item', 'list_meta_comments', 'reply_to_meta_comment', 'list_youtube_comments',
+  'reply_to_youtube_comment', 'list_tiktok_comments', 'reply_to_tiktok_comment', 'instagram_insights',
+  'meta_page_insights', 'meta_post_insights', 'youtube_channel_report', 'tiktok_account_insights',
+  'linkedin_page_analytics', 'analytics_report', 'list_meta_pages', 'list_meta_posts',
+  'list_meta_lead_forms', 'upload_google_ads_asset', 'list_tiktok_ads_accounts', 'list_tiktok_ads_identities',
+  'upload_tiktok_ads_creative', 'search_tiktok_ads_targeting', 'search_linkedin_ads_targeting',
+  'list_linkedin_pages', 'search_reddit_ads_targeting', 'list_reddit_ads_posts', 'create_reddit_ads_post',
+  'microsoft_ads_geo_search', 'openai_ads_geo_search', 'list_openai_ads_audiences', 'list_snapchat_ads_accounts',
+  'search_snapchat_ads_targeting', 'upload_snapchat_ads_creative', 'list_x_ads_accounts',
+  'set_connector_accounts', 'youtube_channel', 'x_post_metrics', 'list_analytics_properties',
+  'moderate_meta_comment', 'list_brands',
+]);
 // Hosts that have been SEEN to follow find_tools → call_tool. A name that does not match keeps the full roster.
 // WIDENED 2026-09-25 ON EVIDENCE: Gemini CLI (0.60, clientInfo "gemini-cli-mcp-client"), Grok (clientInfo "grok", UA
 // grok-connectors-manager) and Mistral Le Chat / Vibe (clientInfo "mcp", so it is recognised by its UA MistralAI-MCPClient)
@@ -2244,7 +2287,10 @@ export function parseToolScope(raw) {
 // `delete_brand` JOINED THEM 2026-09-30 (owner's call, for the 1.0.0 review): destroying a whole workspace is a heavy,
 // irreversible action a reviewer has to reason about, and it is always one click away in the Hermoso app. Every other
 // surface keeps it.
-export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand']);
+// connect_connector takes a pasted key in the conversation, which ChatGPT's review refuses (connect in the app instead);
+// x_post_insights / x_post_insights_historical need X analytics access our X app does not hold today, so ChatGPT's scan
+// read their descriptions as claiming what the tool cannot do (2026-10-18). x_post_metrics answers there.
+export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand', 'connect_connector', 'x_post_insights', 'x_post_insights_historical']);
 // ── WHAT A WIDGET HOST (CHATGPT) LISTS, AFTER OPENAI'S AUTOMATED PLUGIN SCAN (2026-09-30) ──────────────────────────
 // Two rules from developers.openai.com/plugins/plugin-guidelines.md, both HOST rules: every other surface keeps today's
 // roster exactly.
@@ -2514,11 +2560,17 @@ export function defForHost(name, def, widgetHost) {
 // by-reference property) and a def with nothing to rename comes back as itself.
 const WIDGET_RENAME_RE = new RegExp(`\\b(${Object.keys(WIDGET_HOST_RENAMES).join('|')})\\b`, 'g');
 const _widgetRenamed = new WeakMap();
+// …AND A "(Settings > Connectors > X, or connect_connector)" CLAUSE LOSES ITS SECOND HALF THERE (2026-10-18). On ChatGPT a
+// key is connected in the Hermoso app, never pasted into the conversation, and OpenAI's scan held tools whose text
+// offered that (post_to_bluesky / post_to_telegram, 2026-10-16). The app half of the sentence stays.
+const WIDGET_KEY_PASTE_RE = /,? or connect_connector\b[^.;)]*/g;
 function renamedForWidgetHost(def) {
-  if (!def || typeof def.description !== 'string' || !WIDGET_RENAME_RE.test(def.description)) { WIDGET_RENAME_RE.lastIndex = 0; return def; }
-  WIDGET_RENAME_RE.lastIndex = 0;
+  const d = def && typeof def.description === 'string' ? def.description : '';
+  const rename = !!d && WIDGET_RENAME_RE.test(d); WIDGET_RENAME_RE.lastIndex = 0;
+  const paste = !!d && WIDGET_KEY_PASTE_RE.test(d); WIDGET_KEY_PASTE_RE.lastIndex = 0;
+  if (!rename && !paste) return def;
   let hit = _widgetRenamed.get(def);
-  if (!hit) { hit = { ...def, description: def.description.replace(WIDGET_RENAME_RE, (m) => WIDGET_HOST_RENAMES[m] || m) }; _widgetRenamed.set(def, hit); }
+  if (!hit) { hit = { ...def, description: d.replace(WIDGET_RENAME_RE, (m) => WIDGET_HOST_RENAMES[m] || m).replace(WIDGET_KEY_PASTE_RE, '') }; _widgetRenamed.set(def, hit); }
   return hit;
 }
 
@@ -2903,7 +2955,13 @@ function newToolScope(opts) {
 // A core-first roster carries the `core` group plus CORE_FIRST_EXTRA — see the block beside that constant.
 // Expressed as a predicate rather than as a branch inside applyToolGates so the check can RUN it.
 // A widget-host alias (WIDGET_HOST_RENAMES) is listed exactly when the tool it renames would be.
-export const listedInCoreFirst = (name, group, ctx) => ctx.enabledGroups.has(group) || (!!ctx.coreFirst && CORE_FIRST_EXTRA.includes(WIDGET_HOST_ALIAS_OF[name] || name));
+// EVERY FEATURE ON CHATGPT (2026-10-18, the owner: "get all the rest of our features in our ChatGPT plugin"). A widget host
+// cannot use the generic executor, so a tool it does not list is a feature it does not have; the batches in
+// WIDGET_HOST_EXTRA (21, then 129 names) left ~620 out. A widget host now lists every tool, and the connector gate keeps
+// each provider's tools off until that provider is connected (measured 2026-10-18: nothing connected 43 -> 134 tools,
+// socials connected 76 -> 308, everything connected 163 -> 892). WIDGET_HOST_EXTRA stays as the record of what passed
+// OpenAI's scan in the first two rounds.
+export const listedInCoreFirst = (name, group, ctx) => ctx.enabledGroups.has(group) || (!!ctx.coreFirst && (CORE_FIRST_EXTRA.includes(WIDGET_HOST_ALIAS_OF[name] || name) || !!ctx.widgetHost));
 // THE THREE REASONS A REGISTERED TOOL IS HELD BACK. Applied identically on the build path, the replay path and
 // `enable_tools`, from ONE function, because a gate applied at two of the three is a gate a group flip undoes.
 //
@@ -3714,7 +3772,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('post_to_bluesky', {
     title: 'Post to Bluesky',
-    description: "Publish a post to Bluesky as the connected account. Text up to 300 characters — Bluesky ALSO caps a post at 3000 UTF-8 bytes, so an emoji-heavy post can be under 300 characters and still be refused; Hermoso checks both before spending the round trip and says which limit and by how much. MEDIA: either up to 4 images (imageUrls + altText) OR one MP4 video (videoUrl + videoAlt), never both — a Bluesky post record carries a single embed and images and video are two different embed types. Video is MP4 only, up to 300MB at Bluesky's end (Hermoso can fetch up to 150MB from a URL), with optional WebVTT caption tracks; the aspect ratio is measured from the file. Bluesky requires a CONFIRMED EMAIL on the account before it will process any video — if it is unconfirmed you get a refusal saying so, and reconnecting will not help. Links in the text are made clickable automatically. LINK CARDS: Bluesky does NOT scrape links, so a URL posted bare renders as plain blue text — the client composing the post has to build the card. Hermoso builds one AUTOMATICALLY when the post has a URL and NO media: it fetches the page, uses its title/description and uploads its image as the card thumbnail. Pass linkCard:false to suppress it, or linkCard:{uri,title,description,thumbUrl} to control it (give both title and description and the page is not fetched at all). A POST CARRIES ONE EMBED, so a card and images/video cannot both ride: if you pass linkCard explicitly ALONGSIDE media the call is REFUSED by name rather than silently dropping one, and if the URL was merely in the text the MEDIA WINS and the reply says the card was skipped (the link stays clickable either way). Returns the post's public bsky.app URL. Connect at Settings > Connectors > Bluesky, or here with connect_connector, with a handle and an APP PASSWORD.",
+    description: "Use this when the user wants to post to Bluesky. Publishing costs no credits. Publish a post to Bluesky as the connected account. Text up to 300 characters — Bluesky ALSO caps a post at 3000 UTF-8 bytes, so an emoji-heavy post can be under 300 characters and still be refused; Hermoso checks both before spending the round trip and says which limit and by how much. MEDIA: either up to 4 images (imageUrls + altText) OR one MP4 video (videoUrl + videoAlt), never both — a Bluesky post record carries a single embed and images and video are two different embed types. Video is MP4 only, up to 300MB at Bluesky's end (Hermoso can fetch up to 150MB from a URL), with optional WebVTT caption tracks; the aspect ratio is measured from the file. Bluesky requires a CONFIRMED EMAIL on the account before it will process any video — if it is unconfirmed you get a refusal saying so, and reconnecting will not help. Links in the text are made clickable automatically. LINK CARDS: Bluesky does NOT scrape links, so a URL posted bare renders as plain blue text — the client composing the post has to build the card. Hermoso builds one AUTOMATICALLY when the post has a URL and NO media: it fetches the page, uses its title/description and uploads its image as the card thumbnail. Pass linkCard:false to suppress it, or linkCard:{uri,title,description,thumbUrl} to control it (give both title and description and the page is not fetched at all). A POST CARRIES ONE EMBED, so a card and images/video cannot both ride: if you pass linkCard explicitly ALONGSIDE media the call is REFUSED by name rather than silently dropping one, and if the URL was merely in the text the MEDIA WINS and the reply says the card was skipped (the link stays clickable either way). Returns the post's public bsky.app URL. Connect at Settings > Connectors > Bluesky.",
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the profile has more than one bluesky account connected (several and none named is refused by name, never guessed); omit when there is one."),
       brand: HOOK_ATTR.brand,
@@ -3776,7 +3834,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('post_to_telegram', {
     title: 'Post to Telegram',
-    description: "Publish to a Telegram channel, group or chat as the brand's own bot. WHICH CHAT IS ALWAYS REQUIRED AND IS NEVER GUESSED: pass chatId as the public channel's @username (e.g. @hermosoai) or its numeric id (a group is negative; a supergroup or channel starts with -100). There is no default and there cannot be one — the Telegram Bot API publishes no method that lists the chats a bot belongs to, so Hermoso genuinely cannot know them. list_telegram_chats reports the chats that have MESSAGED the bot in the last 24 hours, which is a shortcut for finding an id and is NOT a roster: a chat missing from it can still be posted to. TEXT: up to 4096 characters on a text-only message, but only 1024 the moment ANY photo or video is attached — a caption is not a message, and Hermoso refuses the over-long one before spending the round trip and says which budget applied. MEDIA: one image (imageUrl), one video (videoUrl), or an ALBUM of 2–10 (imageUrls, in order) in which photos and videos may be MIXED — pass a videoUrl alongside imageUrls and it joins the album as one more item. Hermoso uploads the bytes rather than handing Telegram a link, which is what buys the larger ceilings: 10MB per photo and 50MB per video, where a link would be 5MB and 20MB. THE BOT MUST BE IN THE CHAT — an administrator with Post Messages for a channel, an unrestricted member for a group; if it is not, Telegram refuses and the error says to add it rather than to reconnect. Returns the message id and, for a PUBLIC chat, its t.me link — a private group has no public web link, so `url` comes back null rather than as a link that would 404 for whoever you hand it to. 0 credits. Connect at Settings > Connectors > Telegram, or here with connect_connector, by pasting a bot token from @BotFather.",
+    description: "Use this when the user wants to post to a Telegram channel or group. Publishing costs no credits. Publish to a Telegram channel, group or chat as the brand's own bot. WHICH CHAT IS ALWAYS REQUIRED AND IS NEVER GUESSED: pass chatId as the public channel's @username (e.g. @hermosoai) or its numeric id (a group is negative; a supergroup or channel starts with -100). There is no default and there cannot be one — the Telegram Bot API publishes no method that lists the chats a bot belongs to, so Hermoso genuinely cannot know them. list_telegram_chats reports the chats that have MESSAGED the bot in the last 24 hours, which is a shortcut for finding an id and is NOT a roster: a chat missing from it can still be posted to. TEXT: up to 4096 characters on a text-only message, but only 1024 the moment ANY photo or video is attached — a caption is not a message, and Hermoso refuses the over-long one before spending the round trip and says which budget applied. MEDIA: one image (imageUrl), one video (videoUrl), or an ALBUM of 2–10 (imageUrls, in order) in which photos and videos may be MIXED — pass a videoUrl alongside imageUrls and it joins the album as one more item. Hermoso uploads the bytes rather than handing Telegram a link, which is what buys the larger ceilings: 10MB per photo and 50MB per video, where a link would be 5MB and 20MB. THE BOT MUST BE IN THE CHAT — an administrator with Post Messages for a channel, an unrestricted member for a group; if it is not, Telegram refuses and the error says to add it rather than to reconnect. Returns the message id and, for a PUBLIC chat, its t.me link — a private group has no public web link, so `url` comes back null rather than as a link that would 404 for whoever you hand it to. 0 credits. Connect at Settings > Connectors > Telegram.",
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the profile has more than one telegram account connected (several and none named is refused by name, never guessed); omit when there is one."),
       brand: HOOK_ATTR.brand,
@@ -4762,7 +4820,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('moderate_meta_comment', {
     title: 'Hide, unhide or delete a Meta comment',
-    description: 'Moderate a comment on the brand’s Facebook or Instagram post. Prefer hide over delete — hiding is reversible and invisible to the commenter. Deleting is PERMANENT and requires confirm:true after the user has agreed.',
+    description: 'Moderate a comment on the brand’s Facebook or Instagram post. Hide is the default and can be undone. Deleting is PERMANENT and requires confirm:true after the user has agreed.',
     inputSchema: {
       commentId: z.string().describe('comment id from list_meta_comments'),
       action: z.enum(['hide', 'unhide', 'delete']).optional().describe('default hide'),
@@ -5253,7 +5311,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('post_to_meta', {
     title: 'Post to Facebook, Instagram or Threads',
-    description: 'Publish to a connected Facebook Page, its linked Instagram, OR the brand’s Threads account — text/link/image/VIDEO/CAROUSEL. A MULTI-SLIDE creative is a CAROUSEL, not several posts: pass the slides in order as imageUrls[] and they publish as ONE swipeable post (Instagram album, Threads carousel, Facebook multi-photo post). Never publish slide 1 of a deck on its own — the creative tells the viewer to swipe. target:"facebook" (default) posts to the Page; target:"instagram" publishes a photo or Reel to the linked IG business account (needs an image or video); target:"threads" posts to the connected Threads account (text, image, or video). Works with ANY media — a finished Hermoso ad OR an arbitrary user file: imageUrl/videoUrl accept a public https URL, a data: URI, or a Hermoso /generated path; for a LOCAL file (e.g. on the user’s desktop) call upload_file first and pass the url it returns. INSTAGRAM COLLAB: pass `collaborators` (up to 3 usernames) to invite other accounts to CO-AUTHOR the post — it then shows on their profile too once they accept, which is the reach play behind every creator partnership. This PUBLISHES immediately — confirm the copy + media with the user first. Needs a connected Meta account (Settings > Connectors > Meta) with posting permission; Threads needs its own connection.',
+    description: 'Use this when the user wants to post now to Facebook, Instagram or Threads. Publish to a connected Facebook Page, its linked Instagram, OR the brand’s Threads account — text/link/image/VIDEO/CAROUSEL. A MULTI-SLIDE creative is a CAROUSEL, not several posts: pass the slides in order as imageUrls[] and they publish as ONE swipeable post (Instagram album, Threads carousel, Facebook multi-photo post). Never publish slide 1 of a deck on its own — the creative tells the viewer to swipe. target:"facebook" (default) posts to the Page; target:"instagram" publishes a photo or Reel to the linked IG business account (needs an image or video); target:"threads" posts to the connected Threads account (text, image, or video). Works with ANY media — a finished Hermoso ad OR an arbitrary user file: imageUrl/videoUrl accept a public https URL, a data: URI, or a Hermoso /generated path; for a LOCAL file (e.g. on the user’s desktop) call upload_file first and pass the url it returns. INSTAGRAM COLLAB: pass `collaborators` (up to 3 usernames) to invite other accounts to CO-AUTHOR the post — it then shows on their profile too once they accept. This PUBLISHES immediately — confirm the copy + media with the user first. Needs a connected Meta account (Settings > Connectors > Meta) with posting permission; Threads needs its own connection.',
     // LOOSE ON PURPOSE (2026-09-30): an argument this schema does not declare is FORWARDED, not stripped, so a caption
     // sent as `caption` or a picture as `image_url` reaches the server and is refused BY NAME with the right field
     // (metaPostAliasRefusal). Stripped, it vanished and the call read as empty: five identical refusals in 35 minutes.
@@ -5268,7 +5326,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       allowDuplicate: z.boolean().optional().describe('post it even though an identical post was just made or attempted. Only pass this when the user genuinely wants the same thing posted twice, or when you have LOOKED at the account and confirmed a timed-out attempt did not land.'),
       async: z.boolean().optional().describe('publish in the BACKGROUND and return a job id to poll with get_job, instead of waiting. USE THIS FOR VIDEO: a Facebook or Instagram video publish routinely outlives an agent transport, and a timeout on the synchronous path leaves you unable to tell whether the post is live. With async:true nothing can time out — the job reports the post id and url when it lands.'),
       link: z.string().optional().describe('a URL to attach (FB text post only)'),
-      collaborators: z.array(z.string()).optional().describe('INSTAGRAM COLLAB \u2014 up to 3 Instagram usernames invited to CO-AUTHOR this post. Once one accepts, the post appears on THEIR profile too, with both handles in the header and the likes and comments shared \u2014 it is how a brand reaches a creator\u2019s audience without paying for placement, and it is the single most-asked thing a scheduler normally cannot do. Pass handles only ("hermosoai"), not profile links; a leading @ is fine. INSTAGRAM ONLY \u2014 Facebook and Threads have no collab post at all and are refused BY NAME rather than silently dropping the co-authors \u2014 and never on a Story. AN INVITE IS NOT A CO-POST: publishing SENDS a request the other account must accept in their Instagram notifications, and until they do the post is on this brand\u2019s profile ALONE; they may also decline, and Instagram sends no notification either way. So never report the post as live on both accounts \u2014 read the invite status back out of the reply, and use instagram_collaborators later to find out whether they accepted.'),
+      collaborators: z.array(z.string()).optional().describe('INSTAGRAM COLLAB \u2014 up to 3 Instagram usernames invited to CO-AUTHOR this post. Once one accepts, the post appears on THEIR profile too, with both handles in the header and the likes and comments shared. Pass handles only ("hermosoai"), not profile links; a leading @ is fine. INSTAGRAM ONLY \u2014 Facebook and Threads have no collab post at all and are refused BY NAME rather than silently dropping the co-authors \u2014 and never on a Story. AN INVITE IS NOT A CO-POST: publishing SENDS a request the other account must accept in their Instagram notifications, and until they do the post is on this brand\u2019s profile ALONE; they may also decline, and Instagram sends no notification either way. So never report the post as live on both accounts \u2014 read the invite status back out of the reply, and use instagram_collaborators later to find out whether they accepted.'),
       target: z.enum(['facebook', 'instagram', 'threads']).optional().describe('default facebook; instagram -> the Page’s linked IG; threads -> the brand’s connected Threads account'),
       account: z.string().optional().describe('WHICH Instagram account when target is instagram and the brand has several — Page-linked and Instagram Login accounts alike; an @username or id from list_connector_accounts("instagram"). Several and none named is refused by name; omit when there is one.'),
       scheduleAt: z.string().optional().describe('FACEBOOK ONLY — schedule instead of posting now. ISO timestamp (2026-08-01T09:00:00Z) or unix seconds; must be 10 minutes to 30 days ahead. Facebook holds the post and publishes it at that time, so nothing has to stay running on our side. Instagram and Threads have NO scheduling in Meta’s API — passing this for them is refused rather than silently posted immediately.'),
@@ -5344,7 +5402,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // no need for one edge case just for Facebook."
   server.registerTool('schedule_post', {
     title: 'Schedule a post for later',
-    description: 'Queue a post for a future time on one or more connected channels at once: facebook, instagram, threads, tiktok, youtube, linkedin, x, pinterest, bluesky, telegram — TEN channels, every one live. google_business is in the schema but HELD BACK (Google’s API allowlist) and is refused at enqueue. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order — never schedule just its first slide. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT (what “just queue it” means). imageUrl/videoUrl take a Hermoso render URL or an upload_file URL. `captions` gives a channel its own wording; the rest use `message`. PINTEREST AND YOUTUBE SHOW A TITLE: `title` (max 100 chars), derived from the caption when omitted; YOUTUBE also takes `description`, `tags`, `thumbnailUrl`. Every PER-CHANNEL SETTING is a parameter below, carried straight to the real publisher — TikTok’s `brandedContent` / `yourBrand` disclosures (set them whenever the post is commercial), Google Business `topicType` / `event` / `offer` / `actionType`, an X `thread` / `poll`, Instagram `collaborators`, and the rest. Channels are attempted INDEPENDENTLY: one failing never blocks the others. SOME CHANNELS MUST BE TOLD WHICH ACCOUNT, and Hermoso never guesses: Pinterest needs `boardId` (list_pinterest_boards) or is refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages) or it goes to the person’s own profile; several Facebook Pages need `pageId` (list_meta_pages), several Google Business listings `locationId` (list_business_locations) — resolve those FIRST and let the user pick, or the post is refused when it fires. A scheduled post GOES LIVE PUBLICLY by default on every channel, never quietly downgraded. Only if the user asks, set `visibility` (or `visibilityByChannel`): ‘unlisted’ (YouTube) · ‘private’ (YouTube, or TikTok SELF_ONLY) · ‘draft’ (TikTok, or an unpublished Facebook Page post). A visibility a channel cannot do is REFUSED now, never posted weaker later.',
+    description: 'Use this when the user wants to schedule a social media post for later, on one channel or several at once. Scheduling and publishing cost no credits on any Hermoso plan (X alone bills a few credits per call). Queue a post for a future time on one or more connected channels at once: facebook, instagram, threads, tiktok, youtube, linkedin, x, pinterest, bluesky, telegram — TEN channels, every one live. google_business is in the schema but HELD BACK (Google’s API allowlist) and is refused at enqueue. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order — never schedule just its first slide. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT (what “just queue it” means). imageUrl/videoUrl take a Hermoso render URL or an upload_file URL. `captions` gives a channel its own wording; the rest use `message`. PINTEREST AND YOUTUBE SHOW A TITLE: `title` (max 100 chars), derived from the caption when omitted; YOUTUBE also takes `description`, `tags`, `thumbnailUrl`. Every PER-CHANNEL SETTING is a parameter below, carried straight to the real publisher — TikTok’s `brandedContent` / `yourBrand` disclosures (set them whenever the post is commercial), Google Business `topicType` / `event` / `offer` / `actionType`, an X `thread` / `poll`, Instagram `collaborators`, and the rest. Channels are attempted INDEPENDENTLY: one failing never blocks the others. SOME CHANNELS MUST BE TOLD WHICH ACCOUNT, and Hermoso never guesses: Pinterest needs `boardId` (list_pinterest_boards) or is refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages) or it goes to the person’s own profile; several Facebook Pages need `pageId` (list_meta_pages), several Google Business listings `locationId` (list_business_locations) — resolve those FIRST and let the user pick, or the post is refused when it fires. A scheduled post GOES LIVE PUBLICLY by default on every channel, never quietly downgraded. Only if the user asks, set `visibility` (or `visibilityByChannel`): ‘unlisted’ (YouTube) · ‘private’ (YouTube, or TikTok SELF_ONLY) · ‘draft’ (TikTok, or an unpublished Facebook Page post). A visibility a channel cannot do is REFUSED now, never posted weaker later.',
     inputSchema: {
       ...HOOK_ATTR,
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).describe('one or more channels to post to at that time'),
@@ -5478,7 +5536,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_scheduled', {
     title: 'List scheduled and past posts',
-    description: 'Show what is queued to post and what already went out. Each fired item reports PER-CHANNEL outcomes, so you can see that (say) Instagram published and TikTok failed on the same item rather than a single misleading verdict. Past items are rebuilt from published-post records, one row per channel; they are not job runs (use list_jobs for those). THE LIST IS COMPACT so it fits in one reply: the next 25 queued and the last 15 fired, captions shortened. Pass `id` for ONE post in full (every caption and setting, which you need before reschedule_post replaces a caption map), `channel` to filter, or `upcoming` / `fired` for more rows. Read-only, 0 credits.',
+    description: 'Use this when the user asks what is scheduled, what already posted, or whether a post went out. Show what is queued to post and what already went out. Each fired item reports PER-CHANNEL outcomes, so you can see that (say) Instagram published and TikTok failed on the same item rather than a single misleading verdict. Past items are rebuilt from published-post records, one row per channel; they are not job runs (use list_jobs for those). THE LIST IS COMPACT so it fits in one reply: the next 25 queued and the last 15 fired, captions shortened. Pass `id` for ONE post in full (every caption and setting, which you need before reschedule_post replaces a caption map), `channel` to filter, or `upcoming` / `fired` for more rows. Read-only, 0 credits.',
     inputSchema: {
       brand: z.string().optional().describe('WHICH PROFILE to list — the id or exact name from list_brands. Needed when the post lives in a profile this connection is not pinned to: a post you can CREATE in a profile must be manageable there too, without switching the whole connection. A name that matches no profile, or two, is REFUSED.'),
       id: z.string().optional().describe('one post id from this list: returns that post in full, every caption and setting included'),
@@ -5843,7 +5901,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('post_to_linkedin', {
     title: 'Publish to LinkedIn',
-    description: 'Publish a post to the user’s connected LinkedIn profile — text, and optionally an image (pass its served URL as imageUrl). The image does NOT have to be something Hermoso generated: LinkedIn is served the bytes from us, so the URL must be Hermoso-hosted, and upload_file turns ANY file the user already has into exactly that. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Needs a connected LinkedIn account (Settings > Connectors > LinkedIn).',
+    description: 'Use this when the user wants to post to their personal LinkedIn profile. Publishing costs no credits. Publish a post to the user’s connected LinkedIn profile — text, and optionally an image (pass its served URL as imageUrl). The image does NOT have to be something Hermoso generated: LinkedIn is served the bytes from us, so the URL must be Hermoso-hosted, and upload_file turns ANY file the user already has into exactly that. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Needs a connected LinkedIn account (Settings > Connectors > LinkedIn).',
     inputSchema: {
       ...HOOK_ATTR,
       text: z.string().describe('the post text'),
@@ -5864,7 +5922,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // below say so explicitly, because an agent that fires ten posts to "see what sticks" is spending the user's money.
   server.registerTool('post_to_x', {
     title: 'Publish a post to X (Twitter)',
-    description: 'Publish to the user’s connected X (Twitter) account — a single post, a post with an image or video render attached, a reply to an existing post, or a whole THREAD (pass `thread` as an array and each part is posted as a reply to the one before). This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Can also run a POLL (2-4 options) instead of media, and restrict who may reply. LENGTH IS THE POSTING ACCOUNT’S, NOT A FLAT 280: 280 characters on an ordinary account, but UP TO 25,000 if that account has X Premium. Hermoso reads the account’s own subscription from X and sends the post rather than refusing something it may be entitled to; if X declines it on length, the reply says so and names the subscription X reported. Over 25,000 is refused for free — that is X’s own ceiling on every account. Text is NEVER truncated. AND A LONG POST IS CHEAPER THAN A THREAD: it is ONE billed X call where the same words split across five posts are five, so prefer one long post over threading when the account has Premium. Only the first ~280 characters show in the timeline; the rest sits behind \u201cShow more\u201d. Write altText whenever you attach a render. COSTS CREDITS: X charges per API request, so every post in a thread is billed, and a post containing a LINK costs roughly 13× one without — mention the cost before publishing a long thread. Each profile also has a rolling 24-hour ceiling on what it can spend at X, and a request that would cross it is refused WHOLE before anything publishes, so a batch of posts is bounded rather than open-ended. THIS TOOL POSTS ORGANICALLY — it does not create an ad campaign. X ads are built with create_x_ads_campaign -> create_x_ads_line_item -> create_x_ads_promoted_tweet, and a promoted post needs a post id, so publish here first and promote that post. Needs X connected (Settings > Connectors > X).',
+    description: 'Use this when the user wants to post to X (Twitter) now. Publish to the user’s connected X (Twitter) account — a single post, a post with an image or video render attached, a reply to an existing post, or a whole THREAD (pass `thread` as an array and each part is posted as a reply to the one before). This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Can also run a POLL (2-4 options) instead of media, and restrict who may reply. LENGTH IS THE POSTING ACCOUNT’S, NOT A FLAT 280: 280 characters on an ordinary account, but UP TO 25,000 if that account has X Premium. Hermoso reads the account’s own subscription from X and sends the post rather than refusing something it may be entitled to; if X declines it on length, the reply says so and names the subscription X reported. Over 25,000 is refused for free — that is X’s own ceiling on every account. Text is NEVER truncated. AND A LONG POST IS CHEAPER THAN A THREAD: it is ONE billed X call where the same words split across five posts are five, so prefer one long post over threading when the account has Premium. Only the first ~280 characters show in the timeline; the rest sits behind \u201cShow more\u201d. Write altText whenever you attach a render. COSTS CREDITS: X charges per API request, so every post in a thread is billed, and a post containing a LINK costs roughly 13× one without — mention the cost before publishing a long thread. Each profile also has a rolling 24-hour ceiling on what it can spend at X, and a request that would cross it is refused WHOLE before anything publishes, so a batch of posts is bounded rather than open-ended. THIS TOOL POSTS ORGANICALLY — it does not create an ad campaign. X ads are built with create_x_ads_campaign -> create_x_ads_line_item -> create_x_ads_promoted_tweet, and a promoted post needs a post id, so publish here first and promote that post. Needs X connected (Settings > Connectors > X).',
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the profile has more than one x account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
@@ -5932,7 +5990,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().describe('the FULL new text of the post. It replaces the old text entirely. Same length rule as a new post: 280 characters, or up to 25,000 on an X Premium account.'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), previousId: z.string().optional(), editedFromId: z.string().optional(), url: z.string().nullable().optional(), text: z.string().nullable().optional(), editHistory: z.array(z.string()).optional(), editsRemaining: z.number().nullable().optional(), editableUntil: z.string().nullable().optional(), note: z.string().optional(), costCredits: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/edit', a);
     return ok(`Edited the post on X. ${d.note || ''} Cost ${d.costCredits ?? '?'} credits.`.trim(), d);
@@ -5949,7 +6007,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('x_post_metrics', {
     title: 'Read performance of a post on X',
-    description: "THE X ANALYTICS TOOL THAT WORKS — impressions, likes, reposts, replies, quotes and bookmarks for any post, PLUS the advertiser numbers (link clicks, profile clicks, engagements) for YOUR OWN posts published in the last 30 days. X serves those private metrics on this same lookup with the user-context connection you already have; that is X's own design, not a workaround. Prefer this over x_post_insights, whose endpoint family X has retired. If a post is deleted, protected or suspended, X answers with no data at all and this says so — that is MISSING DATA, never zero engagement, and must never be reported as a measured zero. Costs a small number of credits (X bills per API read). Needs X connected.",
+    description: "THE X ANALYTICS TOOL THAT WORKS — impressions, likes, reposts, replies, quotes and bookmarks for any post, PLUS the advertiser numbers (link clicks, profile clicks, engagements) for YOUR OWN posts published in the last 30 days. X serves those private metrics on this same lookup with the user-context connection you already have; that is X's own design, not a workaround. Use this rather than x_post_insights, whose endpoint family X has retired. If a post is deleted, protected or suspended, X answers with no data at all and this says so — that is MISSING DATA, never zero engagement, and must never be reported as a measured zero. Costs a small number of credits (X bills per API read). Needs X connected.",
     inputSchema: {
       ...MANAGE_BRAND,
       id: z.string().describe('the numeric X post id — the last part of the post URL'),
@@ -6162,7 +6220,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('post_to_pinterest', {
     title: 'Create a Pin',
-    description: 'Create a Pin on one of the user’s Pinterest boards from any finished visual they have — image, video, or a 2–5 slide CAROUSEL (pass the slides in order as imageUrls[] and Pinterest publishes one swipeable Pin). Title, description and destination link ride along. The link is what makes a Pin drive traffic, so ask for it rather than omitting it, and the description is the text Pinterest search actually reads. boardId is REQUIRED: call list_pinterest_boards first and let the user choose. This PUBLISHES to their public profile — confirm the board, title and link before calling. Video Pins take a minute or two while Pinterest ingests the file. Needs Pinterest connected (Settings > Connectors > Pinterest).',
+    description: 'Use this when the user wants to publish a Pin to Pinterest. Publishing costs no credits. Create a Pin on one of the user’s Pinterest boards from any finished visual they have — image, video, or a 2–5 slide CAROUSEL (pass the slides in order as imageUrls[] and Pinterest publishes one swipeable Pin). Title, description and destination link ride along. The link is what makes a Pin drive traffic, so ask for it rather than omitting it, and the description is the text Pinterest search actually reads. boardId is REQUIRED: call list_pinterest_boards first and let the user choose. This PUBLISHES to their public profile — confirm the board, title and link before calling. Video Pins take a minute or two while Pinterest ingests the file. Needs Pinterest connected (Settings > Connectors > Pinterest).',
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the profile has more than one pinterest account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
@@ -6555,7 +6613,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('post_to_youtube', {
     title: 'Post a video to YouTube',
-    description: 'Publish a finished video to the brand’s connected YouTube channel. Pass a Hermoso render URL (or an upload_file url for a local/external file). PUBLISHES PUBLICLY BY DEFAULT: a plain "post this to YouTube" puts it ON the channel (confirm the title with the user, as for any publish) and notifies subscribers as YouTube does. Pass the privacy the user states instead: "unlisted" (link-only) or "private" (eyes-only). A video meant to run as a YouTube/Google AD should go up "unlisted" — private videos CANNOT be used as ads. SCHEDULE it with publishAt, FILE it under the right categoryId (the default 22 "People & Blogs" is wrong for most ads), SUBSCRIBER NOTIFICATIONS FOLLOW PRIVACY — a public publish announces the video to the channel’s subscribers (YouTube’s own default), while unlisted/private uploads stay quiet; pass notifySubscribers explicitly to override either way. THUMBNAIL: pass thumbnailUrl, or a frame of the video is set for free; a thumbnail YouTube refuses never fails the upload, and thumbnailNote says why. YOUTUBE MUSIC: YouTube’s API takes no music track. Only when the user wants a track from YouTube’s own Audio Library: BEFORE uploading, tell them plainly it will go up UNLISTED (not on their channel, nobody sees it) so they can add the track in YouTube Studio on desktop (Content > the video > Editor > Audio), and that THEY must then switch it to Public there themselves; get their yes, then pass privacy:"unlisted". Never choose unlisted for music on your own. Needs a connected YouTube channel (Settings > Connectors > YouTube).',
+    description: 'Use this when the user wants to upload a video or Short to YouTube. Publishing costs no credits. Publish a finished video to the brand’s connected YouTube channel. Pass a Hermoso render URL (or an upload_file url for a local/external file). PUBLISHES PUBLICLY BY DEFAULT: a plain "post this to YouTube" puts it ON the channel (confirm the title with the user, as for any publish) and notifies subscribers as YouTube does. Pass the privacy the user states instead: "unlisted" (link-only) or "private" (eyes-only). A video meant to run as a YouTube/Google AD should go up "unlisted" — private videos CANNOT be used as ads. SCHEDULE it with publishAt, FILE it under the right categoryId (the default 22 "People & Blogs" is wrong for most ads), SUBSCRIBER NOTIFICATIONS FOLLOW PRIVACY — a public publish announces the video to the channel’s subscribers (YouTube’s own default), while unlisted/private uploads stay quiet; pass notifySubscribers explicitly to override either way. THUMBNAIL: pass thumbnailUrl, or a frame of the video is set for free; a thumbnail YouTube refuses never fails the upload, and thumbnailNote says why. YOUTUBE MUSIC: YouTube’s API takes no music track. Only when the user wants a track from YouTube’s own Audio Library: BEFORE uploading, tell them plainly it will go up UNLISTED (not on their channel, nobody sees it) so they can add the track in YouTube Studio on desktop (Content > the video > Editor > Audio), and that THEY must then switch it to Public there themselves; get their yes, then pass privacy:"unlisted". Never choose unlisted for music on your own. Needs a connected YouTube channel (Settings > Connectors > YouTube).',
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the profile has more than one youtube account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
@@ -6657,7 +6715,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       schedule: z.boolean().optional().describe('false = do not create the job if it is missing; just report that none exists'),
     },
     outputSchema: { report: z.string().optional(), reportTypeId: z.string().optional(), jobId: z.string().optional(), scheduled: z.boolean().optional(), justCreated: z.boolean().optional(), days: z.array(z.string()).optional(), columns: z.array(z.string()).optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/bulk-report', { report: a.report, days: a.days, since: a.since, until: a.until, schedule: a.schedule === false ? 'false' : undefined });
     return ok(`${d.note}\n${rowLines(d.rows)}`, d);
@@ -6687,7 +6745,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Edit an existing video on the connected channel: title, description, tags, and/or privacy (unlisted | public | private). THIS IS HOW YOU FLIP AN UNLISTED UPLOAD PUBLIC (post_to_youtube is public by default; unlisted only when the user asked for it). Making a video PUBLIC puts it on the channel where anyone can find it, so show the user exactly what will change and get an explicit yes before calling with privacy:"public". Fields you omit are left untouched. Needs a connected YouTube channel.',
     inputSchema: { ...MANAGE_BRAND, videoId: z.string().describe('the YouTube video id'), title: z.string().optional().describe('≤100 chars'), description: z.string().optional().describe('≤5000 chars'), tags: z.array(z.string()).optional(), privacy: z.enum(['unlisted', 'public', 'private']).optional().describe('public = live on the channel; confirm with the user first') },
     outputSchema: { videoId: z.string().optional(), title: z.string().optional(), privacy: z.string().optional(), url: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/update-video', a);
     return ok(`Updated — “${d.title}” is now ${d.privacy}. ${d.url}`, d);
@@ -6739,7 +6797,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       bannerImageUrl: z.string().optional().describe('any public https image URL to upload as the channel banner — a Hermoso render, or ANY file of your own brought in with upload_file'),
     },
     outputSchema: { channelId: z.string().optional(), channelTitle: z.string().optional(), requested: z.any().optional(), applied: z.array(z.string()).optional(), notApplied: z.array(z.string()).optional(), bannerUrl: z.string().optional(), url: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/channel', a);
     return ok(`${d.note} ${d.url || ''}`.trim(), d);
@@ -6755,7 +6813,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       durationMs: z.number().optional().describe('how long it stays on screen'),
     },
     outputSchema: { channelId: z.string().optional(), action: z.string().optional(), bytes: z.number().optional(), verified: z.boolean().nullable().optional(), timing: z.any().optional(), url: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/watermark', a);
     return ok(d.note, d);
@@ -6783,7 +6841,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Set the CUSTOM THUMBNAIL on a video already on the connected channel, using a Hermoso image — a make_thumbnail render, a generated image, or a frame. The thumbnail is the single biggest lever on YouTube click-through and YouTube otherwise auto-picks a frame, so a published video without one is leaving reach on the table. It changes ONLY the thumbnail — video, title and privacy are untouched — but it is public and immediate, so show the user which image is going on which video and get a yes first. Custom thumbnails require a VERIFIED YouTube channel (a phone number at youtube.com/verify); without it YouTube refuses and the error says so. Images over YouTube’s 2MB cap are compressed automatically. The image must be Hermoso-HOSTED, which is not the same as Hermoso-GENERATED: the user’s own artwork works, put it through upload_file first and pass the URL that returns. An arbitrary external host is refused. 0 credits. Needs a connected YouTube channel.',
     inputSchema: { ...MANAGE_BRAND, videoId: z.string().describe('the YouTube video id (what post_to_youtube returned)'), imageUrl: z.string().describe('a Hermoso-hosted image URL — a make_thumbnail / list_library render, OR any image of the user’s own passed through upload_file first. An arbitrary external host is refused.') },
     outputSchema: { ok: z.boolean().optional(), videoId: z.string().optional(), thumbnailUrl: z.string().nullable().optional(), bytes: z.number().optional(), url: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/set-thumbnail', a);
     return ok(`${d.note} ${d.url || ''}`, d);
@@ -6842,7 +6900,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Add a video to a playlist, remove an entry, or move an entry to a new position. ADD takes playlistId + videoId and returns the new entry’s `itemId`. REMOVE and MOVE take that `itemId` — NOT the videoId — because one video can sit in a playlist more than once, so a videoId does not identify which row to touch; list_youtube_playlists with a playlistId returns the itemId of every entry. Removing an entry does NOT delete the video, only its place in the playlist. Positions are zero-based. 0 credits. Needs a connected YouTube channel.',
     inputSchema: { action: z.enum(['add', 'remove', 'move']).describe('add | remove | move'), playlistId: z.string().optional().describe('required for add'), videoId: z.string().optional().describe('required for add'), itemId: z.string().optional().describe('the playlist-ENTRY id — required for remove and move (from list_youtube_playlists)'), position: z.number().optional().describe('zero-based position; required for move, optional on add (default: appended)') },
     outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), itemId: z.string().optional(), playlistId: z.string().optional(), videoId: z.string().optional(), title: z.string().optional(), position: z.number().optional(), previousPosition: z.number().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/youtube/playlist-items', a); return ok(d.note, d); }));
   // ── YOUTUBE CHANNEL SECTIONS + PLAYLIST IMAGES (2026-08-20) ────────────────────────────────────────────────
   // Both on the held `youtube.force-ssl`. channelSections.list LAGS a write in BOTH directions (measured), so
@@ -6881,7 +6939,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       imageId: z.string().optional().describe("for action:'delete' — from action:'list'"),
     },
     outputSchema: { action: z.string().optional(), playlistId: z.string().optional(), count: z.number().optional(), images: z.array(z.any()).optional(), image: z.any().optional(), bytes: z.number().optional(), deleted: z.boolean().optional(), url: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/playlist-image', a);
     const rows = (d.images || []).map(i => `${i.type} · ${i.width || '?'}x${i.height || '?'} · ${i.id}`);
@@ -7492,7 +7550,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('post_to_tiktok', {
     title: 'Post a video or photo post to TikTok',
-    description: 'Publish to the user’s connected TikTok account — a finished VIDEO, or a PHOTO POST (TikTok’s photo/slideshow format). A photo post carries 1 to 35 images and ONE image is simply a one-slide photo post, so there is nothing special to do for a single picture: pass imageUrls, in the order the slides should appear, and optionally coverIndex. Pass videoUrl for a video. Never pass both — TikTok has no mixed post. TWO destinations. destination:"post" (THE DEFAULT) publishes it LIVE on their profile: TikTok requires the user to CHOOSE the privacy themselves (no default is allowed), so call tiktok_creator_info, show them their real privacy options, and get their choice and an explicit yes before calling. destination:"draft" is ONLY for when the user asks for a draft, or wants to add a TikTok sound or trending audio (TikTok’s API takes no sound for a VIDEO): BEFORE sending, tell them plainly it lands in their TikTok inbox as a DRAFT, that they add the sound in TikTok’s editor, and that THEY must publish it from the TikTok app — nothing goes live until they do. Never pick draft on your own. A photo post published with destination:"post" gets a TikTok-recommended track automatically (autoAddMusic, default on) that they can change in the app. Pass Hermoso render URLs (or upload_file urls for local/external files). Needs TikTok connected (Settings > Connectors > TikTok).',
+    description: 'Use this when the user wants to post a video or photo post to TikTok now. Publishing costs no credits. Publish to the user’s connected TikTok account — a finished VIDEO, or a PHOTO POST (TikTok’s photo/slideshow format). A photo post carries 1 to 35 images and ONE image is simply a one-slide photo post, so there is nothing special to do for a single picture: pass imageUrls, in the order the slides should appear, and optionally coverIndex. Pass videoUrl for a video. Never pass both — TikTok has no mixed post. TWO destinations. destination:"post" (THE DEFAULT) publishes it LIVE on their profile: TikTok requires the user to CHOOSE the privacy themselves (no default is allowed), so call tiktok_creator_info, show them their real privacy options, and get their choice and an explicit yes before calling. destination:"draft" is ONLY for when the user asks for a draft, or wants to add a TikTok sound or trending audio (TikTok’s API takes no sound for a VIDEO): BEFORE sending, tell them plainly it lands in their TikTok inbox as a DRAFT, that they add the sound in TikTok’s editor, and that THEY must publish it from the TikTok app — nothing goes live until they do. Never pick draft on your own. A photo post published with destination:"post" gets a TikTok-recommended track automatically (autoAddMusic, default on) that they can change in the app. Pass Hermoso render URLs (or upload_file urls for local/external files). Needs TikTok connected (Settings > Connectors > TikTok).',
     inputSchema: {
       account: z.string().optional().describe("WHICH connected account of this channel to post as — its @handle or id from list_connector_accounts. Needed only when the profile has more than one tiktok account connected (several and none named is refused by name, never guessed); omit when there is one."),
       ...HOOK_ATTR,
@@ -7607,7 +7665,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       productCatalogId: z.string().optional().describe('CATALOG (dynamic product) ADS — the PRODUCT CATALOG this campaign advertises, from list_meta_catalogs. This is the CAMPAIGN-level half of a catalog ad; the AD SET takes a productSetId and the creative takes the same set. Passing a product SET id here is refused by name with the level it belongs on. The binding is READ BACK from Meta before it is reported, so a 200 is never narrated as “bound”.'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), status: z.string().optional(), dailyBudgetUsd: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/campaign', a);
     return ok(`Created campaign ${d.campaignId} (PAUSED${d.dailyBudgetUsd ? `, $${d.dailyBudgetUsd}/day` : ''}). ${d.note || ''}`, d);
@@ -7621,7 +7679,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to activate (real spend) — set only after the user explicitly approved the budget'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), status: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/campaign/status', a);
     return ok(d.note || `Campaign ${a.campaignId} → ${a.status}.`, d);
@@ -7720,7 +7778,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Page id from list_meta_pages; omit = first Page'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), adSetId: z.string().optional(), count: z.number().optional(), status: z.string().optional(), dailyBudgetUsd: z.number().optional(), summary: z.string().optional(), previews: z.array(z.any()).optional(), previewExpiresHours: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const { imageUrls, ...rest } = a;
     const d = await apiPost('/api/meta/ad', imageUrls?.length ? { ...rest, urls: imageUrls } : rest);
@@ -7740,7 +7798,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Page id; omit = first Page'),
     },
     outputSchema: { ok: z.boolean().optional(), adSetId: z.string().optional(), campaignId: z.string().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/adset', a);
     return ok(d.summary || `Meta returned ad set ${d.adSetId} but no verified summary.`, d);
@@ -7905,7 +7963,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Create or edit an Instagram DM automation',
     description: 'Create (no id) or edit (id) an automation that DMs people automatically: a comment with a keyword on one post / the next post / any post gets a private reply, or a DM / story reply / ig.me link gets an answer. Optional link buttons, public comment replies, follow gate and dry run. Once per person per post; Meta allows private replies within 7 days of the comment. It DMs real people, so confirm the text first. Free, no AI on the send path.',
     inputSchema: { id: z.string().optional(), ...dmaRuleShape },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/dm-automations', { ...a, channel: 'instagram' });
     return ok(d.summary, d);
@@ -7968,9 +8026,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('save_dm_automation', {
     title: 'Create or edit a DM automation (Instagram, Facebook, X)',
-    description: 'Create (no id) or edit (id) a ManyChat-style AUTO-DM / AUTO-REPLY automation: "when someone comments GUIDE on my posts, DM them my guide link", "reply to anyone who DMs PRICE with our pricing page", "reply to people who mention us on X". PAUSE one with {id, enabled:false}; PRACTICE MODE (dryRun:true) logs what it would send and sends nothing. Instagram/Facebook: a keyword comment (one post, the next post, any post; on Facebook also ads) gets a private reply in DMs/Messenger, a DM keyword or ig.me/m.me ref link gets a message, with optional link buttons and rotated public replies. X: a keyword @mention or a reply under your post gets a public reply, a DM keyword gets a DM (X allows an automated DM only after the person DMed you). Once per person per post; a DM saying STOP opts that person out. Instagram and Facebook are free; X is billed in credits for every mention, reply or DM X delivers to the account plus each reply or DM sent, and running out stops the X rules. It messages real people, so confirm the text first.',
+    description: 'Create (no id) or edit (id) an AUTO-DM / AUTO-REPLY automation: "when someone comments GUIDE on my posts, DM them my guide link", "reply to anyone who DMs PRICE with our pricing page", "reply to people who mention us on X". PAUSE one with {id, enabled:false}; PRACTICE MODE (dryRun:true) logs what it would send and sends nothing. Instagram/Facebook: a keyword comment (one post, the next post, any post; on Facebook also ads) gets a private reply in DMs/Messenger, a DM keyword or ig.me/m.me ref link gets a message, with optional link buttons and rotated public replies. X: a keyword @mention or a reply under your post gets a public reply, a DM keyword gets a DM (X allows an automated DM only after the person DMed you). Once per person per post; a DM saying STOP opts that person out. Instagram and Facebook are free; X is billed in credits for every mention, reply or DM X delivers to the account plus each reply or DM sent, and running out stops the X rules. It messages real people, so confirm the text first.',
     inputSchema: { id: z.string().optional(), ...dmaAnyShape },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/dm-automations', a);
     return ok(`${d.summary}${d.notes?.length ? `\n${d.notes.join('\n')}` : ''}`, d);
@@ -8025,7 +8083,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { igId: z.string().optional(), account: z.string().optional(), done: z.array(z.string()).optional(), failed: z.array(z.string()).optional(), summary: z.string().optional(), adPermissions: z.any().optional(), tagApproval: z.any().optional(), warning: z.string().optional(), note: z.string().optional(), access: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/partnership/creator', a);
     return ok(`${d.summary}${d.metaWriteErrorNote ? `\n\nℹ Meta answered the write itself with an error and performed it anyway — Meta said: “${d.metaWriteError}”. ${d.metaWriteErrorNote} The line above is read back from Meta’s own list, so report THAT, not the error.` : ''}${d.warning ? `\n\n⚠ ${d.warning}` : ''}${d.adPermissions ? `\n\nAd-permission list now: ${d.adPermissions.summary}` : ''}${d.tagApproval ? `\nTag-approval list now: ${d.tagApproval.summary}` : ''}${d.note ? `\n\n${d.note}` : ''}`, d);
@@ -8103,7 +8161,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   //    routes, so there is no second set of rules here to drift.
   server.registerTool('list_meta_catalogs', {
     title: 'List the merchant’s Meta product catalogs',
-    description: 'The PRODUCT CATALOGS this Meta login can advertise from — id, name, how many products each holds, and which business portfolio owns it, WITH THAT PORTFOLIO’S NUMERIC ID. It also lists every business portfolio this login administers (`portfolios`), whether or not it holds a catalog yet — so this is where the businessId create_meta_catalog needs comes from, and the two tools chain with no trip to Business Manager. A catalog is the input to Advantage+ catalog ads (dynamic product ads), the highest-performing ecommerce format on Meta: one campaign that shows each person the products they are most likely to buy, with the image, name and price taken from the catalog rather than from a render. START HERE for any "advertise my products" ask, then list_meta_product_sets to pick what to advertise. AN EMPTY LIST IS A FACT ABOUT WHAT THIS LOGIN ADMINISTERS, NEVER ABOUT THE MERCHANT: Meta serves catalogs off the BUSINESS PORTFOLIO, so a full Shopify-synced catalog is invisible here if the connected user is not an admin of the portfolio that owns it — read the `note` and say that, never "you have no catalog". A portfolio that could not be read is reported as `unreadable` rather than dropped. Read-only, 0 credits.',
+    description: 'The PRODUCT CATALOGS this Meta login can advertise from — id, name, how many products each holds, and which business portfolio owns it, WITH THAT PORTFOLIO’S NUMERIC ID. It also lists every business portfolio this login administers (`portfolios`), whether or not it holds a catalog yet — so this is where the businessId create_meta_catalog needs comes from, and the two tools chain with no trip to Business Manager. A catalog is the input to Advantage+ catalog ads (dynamic product ads): one campaign that shows each person the products they are most likely to buy, with the image, name and price taken from the catalog rather than from a render. START HERE for any "advertise my products" ask, then list_meta_product_sets to pick what to advertise. AN EMPTY LIST IS A FACT ABOUT WHAT THIS LOGIN ADMINISTERS, NEVER ABOUT THE MERCHANT: Meta serves catalogs off the BUSINESS PORTFOLIO, so a full Shopify-synced catalog is invisible here if the connected user is not an admin of the portfolio that owns it — read the `note` and say that, never "you have no catalog". A portfolio that could not be read is reported as `unreadable` rather than dropped. Read-only, 0 credits.',
     inputSchema: {},
     outputSchema: { count: z.number().optional(), catalogs: z.array(z.any()).optional(), portfolios: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), note: z.string().optional(), warning: z.string().optional(), flow: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
@@ -8186,7 +8244,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       partnerIntegration: z.record(z.any()).optional().describe('partner-integration settings object'),
       additionalVerticalOption: z.enum(['LOCAL_DA_CATALOG', 'LOCAL_PRODUCTS']).optional().describe('additional vertical option'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/catalog/update', a);
     return ok(d.summary, d);
@@ -8464,7 +8522,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_meta_lead_form', {
     title: 'Create a Meta instant (lead) form',
-    description: 'Create an INSTANT LEAD FORM on a connected Facebook Page — the in-app form a Meta lead ad opens instead of sending someone to a website, which is why lead ads convert far better than a landing page on mobile. `questions` takes Meta’s own type names, e.g. ["FULL_NAME","EMAIL","PHONE"]; for anything bespoke pass {type:"CUSTOM", label:"What size fleet do you run?"} and add options:[…] to make it a dropdown. Ask FEWER questions than you think — every extra field costs completions. privacyPolicyUrl is REQUIRED: the form collects real people’s contact details and has to say where their data goes. Optional: headline, contextCard {title, bullets[], buttonText} for the why-should-I screen, thankYou {title, body, buttonType, buttonText, websiteUrl}, locale, followUpActionUrl. CREATING A FORM SPENDS NOTHING and publishes nothing — it is invisible to the public until an ad points at it (create_meta_ad with objective:"OUTCOME_LEADS" + leadFormId), and that ad is created PAUSED. Read the submissions with read_meta_leads. NEEDS pages_manage_ads — see list_meta_lead_forms for what to do if Meta refuses it.',
+    description: 'Create an INSTANT LEAD FORM on a connected Facebook Page — the in-app form a Meta lead ad opens instead of sending someone to a website, so a person can sign up without leaving the app. `questions` takes Meta’s own type names, e.g. ["FULL_NAME","EMAIL","PHONE"]; for anything bespoke pass {type:"CUSTOM", label:"What size fleet do you run?"} and add options:[…] to make it a dropdown. Ask FEWER questions than you think — every extra field costs completions. privacyPolicyUrl is REQUIRED: the form collects real people’s contact details and has to say where their data goes. Optional: headline, contextCard {title, bullets[], buttonText} for the why-should-I screen, thankYou {title, body, buttonType, buttonText, websiteUrl}, locale, followUpActionUrl. CREATING A FORM SPENDS NOTHING and publishes nothing — it is invisible to the public until an ad points at it (create_meta_ad with objective:"OUTCOME_LEADS" + leadFormId), and that ad is created PAUSED. Read the submissions with read_meta_leads. NEEDS pages_manage_ads — see list_meta_lead_forms for what to do if Meta refuses it.',
     inputSchema: {
       name: z.string().describe('internal name for the form — not shown to the person filling it in'),
       questions: z.array(z.any()).describe('Meta question types as strings ("FULL_NAME","EMAIL","PHONE","COMPANY_NAME","JOB_TITLE","CITY","ZIP","WORK_EMAIL","DATE_TIME"…) or objects {type,label,key,options[]} for CUSTOM'),
@@ -8576,7 +8634,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endTime: z.string().optional(),
       dryRun: z.boolean().optional(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/meta/marketing-messages/campaign', a); return ok(d.note, d); }));
   server.registerTool('list_messenger_marketing_campaigns', {
     title: 'List Messenger marketing-message campaigns',
@@ -9206,7 +9264,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignResourceName: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), budgetResourceName: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/campaign', a);
     // d.note is written from a READ-BACK of the whole tree (the route 502s rather than returning an unverified id),
@@ -9229,7 +9287,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), adGroupId: z.string().optional(), adGroupResourceName: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/ad-group', a);
     return ok(d.note, d);
@@ -9247,7 +9305,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), adResourceName: z.string().optional(), type: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/ad', a);
     return ok(d.note, d);
@@ -9305,7 +9363,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional(),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), biddingStrategyType: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/bidding', a);
     return ok(d.note, d);
@@ -9337,7 +9395,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { ok: z.boolean().optional(), budgetResourceName: z.string().optional(), dailyBudgetUsd: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/budget', a);
     return ok(`Budget set to $${d.dailyBudgetUsd}/day (${d.budgetResourceName}).`, d);
@@ -9549,7 +9607,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), status: z.string().optional(), assetGroupResourceName: z.string().optional(), brandGuidelinesEnabled: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/performance-max', a);
     return ok(`${d.note || 'Performance Max campaign created PAUSED.'}${d.dryRun ? '' : ' To make it spend, use set_google_ads_status(confirm:true) after the user approves.'}`, d);
@@ -11162,7 +11220,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Cancel a Stripe subscription: at the end of the current period by default (the customer keeps access until then), or immediately:true to end it now. ALWAYS needs confirm:true, test keys included. The read-back distinguishes the two — a period-end cancel reports the date it will end and the status it keeps until then, an immediate one reports status canceled. Needs Stripe connected (Settings > Connectors > Stripe, or connect_connector).",
     inputSchema: { subscriptionId: z.string(), immediately: z.boolean().optional(), confirm: z.boolean().optional() },
     outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), count: z.number().optional(), hasMore: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/stripe/subscription/cancel', a); return ok(d.note, d); }));
   server.registerTool('refund_stripe_charge', {
     title: 'refund stripe charge',
@@ -11354,7 +11412,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       adGroup: z.object({ name: z.string().optional(), cpcBid: z.number().optional(), language: z.string().optional(), status: z.enum(['Active', 'Paused']).optional(), ad: z.object(msAdShape).optional(), keywords: msKeywordShape.optional() }).optional().describe('build the serving tree in the same call — WITHOUT this you get a campaign shell that can never show an ad'),
     },
     outputSchema: { ok: z.boolean().optional(), accountId: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/campaign', a);
     return ok(`${d.note} To make it spend, use set_microsoft_ads_status(confirm:true) after the user approves.`, d);
@@ -11374,7 +11432,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create this Active under a LIVE campaign'),
     },
     outputSchema: { ok: z.boolean().optional(), adGroupId: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/ad-group', a);
     return ok(d.note, d);
@@ -11390,7 +11448,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create this Active in a LIVE ad group'),
     },
     outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), adGroupId: z.string().optional(), status: z.string().optional(), editorialStatus: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/ad', a);
     return ok(d.note, d);
@@ -11453,7 +11511,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to change the budget of a LIVE campaign'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), dailyBudget: z.number().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/budget', a);
     return ok(d.note, d);
@@ -11471,7 +11529,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to set Active (real spend)'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), status: z.string().optional(), verifiedStatus: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/microsoft-ads/status', a);
     // d.note is written from the READ-BACK and says so when Microsoft reports a status different to the one we asked
@@ -11702,7 +11760,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       biddingStrategy: z.enum(['AUTO_BIDDING_WITH_CPM_BILLING', 'TARGET_GOAL_WITH_CPI_BILLING']).optional(),
     },
     outputSchema: { ...alOut, campaign: z.any().optional(), pausedAfterCreate: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/campaign', a); return ok(d.note, d); }));
   server.registerTool('update_applovin_ads_campaign', {
     title: 'Update an AppLovin Ads campaign',
@@ -11721,7 +11779,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'LIVE or PAUSED for an AppLovin campaign (campaignId) or creative set (creativeSetId), read back. LIVE starts real ad spend: show the user the budget, get an explicit yes, then call with confirm:true. Pausing is always safe. AppLovin’s API has no delete; pause instead.' + AL_CM_NOTE,
     inputSchema: { level: z.enum(['campaign', 'creative_set']).optional().describe('inferred from the id you pass'), campaignId: z.string().optional(), creativeSetId: z.string().optional(), status: z.enum(['LIVE', 'PAUSED']), confirm: z.boolean().optional().describe('required true for LIVE') },
     outputSchema: { ...alOut, level: z.string().optional(), status: z.string().nullable().optional(), unchanged: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/applovin-ads/status', a); return ok(d.note, d); }));
   server.registerTool('list_applovin_ads_creative_sets', {
     title: 'List AppLovin creative sets',
@@ -11833,7 +11891,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   });
   server.registerTool('list_openai_ads_campaigns', {
     title: 'List ChatGPT Ads account / campaigns / ad groups / ads',
-    description: 'Read the brand’s connected ChatGPT Ads account — the ads that appear below ChatGPT answers. Every campaign, ad group and ad row carries servingIssues, OpenAI’s own list of what is blocking delivery (payment method, brand review, budget spent, ad in review, landing page not crawlable, country policy…) with a plain meaning each: null means OpenAI was not asked, [] means it reports no blocker, which is still not a promise of impressions. Call with NO ids to get the ad account itself (its three names: brandName shown in ads, accountName internal to Ads Manager, legalName; currency, status, brand review and business review state) plus its campaigns; with campaignId to list that campaign’s ad groups; with adGroupId to list that ad group’s ads, including each ad’s REVIEW status, which is what decides whether it can ever show. Statuses here are active / paused / archived. Read-only, free, zero spend risk. Needs ChatGPT Ads connected (Settings > Connectors > ChatGPT Ads, or connect_connector): the user pastes an Advertiser API key from ChatGPT Ads Manager > Settings — there is no OAuth and no manager account, and one key is scoped to one ad account.',
+    description: 'Read the brand’s connected ChatGPT Ads account — the ads that appear below ChatGPT answers. Every campaign, ad group and ad row carries servingIssues, OpenAI’s own list of what is blocking delivery (payment method, brand review, budget spent, ad in review, landing page not crawlable, country policy…) with a plain meaning each: null means OpenAI was not asked, [] means it reports no blocker, which is still not a promise of impressions. Call with NO ids to get the ad account itself (its three names: brandName shown in ads, accountName internal to Ads Manager, legalName; currency, status, brand review and business review state) plus its campaigns; with campaignId to list that campaign’s ad groups; with adGroupId to list that ad group’s ads, including each ad’s REVIEW status, which is what decides whether it can ever show. Statuses here are active / paused / archived. Read-only, free, zero spend risk. Needs ChatGPT Ads connected under Settings > Connectors > ChatGPT Ads in the Hermoso app; one connection covers one ad account.',
     inputSchema: {
       campaignId: z.string().optional().describe('list this campaign’s ad groups'),
       adGroupId: z.string().optional().describe('list this ad group’s ads'),
@@ -11922,7 +11980,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endTime: z.string().optional(),
     },
     outputSchema: { campaignId: z.string().optional(), accountId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/campaign', a); return ok(d.note, d); }));
   server.registerTool('set_x_ads_status', {
     title: 'Pause or activate an X campaign or line item',
@@ -11935,7 +11993,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('required to set ACTIVE — real money'),
     },
     outputSchema: { campaignId: z.string().nullable().optional(), lineItemId: z.string().nullable().optional(), status: z.string().optional(), parentStatus: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/status', a); return ok(d.note, d); }));
   // ── MICROSOFT BULK SERVICE + MEASUREMENT (2026-08-20) ──────────────────────────────────────────────────────────
   // The last unbuilt Bing Ads service. The DOWNLOAD half reaches ~185 record types nothing else in the product can
@@ -12208,7 +12266,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       budgetOrderIds: z.array(z.string()).optional().describe('budget order id(s) from list_apple_ads_budget_orders to assign this campaign to — a budget order is a spend CEILING SHARED across every campaign assigned to it, and it works ALONGSIDE dailyBudget rather than instead of it. Without this a budget order can never be drawn from.'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), bornPaused: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/campaign', a); return ok(`Apple Ads campaign created PAUSED:\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('create_apple_ads_ad_group', {
@@ -12240,7 +12298,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       }).optional().describe('Who and where this ad group reaches. For Apple Maps, locationGroupIds is what says which shops it promotes.'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), bornPaused: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/adgroup', a); return ok(`Apple Ads ad group created PAUSED:\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('add_apple_ads_keywords', {
@@ -12300,7 +12358,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED to ENABLE — it arms real spend. Pausing needs none.'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), armsSpend: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/status', a); return ok(`Apple Ads ${d.level} ${d.id} → ${d.requested?.status} (verified: ${d.verified}${d.armsSpend ? ', SPEND ARMED' : ''}):\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('delete_apple_ads_object', {
@@ -12397,7 +12455,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       defaultLocale: z.string().optional().describe('Apple Maps only, e.g. "en-US".'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), systemStatus: z.string().optional(), spendsNothing: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/creative', a); return ok(`Apple Ads creative created:\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('list_apple_ads_ads', {
@@ -12423,7 +12481,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       name: z.string().describe('REQUIRED.'),
     },
     outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), id: z.string().optional(), verified: z.boolean().optional(), bornPaused: z.boolean().optional(), read: z.any().optional(), summary: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/apple-ads/ad', a); return ok(`Apple Ads ad created PAUSED:\n${d.summary}\n${d.note || ''}`, d); }));
 
   server.registerTool('upload_apple_ads_asset', {
@@ -12895,7 +12953,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endTime: z.string().optional(),
     },
     outputSchema: { lineItemId: z.string().optional(), accountId: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/line-item', a); return ok(d.note, d); }));
   server.registerTool('create_x_ads_promoted_tweet', {
     title: 'Attach a post to an X line item (paused)',
@@ -12905,7 +12963,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       tweetIds: z.array(z.string()).describe('post ids — digits only, from the end of the post URL'),
     },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), promotedTweetIds: z.array(z.string()).optional(), verifiedCount: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/promoted-tweet', a); return ok(d.note, d); }));
   server.registerTool('add_x_ads_targeting', {
     title: 'Target an X ads line item',
@@ -13099,7 +13157,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       }).optional().describe('build the ad group (and its ad) in the same call — a campaign alone cannot serve'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), adGroupId: z.string().optional(), tree: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/campaign', a);
     return ok(`${d.note} To make it spend, use set_openai_ads_status(confirm:true) after the user approves.`, d);
@@ -13119,7 +13177,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create this ACTIVE under a live campaign (real spend)'),
     },
     outputSchema: { ok: z.boolean().optional(), adGroupId: z.string().optional(), tree: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/ad-group', a);
     return ok(d.note, d);
@@ -13135,7 +13193,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create this ACTIVE in a live ad group (real spend)'),
     },
     outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), ad: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/ad', a);
     return ok(d.note, d);
@@ -13205,7 +13263,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Change a ChatGPT Ads campaign’s budget — a daily cap, a lifetime cap, or both, in the ad account’s currency. A LIFETIME (total) budget is PACED by ChatGPT Ads to spread spend evenly across the campaign’s dates (actual daily spend still varies with available delivery), so a total budget is not a first-come-first-served pool. ChatGPT Ads’ own minimum for a DAILY budget is 25.00 (measured live 2026-08-05; a LIFETIME budget has no such floor, so use one to spend less than that in total). Raising it on a LIVE (active) campaign increases real spend immediately, so you MUST show the user the old and new amounts, get an explicit yes, then call with confirm:true. Lowering it or changing a paused campaign is safe. The campaign is READ BACK after the change and the note is built from that.',
     inputSchema: { campaignId: z.string(), dailyBudget: z.number().optional(), lifetimeBudget: z.number().optional(), confirm: z.boolean().optional().describe('REQUIRED true when the campaign is live') },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), campaign: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/openai-ads/budget', a);
     return ok(d.note, d);
@@ -13438,7 +13496,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('set_openai_ads_daily_spend_limit', {
     title: 'Set the ChatGPT Ads account daily spending limit', description: 'Create or change the ACCOUNT-WIDE DAILY SPENDING LIMIT on ChatGPT Ads: the most all campaigns together may spend each day, renewing at midnight in the account timezone, until it is removed or reaches its optional end date. OpenAI offers it only on ad accounts with postpaid INVOICE billing and it needs billing-management permission; a card-billed account is refused whatever key is used. amount is per day in the account currency and is required even when only the end date changes (0 stops account spend). A NEW limit starts tomorrow or later: list_openai_ads_spend_windows names the earliest start date. On an existing limit leave startDate out, because its start cannot change. An account can hold SEVERAL non-overlapping daily rules (list_openai_ads_spend_windows returns each with a windowId): pass windowId to change one, or newRule:true (with startDate) to add another; with more than one rule OpenAI requires the windowId. endDate is exclusive; noEndDate:true clears it. A daily limit and a date-range window cannot overlap. Lowering it can stop delivery and raising it lets campaigns spend up to their own budgets, so show the user the current and new values first: without confirm:true AND expectedRevision (the revision list_openai_ads_spend_windows returns) nothing changes and the reply states what would. The result is read back from ChatGPT Ads.',
     inputSchema: { amount: z.number(), windowId: z.string().optional().describe('the daily rule to change, from list_openai_ads_spend_windows; required when the account has more than one'), newRule: z.boolean().optional().describe('true adds another non-overlapping daily rule instead of editing one'), expectedRevision: z.number().optional().describe('the revision from list_openai_ads_spend_windows'), startDate: z.string().optional().describe('YYYY-MM-DD, first day of a NEW daily limit (tomorrow or later)'), endDate: z.string().optional().describe('YYYY-MM-DD, exclusive'), noEndDate: z.boolean().optional().describe('true removes the end date'), confirm: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/daily-spend-limit', a))));
   server.registerTool('remove_openai_ads_daily_spend_limit', {
     title: 'Remove the ChatGPT Ads account daily spending limit', description: 'Remove the account-wide DAILY spending limit on ChatGPT Ads. This takes a spending CEILING off the whole account, so campaigns may then spend up to their own budgets every day; date-range spend-limit windows are not touched. Like every account spending-limit request it needs postpaid INVOICE billing and billing-management permission; a card-billed account is refused whatever key is used. Without confirm:true AND expectedRevision (the revision list_openai_ads_spend_windows returns) nothing changes and the reply names the limit that would be removed. With several daily rules, pass windowId to name the one to remove (OpenAI requires it then). The result is read back from ChatGPT Ads.',
@@ -13577,7 +13635,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       adGroup: z.object({ ...pinAdGroupShape, name: z.string().optional(), ad: z.object(pinAdShape).optional() }).optional().describe('build the serving tree in the same call — WITHOUT this you get a campaign shell that can never show an ad'),
     },
     outputSchema: { ok: z.boolean().optional(), adAccountId: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/pinterest/ads-campaign', a);
     return ok(`${d.note} To make it spend, use set_pinterest_ads_status(confirm:true) after the user approves.`, d);
@@ -13593,7 +13651,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create this ACTIVE under a LIVE campaign'),
     },
     outputSchema: { ok: z.boolean().optional(), adGroupId: z.string().optional(), campaignId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-ad-group', a); return ok(d.note, d); }));
   server.registerTool('create_pinterest_ads_ad', {
     title: 'Create a Pinterest ad',
@@ -13606,7 +13664,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create this ACTIVE in a live ad group'),
     },
     outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), adGroupId: z.string().optional(), status: z.string().optional(), reviewStatus: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-ad', a); return ok(d.note, d); }));
   // EDITING (2026-08-11) — note this is deliberately NOT a `// ── banner ──` comment: tools/docs-data.mjs treats one
   // as a new docs SECTION, and these two belong in PINTEREST ADS, not in a group of their own.
@@ -13687,7 +13745,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to change the budget of a LIVE campaign'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), dailyBudget: z.number().nullable().optional(), lifetimeBudget: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-budget', a); return ok(d.note, d); }));
   server.registerTool('set_pinterest_ads_status', {
     title: 'Activate, pause or archive a Pinterest campaign / ad group / ad',
@@ -13913,7 +13971,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       useCatalog: z.boolean().optional().describe('SALES only: true makes it a product-catalog campaign (the new spelling of CATALOG_SALES) \u2014 every ad group under it must then use a catalog (create_reddit_ads_ad_group with productSetId + shoppingType). Frozen once created'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), useCatalog: z.boolean().optional(), adAccountId: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/campaigns', a);
     return ok(`Created Reddit campaign "${d.name}" (${d.id}) with objective ${d.objective}, status ${d.status} \u2014 PAUSED and spending nothing. Next: create_reddit_ads_post for the creative, then create_reddit_ads_ad_group under this campaign, then create_reddit_ads_ad.`, d);
@@ -13967,7 +14025,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       })).optional().describe('weekly dayparting windows — omit to run all week'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), budget: z.number().nullable().optional(), optimizationGoal: z.string().nullable().optional(), viewThroughConversionType: z.string().nullable().optional(), productSetId: z.string().nullable().optional(), shoppingType: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ad-groups', a);
     return ok(`${d.note} To make it spend, use set_reddit_ads_status(confirm:true) after the user approves.`, d);
@@ -14011,7 +14069,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       eventTrackers: z.array(z.object({ type: z.enum(['CLICK', 'VIEW']), url: z.string() })).optional().describe('third-party measurement URLs; only Reddit-approved providers are accepted'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), effectiveStatus: z.string().optional(), postId: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/ads', a);
     return ok(`${d.note} To make it spend, use set_reddit_ads_status(confirm:true) after the user approves.`, d);
@@ -14064,7 +14122,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       supplementaryText: z.string().optional().describe('up to 100 characters'),
       userGeneratedContent: z.enum(['OPT_IN', 'OPT_OUT']).optional().describe('let Reddit add user-generated content enhancements'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/reddit-ads/max-campaign', a); return ok(d.note, d); }));
   server.registerTool('get_reddit_ads_max_template', {
     title: 'Read a Reddit Max template ad',
@@ -14530,11 +14588,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'List the TikTok identities an ad can post as',
     description: 'List the IDENTITIES on a TikTok advertiser account — the TikTok accounts an ad is allowed to appear as. THIS IS A HARD PREREQUISITE, not a convenience: a TikTok ad carries no identity of its own and there is NO DEFAULT, so create_tiktok_ads_ad refuses without an id from here. Call it, show the user the list, and let them CHOOSE — an ad runs publicly under whichever account is named, so picking one for them is a public mistake on somebody else’s profile. If it comes back empty, no TikTok account has been authorised on this advertiser yet and nothing can be advertised from it; say that rather than guessing an id. Read-only, free.',
     inputSchema: {
-      advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts'),
-      eventSourceType: z.enum(['PIXEL', 'APP']).optional().describe('PIXEL (default) or APP — TikTok publishes no other value'),
-      eventSourceId: z.string().optional().describe('the pixel id (list_tiktok_ads_pixels) or app id. Omit and a single pixel is resolved for you; with several you are asked which.'),
-      searchKeyword: z.string().optional().describe('filter by Custom Conversion name (fuzzy) or id'),
-      pageSize: z.number().optional().describe('1-1000, default 10'),
+      advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts — omit to use the connected default'),
     },
     outputSchema: { advertiserId: z.string().optional(), identities: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
@@ -14744,7 +14798,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_tiktok_post_ad_authorization', {
     title: "Turn Spark-Ads authorization on or off for the brand’s own post",
-    description: "Turn TikTok's 'Ad authorization' setting ON or OFF for a post the authorized account owns — THIS IS WHERE A SPARK ADS AUTHORIZATION CODE COMES FROM. Until now the only way to get one was a human opening the TikTok app and copying a string; that is still true for somebody ELSE's post, and no longer true for the brand's own. Turning it on mints the code, which you then hand to authorize_tiktok_ads_spark_post so an ad account may promote the post. IT IS CONFIRM-GATED ON THE WAY ON, and not because it spends: TikTok changes the post's privacy to 'Available for Ads', sends it to their ad review team, says the post 'may also appear as an ad on third party platforms', and treats the call as accepting their Advertising Content Terms on the owner's behalf. Turning it OFF needs no confirm — but TikTok REFUSES to turn it off while an active Spark Ad is using the post, so pause those campaigns first. authorizationDays must be one of 7, 30, 60, 180, 365. THE ANSWER IS THE READ-BACK: the reply carries the post's real authorization status and its code, because TikTok's own response body is empty. NEEDS THE TIKTOK ACCOUNT AUTHORIZATION (see tiktok_account_status).",
+    description: "Turn TikTok's 'Ad authorization' setting ON or OFF for a post the authorized account owns — THIS IS WHERE A SPARK ADS AUTHORIZATION CODE COMES FROM. For somebody ELSE's post the code still comes from that creator, copied out of the TikTok app. Turning it on mints the code, which you then hand to authorize_tiktok_ads_spark_post so an ad account may promote the post. IT IS CONFIRM-GATED ON THE WAY ON, and not because it spends: TikTok changes the post's privacy to 'Available for Ads', sends it to their ad review team, says the post 'may also appear as an ad on third party platforms', and treats the call as accepting their Advertising Content Terms on the owner's behalf. Turning it OFF needs no confirm — but TikTok REFUSES to turn it off while an active Spark Ad is using the post, so pause those campaigns first. authorizationDays must be one of 7, 30, 60, 180, 365. THE ANSWER IS THE READ-BACK: the reply carries the post's real authorization status and its code, because TikTok's own response body is empty. NEEDS THE TIKTOK ACCOUNT AUTHORIZATION (see tiktok_account_status).",
     inputSchema: {
       itemId: z.string().describe('the TikTok post id'),
       enabled: z.boolean().describe('true turns Ad authorization ON (and mints the Spark Ads code); false turns it off'),
@@ -14752,7 +14806,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true when enabling \u2014 it makes the post publicly promotable and accepts TikTok\u2019s advertising terms on the owner\u2019s behalf'),
     },
     outputSchema: { itemId: z.string().optional(), adPromotable: z.boolean().optional(), authorizationDays: z.number().nullable().optional(), status: z.any().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/post-authorization', a);
     return ok(`${d.note}${d.status?.authCode ? `\nAuthorization code: ${d.status.authCode}` : ''}`, d);
@@ -15031,7 +15085,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       appPromotionType: z.enum(['APP_INSTALL', 'APP_RETARGETING', 'MINIS']).optional().describe('REQUIRED when the objective is APP_PROMOTION. MINIS promotes a Series or mini game'),
     },
     outputSchema: { campaignId: z.string().optional(), advertiserId: z.string().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/tiktok-ads/smart/campaign', a); return ok(d.summary, d); }));
 
   server.registerTool('create_tiktok_smart_ad_group', {
@@ -15058,7 +15112,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       optimizationEvent: z.string().optional().describe('the conversion event, required whenever pixelId is set (e.g. SHOPPING, ON_WEB_ORDER)'),
     },
     outputSchema: { adGroupId: z.string().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/tiktok-ads/smart/adgroup', a); return ok(d.summary, d); }));
 
   server.registerTool('create_tiktok_smart_ad', {
@@ -15075,7 +15129,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       advertiserId: z.string().optional(),
     },
     outputSchema: { adIds: z.array(z.string()).optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/tiktok-ads/smart/ad', a); return ok(d.summary, d); }));
 
   server.registerTool('list_tiktok_smart_campaigns', {
@@ -15125,7 +15179,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       budget: z.number().optional().describe('campaign budget in the advertiser’s own currency — not needed with BUDGET_MODE_INFINITE'),
     },
     outputSchema: { id: z.string().optional(), advertiserId: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/campaign', a);
     return ok(`Created TikTok campaign "${d.name}" (${d.id}) — objective ${d.objective}, status ${d.status}. ${d.note} Next: create_tiktok_ads_ad_group under it, then list_tiktok_ads_identities and create_tiktok_ads_ad.`, d);
@@ -15163,7 +15217,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       conversionBid: z.number().optional().describe('target cost per conversion for oCPM — required by TikTok when bidType is BID_TYPE_CUSTOM and billingEvent is OCPM'),
     },
     outputSchema: { id: z.string().optional(), advertiserId: z.string().optional(), campaignId: z.string().optional(), name: z.string().optional(), status: z.string().optional(), optimizationGoal: z.string().optional(), pixelId: z.string().nullable().optional(), optimizationEvent: z.string().nullable().optional(), billingEvent: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/adgroup', a);
     const conv = d.pixelId ? ` toward ${d.optimizationEvent || 'a conversion'} on pixel ${d.pixelId}` : '';
@@ -15302,7 +15356,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED to book. Without it nothing is created and you get the sentence to show the user.'),
     },
     outputSchema: { created: z.boolean().optional(), confirmRequired: z.boolean().optional(), id: z.string().optional(), advertiserId: z.string().optional(), campaignId: z.string().optional(), name: z.string().optional(), rfPurchasedType: z.string().optional(), budget: z.number().optional(), purchasedImpressionThousands: z.number().optional(), purchasedReachThousands: z.number().optional(), optimizationGoal: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/rf-adgroup', a);
     if (!d.created) return ok(d.note, d);
@@ -15932,7 +15986,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       landingPageUrl: z.string().optional().describe('where the ad sends people'),
     },
     outputSchema: { id: z.string().optional(), advertiserId: z.string().optional(), adgroupId: z.string().optional(), name: z.string().optional(), status: z.string().nullable().optional(), identityId: z.string().optional(), videoId: z.string().nullable().optional(), tiktokItemId: z.string().nullable().optional(), spark: z.boolean().optional(), imageIds: z.array(z.string()).optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/ad', a);
     return ok(`Created TikTok ${d.spark ? 'SPARK ad promoting organic post ' + d.tiktokItemId : 'ad'} "${d.name}" (${d.id}) in ad group ${d.adgroupId}, posting as identity ${d.identityId} — TikTok stored it as ${d.status || 'an unreported status'}. ${d.note} TikTok still has to review it before it can show.`, d);
@@ -16194,7 +16248,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true — call without it first to see exactly what would change'),
     },
     outputSchema: { advertiserId: z.string().optional(), level: z.string().optional(), id: z.string().optional(), requested: z.number().optional(), read: z.number().nullable().optional(), verified: z.boolean().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/budget', a);
     return ok(d.verified
@@ -16393,7 +16447,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       businessAccountHandle: z.string().optional().describe('allowlist-only at TikTok, and non-EU only: lets creators message the brand from the invite link'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), campaignId: z.string().optional(), campaignType: z.string().nullable().optional(), inviteLink: z.string().nullable().optional(), invited: z.array(z.string()).optional(), failedHandles: z.array(z.string()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/tto-campaign', a);
     return ok(d.note, d);
@@ -16425,7 +16479,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       action: z.enum(['LINK', 'REVOKE']).optional().describe('default LINK; a second LINK is a REMINDER'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), videoId: z.string().optional(), status: z.string().nullable().optional(), statusMeans: z.string().nullable().optional(), requestsSent: z.number().nullable().optional(), remindersLeft: z.number().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/tto-link', a);
     return ok(d.note, d);
@@ -16794,7 +16848,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endTime: z.string().optional().describe('ISO 8601'),
     },
     outputSchema: { id: z.string().optional(), adAccountId: z.string().optional(), name: z.string().optional(), objective: z.string().optional(), status: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/campaign', a);
     return ok(`Created Snapchat campaign "${d.name}" (${d.id})${d.objective ? ` — objective ${d.objective}` : ''}. Snapchat stored it as ${d.status || 'an unreported status'}. ${d.note} Next: create_snapchat_ads_ad_squad under it, then upload_snapchat_ads_creative and create_snapchat_ads_ad.`, d);
@@ -16849,7 +16903,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       type: z.string().optional().describe('default SNAP_AD. Others include REMOTE_WEBPAGE, APP_INSTALL, STORY, COLLECTION, LEAD_GENERATION.'),
     },
     outputSchema: { id: z.string().optional(), adAccountId: z.string().optional(), adSquadId: z.string().optional(), creativeId: z.string().optional(), name: z.string().optional(), status: z.string().optional(), type: z.string().optional(), reviewStatus: z.string().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/ad', a);
     return ok(`Created Snapchat ad "${d.name}" (${d.id}) in ad squad ${d.adSquadId} from creative ${d.creativeId} — stored as ${d.status || 'an unreported status'}. ${d.note}`, d);
@@ -16868,7 +16922,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true — without it nothing changes and you get the sentence to show the user'),
     },
     outputSchema: { adAccountId: z.string().optional(), level: z.string().optional(), id: z.string().optional(), requestedMicro: z.number().optional(), readMicro: z.number().nullable().optional(), read: z.number().nullable().optional(), currency: z.string().nullable().optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/budget', a);
     return ok(`Snapchat ad squad ${d.id} — requested ${d.requestedMicro} micro, READ BACK from Snapchat as ${d.readMicro ?? '(not returned)'} micro${d.read != null ? ` (${d.read} ${d.currency || ''})` : ''}.${d.note ? ' ' + d.note : ''}`, d);
@@ -16884,7 +16938,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true — without it nothing changes and you get the sentence to show the user'),
     },
     outputSchema: { adAccountId: z.string().optional(), level: z.string().optional(), requested: z.string().optional(), results: z.array(z.any()).optional(), read: z.array(z.any()).optional(), verified: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/status', a);
     const read = (d.read || []).map(r => `${r.id} → ${r.status ?? '(unreadable)'}`).join(', ') || '(Snapchat returned no rows on the read-back)';
@@ -16937,7 +16991,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('post_to_linkedin_page', {
     title: 'Publish to a LinkedIn company Page',
-    description: 'Publish a post to one of the user’s LinkedIn COMPANY PAGES — text, plus optionally an image, a video, a 2–20 image CAROUSEL (LinkedIn calls it a MultiImage post; pass the slides in order as imageUrls[]), or a LINK POST with a real preview card (linkUrl). USE linkUrl WHENEVER THE POINT OF THE POST IS A LINK: LinkedIn disables URL scraping for API partners, so a url sitting in the text renders as plain text with no card, and the card’s title, description and image only exist if you pass linkTitle / linkDescription / linkThumbnailUrl — read them off the page and supply them. The media need not be a Hermoso render — it must be Hermoso-HOSTED because we upload the bytes to LinkedIn ourselves, and upload_file turns ANY file the user already has into such a URL. ORGANIC CAROUSELS ARE COMPANY-PAGE ONLY — a personal profile cannot publish one and is refused by name, so send a deck here rather than to post_to_linkedin. This is a DIFFERENT thing from post_to_linkedin, which publishes to the person’s own profile: pick the one the user actually asked for and never substitute. organizationId comes from list_linkedin_pages; omit it only when the account administers exactly one Page. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. A VIDEO POST CAN CARRY CAPTIONS AND ITS OWN COVER, and both are attached only during the upload: pass captionsSrt (SubRip content — LinkedIn is watched with the sound off) and videoThumbnailUrl (otherwise LinkedIn picks a frame for you). LinkedIn does NOT allow the image, video, captions or thumbnail of a published post to be swapped afterwards, so get all of that right first (the copy can still be edited with manage_linkedin_post).',
+    description: 'Use this when the user wants to post to a LinkedIn company Page. Publishing costs no credits. Publish a post to one of the user’s LinkedIn COMPANY PAGES — text, plus optionally an image, a video, a 2–20 image CAROUSEL (LinkedIn calls it a MultiImage post; pass the slides in order as imageUrls[]), or a LINK POST with a real preview card (linkUrl). USE linkUrl WHENEVER THE POINT OF THE POST IS A LINK: LinkedIn disables URL scraping for API partners, so a url sitting in the text renders as plain text with no card, and the card’s title, description and image only exist if you pass linkTitle / linkDescription / linkThumbnailUrl — read them off the page and supply them. The media need not be a Hermoso render — it must be Hermoso-HOSTED because we upload the bytes to LinkedIn ourselves, and upload_file turns ANY file the user already has into such a URL. ORGANIC CAROUSELS ARE COMPANY-PAGE ONLY — a personal profile cannot publish one and is refused by name, so send a deck here rather than to post_to_linkedin. This is a DIFFERENT thing from post_to_linkedin, which publishes to the person’s own profile: pick the one the user actually asked for and never substitute. organizationId comes from list_linkedin_pages; omit it only when the account administers exactly one Page. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. A VIDEO POST CAN CARRY CAPTIONS AND ITS OWN COVER, and both are attached only during the upload: pass captionsSrt (SubRip content — LinkedIn is watched with the sound off) and videoThumbnailUrl (otherwise LinkedIn picks a frame for you). LinkedIn does NOT allow the image, video, captions or thumbnail of a published post to be swapped afterwards, so get all of that right first (the copy can still be edited with manage_linkedin_post).',
     inputSchema: {
       ...HOOK_ATTR,
       organizationId: z.string().optional().describe('numeric Page id from list_linkedin_pages'),
@@ -17078,7 +17132,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('linkedin_ads_report', {
     title: 'LinkedIn ads performance report',
-    description: 'LinkedIn ad performance — impressions, clicks, cost, website conversions, leads and social actions — pivoted by CAMPAIGN (default), CAMPAIGN_GROUP, CREATIVE, ACCOUNT, CONVERSION, PLACEMENT_NAME, IMPRESSION_DEVICE_TYPE, SERVING_LOCATION… or by AUDIENCE DEMOGRAPHICS: MEMBER_COMPANY_SIZE, MEMBER_INDUSTRY, MEMBER_SENIORITY, MEMBER_JOB_TITLE, MEMBER_JOB_FUNCTION, MEMBER_COUNTRY_V2, MEMBER_REGION_V2, MEMBER_COMPANY. The MEMBER_* pivots are what LinkedIn is uniquely good at — job title, seniority and company size are targeting dimensions no other platform reports — and LinkedIn allows exactly ONE pivot per report, so ask for them one at a time and join the answers yourself. An unknown pivot or granularity is refused BY NAME rather than forwarded. On a demographic pivot LinkedIn returns only the top 100 values, DROPS any value under 3 events (so the rows will not sum to the campaign total) and lags 12–24 hours behind the performance numbers — the note says so, every time. Window via since/until (YYYY-MM-DD). ZERO rows genuinely means no delivery in that window; say exactly that and never present zeros as measured performance. A LinkedIn TEST ad account NEVER returns analytics, and the note says so when that is what you are looking at. Read-only, free.',
+    description: 'LinkedIn ad performance — impressions, clicks, cost, website conversions, leads and social actions — pivoted by CAMPAIGN (default), CAMPAIGN_GROUP, CREATIVE, ACCOUNT, CONVERSION, PLACEMENT_NAME, IMPRESSION_DEVICE_TYPE, SERVING_LOCATION… or by AUDIENCE DEMOGRAPHICS: MEMBER_COMPANY_SIZE, MEMBER_INDUSTRY, MEMBER_SENIORITY, MEMBER_JOB_TITLE, MEMBER_JOB_FUNCTION, MEMBER_COUNTRY_V2, MEMBER_REGION_V2, MEMBER_COMPANY. The MEMBER_* pivots report job title, seniority, company size and the other member demographics. LinkedIn allows exactly ONE pivot per report, so ask for them one at a time and join the answers yourself. An unknown pivot or granularity is refused BY NAME rather than forwarded. On a demographic pivot LinkedIn returns only the top 100 values, DROPS any value under 3 events (so the rows will not sum to the campaign total) and lags 12–24 hours behind the performance numbers — the note says so, every time. Window via since/until (YYYY-MM-DD). ZERO rows genuinely means no delivery in that window; say exactly that and never present zeros as measured performance. A LinkedIn TEST ad account NEVER returns analytics, and the note says so when that is what you are looking at. Read-only, free.',
     inputSchema: {
       adAccountId: z.string().optional(),
       campaignIds: z.array(z.string()).optional(),
@@ -17180,7 +17234,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create it ACTIVE under a LIVE campaign group'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), campaignGroupId: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/ads-campaign', a);
     return ok(`${d.note} To make it spend, use set_linkedin_ads_status(confirm:true) after the user approves.`, d);
@@ -17197,7 +17251,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to change the budget of a LIVE campaign'),
     },
     outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), dailyBudget: z.string().nullable().optional(), totalBudget: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/linkedin/ads-budget', a); return ok(d.note, d); }));
   server.registerTool('set_linkedin_ads_status', {
     title: 'Activate or pause a LinkedIn campaign group / campaign / ad',
@@ -17249,7 +17303,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true to create it ACTIVE under a LIVE campaign (real spend)'),
     },
     outputSchema: { ok: z.boolean().optional(), creativeId: z.string().optional(), campaignId: z.string().optional(), intendedStatus: z.string().optional(), isServing: z.boolean().optional(), reference: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/ads-creative', a);
     return ok(`${d.note} To make it spend, use set_linkedin_ads_status(level:"creative", status:"ACTIVE", confirm:true) after the user approves.`, d);
@@ -17346,7 +17400,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true ONLY to set status ACTIVE (real spend)'),
     },
     outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), updated: z.array(z.string()).optional(), euTransparency: z.string().optional().describe('the EU advertiser / payer names set on this edit, and where they came from') },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/object/update', a);
     return ok(`Updated ${a.objectId} (${(d.updated || []).join(', ')}).${d.euTransparency ? ` ${d.euTransparency}` : ''}`, d);
@@ -18095,7 +18149,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('generate_image', {
     title: 'Generate ad image',
-    description: 'Render a finished ad IMAGE and return its served URL. refImages (local paths or URLs) force product-accurate compositing (drops a real product into the scene). MULTI-BRAND CAUTION: useBrand hydration pulls the SAVED workspace brand — when working a brand that is NOT the saved one (a fresh draft_brand), pass that brand\'s own productImages/logo as refImages (and useBrand:false) or the output composites the WRONG brand\'s product. NOTE that the saved-brand hydration also decides the ENGINE: attaching product photos routes the render to the compositing model, so a `model` you named is only honoured when no references ride — pass raw:true (or useBrand:false) to render on exactly the model you asked for. model = a catalog id from hermoso_capabilities (omit for the default). PUTTING A REAL PRODUCT IN A REAL PERSON’S HANDS, or a garment on them, is a DIFFERENT KIND OF ROW and you must name it: the ids marked `needsRefs` with a `refsMax` in hermoso_capabilities take a person photo first and up to three product/garment photos after it, and they EDIT THE PHOTOGRAPH rather than compositing — THE PERSON IS RE-POSED to hold or wear the thing, so their stance and hands change while their face, clothing, setting and lighting are kept. That is not an object swap in a fixed frame; if you needed the rest of the photograph untouched, this is the wrong tool. Every finished render says which way it went. RAW MODEL ACCESS: ' + RAW_TOOL_NOTE + ' Fast (seconds). Spends credits.',
+    description: 'Use this when the user wants an ad image, product photo or social graphic made. Render a finished ad IMAGE and return its served URL. refImages (local paths or URLs) force product-accurate compositing (drops a real product into the scene). MULTI-BRAND CAUTION: useBrand hydration pulls the SAVED workspace brand — when working a brand that is NOT the saved one (a fresh draft_brand), pass that brand\'s own productImages/logo as refImages (and useBrand:false) or the output composites the WRONG brand\'s product. NOTE that the saved-brand hydration also decides the ENGINE: attaching product photos routes the render to the compositing model, so a `model` you named is only honoured when no references ride — pass raw:true (or useBrand:false) to render on exactly the model you asked for. model = a catalog id from hermoso_capabilities (omit for the default). PUTTING A REAL PRODUCT IN A REAL PERSON’S HANDS, or a garment on them, is a DIFFERENT KIND OF ROW and you must name it: the ids marked `needsRefs` with a `refsMax` in hermoso_capabilities take a person photo first and up to three product/garment photos after it, and they EDIT THE PHOTOGRAPH rather than compositing — THE PERSON IS RE-POSED to hold or wear the thing, so their stance and hands change while their face, clothing, setting and lighting are kept. That is not an object swap in a fixed frame; if you needed the rest of the photograph untouched, this is the wrong tool. Every finished render says which way it went. RAW MODEL ACCESS: ' + RAW_TOOL_NOTE + ' Fast (seconds). Spends credits.',
     inputSchema: {
       prompt: z.string().optional().describe('REQUIRED on every model EXCEPT the pose rows below. the full image prompt — subject, composition, lighting, and any on-image ad text. ON A POSE MODEL (product-in-hand / try-on) THIS IS EXTRA DIRECTION AND IT IS OPTIONAL — leave it out and the pose is built for you. If you do write one, DESCRIBE THE POSE ("she holds the bottle upright in her right hand at chest height, label to camera"); do NOT phrase it as a swap ("replace the mug with the bottle"), which is REFUSED for free, because the product then comes out the size of whatever it replaced — a 30ml bottle rendered mug-sized in testing.'),
       refImages: z.array(z.string()).optional().describe('local file paths or URLs of product/logo references to composite in. ON THE POSE MODELS — any row hermoso_capabilities marks `needsRefs` with a `refsMax`, such as putting your product in someone’s hands or a virtual try-on — THE ORDER IS THE CONTRACT AND IT IS NOT A COMPOSITE: refImages[0] is the PERSON photo, and the rest (up to `refsMax` minus one) are the product or garment photos. Reversed, you get the product wearing the person. A 4th product is dropped and the reply says so. ' + LIKENESS_TERMS),
@@ -18369,7 +18423,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('render_ad', {
     title: 'Render ad video',
-    description: 'RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), no music unless asked, real product references. UGC and cinematic plans are rendered from a painted STORYBOARD board (cleaned, then bound first, ahead of the creator and the product); a cinematic spot paints a location anchor first (and a hero when someone is on camera). A product-only commercial renders from the real product photo by default; board:true or foundations:\'choose\' adds a product identity sheet, a four-up moodboard and a board. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
+    description: 'Use this when the user wants a finished video ad for their brand. RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), no music unless asked, real product references. UGC and cinematic plans are rendered from a painted STORYBOARD board (cleaned, then bound first, ahead of the creator and the product); a cinematic spot paints a location anchor first (and a hero when someone is on camera). A product-only commercial renders from the real product photo by default; board:true or foundations:\'choose\' adds a product identity sheet, a four-up moodboard and a board. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
       creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”), or a PRESET AI creator from list_creators presets by exact name or id (free, no generation). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default when the plan has a person on camera and the account is on a paid Hermoso plan (a free account gets a fresh AI person), and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if an explicitly named creator is cast on a plan with nobody on camera, or if a REAL person is cast on a free plan. ' + LIKENESS_TERMS),
@@ -18846,7 +18900,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('generate_video', {
     title: 'Generate video',
-    description: 'Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. ONE generation = one continuous clip up to the model’s longest listed duration — the longest-clip model in the catalog today renders a full multi-beat spot of up to 30 SECONDS in ONE unbroken take with native synchronized audio, so never assume a generic 8–10s cap and never stitch something that fits one clip; durationSeconds must be one of the model’s durations from hermoso_capabilities, which is the live list. TO GET A SPECIFIC MODEL, NAME IT in `model`: an unnamed render is routed by the server’s own auto-pool, which is narrower than the catalog, so the longest-clip and highest-resolution models are reached by naming them. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. AUDIO IS NOT FREE AND NOT OPTIONAL BY DEFAULT: a clip delivered with no audio of its own gets a music bed composed and CHARGED on top of the render (see musicMood and audio) — on a cheap short draft the bed can cost as much as the clip. Pass refVideo (a clip URL) to EDIT an existing video instead — the omni engine transforms that clip per your prompt, inheriting its canvas + length (aspectRatio/durationSeconds are ignored for an edit). RAW MODEL ACCESS: by default a few small guards are appended (packaging/label safety with no reference image, a negative prompt where the model takes one, reference-binding lines) and hex colour codes become colour names; ' + RAW_TOOL_NOTE + ' Spends credits (Starter plan is video-blocked server-side).',
+    description: 'Use this when the user wants a video clip made from a prompt; for a finished, branded video ad use render_ad. Render a RAW video clip from your own prompt and return its served mp4 URL. For finished brand ADS prefer render_ad (it runs the Studio quality pipeline — composited text, clean speech, end card, music); use this for raw/experimental clips or precise manual control. ONE generation = one continuous clip up to the model’s longest listed duration — the longest-clip model in the catalog today renders a full multi-beat spot of up to 30 SECONDS in ONE unbroken take with native synchronized audio, so never assume a generic 8–10s cap and never stitch something that fits one clip; durationSeconds must be one of the model’s durations from hermoso_capabilities, which is the live list. TO GET A SPECIFIC MODEL, NAME IT in `model`: an unnamed render is routed by the server’s own auto-pool, which is narrower than the catalog, so the longest-clip and highest-resolution models are reached by naming them. Renders take 1–3 min. refImage anchors the opening frame; ttsScript adds a voiceover. AUDIO IS NOT FREE AND NOT OPTIONAL BY DEFAULT: a clip delivered with no audio of its own gets a music bed composed and CHARGED on top of the render (see musicMood and audio) — on a cheap short draft the bed can cost as much as the clip. Pass refVideo (a clip URL) to EDIT an existing video instead — the omni engine transforms that clip per your prompt, inheriting its canvas + length (aspectRatio/durationSeconds are ignored for an edit). RAW MODEL ACCESS: by default a few small guards are appended (packaging/label safety with no reference image, a negative prompt where the model takes one, reference-binding lines) and hex colour codes become colour names; ' + RAW_TOOL_NOTE + ' Spends credits (Starter plan is video-blocked server-side).',
     inputSchema: {
       prompt: z.string().optional().describe('the video prompt / shot description (for a refVideo edit, this is the transformation instruction); optional with `shots`'),
       raw: z.boolean().optional().describe('Send the prompt to the model exactly as written, without the wording Hermoso usually adds (packaging and label guidance, reference lines, colour names for hex codes, quality hints). Use it when you want the model\'s own interpretation rather than Hermoso\'s render craft. Two vendor-required fixes still apply: extra @ImageN tokens are dropped and an over-long prompt is trimmed at a sentence (on Veo it is refused with the length and the cap instead). Billing, durable delivery and per-model validation are unchanged.'),
@@ -20456,7 +20510,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('research_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Researching ads…', 'Ad research ready'),
     title: 'Research ads',
-    description: 'Open-ended ad research that needs JUDGMENT across platforms — comparisons, "what angle is working", "who else is doing this", anything where the right sources are not known up front. It is an agentic loop (several rounds of library pulls plus a written synthesis) and typically takes 30-60 seconds, so it is the WRONG tool for a question that names its own answer. For one named brand\u2019s live ads use pull_competitor_ads; for one keyword or one advertiser on Meta use search_meta_ads \u2014 both are a single call and return in a few seconds. Spends credits — an agentic loop, so a handful rather than the one-call cost of a targeted search.',
+    description: 'Use this when the user wants to see the ads a brand or competitor is running, or ad examples for a market. Open-ended ad research that needs JUDGMENT across platforms — comparisons, "what angle is working", "who else is doing this", anything where the right sources are not known up front. It is an agentic loop (several rounds of library pulls plus a written synthesis) and typically takes 30-60 seconds, so it is the WRONG tool for a question that names its own answer. For one named brand\u2019s live ads use pull_competitor_ads; for one keyword or one advertiser on Meta use search_meta_ads \u2014 both are a single call and return in a few seconds. Spends credits — an agentic loop, so a handful rather than the one-call cost of a targeted search.',
     inputSchema: {
       query: z.string().describe('what to research, e.g. "the longest-running protein-pancake ads on Meta"'),
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object to tailor the research to; omit to use the workspace’s saved brand'),
@@ -20622,7 +20676,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('search_linkedin_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching LinkedIn ads…', 'Found LinkedIn ads'),
     title: 'Search LinkedIn ads',
-    description: "Structured LinkedIn Ad Library search by company name, keyword, or companyId — use for a targeted B2B pull; use research_ads for open-ended research. Returns compact JSON {advertiser, headline, description, cta, link, media, dates, impressions} per ad — LinkedIn is the one library exposing real impression counts. Spends about a credit.",
+    description: "Structured LinkedIn Ad Library search by company name, keyword, or companyId — use for a targeted B2B pull; use research_ads for open-ended research. Returns compact JSON {advertiser, headline, description, cta, link, media, dates, impressions} per ad — LinkedIn's library includes impression counts. Spends about a credit.",
     inputSchema: {
       company: z.string().optional().describe('advertiser company name'),
       keyword: z.string().optional().describe('keyword across all advertisers'),
@@ -21149,7 +21203,7 @@ function memoryNoteVerdict(text) {
   // described look) runs as a video edit: same engines, same price, same free preservation read-back as edit_video.
   server.registerTool('restyle_video', {
     title: 'Restyle a video',
-    description: "RESTYLE a clip into a new LOOK: every frame redrawn, shots, motion, camera, framing, timing and sound kept. Looks: `Restyle looks` in hermoso_capabilities (claymation, knitted yarn, cel-shaded CG anime…), your own words, or a look BUILT FROM YOUR IMAGES (styleImages); characters draws your own characters in. engine auto (default) picks by what is in the clip: a real-looking person -> kling (Kling O3 Edit, 3-15s, the strongest look on a face); none -> wan (Wan 3.0 Prime, ≤15s) else seedance (Seedance 2.5, 4-30s). Paid; dryRun quotes it. One change only: edit_video.",
+    description: "RESTYLE a clip into a new LOOK: every frame redrawn, shots, motion, camera, framing, timing and sound kept. Looks: `Restyle looks` in hermoso_capabilities (claymation, knitted yarn, cel-shaded CG anime…), your own words, or a look BUILT FROM YOUR IMAGES (styleImages); characters draws your own characters in. engine auto (default) picks by what is in the clip: a real-looking person -> kling (Kling O3 Edit, 3-15s); none -> wan (Wan 3.0 Prime, ≤15s) else seedance (Seedance 2.5, 4-30s). Paid; dryRun quotes it. One change only: edit_video.",
     inputSchema: {
       video: z.string().describe('the source video URL (a render, job result or list_library)'),
       style: z.string().optional().describe('a look id from hermoso_capabilities (e.g. claymation, knitted-yarn, cel-shaded-anime-cg)'),

@@ -94,6 +94,11 @@ below). The ChatGPT desktop app and ChatGPT workspace admins can also read this 
 No browser on the machine? Create a key in the app under **MCP & CLI** and run
 `npx -y hermoso auth login --token <key>`.
 
+On a server, a CI job or an agent gateway that calls Hermoso many times a day, install it once
+(`npm i -g hermoso`) and call `hermoso` directly. `npx` asks the npm registry about the package on every run,
+and a busy machine can be rate-limited by npm. If the CLI ever says an HTTP error "did not come from Hermoso",
+something on your side (a proxy, a firewall or the gateway) refused the request before it reached us.
+
 ## Which surface should your agent use?
 
 Two shapes, and the right one is decided by **what your client can do**, not by which we prefer.

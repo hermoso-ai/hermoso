@@ -246,8 +246,25 @@ export function isFrontDoorRefusal(status, contentType, { read = false } = {}) {
   return st === 429 || (read && (st === 502 || st === 503 || st === 504));
 }
 export const FRONT_DOOR_MESSAGE = 'Hermoso\u2019s server was briefly too busy to take the request and turned it away before the app saw it (HTTP 429). It was retried and the server was still busy. Nothing ran and nothing was charged: try again in a minute.';
+// A REFUSAL THAT NEVER CAME FROM HERMOSO IS SAID TO BE ONE (2026-10-18). A paying customer's agent gateway got HTTP 429 on
+// every call for a day; the CLI printed FRONT_DOOR_MESSAGE ("Hermoso's server was briefly too busy"), so he and his
+// agent asked us to unblock his IP. Cloudflare's own logs held ZERO requests from that IP: the 429 was answered by
+// something between his machine and us. Every reply from the hosted API, the edge's own refusals included, carries
+// Cloudflare's cf-ray and/or our x-request-id; a refusal with neither did not come from Hermoso, and saying so is the
+// whole diagnosis. Only judged against the hosted API (a self-hosted base has no edge). PURE, so a check runs it.
+export const HOSTED_API_RE = /^https:\/\/app\.hermoso\.ai$/i;
+export function foreignRefusal(status, get, apiBase = API_BASE, env = process.env) {
+  const st = Number(status);
+  if (!(st >= 400) || !HOSTED_API_RE.test(String(apiBase || ''))) return null;
+  const h = (k) => { try { return String(get?.(k) || ''); } catch { return ''; } };
+  if (h('cf-ray') || h('x-request-id')) return null;
+  const via = h('server') ? ` (it answered as "${h('server').slice(0, 60)}")` : '';
+  const proxy = env?.HTTPS_PROXY || env?.https_proxy || env?.HTTP_PROXY || env?.http_proxy ? ' This machine sends web traffic through a proxy (HTTPS_PROXY is set), which is the likeliest source.' : '';
+  return `HTTP ${st} did not come from Hermoso${via}: the reply carries none of the headers every Hermoso response has, so something between this machine and ${apiBase} refused the request, such as a proxy, a firewall or the gateway this runs on.${proxy} Nothing reached Hermoso and nothing was charged. Hermoso itself did not throttle or block this account or address.`;
+}
 async function throughFrontDoor(send, { read }) {
   let res = await send();
+  { const foreign = foreignRefusal(res.status, (k) => res.headers?.get?.(k)); if (foreign) { try { await res.arrayBuffer(); } catch { /* drain */ } throw Object.assign(new Error(foreign), { status: res.status, _foreign: true }); } }
   for (const ms of frontDoorWaits()) {
     if (!isFrontDoorRefusal(res.status, res.headers?.get?.('content-type'), { read })) return res;
     try { await res.arrayBuffer(); } catch { /* drain, so the socket is reused */ }

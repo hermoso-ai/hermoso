@@ -70,6 +70,21 @@ function parse(argv) {
 
 const die = (msg) => { console.error('✗ ' + msg); process.exit(1); };
 
+// RUN THROUGH npx, EVERY CALL ASKS THE NPM REGISTRY (2026-10-18). Measured: `npx -y hermoso …` revalidates the package
+// with registry.npmjs.org on every run, even with it cached, and an npm 429 kills the command before this file runs
+// (npm prints "E429 … Too Many Requests"). An agent on a server calling Hermoso hundreds of times an hour through npx
+// is exactly what npm rate-limits, and a paying customer's gateway spent a day on that 429 believing Hermoso had
+// blocked him. So when this CLI is running through npx it says once a week, on stderr (never in --json output),
+// that installing it once avoids the registry entirely. Not for `mcp`: an MCP host starts it once per session.
+const ranViaNpx = (argv1 = process.argv[1], env = process.env) => /[\\/]_npx[\\/]/.test(String(argv1 || '')) || env.npm_command === 'exec';
+async function npxTip(group) {
+  if (group === 'mcp' || !ranViaNpx()) return;
+  const mark = path.join(CONFIG_DIR, 'npx-tip');
+  try { if (Date.now() - Number(await readFile(mark, 'utf8')) < 7 * 86400e3) return; } catch { /* first time */ }
+  try { await mkdir(CONFIG_DIR, { recursive: true }); await writeFile(mark, String(Date.now())); } catch { /* best effort */ }
+  console.error('tip: this ran through npx, which asks the npm registry on every call. For an agent or a server making many calls, install once with `npm install -g hermoso` and run `hermoso` directly: npm rate-limits busy machines (an HTTP 429 from npm, before Hermoso is reached).');
+}
+
 async function main() {
   const { pos, flags } = parse(process.argv.slice(2));
   const [group, sub] = pos;
@@ -101,6 +116,7 @@ async function main() {
   }
 
   // resolve API base + token from config (env overrides), then load the shared client
+  await npxTip(group);
   process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
   if (cfg.profile && cfg.profile !== 'default' && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
