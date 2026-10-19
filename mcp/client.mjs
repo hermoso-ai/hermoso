@@ -500,6 +500,22 @@ export async function submitJob(type, input, { label = '' } = {}) {
   return apiPost('/api/jobs', { type, input, label }); // → publicJob {id, status, ...}
 }
 export async function getJob(id) { return apiGet(`/api/jobs/${encodeURIComponent(id)}`); } // → publicJob
+// ONE READ THAT A ROLLOVER CANNOT TURN INTO "IT DOES NOT EXIST" (2026-10-19). get_job is a single read, and its 404
+// answer tells the caller to STOP POLLING — so a 404 from a revision that has not yet seen a job (see pollMissVerdict)
+// ended the follow-up for good. A 404 is re-read for a short window before it is reported as absent; any other answer
+// returns at once, and an id that really does not exist costs only that window. null = absent after the window.
+export const JOB_READ_GRACE_MS = 12_000;
+export async function getJobSettled(id, { graceMs = JOB_READ_GRACE_MS, intervalMs = 3000, getJobFn = getJob } = {}) {
+  const until = Date.now() + Math.max(0, graceMs);
+  for (;;) {
+    try { return await getJobFn(id); }
+    catch (e) {
+      if (Number(e?.status) !== 404) throw e;
+      if (Date.now() + intervalMs > until) return null;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+}
 export function jobResult(job) { const r = job?.result; return r && Object.prototype.hasOwnProperty.call(r, 'data') ? r.data : r; }
 
 // HOW LONG A RENDER TOOL HOLDS ITS CALLER, in ms. `cap` is the transport's own maximum (45s hosted, 10min local) and
@@ -519,9 +535,17 @@ export function jobWaitMs(requested, cap) {
 // 404 (and a 502/503/504, which is what a rollover looks like from outside) is retried; past it a 404 is final and is
 // said in words, never as the bare route error. PURE, so tools/job-readthrough-check.mjs runs it.
 export const JOB_MISS_GRACE_MS = 30_000;
-export function pollMissVerdict(status, { startedAt, now = Date.now(), deadline = Infinity, graceMs = JOB_MISS_GRACE_MS } = {}) {
+// THE GRACE RUNS FROM THE FIRST MISS, NOT FROM THE SUBMIT (2026-10-19). A rollover can land at ANY point in a 1-3 minute
+// render, not only in its first seconds: job_mvfhwfft5wijd was submitted at 16:55:21 to revision 02505, the poll at
+// 16:56:09 reached 02506 (booted 16:55:48), which had not yet seen it and answered 404, and because the grace had been
+// counted from the submit (48s earlier) that first 404 was FINAL: the caller read "no record of job" about a render
+// that answered 200 nine seconds later and finished. `missSince` is when the current run of 404s began (pollJob resets
+// it on any answer), so a miss is final only after it has lasted the whole grace; a caller with no `missSince` keeps
+// the old reading (startedAt). The deadline still bounds every wait.
+export function pollMissVerdict(status, { startedAt, missSince = null, now = Date.now(), deadline = Infinity, graceMs = JOB_MISS_GRACE_MS } = {}) {
   const st = Number(status);
-  if (st === 404) return (now - startedAt < graceMs && now < deadline) ? 'retry' : 'final';
+  const since = Number.isFinite(+missSince) && missSince != null ? +missSince : startedAt;
+  if (st === 404) return (now - since < graceMs && now < deadline) ? 'retry' : 'final';
   // a throttle is not news about the render: a poll that was turned away waits and asks again (2026-10-04)
   if ((st === 429 || st === 502 || st === 503 || st === 504) && now < deadline) return 'retry';
   return 'throw';
@@ -531,14 +555,16 @@ export function jobMissMessage(id) {
     + 'If it was just submitted, the server that took it was replaced before it wrote the job down, so it cannot be followed from here. A render lost that way is not charged: the credits held for it are released automatically. '
     + 'Call list_jobs to see this workspace\'s recent jobs. Do not re-run the render on the strength of this message alone.';
 }
-export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 1000, onTick, getJobFn = getJob } = {}) {
+export async function pollJob(id, { intervalMs = 3000, timeoutMs = 10 * 60 * 1000, onTick, getJobFn = getJob, graceMs = JOB_MISS_GRACE_MS } = {}) {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
+  let missSince = null; // when the current run of 404s began (see pollMissVerdict); any answer resets it
   for (;;) {
     let job;
-    try { job = await getJobFn(id); }
+    try { job = await getJobFn(id); missSince = null; }
     catch (e) {
-      const v = pollMissVerdict(e?.status, { startedAt, now: Date.now(), deadline });
+      if (Number(e?.status) === 404 && missSince == null) missSince = Date.now();
+      const v = pollMissVerdict(e?.status, { startedAt, missSince, now: Date.now(), deadline, graceMs });
       if (v === 'final') throw Object.assign(new Error(jobMissMessage(id)), { status: 404, _viaApi: true, _jobMissing: true });
       if (v === 'throw') throw e;
       await new Promise(r => setTimeout(r, Math.min(intervalMs, Math.max(50, deadline - Date.now()))));

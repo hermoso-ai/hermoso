@@ -5,7 +5,7 @@
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
 import { absolutizeAssetUrl, publicOrigin } from './public-url.mjs';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT, brandScope } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, getJobSettled, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT, brandScope } from './client.mjs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -18243,9 +18243,38 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   // ---------- planning (LLM, 0 SC credits) ----------
   server.group('create');
+  // THE USER'S OWN PICTURES CUT INTO THE VIDEO (2026-10-19, parity with the web Studio's create_ad `inserts`). Each
+  // image may be an https URL (an upload_file URL included), a Library id from list_library (L0, L1… newest first), or a
+  // local path on the CLI (sent as bytes, stored once by the server). An id or path that resolves to nothing is refused
+  // by name, free, before anything is planned or rendered.
+  const INSERTS_Z = z.array(z.object({
+    image: z.string().describe('the picture: an https URL, an upload_file URL, a Library id from list_library (L0, L1…), or a local file path on the CLI'),
+    start: z.number().describe('second of the finished video it appears at'),
+    end: z.number().describe('second it ends at (at least half a second after start)'),
+  })).max(8);
+  const insertsResolved = async (list) => {
+    if (!Array.isArray(list)) return undefined;
+    let lib = null; const out = [];
+    for (const x of list.slice(0, 8)) {
+      if (!x || typeof x !== 'object') continue;
+      const raw = String(x.image || '').trim();
+      let image = raw;
+      const lid = /^L(\d{1,3})$/i.exec(raw);
+      if (lid) {
+        if (!lib) { const all = await readStore('heist.assets.v1').catch(() => null); lib = Array.isArray(all) ? all.filter((a) => a && a.url) : []; }
+        const a = lib[+lid[1]];
+        if (!a || (a.kind && a.kind !== 'image')) throw Object.assign(new Error(`${raw} is not an image in this workspace's Library (list_library numbers them L0, L1… newest first). Nothing was planned, rendered or charged.`), { status: 400, _userInput: true });
+        image = String(a.url);
+      } else image = await toRef(raw);
+      if (!image) throw Object.assign(new Error(`The picture "${raw.slice(0, 80)}" could not be read: pass an https URL, an upload_file URL or a Library id (L0…). Nothing was planned, rendered or charged.`), { status: 400, _userInput: true });
+      out.push({ image: /^\/generated\//.test(image) ? abs(image) : image, start: +x.start, end: +x.end });
+    }
+    return out;
+  };
+  const insertsLine = (ins, verb = 'are laid') => (Array.isArray(ins) && ins.length ? `\nCut-ins: ${ins.length === 1 ? 'the user\'s picture' : `${ins.length} of the user's pictures`} ${ins.length === 1 ? verb.replace(/^are/, 'is') : verb} full-screen at ${ins.map((x) => `${x.start}–${x.end}s`).join(', ')}.` : '');
   server.registerTool('plan_ad', {
     title: 'Plan an ad concept',
-    description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. Spends credits.',
+    description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. The user’s OWN screenshots or pictures cut into the video full-screen go in `inserts`: the board keeps those seconds free of any screen, and render_ad lays the real pictures in. Spends credits.',
     inputSchema: {
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name, or a brand profile object {name,domain,category,palette,products,…}. OMIT to use the workspace’s SAVED brand + memory automatically (see get_brand); use draft_brand to onboard a new one'),
       product: z.string().describe('what to advertise + any angle/offer the user specified'),
@@ -18258,9 +18287,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       language: z.string().optional().describe('output language for the ad copy (e.g. Spanish) — default English'),
       talent: z.enum(['auto', 'creator', 'product_only']).optional().describe("who is on camera; omit to follow the format. Say 'someone new' in product to skip reusing a saved creator."),
       draft: z.object({ model: z.string(), durationSeconds: z.number() }).optional().describe("ONLY after a video refusal that offered a light draft: the {model, durationSeconds} it named. The plan is then authored to that length and priced on that model. Never invent one — a video the account cannot cover is refused BEFORE planning with the three options (image / add credits / this draft when one fits), and the user chooses."),
+      inserts: INSERTS_Z.optional().describe("VIDEO ONLY: the user's OWN pictures (app or report screenshots, a web page, a chart) shown FULL-SCREEN over the video at these seconds while its voice carries on underneath. The plan keeps the shot under each window on camera with no screen in it (the real picture covers it, never a drawn copy), the pictures are never used as references for the video itself, and they ride the returned creative as `inserts` so render_ad lays them in right after the render, in the same job (about 2 credits more). Each picture goes over the seconds that talk about what it shows; at most 8, never two at once. A picture the planned length has no room for is left out and the reply says so."),
     },
     outputSchema: {
       format: z.string().optional().describe("the resolved creative format — 'image' or 'video'"),
+      inserts: z.array(z.any()).optional().describe("the user's pictures render_ad will lay in full-screen: [{image, start, end}], fitted to the planned length"),
+      inserts_note: z.string().optional().describe('set when a picture was left out because the planned length has no room for it'),
       concept: z.string().optional().describe('the one-line creative concept'),
       format_note: z.string().optional().describe("the plan's own read-back when it chose an IMAGE on an open format because the balance could not cover the default video — states the video's real credit price"),
       budget_pick: z.any().optional().describe('{format, reason, videoCredits, balance, seconds} when format_note is set'),
@@ -18278,7 +18310,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       presence_note: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language, durationSeconds, hook, setting, draft, talent }) => {
+  }, wrap(async ({ brand, product, format = 'auto', recipe, reference, language, durationSeconds, hook, setting, draft, talent, inserts }) => {
     // LENGTH SOVEREIGNTY over MCP (found live 2026-07-31: a 40-second brief came back as render_plan.duration_seconds
     // 15, structure single_clip, scenes summing to 15 — the 40 was silently dropped because this tool declared no
     // duration at all). /api/create has honored `durationSeconds` all along (it becomes the planner's "Target video
@@ -18298,7 +18330,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       try { const cur = await apiGet('/api/brand/current'); if (cur?.hasBrand && cur.brand && _n(cur.brand.name) && _n(cur.brand.name) === _n(brand)) brandObj = cur.brand; } catch {}
     }
     const _draft = (draft && typeof draft === 'object' && String(draft.model || '').trim()) ? { model: String(draft.model).trim(), durationSeconds: Math.round(+draft.durationSeconds || 0) } : null; // the accepted light draft rides as itself; its length is the plan's length
-    const d = await apiPost('/api/create', { brand: brandObj, product, format: _draft ? 'video' : format, recipe: recipe || '', reference: reference ? { url: reference } : null, language: language || '', ...(_draft ? { draft: _draft, durationSeconds: _draft.durationSeconds || _len || undefined } : (_len ? { durationSeconds: _len } : {})), hook: hook || '', setting: setting || '', userAsk: String(product || ''), ...(talent && talent !== 'auto' ? { talent } : {}) });
+    const _ins = await insertsResolved(inserts); // the user's own pictures, laid over the video after it renders (resolved before anything is billed)
+    const d = await apiPost('/api/create', { brand: brandObj, product, format: _draft ? 'video' : (_ins && _ins.length && format === 'auto' ? 'video' : format), recipe: recipe || '', reference: reference ? { url: reference } : null, language: language || '', ...(_draft ? { draft: _draft, durationSeconds: _draft.durationSeconds || _len || undefined } : (_len ? { durationSeconds: _len } : {})), hook: hook || '', setting: setting || '', userAsk: String(product || ''), ...(talent && talent !== 'auto' ? { talent } : {}), ...(_ins && _ins.length ? { inserts: _ins } : {}) });
     const c = d.creative || d;
     // EMBED THE PLAN'S OWN BRAND in the creative (2026-07-17: a multi-brand caller planned Fly By Jing but render_ad
     // grounded on the account's SAVED brand — the video shipped with the WRONG brand's packshots and end lockup).
@@ -18323,7 +18356,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         + (_askedLen && _askedLen !== _len ? ` — you asked for ${_askedLen}s, which is outside the supported 4–180s range, so it was clamped to ${_len}s` : '')
         + (_len && _planned && Math.abs(_planned - _len) > 1 ? ` — ⚠ this does NOT match the ${_len}s you asked for; tell the user before rendering, or re-plan` : '');
     }
-    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"${c.format_note ? '\n' + c.format_note : ''}${c.presence_note ? '\n' + c.presence_note : ''}${c.concept_count > 1 ? `\nYou asked for ${c.concept_count} concepts: the concept line names each; this plan builds out the first (variants = ${c.variants || c.concept_count}). Call plan_ad again with a different angle for the others, or render_ad with variants for takes of this one.` : ''}${refWatchedLine(c.reference_watched)}${_lenLine}${_hookLine}${c.for_fun ? '\nJust for fun: a plain picture of what they asked for, with no headline, button or ad copy. Render it as it is and do not call it an ad.' : `\nHeadline: ${c.copy?.[0]?.headline || ''}`}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a storyboard that fits ONE clip of the render model renders as a single continuous pass, a longer plan renders as stitched acts automatically — never hand-stitch)' : 'generate_image with the image_concept.prompt'}.`;
+    const text = `Concept (${c.format}${c.recipe_label ? ' · ' + c.recipe_label : ''}): "${c.concept}"${c.format_note ? '\n' + c.format_note : ''}${c.presence_note ? '\n' + c.presence_note : ''}${c.concept_count > 1 ? `\nYou asked for ${c.concept_count} concepts: the concept line names each; this plan builds out the first (variants = ${c.variants || c.concept_count}). Call plan_ad again with a different angle for the others, or render_ad with variants for takes of this one.` : ''}${refWatchedLine(c.reference_watched)}${_lenLine}${_hookLine}${c.for_fun ? '\nJust for fun: a plain picture of what they asked for, with no headline, button or ad copy. Render it as it is and do not call it an ad.' : `\nHeadline: ${c.copy?.[0]?.headline || ''}`}${insertsLine(c.inserts, 'are laid in by render_ad')}${c.inserts_note ? `\n${c.inserts_note}` : ''}${Array.isArray(inserts) && inserts.length && !(Array.isArray(c.inserts) && c.inserts.length) && !c.inserts_note ? (c.format === 'video' ? '\n⚠ None of the pictures could be kept on this plan; render_ad will not lay any in.' : '\nThe pictures were not used: this plan is an image, and cut-ins go into a video.') : ''}\nRender model: ${c.format === 'video' ? c.vmodel : c.imodel || '—'}. Next: ${c.format === 'video' ? 'call render_ad with THIS ENTIRE creative object (Studio quality pipeline; a storyboard that fits ONE clip of the render model renders as a single continuous pass, a longer plan renders as stitched acts automatically — never hand-stitch)' : 'generate_image with the image_concept.prompt'}.`;
     return ok(text, c);
   }));
 
@@ -18657,7 +18690,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('render_ad', {
     title: 'Render ad video',
-    description: 'Use this when the user wants a finished video ad for their brand. RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), no music unless asked, real product references. UGC and cinematic plans are rendered from a painted STORYBOARD board (cleaned, then bound first, ahead of the creator and the product); a cinematic spot paints a location anchor first (and a hero when someone is on camera). A product-only commercial renders from the real product photo by default; board:true or foundations:\'choose\' adds a product identity sheet, a four-up moodboard and a board. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. Spends credits.',
+    description: 'Use this when the user wants a finished video ad for their brand. RECOMMENDED for finished video ADS: render a plan_ad concept through the SAME quality pipeline as the Hermoso web Studio — timed shot list, exact/clean speech (no garbled words), text composited in post (never model-painted), an optional brand end card (only when the user asks), no music unless asked, real product references. UGC and cinematic plans are rendered from a painted STORYBOARD board (cleaned, then bound first, ahead of the creator and the product); a cinematic spot paints a location anchor first (and a hero when someone is on camera). A product-only commercial renders from the real product photo by default; board:true or foundations:\'choose\' adds a product identity sheet, a four-up moodboard and a board. Pass plan_ad’s full structured output as `creative`. Honors the plan’s render_plan structure/duration: a storyboard that FITS ONE CLIP OF THE RENDER MODEL renders as a single continuous pass; anything longer automatically renders as STITCHED ACTS (the fewest balanced clips, each at most one model clip) — never time-compressed into one clip. That threshold is the render model’s own maximum, not a fixed number: most models cap a clip at 15s and the longest-clip one goes to 30s, so use dryRun:true to see the act split this plan will actually get, for free, before spending. CAST A SAVED CREATOR with `creator` so the SAME person stars in this ad as in the last one (list_creators is the roster) — otherwise every render invents a new face. Renders take 1–3 min; keep polling get_job if it returns still-rendering. The user’s own pictures that plan_ad was given (creative.inserts) are laid in full-screen at their seconds by the same job, or pass `inserts` here. Spends credits.',
     inputSchema: {
       creative: z.object({}).passthrough().describe('the FULL structured output of plan_ad (must contain video_storyboard)'),
       creator: z.string().optional().describe('CAST A SAVED CREATOR in this ad — their id from list_creators, or the name you know them by (“Sarah”), or a PRESET AI creator from list_creators presets by exact name or id (free, no generation). Their saved portrait becomes the on-camera identity for the whole spot, so the same face carries across every act and across every ad you render for this brand — and because we already have their picture, the character portrait this pipeline would otherwise generate is skipped, so casting somebody costs LESS than not casting them. Omit to let the ad cast a fresh person — EXCEPT for a CREATOR account (onboarded from their own @handle): their own saved likeness is cast by default when the plan has a person on camera and the account is on a paid Hermoso plan (a free account gets a fresh AI person), and the read-back says `default:true`; pass "none" to render without them. Refused for free, with nothing rendered, if the name matches nobody or more than one creator, if an explicitly named creator is cast on a plan with nobody on camera, or if a REAL person is cast on a free plan. ' + LIKENESS_TERMS),
@@ -18678,6 +18711,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       ttsVoice: z.string().optional().describe('voiceover voice name (e.g. Rachel / George) when the plan voices over'),
       dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) and the estimated credits the real render reserves, WITHOUT submitting a render — free, nothing charged'),
       allowGenericProduct: z.boolean().optional().describe('proceed even though this brand has NO product photo on file and the ad features a product — the packaging will be INVENTED. Only pass true after telling the user that and hearing they are fine with a generic stand-in'),
+      inserts: INSERTS_Z.optional().describe("the user's OWN pictures (screenshots, a page, a chart) laid FULL-SCREEN over the finished video at these seconds, its sound running underneath, by the same job right after the render (about 2 credits more). Omit to use the ones plan_ad was given (creative.inserts); [] renders without them. Passing them here when plan_ad never saw them still keeps the shots under them free of screens, but plan_ad with inserts writes the board around them."),
     },
     outputSchema: {
       ...JOB_OUT,
@@ -18699,6 +18733,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _len = _askedLen ? clampAdSeconds(_askedLen) : 0;
     if (_len) a = { ...a, durationSeconds: _len };
     const _clampNote = (_askedLen && _askedLen !== _len) ? `\n(${_askedLen}s is outside the supported 4–180s range — rendered at ${_len}s.)` : '';
+    if (Array.isArray(a.inserts)) a = { ...a, inserts: await insertsResolved(a.inserts) }; // the user's pictures, resolved before anything is billed
     const { input, jobType, notes, needsProductPhoto, creator, ownRefNotice, quote, brandPhoto } = await apiPost('/api/render/assemble', a); // a passes wholesale — creator/resolution/captions/endCard/music/lockup/ttsVoice ride the body
     // THE CAST IS THE READ-BACK, NEVER THE ASK. `creator` is the row the SERVER resolved out of this workspace's own
     // roster; a half-remembered name that matched nobody, matched two people, or belongs to an unconsented real
@@ -18731,11 +18766,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // catalog pick, the cast) were dropped, and get_job cannot say them later: they are not on the job. `brandPhoto`
     // rides structuredContent on both paths, so a surface shows the left-out photo as its own line.
     const _bp = brandPhoto && typeof brandPhoto === 'object' && brandPhoto.note ? brandPhoto : null;
-    if (r?.stillRendering) return ok(`${stillMsg(r)}${_bp ? `\nALSO TELL THE USER, in one short line: ${_bp.note}` : ''}${_clampNote}${_castLine}${notes ? `\nNOTES: ${String(notes).trim()}` : ''}`, { ...r, ...(creator ? { creator } : {}), ...(_bp ? { brandPhoto: _bp } : {}), ...(notes ? { notes: String(notes).trim() } : {}) });
+    if (r?.stillRendering) return ok(`${stillMsg(r)}${insertsLine(input?.layInserts, 'are laid in by this same job before it is delivered, so the file get_job returns already has them')}${_bp ? `\nALSO TELL THE USER, in one short line: ${_bp.note}` : ''}${_clampNote}${_castLine}${notes ? `\nNOTES: ${String(notes).trim()}` : ''}`, { ...r, ...(creator ? { creator } : {}), ...(_bp ? { brandPhoto: _bp } : {}), ...(notes ? { notes: String(notes).trim() } : {}) });
     // FOUNDATIONS ONLY (foundations:'choose'): no video was rendered — hand back the pictures to pick from.
     const _fd = renderPayload(r);
     if (_fd && _fd.foundationsOnly) { const F = _fd.foundations || {}; return ok(`Foundations painted (${_fd.boardCreditsUsed || 0} credits, billed as images) [job ${r.jobId}]:\n${Object.entries(F).filter(([, v]) => typeof v === 'string').map(([k, v]) => `• ${k}: ${abs(v)}`).join('\n')}\n${_fd.note || ''}`, { ...r, foundations: F }); }
-    return okVideo(`Ad video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${_clampNote}${switchNote(r)}${_castLine}${Array.isArray(_fd?.boards) && _fd.boards.length ? `\nStoryboard: ${_fd.boards.map((u) => abs(u)).join(' , ')}${_fd.boardCreditsUsed ? ` (${_fd.boardCreditsUsed} credits of image paints)` : ''}` : ''}\n${notes || ''}`, { ...r, ...(creator ? { creator } : {}), ...(_bp ? { brandPhoto: _bp } : {}) });
+    return okVideo(`Ad video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${_fd?.inserts?.laid ? insertsLine(_fd.inserts.windows) : ''}${_fd?.inserts?.failed && _fd.note ? `\nTELL THE USER: ${_fd.note}` : ''}${_clampNote}${switchNote(r)}${_castLine}${Array.isArray(_fd?.boards) && _fd.boards.length ? `\nStoryboard: ${_fd.boards.map((u) => abs(u)).join(' , ')}${_fd.boardCreditsUsed ? ` (${_fd.boardCreditsUsed} credits of image paints)` : ''}` : ''}\n${notes || ''}`, { ...r, ...(creator ? { creator } : {}), ...(_bp ? { brandPhoto: _bp } : {}) });
   }));
 
 
@@ -19337,7 +19372,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // `structuredContent` from an error, and `window.openai.callTool` REJECTS on one, so the widget would be back to
     // guessing from prose. The sentence below is unambiguous for the model; `status:'not_found'` is unambiguous for
     // the card; and both say STOP rather than leaving a poller to grind for six minutes.
-    const j = await getJob(id).catch((e) => { if (Number(e?.status) === 404) return null; throw e; });
+    const j = await getJobSettled(id); // a 404 is re-read for a few seconds first: a revision taking over mid-render has not yet seen the job (getJobSettled)
     if (!j) return ok(`No job with id "${id}". Nothing is rendering under that id — it does not exist on this workspace (it may have been mistyped, or it may belong to another account or brand). STOP POLLING IT. Do NOT re-run the render on the strength of this: call list_jobs to see this workspace's recent jobs and their real ids.`, { id, status: 'not_found', progress: 0, error: `No job with id "${id}" on this workspace.`, url: null });
     const res = jobResult(j);
     const url = abs(res?.video || res?.image || res?.url);
@@ -19371,7 +19406,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return out;
     }
     const seamLine = seamsText(res); // a timeline / join's measured seams + intro budget ('' for any other video)
-    if (j.status === 'done' && res?.video) return okVideo(wireText + seamLine, { ...j, url }); // resumed video → same inline poster as a direct return
+    // a render that laid the user's pictures in (render_ad inserts): say they are in it, or that they could not be
+    const insLine = res?.inserts?.laid ? `\nCut-ins: ${res.inserts.laid === 1 ? 'the user\'s picture is' : `${res.inserts.laid} of the user's pictures are`} laid in full-screen at ${(res.inserts.windows || []).map((x) => `${x.start}–${x.end}s`).join(', ')}.` : (res?.inserts?.failed && res.note ? `\nTELL THE USER: ${res.note}` : '');
+    if (j.status === 'done' && res?.video) return okVideo(wireText + seamLine + insLine, { ...j, url }); // resumed video → same inline poster as a direct return
     if (j.status === 'done' && res?.image) { const img = await imageBlock(url); return { content: [{ type: 'text', text: wireText }, ...(img ? [img] : [])], structuredContent: { ...j, url } }; }
     return ok(wireText, { ...j, url });
   }));
@@ -21260,22 +21297,23 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('list_library', {
     title: 'List library',
-    description: "Browse this workspace's Library — every image/video generated in the Studio, newest first (the same Library the web app shows). Returns served URLs you can open directly or hand to fetch_asset for a download link, plus each asset's kind, model, and age. Free, read-only.",
+    description: "Browse this workspace's Library — every image/video generated in the Studio, newest first (the same Library the web app shows). Returns served URLs you can open directly or hand to fetch_asset for a download link, plus each asset's id (L0, L1…, which plan_ad and render_ad `inserts` take), kind, model, and age. Free, read-only.",
     inputSchema: {
       kind: z.enum(['image', 'video', 'all']).optional().describe("filter by asset kind (default 'all')"),
       limit: z.number().optional().describe('max assets to return (default 20, max 60)'),
     },
-    outputSchema: { assets: z.array(z.object({ url: z.string(), kind: z.string().optional(), model: z.string().optional(), ageHours: z.number().optional() })).optional() },
+    outputSchema: { assets: z.array(z.object({ id: z.string().optional(), url: z.string(), kind: z.string().optional(), model: z.string().optional(), ageHours: z.number().optional() })).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     let list = await readStore('heist.assets.v1'); // via /api/store/bootstrap — there is no GET /api/store/:key route
     if (!Array.isArray(list)) list = [];
     const kind = a.kind && a.kind !== 'all' ? a.kind : null;
     const lim = Math.min(60, Math.max(1, +a.limit || 20));
-    const assets = list.filter(x => x && x.url && (!kind || x.kind === kind)).slice(0, lim)
-      .map(x => ({ url: abs(x.url), kind: x.kind || '', model: x.model || '', ageHours: x.at ? Math.round((Date.now() - x.at) / 36e5) : undefined }));
+    // id: L0, L1… over the whole Library newest first (a kind filter does not renumber), the id plan_ad / render_ad `inserts` take
+    const assets = list.filter(x => x && x.url).map((x, i) => ({ x, id: 'L' + i })).filter(({ x }) => !kind || x.kind === kind).slice(0, lim)
+      .map(({ x, id }) => ({ id, url: abs(x.url), kind: x.kind || '', model: x.model || '', ageHours: x.at ? Math.round((Date.now() - x.at) / 36e5) : undefined }));
     if (!assets.length) return ok('The Library is empty for this workspace — render something first.', { assets: [] });
-    return ok(`${assets.length} asset${assets.length === 1 ? '' : 's'} (newest first):\n` + assets.map((x, i) => `  ${i + 1}. [${x.kind || '?'}${x.model ? ' · ' + x.model : ''}${x.ageHours != null ? ' · ' + x.ageHours + 'h ago' : ''}] ${x.url}`).join('\n'), { assets });
+    return ok(`${assets.length} asset${assets.length === 1 ? '' : 's'} (newest first):\n` + assets.map((x) => `  ${x.id}. [${x.kind || '?'}${x.model ? ' · ' + x.model : ''}${x.ageHours != null ? ' · ' + x.ageHours + 'h ago' : ''}] ${x.url}`).join('\n'), { assets });
   }));
 
   server.registerTool('fetch_asset', {
