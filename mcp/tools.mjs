@@ -18404,10 +18404,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // image may be an https URL (an upload_file URL included), a Library id from list_library (L0, L1… newest first), or a
   // local path on the CLI (sent as bytes, stored once by the server). An id or path that resolves to nothing is refused
   // by name, free, before anything is planned or rendered.
+  // HOW IT LOOKS (2026-10-19): a screen sits in a rounded card over the footage, which keeps playing around it (look
+  // 'card', the default; 'full' covers the frame, only when the user asked); a photo of a person, product or place (kind
+  // 'photo') is never laid over the film. Never in the first second or the last 1.5 s; 2 s each at most (lib/insert-windows.mjs).
   const INSERTS_Z = z.array(z.object({
     image: z.string().describe('an https or upload_file URL, a Library id (L0, L1…) or a local path on the CLI'),
-    start: z.number().describe('second it appears'),
-    end: z.number().describe('second it ends (≥0.5 s after start)'),
+    start: z.number().describe('second it appears (never before 1 s: the film opens on moving footage)'),
+    end: z.number().describe('second it ends: at most 2 s after start (2.5 s full-screen), never in the last 1.5 s of the film'),
+    kind: z.enum(['screen', 'photo']).optional().describe("screen (default): an app, a page, a dashboard, a document, a review, a chart. photo: a person, a product or a place, which is NOT laid over the video (a product photo goes in as the brand's product photo, a person to star as a saved creator)"),
+    look: z.enum(['card', 'full']).optional().describe("card (default): a rounded card over the upper middle of the footage, which keeps playing. full: covers the whole frame, ONLY when the user asked for full-screen"),
   })).max(8);
   const insertsResolved = async (list) => {
     if (!Array.isArray(list)) return undefined;
@@ -18424,11 +18429,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
         image = String(a.url);
       } else image = await toRef(raw);
       if (!image) throw Object.assign(new Error(`The picture "${raw.slice(0, 80)}" could not be read: pass an https URL, an upload_file URL or a Library id (L0…). Nothing was planned, rendered or charged.`), { status: 400, _userInput: true });
-      out.push({ image: /^\/generated\//.test(image) ? abs(image) : image, start: +x.start, end: +x.end });
+      out.push({ image: /^\/generated\//.test(image) ? abs(image) : image, start: +x.start, end: +x.end, ...(x.kind === 'photo' ? { kind: 'photo' } : {}), ...(x.look === 'full' ? { look: 'full' } : {}) });
     }
     return out;
   };
-  const insertsLine = (ins, verb = 'are laid') => (Array.isArray(ins) && ins.length ? `\nCut-ins: ${ins.length === 1 ? 'the user\'s picture' : `${ins.length} of the user's pictures`} ${ins.length === 1 ? verb.replace(/^are/, 'is') : verb} full-screen at ${ins.map((x) => `${x.start}–${x.end}s`).join(', ')}.` : '');
+  const insertsLine = (ins, verb = 'are laid') => (Array.isArray(ins) && ins.length ? `\nCut-ins: ${ins.length === 1 ? 'the user\'s picture' : `${ins.length} of the user's pictures`} ${ins.length === 1 ? verb.replace(/^are/, 'is') : verb} at ${ins.map((x) => `${x.start}–${x.end}s${x.look === 'full' ? ' (full-screen)' : ''}`).join(', ')}${ins.some((x) => x.look !== 'full') ? ', as a card over the footage, which keeps playing' : ''}.` : '');
   server.registerTool('plan_ad', {
     title: 'Plan an ad concept',
     description: 'Creative director: turn a brand + product/brief into a finished ad CONCEPT — copy variants (headline/primary/cta) plus an image_concept.prompt OR a video_storyboard, with the resolved recipe + the model ids to render with. Renders nothing; chain its output into generate_image / generate_video. THE USER’S EXPLICIT LENGTH IS SOVEREIGN: when they name a duration ("a 30 second ad", "make it 45s"), pass it as durationSeconds — the board is then AUTHORED to that length (its scenes sum to it) and render_ad renders it as one clip or stitched acts accordingly. Leaving it out lets the planner pick its own default, which is how an explicit ask silently becomes a 15s spot. The user’s OWN screenshots or pictures cut into the video full-screen go in `inserts`: the board keeps those seconds free of any screen, and render_ad lays the real pictures in. Spends credits.',
@@ -18444,12 +18449,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       language: z.string().optional().describe('output language for the ad copy (e.g. Spanish) — default English'),
       talent: z.enum(['auto', 'creator', 'product_only']).optional().describe("who is on camera; omit to follow the format. Say 'someone new' in product to skip reusing a saved creator."),
       draft: z.object({ model: z.string(), durationSeconds: z.number() }).optional().describe("ONLY after a video refusal that offered a light draft: the {model, durationSeconds} it named. The plan is then authored to that length and priced on that model. Never invent one — a video the account cannot cover is refused BEFORE planning with the three options (image / add credits / this draft when one fits), and the user chooses."),
-      inserts: INSERTS_Z.optional().describe("VIDEO ONLY: the user's own pictures (screenshots, a page, a chart) shown FULL-SCREEN at these seconds, the voice running underneath. The plan keeps those shots free of screens, never uses the pictures as references, and returns them as creative.inserts for render_ad to lay in (about 2 credits). At most 8, never two at once; one the planned length has no room for is left out and the reply says so."),
+      inserts: INSERTS_Z.optional().describe("VIDEO ONLY: the user's own SCREENS (an app, a page, a dashboard, a document, a review, a chart) shown at these seconds as a rounded card over the upper middle of the footage, which keeps playing around it (look 'full' covers the frame, only when the user asked), the voice running underneath. Fewer and shorter: about one per 4 s of film, 1.2-2 s each, on the line that talks about it; never in the first second or the last 1.5 s. The plan frames those shots for the card, keeps them free of screens, and returns the pictures as creative.inserts for render_ad to lay in (about 2 credits). A photo of a person, product or place (kind 'photo') is not laid in: pass a product photo as the brand's product photo and a person as a saved creator. One that does not fit is left out and the reply says so."),
     },
     outputSchema: {
       format: z.string().optional().describe("the resolved creative format — 'image' or 'video'"),
-      inserts: z.array(z.any()).optional().describe("the user's pictures render_ad will lay in full-screen: [{image, start, end}], fitted to the planned length"),
-      inserts_note: z.string().optional().describe('set when a picture was left out because the planned length has no room for it'),
+      inserts: z.array(z.any()).optional().describe("the user's pictures render_ad will lay in: [{image, start, end, look}] (look card = over the playing footage, full = full-screen), fitted to the planned length"),
+      inserts_note: z.string().optional().describe('set when a picture was left out (the planned length has no room for it, or it was a photo, which is never laid over the video)'),
       concept: z.string().optional().describe('the one-line creative concept'),
       format_note: z.string().optional().describe("the plan's own read-back when it chose an IMAGE on an open format because the balance could not cover the default video — states the video's real credit price"),
       budget_pick: z.any().optional().describe('{format, reason, videoCredits, balance, seconds} when format_note is set'),
@@ -18868,7 +18873,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       ttsVoice: z.string().optional().describe('voiceover voice name (e.g. Rachel / George) when the plan voices over'),
       dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) and the estimated credits the real render reserves, WITHOUT submitting a render — free, nothing charged'),
       allowGenericProduct: z.boolean().optional().describe('proceed even though this brand has NO product photo on file and the ad features a product — the packaging will be INVENTED. Only pass true after telling the user that and hearing they are fine with a generic stand-in'),
-      inserts: INSERTS_Z.optional().describe("the user's own pictures laid FULL-SCREEN over the finished video at these seconds, sound running underneath (about 2 credits). Omit to use plan_ad's creative.inserts; [] renders without them. plan_ad with inserts writes the board around them."),
+      inserts: INSERTS_Z.optional().describe("the user's own screens laid over the finished video at these seconds, as a card over the playing footage by default (look 'full' covers the frame, only when asked), sound running underneath (about 2 credits). The film always opens and ends on moving footage. Omit to use plan_ad's creative.inserts; [] renders without them. plan_ad with inserts writes the board around them."),
     },
     outputSchema: {
       ...JOB_OUT,
@@ -19565,7 +19570,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     }
     const seamLine = seamsText(res); // a timeline / join's measured seams + intro budget ('' for any other video)
     // a render that laid the user's pictures in (render_ad inserts): say they are in it, or that they could not be
-    const insLine = res?.inserts?.laid ? `\nCut-ins: ${res.inserts.laid === 1 ? 'the user\'s picture is' : `${res.inserts.laid} of the user's pictures are`} laid in full-screen at ${(res.inserts.windows || []).map((x) => `${x.start}–${x.end}s`).join(', ')}.` : (res?.inserts?.failed && res.note ? `\nTELL THE USER: ${res.note}` : '');
+    const insLine = res?.inserts?.laid ? `\nCut-ins: ${res.inserts.laid === 1 ? 'the user\'s picture is' : `${res.inserts.laid} of the user's pictures are`} laid in at ${(res.inserts.windows || []).map((x) => `${x.start}–${x.end}s${x.look === 'full' ? ' (full-screen)' : ''}`).join(', ')}.` : (res?.inserts?.failed && res.note ? `\nTELL THE USER: ${res.note}` : '');
     if (j.status === 'done' && res?.video) return okVideo(wireText + seamLine + insLine, { ...j, url }); // resumed video → same inline poster as a direct return
     if (j.status === 'done' && res?.image) { const img = await imageBlock(url); return { content: [{ type: 'text', text: wireText }, ...(img ? [img] : [])], structuredContent: { ...j, url } }; }
     return ok(wireText, { ...j, url });
