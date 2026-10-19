@@ -287,7 +287,7 @@ export const MCP_INSTRUCTIONS = [
   // stop an agent answering a render request with a model catalog was itself the thing truncated. Whatever gets
   // clipped from the tail must cost tool NAMES, which the roster still carries, never a rule, which it does not.
   'Hermoso is marketing on autopilot, driven over MCP. FIVE INDEPENDENT AREAS — none is a step in a pipeline and no tool needs you to have used another one first:',
-  'ACT ON THE REQUEST, DO NOT SURVEY IT: asked to make something, make it. render_ad, generate_image and generate_video all run with `model` omitted and go to a sound default. hermoso_capabilities (free) is for a specific model id, an exact credit cost or a live duration — never the answer to a request to create something.',
+  'ACT ON THE REQUEST, DO NOT SURVEY IT: asked to make something, make it. render_ad, generate_image and generate_video all run with `model` omitted and go to a sound default. hermoso_capabilities (free) is for a specific model id, a credit cost or a live duration — never the answer to a request to create something.',
   '• RESEARCH the ads already winning: find_competitors, competitor_teardown, pull_competitor_ads, research_ads, search_meta_ads, search_google_ads, search_linkedin_ads, search_tiktok, search_instagram, search_youtube, search_reddit, search_threads, mine_angles, analyze_video, check_ad_policy.',
   '• CREATE finished on-brand ads: render_ad, generate_image, generate_video, generate_avatar, make_template_ad, make_thumbnail, make_explainer, plan_ad, plan_variations; get_brand / draft_brand / update_brand; list_creators / save_creator; edit_video, dub_video, clip_video, reframe_video, upscale_video, stitch_video.',
   '• RAW MODELS, prompt only: generate_image / generate_video with useBrand:false, generate_voice, generate_text, upload_file (any file becomes a URL every tool accepts).',
@@ -336,7 +336,7 @@ export const MCP_INSTRUCTIONS = [
   'Capability map:',
   '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; fetch_social_data; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
   '• CREATE (finished ads): render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar render on their own; plan_ad authors a board first when the ad wants one and render_ad takes it; get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) manage the saved brand, which the create tools hydrate by themselves; list_creators / save_creator / delete_creator (the reusable saved CAST — re-cast the same face instead of generating a new person every time; render_ad’s `creator` stars one of them in the ad); make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); clone_static / recast_motion / reframe_video / upscale_video / dub_video / change_voice / finish_video / fix_beat / hook_variants / stitch_video; plan_variations + score_ad.',
-  '• RAW MODEL PLAYGROUND: generate_image / generate_video (useBrand:false) for prompt-only renders, generate_voice for text-to-speech, generate_text for the writing models — against any of 30+ image / video / voice / writing model ids (exact costs in hermoso_capabilities), no ad framing.',
+  '• RAW MODEL PLAYGROUND: generate_image / generate_video (useBrand:false) for prompt-only renders, generate_voice for text-to-speech, generate_text for the writing models — against any of 30+ image / video / voice / writing model ids (credit costs in hermoso_capabilities), no ad framing.',
   '• ACCOUNT & WORKSPACES: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job; list_brands / create_brand / use_brand / delete_brand (one account holds MANY profiles: brands, clients or creators, so an agency runs every client through here, each with its own brand details, memory, Library and connectors; create_brand → draft_brand onboards a new one, delete_brand is confirm-gated); get_settings / update_settings (the LANGUAGE every ad, script, plan and answer is written in — set it once and every render obeys it — plus app appearance and the weekly competitor-watch email); list_team / invite_member / remove_member / set_role.',
   '• PUBLISH & MANAGE YOUR CHANNELS (the user’s connected accounts, over this MCP): Meta — post_to_meta (FB/IG/Threads), upload_file (post ANY external/local file), list_meta_ads + meta_insights (read campaigns/ad sets/ads + performance, broken down by age/gender/placement/country), preview_meta_ad (see the real ad per placement, 24h links), estimate_meta_reach (audience size before you spend), list_meta_audiences / create_meta_audience (retargeting + lookalikes), create_meta_campaign / create_meta_ad / upload_meta_asset (build), update_meta_object / delete_meta_object / set_meta_campaign_status (edit/delete/activate — spend + deletes confirm-gated), manage_meta_post (edit/delete a post); DM automations (a keyword comment, DM, story reply or ig.me link gets an automatic private reply) — save_dm_automation / test_dm_automation / list_dm_automations / delete_dm_automation on Instagram, Facebook (Page comments, ads, Messenger) and X (X billed in credits per event and send), and the Instagram-only save_instagram_dm_automation / test_instagram_dm_automation / list_instagram_dm_automations / delete_instagram_dm_automation; X — x_chat_settings / update_x_chat_settings (who may DM the brand on X); Microsoft Advertising (Bing Ads) — list_microsoft_ads_campaigns, microsoft_ads_report, microsoft_ads_geo_search, create_microsoft_ads_campaign / create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords (all created Paused), set_microsoft_ads_budget / set_microsoft_ads_status (spend confirm-gated); ChatGPT Ads (OpenAI Advertiser API) — list_openai_ads_campaigns, openai_ads_report, openai_ads_geo_search, create_openai_ads_campaign / create_openai_ads_ad_group / create_openai_ads_ad (all created PAUSED), update_openai_ads_object, set_openai_ads_budget / set_openai_ads_status (spend + archive confirm-gated). Connected by API key; ONE creative format (a text + image card, no video); Pinterest — list_pinterest_boards then post_to_pinterest (the user picks the board); Google Business Profile — list_business_locations, post_to_google_business, list_google_business_posts, delete_google_business_post, google_business_insights, get_business_location / update_business_location (read and CHANGE what the listing says — hours, phone, website, description, categories, name, address; the edit is live on Search and Maps, so the unconfirmed call writes nothing and shows the before-and-after), google_business_account (whose account it is on and whether that role can edit it); Google Drive (ONE connection covering Drive, Sheets and Docs) — save_to_drive, list_drive_files, get_drive_file, update_drive_file, delete_drive_file, create_drive_folder, plus create_sheet / append_to_sheet / read_sheet and create_doc / append_to_doc / read_doc (Hermoso-created files, plus any file the user hands over with the Google file picker in the app); Microsoft OneDrive — save_to_onedrive, list_onedrive_files, get_onedrive_file, update_onedrive_file, delete_onedrive_file, create_onedrive_folder; MANAGING THE CONNECTIONS — list_connectors, list_connector_accounts + set_connector_accounts (which Pages / ad accounts / company Pages this profile may post to and spend from — fails closed, an empty choice shares nothing), leave_connector (remove just YOUR OWN account from a connector several teammates have each joined — theirs keep working) · disconnect_connector (confirm-gated: reconnecting needs a browser). LINKING a NEW account is the one step that is not headless (an OAuth consent screen) — send the user to Workspace ▸ Connectors in the app.',
   'YOUR ROSTER IS CORE-FIRST, AND NOTHING IS MISSING OR UNFINISHED. What you are LISTED is the core tools plus whatever this connection asked for or you have switched on; the rest of the product \u2014 hundreds of tools across research, creation, publishing, paid campaigns, analytics and channel administration \u2014 is held out of the LIST on SIZE ALONE. IT IS ALL CALLABLE RIGHT NOW. find_tools({query}) searches EVERY tool, listed or not, and each row carries its parameters, its credit cost and its recent health; call_tool({name, args}) then runs it through the same handler, the same account and the same permissions; a direct tools/call to a name you already know works too. This route needs no reload and works on every host, including claude.ai and ChatGPT, which fix their tool list when the connection is made. enable_tools({groups:[\u2026]}) additionally LISTS a group for hosts that re-list \u2014 free and instant: the MOMENT the user asks to build, budget, target, report on or change a campaign, enable_tools({groups:[\'ads\']}); for sessions, conversions, revenue by channel or how their site ranks, enable_tools({groups:[\'analytics\']}); to read, moderate, reply to, measure or delete something ALREADY on a channel, enable_tools({groups:[\'channel_admin\']}). IF THE TOOLS DO NOT APPEAR after that call \u2014 some clients cache their tool list for the whole conversation \u2014 do NOT tell the user the capability does not exist and do not keep retrying: just use call_tool, which does not depend on the roster changing at all. Reconnecting with `?tools=all` on the server URL lists everything at connect time. NEVER tell a user Hermoso cannot manage their campaigns or read their analytics, cannot read a comment, answer a DM or pull a channel\u2019s numbers, because you cannot see the tool \u2014 look it up with find_tools and run it with call_tool. The full set of group names is: core, research, create, channels, channel_admin, analytics, files, workspace, ads \u2014 or \'all\'.',
@@ -379,7 +379,7 @@ export const MCP_INSTRUCTIONS_DIRECTORY = [
 // Every other host keeps MCP_INSTRUCTIONS unchanged.
 export const MCP_INSTRUCTIONS_WIDGET = [
   "Hermoso runs a brand's marketing: research the ads other brands are running, create on-brand image and video ads, schedule posts to the user's own connected accounts, and read how posts and campaigns perform. Each area works on its own; none needs another first.",
-  'Act on the request: asked to make something, make it. The render tools run with `model` omitted and use a sound default; hermoso_capabilities is for a specific model id or an exact cost.',
+  'Act on the request: asked to make something, make it. The render tools run with `model` omitted and use a sound default; hermoso_capabilities is for a specific model id or a credit cost.',
   '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
   '• CREATE: get_brand / draft_brand (the saved brand), plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, remake_video_for_brand; variants of a finished ad with edit_image, headline_variants, hook_variants, multiply_ad. Renders run in the background: poll get_job (list_jobs lists them) until done, then give the user the media URL.',
   "• FILES & POSTING: upload_file turns a file into a URL; schedule_post queues a post to the user's own connected accounts; list_scheduled shows the queue; list_connectors shows what is connected (the user connects accounts in the Hermoso app under Settings > Connectors); list_library lists past creations.",
@@ -602,12 +602,16 @@ async function renderJob(type, input, label) {
 // A FIX IS PRICED BEFORE IT RUNS (2026-09-25). dryRun on edit_image / fix_beat / post_edit asks the server for the credits
 // that exact job would reserve: its own worker's pricing, stopped at the hold (jobHoldQuote), so an agent states a LIVE
 // number, never a remembered one. Nothing is queued, rendered or charged.
+// A PRICE BEFORE A RUN IS AN ESTIMATE (2026-10-19, the owner: "charge the real amount not just what we quoted. the quotes are
+// estimates anyway"). The server no longer caps a charge at its hold or quote: a render is charged its actual cost. Every
+// pre-run figure an agent reads says so, and every finished render says what it WAS charged (chargeNote).
+const PRICE_ESTIMATE_LINE = 'The final charge is the actual cost of the run, usually within a few percent of this estimate.';
 async function quoteJob(type, input) {
   const d = await apiPost('/api/jobs', { type, input, dryRun: true });
   return d && d.quote ? d.quote : null;
 }
 function quoteText(q, what) {
-  if (q && q.credits != null && Number.isFinite(+q.credits)) return `DRY RUN (nothing rendered, nothing charged): ${what} reserves ${q.credits} credits when it runs. The charge settles to the measured cost and never above that hold. Call again without dryRun to run it.`;
+  if (q && q.credits != null && Number.isFinite(+q.credits)) return `DRY RUN (nothing rendered, nothing charged): ${what} is estimated at ${q.credits} credits (it reserves that much when it runs). ${PRICE_ESTIMATE_LINE} Call again without dryRun to run it.`;
   return `DRY RUN (nothing rendered, nothing charged): ${what} would not start${q && q.refused ? `: ${q.refused}` : ', so it has no price'}.`;
 }
 // The wait half of renderJob, for a job some other route queued (generate_image's queue mode). One waiting rule.
@@ -625,7 +629,7 @@ async function awaitRenderJob(job) {
   // 30s step budget (an automation platform) asked for the handle, not for a status.
   if (waitMs <= 0) return { jobId: job.id, url: null, stillRendering: true, raw: null };
   try {
-    const { result } = await pollJob(job.id, { timeoutMs: waitMs });
+    const { result, job: doneJob } = await pollJob(job.id, { timeoutMs: waitMs });
     const url = abs(result?.video || result?.image || result?.url);
     // creditsUsed AND the delivered geometry ride out here deliberately. The widget's own registered
     // description promises "the model that rendered it and credits spent", and the pill only ever appeared
@@ -633,7 +637,7 @@ async function awaitRenderJob(job) {
     // the same job showed "Seedance 2.5" direct and "Seedance 2.5 · 463 credits" through get_job.
     // The dimensions are what stop a 9:16 clip rendering in a full-width band with black either side.
     return { jobId: job.id, url, model: result?.model || null,
-      creditsUsed: result?.creditsUsed ?? null, poster: abs(result?.poster) || null,
+      creditsUsed: doneJob?.chargedCredits ?? result?.creditsUsed ?? null, chargedCredits: doneJob?.chargedCredits ?? null, poster: abs(result?.poster) || null,
       deliveredWidth: result?.deliveredWidth ?? null, deliveredHeight: result?.deliveredHeight ?? null,
       raw: result };
   } catch (e) {
@@ -656,7 +660,12 @@ const renderPayload = (r) => (r?.raw ?? jobResult(r) ?? null);
 // is not the model the caller named — an entry-belt coercion, or an in-flight content-filter/quota fallback — and the
 // bill always follows the model that RAN. An agent that asked for one model and reads a one-line "ready" reply would
 // otherwise never learn it got another, so the note rides the reply text every render tool prints.
-const switchNote = (r) => { const n = renderPayload(r)?.modelNote || r?.modelNote; return n ? `\n⚠ ${n}` : ''; };
+// WHAT A FINISHED RENDER WAS CHARGED (2026-10-19). Pre-run prices are estimates now, so the reply that delivers a render
+// says the real charge: the job's own chargedCredits (every leg it billed), else the worker's settle. Rides switchNote
+// because switchNote is already on every render tool's delivery sentence, inline and resumed via get_job alike.
+const chargedOf = (r) => { const v = r?.chargedCredits ?? r?.creditsUsed ?? renderPayload(r)?.creditsUsed ?? r?.result?.creditsUsed; return Number.isFinite(+v) && +v > 0 ? Math.round(+v) : null; };
+const chargeNote = (r) => { const c = chargedOf(r); return c != null ? `\nCharged ${c} credit${c === 1 ? '' : 's'} (the actual cost of this run).` : ''; };
+const switchNote = (r) => { const n = renderPayload(r)?.modelNote || r?.modelNote; return (n ? `\n⚠ ${n}` : '') + chargeNote(r); };
 // THE VISION-QA READ-BACK (2026-08-03). The server WATCHES every generatively-rendered clip before it reports it
 // done — free ffmpeg cadence/freeze probes plus ONE vision call over frames sampled at the hook, either side of
 // each cut, and the tail — and puts what it saw on the result as `qaNote` (see vision-qa.mjs). An agent reading a
@@ -4273,7 +4282,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // The title a directory renders. It has to say CALL THIS FIRST without saying "call this first", because the
     // listing shows it out of context, beside 680 siblings, to somebody who has never used Hermoso.
     title: 'Start here: what Hermoso can do and what it costs',
-    description: 'Probe what this Hermoso account can do RIGHT NOW: available image/video model ids + their exact credit costs, aspect ratios, video durations, the recipe ids, and the canEdit/canAvatar flags. Call it when you need a specific model id, an exact cost, or a capability you are not sure of. It is NOT a prerequisite for rendering: generate_image, generate_video and render_ad all run with `model` omitted and route to the server’s own default. Read-only, free.',
+    description: 'Probe what this Hermoso account can do RIGHT NOW: available image/video model ids + their credit costs (estimates: a render is charged its actual cost), aspect ratios, video durations, the recipe ids, and the canEdit/canAvatar flags. Call it when you need a specific model id, a credit cost, or a capability you are not sure of. It is NOT a prerequisite for rendering: generate_image, generate_video and render_ad all run with `model` omitted and route to the server’s own default. Read-only, free.',
     inputSchema: {}, outputSchema: {
       image: z.boolean().optional().describe('TRUE when image generation is available on this account. A BOOLEAN, never a provider name — /api/generate/status deliberately reports availability only and never leaks the underlying provider, so there is no label here to report. The model ids live in options.image.models[].'),
       video: z.boolean().optional().describe('TRUE when video generation is available. A BOOLEAN, never a provider name (same never-leak-the-provider rule as image). The model ids live in options.video.models[].'),
@@ -4339,8 +4348,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _rmLine = _rm ? `\nRemake engines (recast_motion, restyle_video, edit_video engine): auto picks, for a clip with no real-looking person, ${Object.entries(_rm.defaults || {}).map(([k, v]) => `${k} → ${v}`).join(', ')}; with a person in the clip, ${Object.entries(_rm.faceDefaults || {}).map(([k, v]) => `${k} → ${v}`).join(', ')}${_rm.personClipLibraryDefaults ? ` (a person clip our face library can carry, i.e. one of our renders or faceRoute on a paid plan: ${Object.entries(_rm.personClipLibraryDefaults).map(([k, v]) => `${k} → ${v}`).join(', ')})` : ''}. seedance ${(_rm.seconds || []).join('-')}s, up to ${_rm.imagesMax} pictures, ${Object.entries(_rm.seedanceCredits || {}).map(([res, m]) => `${res} ${Object.entries(m).map(([s, c]) => `${s}s ${c}cr`).join(' / ')}`).join('; ')}${_rm.wanCredits ? `. wan clips up to ${_rm.wanMaxSourceSeconds}s, ${Object.entries(_rm.wanCredits).map(([res, m]) => `${res} ${Object.entries(m).map(([s, c]) => `${s}s ${c}cr`).join(' / ')}`).join('; ')}${_rm.wanLabel ? ` (${_rm.wanLabel})` : ''}` : ''}${_rm.wanPrimeCredits ? `. wan-prime (Wan 3.0 Prime by name) ${Object.entries(_rm.wanPrimeCredits).map(([res, m]) => `${res} ${Object.entries(m).map(([s, c]) => `${s}s ${c}cr`).join(' / ')}`).join('; ')}` : ''}` : '';
     const _je = d.jobEngines; // the certified engine per job (watched side-by-side tests, 2026-10-19)
     const _jeLine = _je && _je.defaults ? `\nDefault engine per job (watched side-by-side tests): ${Object.entries(_je.defaults).map(([k, v]) => `${k} → ${v}`).join(', ')}; a talking ad is one take of up to ${_je.talkingMaxSeconds}s. A model the user picks by name is kept; never switch it.` : '';
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}${_extLine ? `\nExtend a clip (generate_video extend:true + refVideo): ${_extLine}` : ''}${_shotLine ? `\nMulti-shot clips (generate_video shots): ${_shotLine}` : ''}${_rsLine ? `\nRestyle looks (restyle_video style): ${_rsLine}` : ''}${_rmLine}${_jeLine}\n${_pickLine}\n${_resLine}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;
-    return ok(text + connLine, d);
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}${_extLine ? `\nExtend a clip (generate_video extend:true + refVideo): ${_extLine}` : ''}${_shotLine ? `\nMulti-shot clips (generate_video shots): ${_shotLine}` : ''}${_rsLine ? `\nRestyle looks (restyle_video style): ${_rsLine}` : ''}${_rmLine}${_jeLine}\n${_pickLine}\n${_resLine}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\nPRICES: every credit figure above is an estimate. ${PRICE_ESTIMATE_LINE}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;    return ok(text + connLine, d);
   }));
 
   server.registerTool('hermoso_credits', {
@@ -4364,7 +4372,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE CHARGES THEMSELVES (2026-09-12): the same ledger list as Billing ▸ Usage, so "where did my credits go" has an
     // answer here too. Best effort: a reply about the balance never fails on the history read.
     let recent = ''; try { const u = await apiGet('/api/billing/usage', { limit: 10 }); if (u?.items?.length) recent = `\nRecent charges (newest first):\n${u.items.map((r) => `• ${String(r.at).slice(0, 16).replace('T', ' ')} UTC · ${r.label} · ${r.credits} credits`).join('\n')}`; } catch {}
-    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}. ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'}${recent}`, d);
+    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}. ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'} ${d.costEstimate || PRICE_ESTIMATE_LINE}${recent}`, d);
   }));
 
   // AGENT BILLING: out of credits → top up. With a saved card + billing-admin rights this is the SAME one-click
@@ -18424,7 +18432,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       if (r.stillRendering) return { content: [{ type: 'text', text: `Image queued as job ${r.jobId}. It is rendering; read it with get_job.${q.productNote ? `\n${q.productNote}` : ''}` }], structuredContent: { jobId: r.jobId, stillRendering: true, ...(q.productNote ? { productNote: q.productNote } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
       const img = await imageBlock(r.url);
       const _qNote = [q.productNote, r.raw?.productNote].filter(Boolean).join(' '); // the route's note (logo, lineup) + the worker's (crop, the product check)
-      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {} })}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
+      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
     }
     const d = await apiPost('/api/generate/image', _imgBody); // explicit boolean so the server's saved-brand hydration default is unambiguous
     const img = await imageBlock(abs(d.image)); // show the actual creative inline in Claude, not just a URL
@@ -18451,7 +18459,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       instruction: z.string().describe('the change to make, in plain words (pass the user’s own words for a removal or plain photo edit)'),
       removal: z.boolean().optional().describe('true when the edit REMOVES text, branding, a logo, a watermark, a person or an object, so the brand name and logo are not re-added'),
       mask: z.string().optional().describe('optional mask image (URL or local path) marking the region to change: transparent = change, or white = change on an opaque mask'),
-      dryRun: z.boolean().optional().describe('true = return the exact credits this edit reserves and render nothing'),
+      dryRun: z.boolean().optional().describe('true = return the estimated credits this edit reserves and render nothing'),
       fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
     outputSchema: {
@@ -18668,7 +18676,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       lockup: z.boolean().optional().describe('brand wordmark + tagline composited over the closing seconds. DEFAULT FALSE — set true ONLY when the user asks for branding on the close'),
       textStyle: TEXT_STYLE_Z.optional().describe('THE LOOK of captions and the end card, only with captions or endCard and only when the user described one: the look in WORDS ("chunky yellow comic letters, purple outline"), a preset (editorial: big serif title + small italic line; bold: condensed caps, outline; minimal; handwritten; boxed; pill, the default), or fields. "TITLE · small line" puts the part after the dot on a second line.'),
       ttsVoice: z.string().optional().describe('voiceover voice name (e.g. Rachel / George) when the plan voices over'),
-      dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) and the exact credits the real render reserves, WITHOUT submitting a render — free, nothing charged'),
+      dryRun: z.boolean().optional().describe('return the routing decision (single pass vs stitched acts, resolved model + act lengths) and the estimated credits the real render reserves, WITHOUT submitting a render — free, nothing charged'),
       allowGenericProduct: z.boolean().optional().describe('proceed even though this brand has NO product photo on file and the ad features a product — the packaging will be INVENTED. Only pass true after telling the user that and hearing they are fine with a generic stand-in'),
     },
     outputSchema: {
@@ -18704,7 +18712,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // belted input the job would queue, so the credits printed here are what the render reserves, and the model/length
     // are the ones it prices (the belt may re-route an auto pick). A refusal the real run would throw is said as one.
     const _q = quote && typeof quote === 'object' ? quote : null;
-    const _qLine = _q ? (Number.isFinite(+_q.credits) && _q.credits != null ? `\nCOST: ${_q.credits} credits reserved when it renders (${_q.label || _q.model}, ${_q.durationSeconds}s${_q.resolution ? ` at ${_q.resolution}` : ''}); the charge settles to the measured cost and never above that hold.` : _q.refused ? `\nThe real render would be refused before it starts: ${_q.refused}` : '') : '\nCOST: not quoted for this render; hermoso_capabilities lists per-model credit costs.';
+    const _qLine = _q ? (Number.isFinite(+_q.credits) && _q.credits != null ? `\nESTIMATED COST: about ${_q.credits} credits, reserved when it renders (${_q.label || _q.model}, ${_q.durationSeconds}s${_q.resolution ? ` at ${_q.resolution}` : ''}). ${PRICE_ESTIMATE_LINE}` : _q.refused ? `\nThe real render would be refused before it starts: ${_q.refused}` : '') : '\nCOST: not quoted for this render; hermoso_capabilities lists per-model credit costs.';
     if (a.dryRun) return ok(`DRY RUN — routing decision (no job submitted, nothing charged): jobType=${jobType || 'video'}, model=${_q?.model || input.model}, durationSeconds=${_q?.durationSeconds || input.durationSeconds}${Array.isArray(input.scenes) ? `, acts=[${(_q?.acts || input.scenes.map(s => Math.round(s.seconds * 10) / 10)).join(', ')}]s` : ' (single pass)'}${input.modelExplicit ? ', modelExplicit (ask-don’t-swap)' : ''}.${_qLine}${_clampNote}${_castLine}\n${notes || ''}`, { dryRun: true, jobType: jobType || 'video', ...(_q && _q.credits != null ? { credits: _q.credits } : {}), ...(_q ? { quote: _q } : {}), ...(creator ? { creator } : {}), input });
     // ASK BEFORE SPENDING (2026-07-28: "ask the user BEFORE the render is dispatched — never after money is
     // spent"). `notes` alone was not enough here: on the real path it only reaches the model AFTER renderJob has
@@ -18835,7 +18843,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       brandName: z.string().optional().describe('override the workspace brand name'),
       domain: z.string().optional().describe('override the brand website'),
       accent: z.string().optional().describe('override the brand accent hex'),
-      dryRun: z.boolean().optional().describe('true = return the exact credits this edit reserves and run nothing'),
+      dryRun: z.boolean().optional().describe('true = return the estimated credits this edit reserves and run nothing'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -18964,7 +18972,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       prompt: z.string().describe('what the replacement footage should show — describe the shot, matching the master\'s style'),
       refImage: z.string().optional().describe('optional product/style anchor image URL'),
       speechWindows: z.array(z.array(z.number())).optional().describe('[[start,end],...] windows with spoken lines — the fix window must not overlap these'),
-      dryRun: z.boolean().optional().describe('true = return the exact credits this fix reserves and render nothing'),
+      dryRun: z.boolean().optional().describe('true = return the estimated credits this fix reserves and render nothing'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -19067,7 +19075,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       upscale: z.number().optional().describe("optional FINAL upscale — 2 doubles each side, 4 quadruples. Captions and the end card are burned BEFORE it so they upscale with the frame. It is priced BY LENGTH and it is the expensive part — several times the cost of rendering the film itself. hermoso_capabilities reports the exact figures per length as explainerUpscaleCredits. Never turn it on unasked: quote the number and let the user choose."),
       endCard: z.boolean().optional().describe('append the branded end card. DEFAULT FALSE — set true ONLY when the user asks for one'),
       brandName: z.string().optional().describe('brand name for the end card — omit to leave it unbranded'),
-      dryRun: z.boolean().optional().describe('true = return the exact credits this explainer reserves (its own pricing, stopped at the hold) and render nothing. Quote it before running one; try frameDensity lean or minimal when the balance is short.'),
+      dryRun: z.boolean().optional().describe('true = return the estimated credits this explainer reserves (its own pricing, stopped at the hold) and render nothing. Quote it before running one; try frameDensity lean or minimal when the balance is short.'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -19354,7 +19362,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // one an OpenAI reviewer sees. Still cheap for the model to read past: five short scalars.
     const rawJ = j.result || j.raw || {};
     const wireText = `${text}\n${JSON.stringify({ id: j.id, status: j.status, progress: j.progress ?? null, url: url || null, error: j.error || null,
-      model: j.model || rawJ.model || null, poster: abs(rawJ.poster) || null, creditsUsed: j.creditsUsed ?? null,
+      model: j.model || rawJ.model || null, poster: abs(rawJ.poster) || null, creditsUsed: j.chargedCredits ?? rawJ.creditsUsed ?? null,
       deliveredWidth: rawJ.deliveredWidth ?? null, deliveredHeight: rawJ.deliveredHeight ?? null })}`;
     if (j.status === 'done' && res?.video && res?.review) { // a finished TIMELINE edit: its seam review + frames, as edit_timeline would have shown them
       const out = await okVideo(`${wireText}${seamsText(res)}${timelineReviewText(res.review)}`, { ...j, url });
@@ -21410,7 +21418,7 @@ function memoryNoteVerdict(text) {
     inputSchema: {
       draft: z.string().optional().describe('the draft id from the render result (draft.id)'),
       video: z.string().optional().describe('or: the URL of the 480p draft video'),
-      dryRun: z.boolean().optional().describe('true = return the exact credits and render nothing'),
+      dryRun: z.boolean().optional().describe('true = return the estimated credits and render nothing'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
