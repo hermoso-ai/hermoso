@@ -18587,11 +18587,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('generate_voice', {
     title: 'Generate voiceover',
-    description: "RAW text-to-speech from the voice-model catalog: speak a script in a chosen voice and return the served MP3 URL. For a standalone voiceover / narration clip — NOT for adding audio to a video (render_ad and generate_video voice their own spots; change_voice re-voices a finished clip). engine picks the voice model (default 'seed-audio'; also 'eleven-v3', 'minimax-speech', 'kokoro'); voice is a preset name from that engine (see hermoso_capabilities -> voice engines) — a name that engine does not have is REFUSED for free with its real list, and a few engines generate their own voice and take no preset at all (the reply says which voice actually spoke). Paid (a couple of credits by length; ≤900 characters).",
+    description: "RAW text-to-speech from the voice-model catalog: speak a script in a chosen voice and return the served MP3 URL. For a standalone voiceover / narration clip — NOT for adding audio to a video (render_ad and generate_video voice their own spots; change_voice re-voices a finished clip). engine picks the voice model (default 'seed-audio'; also 'eleven-v4' (Eleven v4; the retired id 'eleven-v3' still answers, on v4), 'minimax-speech', 'kokoro'); voice is a preset name from that engine (see hermoso_capabilities -> voice engines) — a name that engine does not have is REFUSED for free with its real list, and a few engines generate their own voice and take no preset at all (the reply says which voice actually spoke). Paid (a couple of credits by length; ≤900 characters).",
     inputSchema: {
       text: z.string().describe('the script to speak (≤900 characters)'),
-      engine: z.string().optional().describe("voice-engine id: 'seed-audio' (default), 'eleven-v3', 'minimax-speech', or 'kokoro' — listed in hermoso_capabilities"),
-      voice: z.string().optional().describe("a voice preset from the chosen engine (e.g. 'Aria'/'George' on eleven-v3, 'stokie_en' on seed-audio) — omit for the engine default"),
+      engine: z.string().optional().describe("voice-engine id: 'seed-audio' (default), 'eleven-v4' (Eleven v4), 'minimax-speech', or 'kokoro' — listed in hermoso_capabilities"),
+      voice: z.string().optional().describe("a voice preset from the chosen engine (e.g. 'Aria'/'George' on eleven-v4, 'stokie_en' on seed-audio) — omit for the engine default"),
     },
     outputSchema: {
       audio: z.string().optional().describe('the served absolute URL of the MP3 voice clip'),
