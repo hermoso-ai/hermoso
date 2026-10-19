@@ -148,6 +148,10 @@ async function unwrap(res) {
     // `connectUrl` rides a not-connected 401 with the brand already in it, so a hint never rebuilds the link.
     throw Object.assign(new Error(msg), { status: res.status, _viaApi: true, ...(body?.connector ? { connector: body.connector } : {}), ...(typeof body?.connectUrl === 'string' ? { connectUrl: body.connectUrl } : {}), ...(body?.meta?.videoChoice && typeof body.meta.videoChoice === 'object' ? { videoChoice: body.meta.videoChoice } : {}), ...(body?.metaAuthHold === true ? { metaAuthHold: true } : {}) }); // `videoChoice` rides a 402 for a video the caller expects and cannot afford (server videoChoiceFor) — wrap() spells its options out instead of a bare top-up line
   }
+  // WHAT THIS CALL WAS CHARGED (2026-10-19). A paid route answers {data, creditsUsed}, and the unwrap below drops the
+  // sibling, so a synchronous paid tool's reply could never say what it cost. It is added to the running tool call's
+  // tally (toolCtx), which wrap() in tools.mjs states once at the end of the reply. Free routes answer 0 or nothing.
+  try { const c = body && typeof body === 'object' ? Number(body.creditsUsed) : NaN; const st = toolCtx.getStore(); if (st && Number.isFinite(c) && c > 0) st.apiCharged = (st.apiCharged || 0) + c; } catch {}
   return body && Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : body;
 }
 
