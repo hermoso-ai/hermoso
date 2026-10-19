@@ -26,7 +26,7 @@ import { mcpCtx, connectedProviders } from './client.mjs';
 // beside cli/, whose package.json carries the release; inside the npm package there is no ../cli/ and ../package.json
 // IS the CLI package. One resolver, so the byte-identical twins agree.
 const PKG_VERSION = (() => { const r = createRequire(import.meta.url); for (const p of ['../cli/package.json', '../package.json']) { try { const v = r(p).version; if (v) return v; } catch {} } return '0.0.0'; })();
-export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null, onConnectEvent = null } = {}) {
+export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null, onConnectEvent = null, firstRunFor = null } = {}) {
   // Outcomes of a real connect, for the host's connect watch (lib/mcp-connect-watch.mjs): a bearer we reject, and the
   // first tools/list of a signed-in session (keyed by the token's hash, so a FRESH token's first listing marks a
   // completed connect). Never throws into the request.
@@ -532,7 +532,15 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
       // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
-      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true };
+      // A CHATGPT ACCOUNT THAT HAS MADE NOTHING YET (2026-10-19). Read once per session, ChatGPT hosts only, bounded so a slow
+      // read can never hold the connect: null (no note) is the answer to every failure. The first successful tool reply of
+      // the session then offers one concrete next ask (firstRunNote in tools.mjs). 9 of 13 ChatGPT signups since the
+      // 10-15 publish spent nothing, and a live "make me a video ad" chat on a connected account never called us.
+      let firstRun = null;
+      if (widgetHost && typeof firstRunFor === 'function' && user.accountId) {
+        try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
+      }
+      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun: firstRun && typeof firstRun === 'object' ? firstRun : null };
       if (typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
       // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
       // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
@@ -595,7 +603,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       ? setTimeout(() => { if (res.writableEnded) return; console.error(`[mcp] tools/call open past ${MCP_CALL_WALL_MS}ms — ending the response (${inflightNameOf(req.body)})`); try { res.end(); } catch {} }, MCP_CALL_WALL_MS)
       : null;
     if (wall && typeof wall.unref === 'function') wall.unref();
-    try { await mcpCtx.run({ token, remote: true, client: entry.client || '' }, () => entry.transport.handleRequest(req, res, req.body)); }
+    try { await mcpCtx.run({ token, remote: true, client: entry.client || '', firstRun: entry.firstRun || null }, () => entry.transport.handleRequest(req, res, req.body)); }
     finally { if (wall) clearTimeout(wall); }
   });
 
