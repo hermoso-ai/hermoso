@@ -2340,7 +2340,15 @@ export function parseToolScope(raw) {
 // read their descriptions as claiming what the tool cannot do (2026-10-18). x_post_metrics answers there.
 // fetch_social_data is a generic proxy over allowlisted vendor paths, which OpenAI's scan held as operations "not
 // individually exposed" (2026-10-18); see WIDGET_HOST_SPLITS for why it is withheld rather than split.
-export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand', 'connect_connector', 'x_post_insights', 'x_post_insights_historical', 'fetch_social_data']);
+// THE TOOLS THAT MOVE MONEY JOINED THEM 2026-10-19, for the plugin submission's attestation that the plugin "does not
+// initiate or execute money transfers, crypto transfers, or investment trades on behalf of users": a Stripe refund
+// pays money out, a Stripe subscription charges the customer's saved card, cancelling one ends a paid plan, and a
+// payment link exists to collect money. Ad budgets are NOT here: a budget is a spend setting on the user's own ad
+// account, not a transfer (an Apple budget order is a cap and spends nothing). The other Stripe writes (product, price,
+// coupon, customer) create records and move nothing; tools/chatgpt-no-money-movement-check.mjs makes a NEW Stripe
+// write fail until somebody classifies it.
+export const WIDGET_MONEY_MOVEMENT_TOOLS = Object.freeze(['refund_stripe_charge', 'create_stripe_subscription', 'cancel_stripe_subscription', 'create_stripe_payment_link']);
+export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand', 'connect_connector', 'x_post_insights', 'x_post_insights_historical', 'fetch_social_data', ...WIDGET_MONEY_MOVEMENT_TOOLS]);
 // The withheld tools whose refusal is the generic-executor sentence rather than the commerce one.
 const WIDGET_GENERIC_PROXIES = new Set(['fetch_social_data']);
 const executorLike = (name) => EXECUTOR_TOOLS.has(name) || WIDGET_GENERIC_PROXIES.has(name);
