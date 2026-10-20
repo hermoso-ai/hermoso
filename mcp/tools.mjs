@@ -565,7 +565,7 @@ const wrap = (fn) => {
     const _widget = hostRendersWidgets();
     if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice, { widgetHost: _widget }); _hints.push(...videoChoiceHints(_tool, e.videoChoice, { widgetHost: _widget })); }
     else if (_widget && /not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) { msg = neutralCreditsText(msg); _hints.push(...creditsLowHints()); }
-    else if (/not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) _hints.push({ do: 'buy_credits({})', why: 'this account cannot cover the call; buy_credits quotes on a saved card or returns a checkout link, and billing_status shows the balance and the billing role' }), msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes (quoteToken included) then one-click charges on confirm:true + quote_token; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.`;
+    else if (/not enough credits|out of credits|needs (a paid plan|the Pro plan)/i.test(msg)) _hints.push({ do: 'buy_credits({})', why: 'this account cannot cover the call; buy_credits quotes on a saved card or returns a checkout link, and billing_status shows the balance and the billing role' }), msg += `\nRun buy_credits to top up (credit packs): with a saved card it quotes (quoteToken included) then one-click charges on confirm:true + quote_token; with no card yet it returns a checkout link your human pays once (the card saves for one-click after). billing_status shows your balance, plan + billing role; if you're an admin, upgrade_plan moves to a bigger monthly plan (a person pays on Stripe). hermoso_credits shows the balance; hermoso_capabilities lists per-model credit costs.${/no markup on models/i.test(msg) ? ' If the user wants credits to go further, upgrade_plan moves them to a monthly plan with no markup on models (a person pays on Stripe).' : ''}`;
     // connector not connected → hand the human a ONE-CLICK connect link (OAuth needs a browser, so it can't happen
     // in-agent) — 2026-07-23. Detected from the STRUCTURED signal, never from the prose (see notConnectedHint).
     else {
@@ -4409,12 +4409,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _rmLine = _rm ? `\nRemake engines (recast_motion, restyle_video, edit_video engine): auto picks, for a clip with no real-looking person, ${Object.entries(_rm.defaults || {}).map(([k, v]) => `${k} → ${v}`).join(', ')}; with a person in the clip, ${Object.entries(_rm.faceDefaults || {}).map(([k, v]) => `${k} → ${v}`).join(', ')}${_rm.personClipLibraryDefaults ? ` (a person clip our face library can carry, i.e. one of our renders or faceRoute on a paid plan: ${Object.entries(_rm.personClipLibraryDefaults).map(([k, v]) => `${k} → ${v}`).join(', ')})` : ''}. seedance ${(_rm.seconds || []).join('-')}s, up to ${_rm.imagesMax} pictures, ${Object.entries(_rm.seedanceCredits || {}).map(([res, m]) => `${res} ${Object.entries(m).map(([s, c]) => `${s}s ${c}cr`).join(' / ')}`).join('; ')}${_rm.wanCredits ? `. wan clips up to ${_rm.wanMaxSourceSeconds}s, ${Object.entries(_rm.wanCredits).map(([res, m]) => `${res} ${Object.entries(m).map(([s, c]) => `${s}s ${c}cr`).join(' / ')}`).join('; ')}${_rm.wanLabel ? ` (${_rm.wanLabel})` : ''}` : ''}${_rm.wanPrimeCredits ? `. wan-prime (Wan 3.0 Prime by name) ${Object.entries(_rm.wanPrimeCredits).map(([res, m]) => `${res} ${Object.entries(m).map(([s, c]) => `${s}s ${c}cr`).join(' / ')}`).join('; ')}` : ''}` : '';
     const _je = d.jobEngines; // the certified engine per job (watched side-by-side tests, 2026-10-19)
     const _jeLine = _je && _je.defaults ? `\nDefault engine per job (watched side-by-side tests): ${Object.entries(_je.defaults).map(([k, v]) => `${k} → ${v}`).join(', ')}; a talking ad is one take of up to ${_je.talkingMaxSeconds}s. A model the user picks by name is kept; never switch it.` : '';
-    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\nExtend a clip (generate_video extend:true + refVideo): by default it cuts to a NEW SHOT of what happens next (new angle, same scene, any i2v model, default ${d.jobEngines?.defaults?.extend || 'certified'})${_extLine ? `; extendMode:'continue' keeps the SAME take instead, on: ${_extLine}` : ''}${_shotLine ? `\nMulti-shot clips (generate_video shots): ${_shotLine}` : ''}${_rsLine ? `\nRestyle looks (restyle_video style): ${_rsLine}` : ''}${_rmLine}${_jeLine}\n${_pickLine}\n${_resLine}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\nPRICES: every credit figure above is an estimate. ${PRICE_ESTIMATE_LINE}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;    return ok(text + connLine, d);
+    const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\nExtend a clip (generate_video extend:true + refVideo): by default it cuts to a NEW SHOT of what happens next (new angle, same scene, any i2v model, default ${d.jobEngines?.defaults?.extend || 'certified'})${_extLine ? `; extendMode:'continue' keeps the SAME take instead, on: ${_extLine}` : ''}${_shotLine ? `\nMulti-shot clips (generate_video shots): ${_shotLine}` : ''}${_rsLine ? `\nRestyle looks (restyle_video style): ${_rsLine}` : ''}${_rmLine}${_jeLine}\n${_pickLine}\n${_resLine}${d.pricing ? `\nPRICES ABOVE ARE THIS ACCOUNT'S OWN: ${d.pricing.memberRate ? 'no markup on image, video and voice models (the model maker\'s price + a 10% service fee, 1 credit = $0.02)' : 'standard prices (every paid plan pays the model maker\'s price + 10% on image, video and voice models; model rows carry memberCredits)'}.` : ''}${_motionLine}${_avLine}\nVoice engines (generate_voice): ${voice}\nWriting models (generate_text): ${llm}\nPRICES: every credit figure above is an estimate. ${PRICE_ESTIMATE_LINE}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;    return ok(text + connLine, d);
   }));
 
   server.registerTool('hermoso_credits', {
     title: 'Credit balance',
-    description: 'Return the account credit balance, the credits this account has spent on the calls listed, those recent priced calls, and costModel — the one-sentence rule of what costs credits. THE RULE: only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management, analytics, comments, DMs and connectors are FREE on every plan (X is the single per-call exception). Check before kicking off paid generation; answer "does posting cost credits?" with NO.',
+    description: 'Return the credit balance, recent priced calls with their credits, and costModel (the one-sentence rule of what costs credits). THE RULE: only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management, analytics, comments, DMs and connectors are FREE on every plan (X is the single per-call exception). Check before kicking off paid generation; answer "does posting cost credits?" with NO. Paid plans: media models at cost + 10% (memberRate).',
     inputSchema: {}, outputSchema: {
       accountBalance: z.number().nullable().optional().describe('the account’s Hermoso credit balance (authoritative when authed)'),
       balance: z.number().optional().describe('raw vendor meter balance (operator/local-dev surface)'),
@@ -4433,7 +4433,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE CHARGES THEMSELVES (2026-09-12): the same ledger list as Billing ▸ Usage, so "where did my credits go" has an
     // answer here too. Best effort: a reply about the balance never fails on the history read.
     let recent = ''; try { const u = await apiGet('/api/billing/usage', { limit: 10 }); if (u?.items?.length) recent = `\nRecent charges (newest first):\n${u.items.map((r) => `• ${String(r.at).slice(0, 16).replace('T', ' ')} UTC · ${r.label} · ${r.credits} credits`).join('\n')}`; } catch {}
-    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}. ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'} ${d.costEstimate || PRICE_ESTIMATE_LINE}${recent}`, d);
+    const _mr = d.memberRate === true ? ' This account\'s plan has no markup on image, video and voice models (the model maker\'s price + a 10% service fee).' : d.planUpsell === true && !hostRendersWidgets() ? ' Monthly plans have no markup on models, so credits go further (upgrade_plan); Free and top-up credits use standard prices.' : '';
+    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}.${_mr} ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'} ${d.costEstimate || PRICE_ESTIMATE_LINE}${recent}`, d);
   }));
 
   // AGENT BILLING: out of credits → top up. With a saved card + billing-admin rights this is the SAME one-click
@@ -4463,7 +4464,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const packs = (cfg.packs || []).map(p => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd }));
     if (!pack) {
       const lines = packs.map(p => `• ${p.id} — ${p.credits.toLocaleString()} credits · $${p.priceUsd}`).join('\n') || '(no packs configured)';
-      return ok(`Credit packs you can buy:\n${lines}\n\nCall buy_credits again with pack="<id>". With a saved card it's a one-click charge (you'll be asked to confirm); otherwise you get a checkout link for your human.\n\nTip: to never run out again, turn on auto-reload (set_auto_reload) — it auto-tops-up from the saved card the moment your balance runs low.`, { packs });
+      let _up = null; try { _up = (await apiGet('/api/billing/status'))?.planUpsell || null; } catch {}
+      return ok(`Credit packs you can buy:\n${lines}\n\nCall buy_credits again with pack="<id>". With a saved card it's a one-click charge (you'll be asked to confirm); otherwise you get a checkout link for your human.${_up ? `\n\n${_up.line} ${_up.note} Top-up credits use standard prices; upgrade_plan lists the monthly plans.` : ''}\n\nTip: to never run out again, turn on auto-reload (set_auto_reload) — it auto-tops-up from the saved card the moment your balance runs low.`, { packs });
     }
     const match = packs.find(p => p.id === pack);
     if (!match) return ok(`No pack "${pack}". Available: ${packs.map(p => p.id).join(', ') || '(none)'}. Call buy_credits with no argument to see details.`, { packs });
@@ -4538,7 +4540,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('billing_status', {
     title: 'Billing status',
-    description: "Show this account's billing at a glance: current plan (id + label + the price it is ACTUALLY billed — quote plan.priceUsd per plan.period, not plan.monthlyUsd), credit balance, whether auto-reload is on, whether a card is on file, and whether YOU (this key) have ADMIN rights to change billing. Read-only, free. Call it before upgrade_plan / set_auto_reload to know what's possible — members have read-only billing. IN A SHARED TEAM WORKSPACE A MEMBER SEES THE PLAN AND THE BALANCE ONLY: the workspace owner's payment card and auto-reload belong to them and are not reported (billingScope:'member'). Never tell a member there is no card on file — the honest answer is that you cannot see it.",
+    description: "Show this account's billing at a glance: current plan (quote plan.priceUsd per plan.period), credit balance, whether auto-reload is on, whether a card is on file, and whether YOU (this key) have ADMIN rights to change billing. Read-only, free. Call it before upgrade_plan / set_auto_reload to know what's possible — members have read-only billing. IN A SHARED TEAM WORKSPACE A MEMBER SEES THE PLAN AND THE BALANCE ONLY: the workspace owner's payment card and auto-reload belong to them and are not reported (billingScope:'member'). Never tell a member there is no card on file — the honest answer is that you cannot see it. plan.memberRate: media models at cost + 10%; plan.legacy: an older plan kept at its price.",
     inputSchema: {}, outputSchema: {
       plan: z.any().optional().describe("the current plan ({id, label, monthlyUsd, period, priceUsd}). QUOTE priceUsd PER period, never monthlyUsd: monthlyUsd is kept for back-compat and reports an annual subscriber at the monthly rate, which is how a $490/yr account got told it pays $49."),
       balanceCredits: z.number().nullable().optional().describe('the current credit balance'),
@@ -4567,7 +4569,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       : d.paymentMethodOnFile ? `yes${d.card ? ` (${d.card.brand} ····${d.card.last4})` : ''}` : 'no';
     const _per = d.plan?.period === 'yr' ? 'yr' : 'mo';
     const _price = _per === 'yr' ? (d.plan?.priceUsd ?? d.plan?.monthlyUsd) : (d.plan?.monthlyUsd ?? d.plan?.priceUsd);
-    const text = `Plan: ${d.plan?.label} ($${_price}/${_per})\nBalance: ${d.balanceCredits} credits\nAuto-reload: ${arLine}\nCard on file: ${cardLine}\nYour billing role: ${d.role}${d.isAdmin ? ' — you can change the plan / auto-reload' : ' — read-only; ask an admin to change the plan or auto-reload'}${withheld && d.billingNote ? `\n${d.billingNote}` : ''}`;
+    const _pr = d.plan?.memberRate ? `\nPricing: no markup on image, video and voice models (the model maker\'s price + a 10% service fee, 1 credit = $0.02)${d.plan?.legacyPrice ? '; this plan keeps its legacy price (upgrade_plan lists the plans on sale; once left it cannot be chosen again)' : ''}` : d.plan?.nextRenewal ? `\nPricing: standard until the next renewal; from then on the same price with no markup on media models and ${d.plan.nextRenewal.credits} credits a month` : (d.plan?.monthlyUsd || 0) > 0 ? '' : d.planUpsell ? `\nPricing: standard. ${d.planUpsell.line} ${d.planUpsell.note} Free and top-up credits use standard prices.` : '';
+    const text = `Plan: ${d.plan?.label} ($${_price}/${_per})${_pr}\nBalance: ${d.balanceCredits} credits\nAuto-reload: ${arLine}\nCard on file: ${cardLine}\nYour billing role: ${d.role}${d.isAdmin ? ' — you can change the plan / auto-reload' : ' — read-only; ask an admin to change the plan or auto-reload'}${withheld && d.billingNote ? `\n${d.billingNote}` : ''}`;
     return ok(text, d);
   }));
 
@@ -4575,33 +4578,38 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // changes + downgrades are made in-app (the tool returns exactly what to do). Admin-only; a human always pays.
   server.registerTool('upgrade_plan', {
     title: 'Upgrade plan',
-    description: "Change this account's SUBSCRIPTION plan (admin only). Call with no argument to list the plans (id · monthly price · monthly credits); call again with `plan` set to a plan id. A NEW subscriber gets a ready-to-pay Stripe Checkout URL to hand your human — THEY pay on Stripe (agents never spend money directly). If the account already has a paid plan, or you're DOWNGRADING, the change is made by a person in the app (Settings -> Billing) and the tool returns exactly what to do. Members (read-only billing) get an honest 'ask an admin' message. Nothing is charged until your human pays.",
+    description: "Change the SUBSCRIPTION plan (admin only). Monthly plans, no markup on media models. No argument lists them. New subscriber: a Checkout URL for the human. Existing subscriber upgrading: a quote + quote_token; once the human agrees, call again with confirm:true and quote_token to charge the card on file. Downgrade: a billing-page link; it starts at the term's end.",
     inputSchema: {
       plan: z.string().optional().describe('the plan id to move to (e.g. pro) — omit to list the available plans first'),
-      period: z.enum(['mo', 'yr']).optional().describe('billing cadence — monthly (default) or yearly (2 months free)'),
+      period: z.enum(['mo', 'yr']).optional().describe("monthly only ('yr' buys monthly)"),
+      confirm: z.boolean().optional().describe('true (with quote_token) to make a quoted upgrade'),
+      quote_token: z.string().optional().describe("the quoteToken from the quote step"),
     },
     outputSchema: {
       plans: z.array(z.any()).optional().describe('available paid plans ({id, name, priceUsd, credits}) when listing'),
-      mode: z.string().optional().describe("'checkout' (a Stripe URL was minted) or 'in_app' (a person makes the change in the app)"),
+      mode: z.string().optional().describe("'checkout' | 'confirm' | 'portal' | 'in_app'"),
       url: z.string().optional().describe('the ready-to-pay Stripe Checkout URL (checkout mode)'),
       plan: z.string().optional().describe('the target plan id'),
       planLabel: z.string().optional().describe('the target plan display name'),
       monthlyUsd: z.number().optional().describe('the plan’s monthly price in USD'),
-      chargeUsd: z.number().optional().describe('the actual charge amount (yearly billing charges the annual total)'),
-      period: z.string().optional().describe("billing cadence of the link — 'mo' or 'yr'"),
-      action: z.string().optional().describe("the in-app action required ('upgrade' or 'downgrade')"),
-      guidance: z.string().optional().describe('exact instructions when the change must be made in the app'),
+      chargeUsd: z.number().optional().describe('the charge in USD'),
+      period: z.string().optional().describe("'mo'"),
+      action: z.string().optional().describe("'upgrade' or 'downgrade'"),
+      guidance: z.string().optional().describe('what happens next, in words'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, // not read-only: with `plan` set it mints a Stripe Checkout Session. It still charges nothing — the human pays.
-  }, wrap(async ({ plan, period }) => {
+  }, wrap(async ({ plan, period, confirm, quote_token }) => {
     const cfg = await apiGet('/api/billing/config');
-    const plans = (cfg.plans || []).filter(p => p.priceUsd > 0).map(p => ({ id: p.id, name: p.name, priceUsd: p.priceUsd, credits: p.credits }));
+    const plans = (cfg.plans || []).filter(p => p.priceUsd > 0 && !p.legacy && !p.cohort).map(p => ({ id: p.id, name: p.name, priceUsd: p.priceUsd, credits: p.credits, noMarkup: !!p.noMarkup, makes: p.makes || null }));
     if (!plan) {
-      const lines = plans.map(p => `• ${p.id} — ${p.name}: $${p.priceUsd}/mo · ${p.credits.toLocaleString()} credits/mo`).join('\n') || '(no plans configured)';
-      return ok(`Subscription plans:\n${lines}\n\nCall upgrade_plan again with plan="<id>" (admin only). Downgrades + changes for existing subscribers are made in the app.`, { plans });
+      const lines = plans.map(p => `• ${p.id} — ${p.name}: $${p.priceUsd}/mo · ${p.credits.toLocaleString()} credits/mo${p.makes?.videoAds ? ` (about ${p.makes.videoAds} ${p.makes.videoSeconds}s video ads or ${p.makes.images} images)` : ''}${p.noMarkup ? ' · no markup on image, video and voice models' : ''}`).join('\n') || '(no plans configured)';
+      return ok(`Subscription plans (monthly):\n${lines}\n${cfg.memberPricing?.note || ''}\n\nCall upgrade_plan again with plan="<id>" (admin only). Downgrades + changes for existing subscribers are made in the app.`, { plans });
     }
-    const d = await apiPost('/api/billing/plan-link', { planId: plan, period });
-    if (d.mode === 'checkout') return ok(`Checkout link for the ${d.planLabel} plan ($${d.monthlyUsd}/mo${d.period === 'yr' ? `, billed $${d.chargeUsd}/yr` : ''}):\n${d.url}\n\nGive this URL to your human to subscribe on Stripe's secure page. Nothing is charged until they pay.`, d);
+    const d = await apiPost('/api/billing/plan-link', { planId: plan, period, ...(confirm && quote_token ? { confirm: true, quoteToken: quote_token } : {}) });
+    if (d.ok && d.plan) return ok(`Done: the plan is now ${d.plan}. The new credits land within a minute (billing_status shows them).`, d);
+    if (d.mode === 'confirm') return ok(`${d.guidance}\nquote_token: ${d.quoteToken}`, d);
+    if (d.mode === 'portal') return ok(`${d.guidance}\n${d.url}`, d);
+    if (d.mode === 'checkout') return ok(`Checkout link for the ${d.planLabel} plan ($${d.monthlyUsd}/mo, no markup on image, video and voice models${d.period === 'yr' ? `, billed $${d.chargeUsd}/yr` : ''}):\n${d.url}\n\nGive this URL to your human to subscribe on Stripe's secure page. Nothing is charged until they pay.`, d);
     return ok(d.guidance, d); // in_app — an existing-subscriber upgrade or a downgrade (done by a person in the app)
   }));
 

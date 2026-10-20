@@ -115,7 +115,7 @@ export function videoChoiceText(tool, choice, opts = {}) {
 // The link is the pricing page, which describes the options and starts nothing. Pure, no imports — the twin rule.
 export const ACCOUNT_INFO_URL = 'https://hermoso.ai/pricing';
 export const CREDITS_LOW_NOTE = `The Hermoso account's credit balance is too low for this. Tell the user plainly; they manage their account and credits at ${ACCOUNT_INFO_URL}. Nothing can be bought from here.`;
-const UPSELL_SENTENCE_RE = /\s*(?:please\s+)?(?:upgrade(?:\s+your\s+plan)?\s+or\s+top\s+up|top\s+up|add\s+credits|buy\s+(?:more\s+)?credits)\b[^.!\n]*[.!]?/gi;
+const UPSELL_SENTENCE_RE = /\s*(?:please\s+)?(?:upgrade(?:\s+your\s+plan)?\s+or\s+top\s+up|top\s+up|add\s+credits|buy\s+(?:more\s+)?credits|monthly\s+plans\s+have\s+no\s+markup\s+on\s+models)\b[^.!\n]*[.!]?/gi; // the monthly-plan upsell (2026-10-20) is a promotion too: a widget host (ChatGPT) never hears it
 export function neutralCreditsText(msg) {
   const base = String(msg ?? '').replace(UPSELL_SENTENCE_RE, '').replace(/[ \t]+$/gm, '').replace(/\s*[—–,:-]\s*$/gm, '.').trim();
   return `${base}${base ? '\n' : ''}${CREDITS_LOW_NOTE}`;
