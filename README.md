@@ -8,6 +8,8 @@ campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a 
 **922 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
+**No markup on models.** Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
+
 **A Chrome extension too.** [Hermoso: save and clone ads](https://chromewebstore.google.com/detail/hermoso-save-and-clone-ad/kmknkbldeilchhblbfddfnfbadmgcklc)
 saves any ad to your swipefile in one click, clones it for your brand, and pulls any company's ads from its
 website.
