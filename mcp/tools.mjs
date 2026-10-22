@@ -4602,7 +4602,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const cfg = await apiGet('/api/billing/config');
     const plans = (cfg.plans || []).filter(p => p.priceUsd > 0 && !p.legacy && !p.cohort).map(p => ({ id: p.id, name: p.name, priceUsd: p.priceUsd, credits: p.credits, noMarkup: !!p.noMarkup, makes: p.makes || null }));
     if (!plan) {
-      const lines = plans.map(p => `• ${p.id} — ${p.name}: $${p.priceUsd}/mo · ${p.credits.toLocaleString()} credits/mo${p.makes?.videoAds ? ` (about ${p.makes.videoAds} ${p.makes.videoSeconds}s video ads or ${p.makes.images} images)` : ''}${p.noMarkup ? ' · no markup on models' : ''}`).join('\n') || '(no plans configured)';
+      const lines = plans.map(p => `• ${p.id} — ${p.name}: $${p.priceUsd}/mo · ${p.credits.toLocaleString()} credits/mo${p.makes?.videoAds ? ` (about ${p.makes.videoAds} ${p.makes.videoSeconds}-second videos or ${p.makes.images} images a month)` : ''}${p.noMarkup ? ' · no markup on models' : ''}`).join('\n') || '(no plans configured)';
       return ok(`Subscription plans (monthly):\n${lines}\n${cfg.memberPricing?.note || ''}\n\nCall upgrade_plan again with plan="<id>" (admin only). Downgrades + changes for existing subscribers are made in the app.`, { plans });
     }
     const d = await apiPost('/api/billing/plan-link', { planId: plan, period, ...(confirm && quote_token ? { confirm: true, quoteToken: quote_token } : {}) });
@@ -21430,10 +21430,10 @@ function memoryNoteVerdict(text) {
     title: 'Draft profile',
     description: 'Fill in a profile (a business brand or a creator) from a website domain, a free-text description, or a social handle, into a {name, products, logo, …} object you can pass to plan_ad / generate. 0 credits. IMPORTANT: a domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com). Before spending any credits on research or renders, VERIFY the returned `name` (and `summary`) match the brand the user meant; if it looks wrong, re-draft with the correct domain or a description (pass save:false until confirmed) — this tool cannot ask the user, so the caller owns that check.',
     inputSchema: {
-      domain: z.string().optional().describe('a website to scrape'),
+      domain: z.string().optional().describe('a website to scrape, or a social link (profile, YouTube channel or one post) to draft from the account it names'),
       description: z.string().optional().describe('a free-text brand description (no website)'),
-      socialHandle: z.string().optional().describe('a social handle to draft from (influencers/creators) — pair with platform'),
-      platform: z.string().optional().describe('platform for socialHandle (instagram/tiktok/…)'),
+      socialHandle: z.string().optional().describe('a social handle (creators); needs platform, never guessed'),
+      platform: z.string().optional().describe('socialHandle platform: instagram/tiktok/youtube/twitter/threads'),
       save: z.boolean().optional().describe('save onto the active profile (like Studio onboarding) so plan_ad/create use it automatically. Default: saves only when NO brand is saved yet; pass true to REPLACE the saved profile (the drafted fields overwrite the saved ones), false to never save'),
     },
     outputSchema: {
