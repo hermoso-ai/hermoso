@@ -575,6 +575,10 @@ const wrap = (fn) => {
       // so an agent relays it instead of retrying or telling the user to reconnect. Read from the STRUCTURED field.
       if (e?.metaAuthHold === true) _hints.push({ do: 'stop retrying; ask the user to clear Meta\u2019s security check: as the Facebook profile that connected Hermoso, on a computer (not the Ads Manager app), create a NEW draft ad in Ads Manager, click Start authentication (or Fix errors) on the error it shows and complete it, or follow a red banner if one is shown; then run the same call again', why: 'Meta refuses new or edited ads from that profile until it re-authenticates; the connection and permissions are fine and reconnecting with the same profile does not clear it' });
       if (Number(e?.status) === 401 && e?.connector) _hints.push({ do: `have the user connect "${e.connector}" (Settings \u25b8 Connectors, or the one-click link in this message)`, why: `${e.connector} is not connected in this workspace, so this tool can only answer 401 until it is` });
+      // A PUBLISH OUTCOME IS DATA (2026-10-25, fb_679fd3573ff0): "nothing was posted" and "could not confirm" both arrive
+      // as 502, so the hint follows the server's `remedy.posted`, never the status or the prose.
+      if (e?.remedy?.code === 'publish_not_sent') _hints.push({ do: 'call this tool again with the same arguments', why: 'nothing was posted: it failed before anything was sent to the platform, so a retry cannot double-post' });
+      else if (e?.remedy?.code === 'publish_unconfirmed' || e?.remedy?.code === 'publish_in_progress') _hints.push({ do: 'check the account for the post before anything else; do not retry with a new idempotency key', why: 'the publishing call did not answer cleanly, so the post may be live; allowDuplicate:true is the only way to post it again' });
     }
       // ── THE STRUCTURED ERROR MARKER (2026-08-26) ──────────────────────────────────────────────────────────
       // `msg` above is a SENTENCE, built for a model to read. `/v1/tools` — the REST passthrough — has to answer
@@ -585,7 +589,9 @@ const wrap = (fn) => {
       // `_meta` is MCP's own sanctioned extension point (spec: any result MAY carry it), so every MCP client
       // sees an ordinary error result and ignores a key it does not recognise. `publishWrap` spreads the result,
       // so its ambiguous-publish advice keeps the marker rather than dropping it.
-      return withHints({ content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, connector: e?.connector ? String(e.connector) : '', ...(e?.videoChoice?.options && typeof e.videoChoice.options === 'object' ? { options: e.videoChoice.options } : {}) } } }, _hints); // `options` = the video choice's three ways forward, structured, so /v1 answers its 402 with them
+      // `remedy` (2026-10-25): the server's structured next step, whole, plus its `code` — Meta's security hold (code +
+      // steps[]) or a publish outcome (posted:false | 'unknown'). /v1 makes `code` its error code and returns `remedy`.
+      return withHints({ content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, connector: e?.connector ? String(e.connector) : '', ...(e?.videoChoice?.options && typeof e.videoChoice.options === 'object' ? { options: e.videoChoice.options } : {}), ...(e?.remedy && typeof e.remedy === 'object' && typeof e.remedy.code === 'string' ? { code: e.remedy.code, remedy: e.remedy } : {}) } } }, _hints); // `options` = the video choice's three ways forward, structured, so /v1 answers its 402 with them
     }
   };
   return outer;
@@ -605,6 +611,13 @@ const publishWrap = (fn) => {
   const outer = async (args, extra) => {
     const r = await inner(args, extra);
     if (!r?.isError) return r;
+    // THE SERVER'S OWN VERDICT WINS (2026-10-25). A publish that failed before anything was sent answers "Nothing was
+    // posted … (timeout of 90000ms exceeded). It is safe to try again." — and the regex below matched its "timeout",
+    // so the same reply then said "the post may well be LIVE … DO NOT RETRY BLINDLY": two opposite verdicts in one
+    // answer, the ambiguity fb_679fd3573ff0 reported. When the server sent a publish `remedy`, its sentence already
+    // carries the right advice; the regex is only for a failure the server never answered (a dropped transport).
+    const _rc = r._meta?.['hermoso.ai/error']?.remedy?.code;
+    if (typeof _rc === 'string' && _rc.startsWith('publish_')) return r;
     const text = r.content?.[0]?.text || '';
     if (!PUBLISH_AMBIGUOUS_RE.test(text)) return r;
     return { ...r, content: [{ type: 'text', text: `${text}\n\nDO NOT ASSUME THIS FAILED, AND DO NOT RETRY BLINDLY. Publishing routinely outlives a transport, so the post may well be LIVE. Hermoso protects you: call this tool AGAIN with the identical arguments${args?.idempotencyKey ? ` and the same idempotencyKey ("${args.idempotencyKey}")` : ''} — an identical publish is recognised and returns the ORIGINAL post instead of posting twice. Tell the user it is being confirmed, not that it failed. For video, prefer async:true (post_to_meta), which returns a job id you poll with get_job and cannot time out at all.` }] };
@@ -615,6 +628,24 @@ const publishWrap = (fn) => {
   Object.defineProperty(outer, '_hermosoTool', { set(v) { inner._hermosoTool = v; }, get() { return inner._hermosoTool; }, configurable: true });
   return outer;
 };
+
+// A CHANGE OF WORDS IN A DESIGN IS RE-MADE, NOT EDITED (2026-10-22). A template ad (made here, in the app or over the API)
+// keeps its design on its Library row; "change $10 to $15" makes that design again with the words swapped, about 2 credits,
+// never a video-model edit of every frame. The server decides, free (POST /api/template-ad/remake-text); edit_video asks
+// it first unless the caller chose the model path (a preview, or an approved still). null = not a design: edit as before.
+async function designRemakeFirst(video, prompt) {
+  let t = null;
+  try { t = await apiPost('/api/template-ad/remake-text', { video, instruction: prompt }); } catch (e) { if (Number(e?.status) !== 404) throw e; } // an older server without the route: the edit, as before
+  const ch = t?.change ? `"${t.change.from}" to "${t.change.to}"` : 'those words';
+  if (t?.route === 'remake') {
+    const r = await awaitRenderJob({ id: t.jobId });
+    if (r?.stillRendering) return ok(`This video was laid out from a design, so the same ${t.templateLabel} is being made again with ${ch} (about ${t.credits} credits) instead of a video edit [job ${t.jobId}]. Call get_job with that id until it is done.`, { ...r, remade: true });
+    return okVideo(`Made the same ${t.templateLabel} again with ${ch} everywhere it appeared (${t.hits} place${t.hits === 1 ? '' : 's'}); the original video is kept and was not edited: ${r.url}  [job ${t.jobId}]${switchNote(r)}`, { ...r, remade: true });
+  }
+  if (t?.route === 'not_found') return ok(`Nothing changed or charged: "${t.change.from}" is not in this design's words. Its words are: ${(t.words || []).map((w) => `"${w}"`).join(', ')}. Ask which words to change and call again with them exactly as they appear.`, t);
+  if (t?.route === 'no_design') return ok(`Nothing changed or charged yet: this video was laid out from a design that was not kept with it, so it cannot be re-made word for word. Offer both ways: (1) make it again from the brand with make_template_ad (the same template, the words with ${ch}), about 2 credits; (2) edit the words inside this video with the video model: edit_video with previewFirstFrame:true shows the change on one still and quotes the clip before anything paid runs.`, t);
+  return null;
+}
 
 // run a job to completion, surfacing the served media URL. Under the HOSTED connector (Claude.ai/ChatGPT) the
 // client kills long tool calls before a 1-3 min render finishes — so cap the in-call wait there and return a
@@ -1910,8 +1941,14 @@ export const INBOX_SOURCES = [
   // you cannot reply to a message id on either vendor. Meta wants the PAGE-SCOPED ID of the person (its
   // /conversation route already computes it as `replyTo`) and Bluesky wants the conversation (`convoId`). Both
   // routes already return exactly that field at the top level, so nothing new is computed here.
-  { source: 'meta_dm',         provider: 'meta',            read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Meta direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' } },
-  { source: 'instagram_dm',    provider: 'instagram',       read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Instagram direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' } }, // a DIRECT (Instagram Login) account's inbox — same routes, resolved through igDmCtx by `account` (2026-09-02)
+  //
+  // `readAll` (2026-10-25): WITHOUT a conversationId these two no longer print "pass conversationId" and list
+  // nothing. They read every waiting conversation in one call per surface (/api/meta/dm-inbox, already folded to
+  // one row per thread, so it is NOT folded again here) — a customer's busy Instagram inbox read as zero items
+  // because of that note plus the next defect. `readAllQuery` splits the two so no thread is listed twice:
+  // meta_dm reads Messenger, instagram_dm reads Instagram (direct login account, or the Page-linked one).
+  { source: 'meta_dm',         provider: 'meta',            read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Meta direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' }, readAll: '/api/meta/dm-inbox', readAllQuery: { platform: 'MESSENGER' } },
+  { source: 'instagram_dm',    provider: 'instagram',       read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Instagram direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' }, readAll: '/api/meta/dm-inbox', readAllQuery: { platform: 'INSTAGRAM' }, query: { platform: 'INSTAGRAM' } }, // `query` rides on the per-thread read too: without it a direct (Instagram Login) thread id was read on the Page path and refused, measured 2026-10-25. A DIRECT (Instagram Login) account's inbox — same routes, resolved through igDmCtx by `account` (2026-09-02)
   { source: 'meta_webhook',    provider: 'meta',            read: '/api/meta/webhooks/events',     reply: null,                               kind: 'pushed',  label: 'Pushed Meta event' },
   { source: 'threads_mention', provider: 'threads',         read: '/api/threads/mentions',         reply: '/api/threads/reply',               kind: 'mention', label: 'Threads mention' },
   { source: 'youtube',         provider: 'youtube',         read: '/api/youtube/comments',         reply: '/api/youtube/reply-comment',       kind: 'comment', label: 'YouTube comment',    needs: { arg: 'videoId', param: 'videoId', from: 'list_youtube_videos' } },
@@ -2055,9 +2092,13 @@ export function normalizeInboxItem(source, row = {}) {
   const nativeId = pick('id', 'commentId', 'name', 'reviewId', 'tweet_id', 'messageId', 'eventId');
   // A REVIEW WITH A STAR RATING AND NO WORDS IS STILL AN ITEM. Google reviews are frequently rating-only, and
   // dropping them would hide the thing a brand most wants to answer. So text OR a rating is enough to keep it.
-  const text = pick('text', 'message', 'comment', 'body', 'content', 'reviewReply.comment', 'snippet.textDisplay');
+  // AND A DM WITH NO WORDS IS STILL AN ITEM (2026-10-25): a story mention, a shared reel, a photo or content Meta
+  // withholds has no text, and this line used to drop every one of them — an Instagram inbox full of story
+  // mentions read as "Nothing waiting." The read route's one-line `summary` stands in for the missing text.
+  const text = pick('text', 'message', 'comment', 'body', 'content', 'reviewReply.comment', 'snippet.textDisplay') || pick('summary');
   const rating = row.starRating ?? row.rating ?? null;
   if (!nativeId || (!text && rating == null)) return null;
+  const mk = src.kind === 'dm' && typeof row.kind === 'string' && typeof row.summary === 'string' ? row.kind : ''; // the Meta read shape only
   return {
     id: inboxId(source, nativeId),
     source,
@@ -2078,6 +2119,15 @@ export function normalizeInboxItem(source, row = {}) {
       || row.inbound === false || row.fromMe === true,
     canReply: !!src.reply,
     ...(row.messageId || row.eventId ? { messageId: String(row.messageId || row.eventId) } : {}),
+    // WHAT THE DM IS (Meta's read routes, 2026-10-25): its kind, the sentence to read out, the media / story /
+    // share links, and `unavailable` + why when Meta withheld the content. Only set when the route sent them.
+    ...(mk ? { messageKind: mk } : {}),
+    ...(src.kind === 'dm' && typeof row.summary === 'string' && row.summary.trim() ? { summary: row.summary.trim() } : {}),
+    ...(src.kind === 'dm' && row.unavailable === true ? { unavailable: true, unavailableReason: String(row.unavailableReason || '') } : {}),
+    ...(src.kind === 'dm' && Array.isArray(row.attachments) && row.attachments.length ? { attachments: row.attachments } : {}),
+    ...(src.kind === 'dm' && row.story && typeof row.story === 'object' ? { story: row.story } : {}),
+    ...(src.kind === 'dm' && row.share && typeof row.share === 'object' ? { share: row.share } : {}),
+    ...(src.kind === 'dm' && typeof row.conversationId === 'string' && row.conversationId ? { conversationId: row.conversationId } : {}),
   };
 }
 
@@ -2097,7 +2147,9 @@ export function inboxLine(it) {
     it.label,
     it.rating != null ? `${it.rating}★` : '',
     `${it.author}:`,
-    JSON.stringify(String(it.text || '').slice(0, 140)),
+    // A DM that is not plain text (a story mention, a share, withheld content) reads as its summary, which already
+    // carries the kind in words; plain text stays quoted as before.
+    it.summary && it.messageKind && it.messageKind !== 'text' ? String(it.summary).slice(0, 220) : JSON.stringify(String(it.text || '').slice(0, 140)),
     `[${it.id}]`,
   ];
   return bits.filter(Boolean).join(' ');
@@ -2348,7 +2400,9 @@ export function parseToolScope(raw) {
 // coupon, customer) create records and move nothing; tools/chatgpt-no-money-movement-check.mjs makes a NEW Stripe
 // write fail until somebody classifies it.
 export const WIDGET_MONEY_MOVEMENT_TOOLS = Object.freeze(['refund_stripe_charge', 'create_stripe_subscription', 'cancel_stripe_subscription', 'create_stripe_payment_link']);
-export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand', 'connect_connector', 'x_post_insights', 'x_post_insights_historical', 'fetch_social_data', ...WIDGET_MONEY_MOVEMENT_TOOLS]);
+export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'delete_brand', 'connect_connector', 'x_post_insights', 'x_post_insights_historical', 'fetch_social_data', 'remix_static', ...WIDGET_MONEY_MOVEMENT_TOOLS]);
+// remix_static is clone_static under its old name (kept for callers that cached it); on ChatGPT two tools for one
+// action is a selection hazard OpenAI's metadata guide calls out, so only clone_static is offered there (2026-10-24).
 // The withheld tools whose refusal is the generic-executor sentence rather than the commerce one.
 const WIDGET_GENERIC_PROXIES = new Set(['fetch_social_data']);
 const executorLike = (name) => EXECUTOR_TOOLS.has(name) || WIDGET_GENERIC_PROXIES.has(name);
@@ -4217,9 +4271,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "Direct), Instagram, Bluesky, X and Telegram. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
       + "skipped silently; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
-      + "never mistaken for a quiet week. DMs are read one conversation at a time and fold to ONE item — the newest "
-      + "thing the other person said — so pass conversationId (from list_meta_conversations, list_bluesky_convos or list_x_dms) "
-      + "to include them. FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
+      + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
+      + "Messenger and Instagram DMs need no argument; each has a messageKind (text, story_mention, story_reply, share, "
+      + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky and X DMs need "
+      + "conversationId (list_bluesky_convos / list_x_dms). FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
       + "and every other source only re-reads what the per-channel tools already read.",
     inputSchema: {
       sources: z.array(z.string()).optional().describe(`Limit to these sources: ${INBOX_SOURCE_NAMES.join(', ')}. Omit for every connected channel.`),
@@ -4229,7 +4284,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // and this schema did not carry it, so the note telling a caller to pass it named an argument the tool
       // refused — and the handler quietly read `postId` for anything that was not `videoId`. The check now
       // asserts INBOX_NEEDS_ARGS ⊆ these keys, so the two cannot drift again.
-      conversationId: z.string().optional().describe('Restrict DMs to one conversation (from list_meta_conversations, list_bluesky_convos or list_x_dms). DMs are read per conversation, and on X reading one costs credits.'),
+      conversationId: z.string().optional().describe('Restrict DMs to one conversation (from list_meta_conversations, list_bluesky_convos or list_x_dms). Required for Bluesky and X DMs; on X reading one costs credits.'),
       limit: z.number().optional().describe('Max items per source (default 25).'),
       unansweredOnly: z.boolean().optional().describe('Only items with no reply from the brand yet.'),
     },
@@ -4259,12 +4314,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // for. Saying so is very different from letting the vendor 400 and filing it as "could not be read": one
         // tells the caller what to pass next, the other reads as a broken channel.
         const given = argValues[src.needs.arg];
-        if (!given) { notes.push(`${src.label}s are read per ${src.kind === 'dm' ? 'conversation' : 'post'} — pass ${src.needs.arg} (from ${src.needs.from}) to include them.`); continue; }
-        q[src.needs.param] = given;
+        // A SOURCE THAT CAN ALSO READ ACCOUNT-WIDE (`readAll`) DOES, rather than printing the note: the Meta and
+        // Instagram DM inboxes list every waiting conversation in one call per surface (2026-10-25).
+        if (!given && !src.readAll) { notes.push(`${src.label}s are read per ${src.kind === 'dm' ? 'conversation' : 'post'} — pass ${src.needs.arg} (from ${src.needs.from}) to include them.`); continue; }
+        if (given) q[src.needs.param] = given;
       }
+      const whole = !!(src.readAll && src.needs && !argValues[src.needs.arg]);
+      Object.assign(q, src.query || {}, whole ? (src.readAllQuery || {}) : {});
       try {
-        const d = await apiGet(src.read, q);
+        const d = await apiGet(whole ? src.readAll : src.read, q);
         const rows = Array.isArray(d) ? d : (d.comments || d.replies || d.mentions || d.reviews || d.messages || d.events || d.items || d.data || []);
+        if (whole) { for (const r of rows) { const it = normalizeInboxItem(src.source, r); if (it) items.push(it); } continue; } // already one row per conversation
         // A DM FOLDS TO ONE ITEM AND CARRIES THE ID YOU ANSWER TO — see foldConversationRows. Deriving this from
         // `kind` rather than naming the two sources means a third DM channel inherits it by declaring its kind.
         // FOLDED ONLY WHERE THE REPLY TARGET IS ON THE ENVELOPE. `dmReplyId` is precisely the declaration "this
@@ -4273,7 +4333,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // conversation, so folding them would collapse every chat into one — keying the fold on `kind` would do
         // exactly that. The trigger is therefore the field the fold consumes, not the category.
         const use = src.dmReplyId ? foldConversationRows(rows, d?.[src.dmReplyId]) : rows;
-        for (const r of use) { const it = normalizeInboxItem(src.source, r); if (it) items.push(it); }
+        for (const r of use) { const it = normalizeInboxItem(src.source, src.dmReplyId && typeof d?.conversationId === 'string' && !r.conversationId ? { ...r, conversationId: d.conversationId } : r); if (it) items.push(it); }
       } catch (e) {
         // NAMED, never swallowed. A connector that is simply not linked is not worth a line; anything else is.
         const msg = String(e?.message || e);
@@ -4342,7 +4402,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('hermoso_capabilities', {
     // The title a directory renders. It has to say CALL THIS FIRST without saying "call this first", because the
     // listing shows it out of context, beside 680 siblings, to somebody who has never used Hermoso.
-    title: 'Start here: what Hermoso can do and what it costs',
+    title: 'Hermoso models, options and credit costs',
     description: 'Probe what this Hermoso account can do RIGHT NOW: available image/video model ids + their credit costs (estimates: a render is charged its actual cost), aspect ratios, video durations, the recipe ids, and the canEdit/canAvatar flags. Call it when you need a specific model id, a credit cost, or a capability you are not sure of. It is NOT a prerequisite for rendering: generate_image, generate_video and render_ad all run with `model` omitted and route to the server’s own default. Read-only, free.',
     inputSchema: {}, outputSchema: {
       image: z.boolean().optional().describe('TRUE when image generation is available on this account. A BOOLEAN, never a provider name — /api/generate/status deliberately reports availability only and never leaks the underlying provider, so there is no label here to report. The model ids live in options.image.models[].'),
@@ -5703,7 +5763,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // no need for one edge case just for Facebook."
   server.registerTool('schedule_post', {
     title: 'Schedule a post for later',
-    description: 'Use this when the user wants to schedule a social media post for later, on one channel or several at once. Scheduling and publishing cost no credits on any Hermoso plan (X alone bills a few credits per call). Queue a post for a future time on one or more connected channels at once: facebook, instagram, threads, tiktok, youtube, linkedin, x, pinterest, bluesky, telegram — TEN channels, every one live. google_business is in the schema but HELD BACK (Google’s API allowlist) and is refused at enqueue. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order — never schedule just its first slide. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT (what “just queue it” means). imageUrl/videoUrl take a Hermoso render URL or an upload_file URL. `captions` gives a channel its own wording; the rest use `message`. PINTEREST AND YOUTUBE SHOW A TITLE: `title` (max 100 chars), derived from the caption when omitted; YOUTUBE also takes `description`, `tags`, `thumbnailUrl`. Every PER-CHANNEL SETTING is a parameter below, carried straight to the real publisher — TikTok’s `brandedContent` / `yourBrand` disclosures (set them whenever the post is commercial), Google Business `topicType` / `event` / `offer` / `actionType`, an X `thread` / `poll`, Instagram `collaborators`, and the rest. Channels are attempted INDEPENDENTLY: one failing never blocks the others. SOME CHANNELS MUST BE TOLD WHICH ACCOUNT, and Hermoso never guesses: Pinterest needs `boardId` (list_pinterest_boards) or is refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages) or it goes to the person’s own profile; several Facebook Pages need `pageId` (list_meta_pages), several Google Business listings `locationId` (list_business_locations) — resolve those FIRST and let the user pick, or the post is refused when it fires. A scheduled post GOES LIVE PUBLICLY by default on every channel, never quietly downgraded. Only if the user asks, set `visibility` (or `visibilityByChannel`): ‘unlisted’ (YouTube) · ‘private’ (YouTube, or TikTok SELF_ONLY) · ‘draft’ (TikTok, or an unpublished Facebook Page post). A visibility a channel cannot do is REFUSED now, never posted weaker later.',
+    description: 'Use this when the user wants to schedule a social media post for later, on one channel or several at once. Scheduling and publishing cost no credits on any Hermoso plan (X alone bills a few credits per call). Queue a post for a future time on one or more connected channels at once: facebook, instagram, threads, tiktok, youtube, linkedin, x, pinterest, bluesky, telegram — TEN channels, every one live. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order — never schedule just its first slide. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT (what “just queue it” means). imageUrl/videoUrl take a Hermoso render URL or an upload_file URL. `captions` gives a channel its own wording; the rest use `message`. PINTEREST AND YOUTUBE SHOW A TITLE: `title` (max 100 chars), derived from the caption when omitted; YOUTUBE also takes `description`, `tags`, `thumbnailUrl`. Every PER-CHANNEL SETTING is a parameter below, carried straight to the real publisher — TikTok’s `brandedContent` / `yourBrand` disclosures (set them whenever the post is commercial), Google Business `topicType` / `event` / `offer` / `actionType`, an X `thread` / `poll`, Instagram `collaborators`, and the rest. Channels are attempted INDEPENDENTLY: one failing never blocks the others. SOME CHANNELS MUST BE TOLD WHICH ACCOUNT, and Hermoso never guesses: Pinterest needs `boardId` (list_pinterest_boards) or is refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages) or it goes to the person’s own profile; several Facebook Pages need `pageId` (list_meta_pages), several Google Business listings `locationId` (list_business_locations) — resolve those FIRST and let the user pick, or the post is refused when it fires. A scheduled post GOES LIVE PUBLICLY by default on every channel, never quietly downgraded. Only if the user asks, set `visibility` (or `visibilityByChannel`): ‘unlisted’ (YouTube) · ‘private’ (YouTube, or TikTok SELF_ONLY) · ‘draft’ (TikTok, or an unpublished Facebook Page post). A visibility a channel cannot do is REFUSED now, never posted weaker later.',
     inputSchema: {
       ...HOOK_ATTR,
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram'])).describe('one or more channels to post to at that time'),
@@ -6377,7 +6437,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('x_mentions', {
     title: 'Read who is mentioning you on X',
-    description: 'Read the posts mentioning the connected X account — who is talking to the brand, in their own words, newest first. Use it to find what deserves a reply (reply with post_to_x + replyToId) and to mine real objections and customer language for ad copy. COSTS CREDITS PER MENTION RETURNED, plus one account lookup — keep maxResults small (default 10) and tell the user the cost before pulling a big page. Needs X connected.',
+    description: 'Read the posts mentioning the connected X account — who is talking to the brand, in their own words, newest first. Use it to find what deserves a reply (reply with post_to_x + replyToId) and to mine real objections and customer language for ad copy. COSTS CREDITS PER MENTION RETURNED and per distinct author X returns with them, plus one account lookup — keep maxResults small (default 10) and tell the user the cost before pulling a big page. Needs X connected.',
     inputSchema: {
       maxResults: z.number().optional().describe('how many mentions to pull, 5-100 (default 10) — every one is billed'),
       sinceId: z.string().optional().describe('only return mentions newer than this post id'),
@@ -7309,7 +7369,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('search_x', {
     title: 'Search X (Twitter)',
-    description: 'Keyword search across the PUBLIC X index \u2014 the last 7 days. This is the X half of ad-spy research, alongside search_tiktok / search_instagram / search_reddit / search_threads / search_youtube. X\u2019s own search OPERATORS work and are the point: `from:nike`, `-is:retweet`, `has:media`, `has:links`, `lang:en`, `\"exact phrase\"`, `(a OR b)`. Every post comes back with impressions, likes, reposts, replies, quotes and bookmarks, so you can rank what actually landed rather than what merely exists. ONLY THE LAST 7 DAYS: the full archive needs a tier we do not hold, and an older window is refused by name rather than silently truncated. Costs a small number of credits (X bills per post read, and this bills the ACTUAL count returned, never the number asked for). Needs X connected.',
+    description: 'Keyword search across the PUBLIC X index \u2014 the last 7 days. This is the X half of ad-spy research, alongside search_tiktok / search_instagram / search_reddit / search_threads / search_youtube. X\u2019s own search OPERATORS work and are the point: `from:nike`, `-is:retweet`, `has:media`, `has:links`, `lang:en`, `\"exact phrase\"`, `(a OR b)`. Every post comes back with impressions, likes, reposts, replies, quotes and bookmarks, so you can rank what actually landed rather than what merely exists. ONLY THE LAST 7 DAYS: the full archive needs a tier we do not hold, and an older window is refused by name rather than silently truncated. Costs a small number of credits (X bills per post read and per distinct author returned with them, and this bills the ACTUAL count returned, never the number asked for). Needs X connected.',
     inputSchema: {
       query: z.string().describe('the search, X operators included \u2014 e.g. `(protein OR creatine) -is:retweet has:media lang:en`'),
       maxResults: z.number().optional().describe('10\u2013100, default 25'),
@@ -8141,7 +8201,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('read_meta_conversation', {
     title: 'Read one Messenger / Instagram DM thread',
-    description: 'The messages in one DM thread, oldest to newest, each marked inbound or outbound — plus WHETHER A REPLY IS ALLOWED RIGHT NOW. Meta only permits a reply within 24 hours of the person acting, and the window is computed from their LAST MESSAGE rather than from the thread’s updated time (which includes our own replies and would report the window open for a day after WE spoke). Read this before drafting: "can I answer this?" is the question a person actually has, and finding out by being refused is the worst way to learn it. It also hands back `replyTo`, the id a reply goes to, so nobody has to guess which participant is the customer. ON INSTAGRAM Meta serves only the 20 most recent messages — a truncated thread is unreachable history, not a short conversation, and the reply says so. Read-only, 0 credits.',
+    description: 'The messages in one DM thread, oldest to newest, each marked inbound or outbound — plus WHETHER A REPLY IS ALLOWED RIGHT NOW. Meta only permits a reply within 24 hours of the person acting, and the window is computed from their LAST MESSAGE rather than from the thread’s updated time (which includes our own replies and would report the window open for a day after WE spoke). Read this before drafting: "can I answer this?" is the question a person actually has, and finding out by being refused is the worst way to learn it. It also hands back `replyTo`, the id a reply goes to, so nobody has to guess which participant is the customer. EVERY MESSAGE SAYS WHAT IT IS: `kind` (text, story_mention, story_reply, share, image, video, audio, file, sticker, gif, template, unsupported, empty), a one-line `summary` to read out, and `attachments` / `story` / `share` / `inReplyTo` / `reactions`; content Meta withholds (unsupported, or a "use the latest app" placeholder) is `unavailable: true` with `unavailableReason`, never blank text. ON INSTAGRAM Meta serves only the 20 most recent messages — a truncated thread is unreachable history, not a short conversation, and the reply says so. Read-only, 0 credits.',
     inputSchema: {
       conversationId: z.string().describe('from list_meta_conversations'),
       platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional().describe('so the Instagram 20-message ceiling can be stated when it applies'),
@@ -8149,13 +8209,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). The way a DIRECT (Instagram Login) account is reached; omit for the Page-linked one.'),
       pageId: z.string().optional(),
     },
-    outputSchema: { conversationId: z.string().optional(), count: z.number().optional(), messages: z.array(z.any()).optional(), replyTo: z.string().optional(), windowState: z.string().optional(), hoursLeft: z.number().nullable().optional(), window: z.string().optional(), historyNote: z.string().optional() },
+    outputSchema: { conversationId: z.string().optional(), count: z.number().optional(), messages: z.array(z.any()).optional(), kinds: z.record(z.string(), z.number()).optional(), unavailableCount: z.number().optional(), kindsNote: z.string().optional(), replyTo: z.string().optional(), windowState: z.string().optional(), hoursLeft: z.number().nullable().optional(), window: z.string().optional(), historyNote: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/meta/conversation', a);
-    const lines = (d.messages || []).map(m => `${m.inbound ? '←' : '→'} ${m.from}: ${String(m.text || '(no text)').replace(/\s+/g, ' ').slice(0, 200)}  [${String(m.at || '').slice(0, 16).replace('T', ' ')}]`);
+    // THE SUMMARY, NOT THE TEXT (2026-10-25): a story mention, a share or withheld content has no text, and
+    // "(no text)" told a screen-reader user nothing about what had arrived. The kind rides in brackets.
+    const lines = (d.messages || []).map(m => `${m.inbound ? '←' : '→'} ${m.from}${m.kind && m.kind !== 'text' ? ` [${m.kind}${m.unavailable ? ', unavailable' : ''}]` : ''}: ${String(m.summary || m.text || '').replace(/\s+/g, ' ').slice(0, 300)}  [${String(m.at || '').slice(0, 16).replace('T', ' ')}]`);
     const head = d.windowState === 'open' ? `You CAN reply (${d.hoursLeft}h left in Meta’s 24-hour window).` : d.windowState === 'closed' ? '⚠ You CANNOT reply — the 24-hour window is closed.' : '⚠ Could not tell whether the 24-hour window is open.';
-    return ok(`${head}\n${lines.join('\n') || '(no messages)'}\n${d.replyTo ? `\nreplyTo: ${d.replyTo}` : ''}${d.window ? `\n\n${d.window}` : ''}${d.historyNote ? `\n\n${d.historyNote}` : ''}`, d);
+    return ok(`${head}\n${lines.join('\n') || '(no messages)'}\n${d.kindsNote ? `\n${d.kindsNote}\n` : ''}${d.replyTo ? `\nreplyTo: ${d.replyTo}` : ''}${d.window ? `\n\n${d.window}` : ''}${d.historyNote ? `\n\n${d.historyNote}` : ''}`, d);
   }));
   server.registerTool('reply_to_meta_message', {
     title: 'Reply to a Messenger / Instagram DM',
@@ -20885,79 +20947,102 @@ function memoryNoteVerdict(text) {
     return { content: [{ type: 'text', text }, ...blocks], structuredContent: { ...d, ...(widget ? adSpyBlock('ads', rows.length, cards) : {}) } };
   }));
 
-  // ── COMPETITOR WATCH — the STANDING research order, not a one-off pull (2026-08-18). `update_settings` could
-  // already turn the weekly digest EMAIL on and off, and nothing headless could say WHO to watch or read WHAT the
-  // watch had found: a switch with no wiring behind it. Both tools are thin wrappers over the routes the web Ad
-  // Spy ▸ Watching tab already calls (POST /api/watch/set, GET /api/watch/latest), so there is one set of rules.
+  // ── MARKET RADAR (the competitor watch, 2026-08-18; modules 2026-10-23) — the STANDING research order, not a one-off
+  // pull. Thin wrappers over the routes the web Ad Spy ▸ Watching tab calls (POST /api/watch/set, GET /api/watch/latest),
+  // so there is one set of rules: lib/market-radar.mjs decides the modules, the quote and what counts as a winner.
   const WATCH_PLATFORM_LABEL = { meta: 'Meta', google: 'Google', linkedin: 'LinkedIn' }; // the worker stores facebook results under 'meta'
   const watchWhen = (ms) => (+ms > 0 ? new Date(+ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'never');
+  const RADAR_KEYS = ['competitors', 'topics', 'modules', 'cadence', 'email', 'auto', 'seed', 'runNow', 'dryRun'];
+  const radarOn = (m) => Object.entries(m || {}).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none';
+  const radarCost = (q) => (q && q.credits ? `A check holds up to ${q.credits} credits before it starts${q.later ? ` (about ${q.later} once each brand's Meta page is found)` : ''}, and is skipped with nothing spent when the balance is short.` : 'Nothing to check, so a check costs nothing.');
   server.registerTool('set_competitor_watch', {
-    title: 'Set the competitor watch',
-    description: 'Set (or STOP) this workspace\'s standing COMPETITOR WATCH — the weekly job that re-checks each named brand\'s ad libraries and reports what is NEW since last time. The same watch the web app\'s Ad Spy > Watching tab manages, and the same one the weekly digest email is sent from (turn that email on/off with update_settings({watchEmail})). '
-      + 'This REPLACES the whole watched list, it does not add to it — pass every brand you want watched, every time. Max 5 brands (the server trims past that). Pass an EMPTY list to stop the watch entirely, which also clears the findings. '
-      + 'Give a `domain` wherever you know one: Google Ads Transparency is looked up BY DOMAIN and is skipped for a brand without one, and the domain is what resolves the right Meta page for a brand with an ambiguous name. '
-      + 'The run itself spends credits against the ad libraries (roughly 3 per brand on Meta, 1 each on Google and LinkedIn) and is hard-capped per run server-side, so an oversized watch is trimmed rather than allowed to run away. Setting the list is free; only a run spends. '
-      + 'runNow:true runs it once IMMEDIATELY (a background job — it spends now) and then keeps the weekly cadence; leave it off and the first check is a week out. '
-      + 'The country and the platform mix are NOT settable here — a re-set inherits whatever the pending run already carried (US / Meta for a watch that has never been configured otherwise). Read the findings back with list_watch_findings.',
-    inputSchema: {
+    title: 'Set the market radar',
+    description: 'Set, change or stop a brand\'s MARKET RADAR (the standing competitor watch; Ad Spy > Watching in the web app; each brand has its own), run weekly or daily: newAds (what watched brands launched), winners (their ad passing 30 days running), trends + topPosts (formats and most-viewed posts for niche topics), ideas (3 to make). '
+      + 'Only what you pass changes. competitors / topics REPLACE their lists (max 8 brands, 5 topics); both empty stops it and clears findings. auto:true picks 3-5 competitors, 2-3 similar brands and 2-3 topics from the saved brand or `seed` (a few credits). dryRun:true quotes one check, saves nothing. '
+      + 'Saving is free; each check holds its quote first and is skipped when the balance is short. runNow is refused while a check runs or just after one finished. Read it with list_watch_findings.',
+    inputSchema: { ...STORE_BRAND,
       competitors: z.array(z.object({
-        name: z.string().describe('the brand name, as it advertises'),
-        domain: z.string().optional().describe('its domain, e.g. ridge.com — required for Google Ads Transparency, and what disambiguates a common brand name on Meta'),
-      }).passthrough()).describe('the brands to watch — the COMPLETE list, replacing whatever was set before. Empty array = stop watching.'),
-      runNow: z.boolean().optional().describe('true to run one check immediately (spends credits now) instead of waiting a week for the first one'),
+        name: z.string(),
+        domain: z.string().optional().describe('e.g. ridge.com: Google is read by domain, and it finds the right Meta page'),
+        kind: z.enum(['competitor', 'similar']).optional(),
+      }).passthrough()).optional().describe('the COMPLETE brand list'),
+      topics: z.array(z.string()).optional().describe('niche search phrases, e.g. "protein breakfast"'),
+      modules: z.object({ newAds: z.boolean().optional(), winners: z.boolean().optional(), trends: z.boolean().optional(), topPosts: z.boolean().optional(), ideas: z.boolean().optional() }).optional().describe('on/off; omitted keep theirs'),
+      cadence: z.enum(['weekly', 'daily']).optional(),
+      email: z.boolean().optional().describe('the weekly email'),
+      auto: z.boolean().optional(),
+      seed: z.string().optional().describe('for auto: a website, brand or niche'),
+      runNow: z.boolean().optional().describe('check now (spends now)'),
+      force: z.boolean().optional().describe('with runNow: check again right after a check, allowed once what is watched changed'),
+      dryRun: z.boolean().optional(),
     },
     outputSchema: {
       watching: z.array(z.string()).optional().describe('the brand names now under watch (empty = the watch is off)'),
+      competitors: z.array(z.any()).optional().describe('{name, domain, kind}'),
+      topics: z.array(z.string()).optional(),
+      modules: z.any().optional().describe('{newAds, winners, trends, topPosts, ideas} on/off'),
+      cadence: z.string().optional(),
+      email: z.boolean().optional(),
+      quote: z.any().optional().describe('{credits, lines[{module, credits}], later?}: what one check holds'),
       nextRunAt: z.number().optional().describe('epoch ms of the next scheduled check (0 = nothing scheduled)'),
+      jobId: z.string().optional().describe('with runNow: the check\'s job (get_job follows it)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, wrap(async (a) => {
-    // An OMITTED list is refused; an EMPTY one is the documented way to stop. Defaulting the omission to [] would
-    // turn "I forgot the argument" into "delete this workspace's whole watch", silently.
-    if (!Array.isArray(a.competitors)) return { content: [{ type: 'text', text: 'Pass `competitors` — the complete list of brands to watch, or [] to stop the watch.' }], isError: true };
-    const comps = a.competitors.filter(c => c && String(c.name || '').trim())
-      .map(c => ({ name: String(c.name).trim(), domain: String(c.domain || '').trim() }));
-    const d = await apiPost('/api/watch/set', { competitors: comps, ...(a.runNow === true ? { runNow: true } : {}) });
-    const on = (d.watching || []);
-    if (!on.length) return ok('Competitor watch STOPPED — nothing is being watched and the findings are cleared.', d);
-    // The server trims to 5 and drops nameless rows; report what it ACTUALLY stored, never what was asked for.
-    const dropped = comps.length - on.length;
-    // …and the no-domain note names only the brands that were KEPT — naming a trimmed one would tell the caller to
-    // fix a row that is not on the watch at all.
-    const noDomain = comps.filter(c => !c.domain && on.includes(c.name)).map(c => c.name);
-    return ok(`Watching ${on.length} brand(s): ${on.join(', ')}.${dropped > 0 ? ` (${dropped} not kept — the watch holds at most 5.)` : ''}`
-      + ` Next check ${a.runNow === true ? 'is running now' : watchWhen(d.nextRunAt)}, then weekly. Read what it finds with list_watch_findings.`
-      + `${noDomain.length ? ` Note: no domain for ${noDomain.join(', ')} — Google Ads Transparency is looked up by domain and will be skipped for them.` : ''}`, d);
-  }));
+  }, wrap(inBrand(async (a) => {
+    // An EMPTY call is refused: defaulting it to anything would turn "I forgot the argument" into a silent change.
+    if (!RADAR_KEYS.some(k => a[k] !== undefined)) return { content: [{ type: 'text', text: 'Pass what to change: competitors, topics, modules, cadence, email, auto (one-click setup), runNow or dryRun. competitors:[] and topics:[] together stop the radar.' }], isError: true };
+    const body = {};
+    for (const k of RADAR_KEYS) if (a[k] !== undefined) body[k] = a[k];
+    if (a.force === true) body.force = true;
+    if (Array.isArray(a.competitors)) body.competitors = a.competitors.filter(c => c && String(c.name || '').trim()).map(c => ({ name: String(c.name).trim(), domain: String(c.domain || '').trim(), ...(c.kind ? { kind: c.kind } : {}) }));
+    const d = await apiPost('/api/watch/set', body);
+    const on = d.watching || [], topics = d.topics || [];
+    const setup = `Brands: ${on.join(', ') || '(none)'}. Topics: ${topics.join(', ') || '(none)'}. Modules on: ${radarOn(d.modules)}. Cadence: ${d.cadence || 'weekly'}. Weekly email: ${d.email === false ? 'off' : 'on'}.`;
+    if (d.dryRun) return ok(`QUOTE ONLY, nothing saved. ${setup} ${radarCost(d.quote)}${a.auto ? ' Save it with set_competitor_watch({competitors, topics}) after editing.' : ''}`, d);
+    if (!on.length && !topics.length) return ok('Market radar STOPPED: nothing is watched and the findings are cleared.', d);
+    // The server trims and de-duplicates; report what it ACTUALLY stored, never what was asked for.
+    const noDomain = (d.competitors || []).filter(c => !c.domain).map(c => c.name);
+    return ok(`${setup} ${radarCost(d.quote)} Next check ${a.runNow === true ? `is running now${d.jobId ? ` (get_job ${d.jobId} follows it)` : ''}` : watchWhen(d.nextRunAt)}. Read what it finds with list_watch_findings.`
+      + `${noDomain.length ? ` No domain for ${noDomain.join(', ')}: Google is read by domain and is skipped for them.` : ''}`, d);
+  })));
 
   server.registerTool('list_watch_findings', {
     _meta: openaiMeta(AD_SPY_URI, 'Reading the competitor watch…', 'Competitor watch read'),
-    title: 'Read the competitor watch',
-    description: 'Read what the standing COMPETITOR WATCH has found — the new ads each watched brand has launched since the last check, plus the watch\'s own state (who is watched, when it last ran, when it runs next, and whether the last run actually succeeded). The same board the web app\'s Ad Spy > Watching tab renders. '
-      + 'Use it to answer "what are our competitors running that\'s new?", to feed a teardown, or to save something worth keeping with save_to_swipefile. '
-      + 'Findings marked `seed:true` are NOT new launches — the first check of a brand has nothing to diff against, so it seeds the board with what that brand is running right now; only later runs surface genuine changes. '
-      + 'Read-only and free — it returns the stored results of past runs and never triggers a check (set_competitor_watch({runNow:true}) is what runs one).',
-    inputSchema: {
-      competitor: z.string().optional().describe('only findings for this watched brand (exact name as returned in `watching`) — omit for all of them'),
-      limit: z.number().optional().describe('max findings to return (default 25, max 75 — the server keeps at most 75, and at most 15 per brand)'),
+    title: 'Read the market radar',
+    description: 'Read what a brand\'s MARKET RADAR (set_competitor_watch) has found: each watched brand\'s new ads, the winners (ads past 30 days running, with a ready brief to make your own version), the trending formats and top posts for its topics, and the ideas to make, plus its state (lastRun, nextRunAt, lastRunOk, paused) and the quote for its next check. '
+      + 'Findings marked `seed:true` are what a brand was already running at its first check, not new launches. Read-only and free; it never runs a check.',
+    inputSchema: { ...STORE_BRAND,
+      competitor: z.string().optional().describe('only this watched brand\'s ads (exact name as returned)'),
+      limit: z.number().optional().describe('max ads (default 25, max 75)'),
     },
     outputSchema: {
       watching: z.boolean().optional().describe('whether a watch is currently set'),
-      competitors: z.array(z.any()).optional().describe('the brands under watch ({name, domain})'),
+      competitors: z.array(z.any()).optional().describe('the brands under watch ({name, domain, kind})'),
+      topics: z.array(z.string()).optional(),
+      modules: z.any().optional(),
+      cadence: z.string().optional(),
       platforms: z.array(z.string()).optional().describe('the ad libraries this watch checks'),
       lastRun: z.number().optional().describe('epoch ms of the last check (0 = never run)'),
-      lastRunOk: z.boolean().optional().describe('false when the last check failed every library call (usually an exhausted credit balance) — a stale board, not an empty market'),
+      lastRunOk: z.boolean().optional().describe('false when the last check failed or was skipped — a stale board, not an empty market'),
       lastRunNote: z.string().optional().describe('what went wrong on the last run, when something did'),
+      paused: z.any().optional().describe('{need, balance} when the radar is paused for credits'),
       nextRunAt: z.number().optional().describe('epoch ms of the next scheduled check (0 = nothing scheduled)'),
+      quote: z.any().optional().describe('what the next check holds'),
       findings: z.array(z.any()).optional().describe('the found ads ({competitor, platform, foundAt, seed, advertiser, body, media, ad})'),
       total: z.number().optional().describe('how many findings the board holds before the filter/limit'),
+      winners: z.array(z.any()).optional().describe('{competitor, platform, days, link, body, brief}'),
+      trends: z.array(z.any()).optional().describe('{name, what, count, examples[]}'),
+      topPosts: z.array(z.any()).optional().describe('{topic, platform, desc, author, link, plays}'),
+      ideas: z.array(z.any()).optional().describe('{title, why, kind, brief}'),
+      run: z.any().optional().describe('{jobId, status, startedAt, stage} while a check runs'),
+      lastResult: z.any().optional().describe('the last check: counts, summary, email'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => {
     const d = await apiGet('/api/watch/latest');
     // ABSENT IS NOT EMPTY ([[failed-read-is-not-empty]]): the route answers null when this workspace has never had a
     // watch at all, which is a different sentence from "the watch ran and found nothing".
-    if (!d) return ok('No competitor watch has ever been set for this workspace — set_competitor_watch names the brands to follow.', { watching: false, findings: [], total: 0 });
+    if (!d) return ok('No market radar has ever been set for this brand. set_competitor_watch({auto:true}) sets one up.', { watching: false, findings: [], total: 0 });
     const want = String(a.competitor || '').trim().toLowerCase();
     const all = Array.isArray(d.newAds) ? d.newAds : [];
     const rows = want ? all.filter(n => String(n.competitor || '').toLowerCase() === want) : all;
@@ -20977,9 +21062,16 @@ function memoryNoteVerdict(text) {
         ad,
       };
     });
-    const state = `Watching: ${names.join(', ') || '(nobody)'}${d.platforms?.length ? ` · libraries: ${d.platforms.join(', ')}` : ''}`
-      + ` · last check ${watchWhen(d.lastRun)}${d.lastRunOk === false ? ` (FAILED${d.lastRunNote ? `: ${d.lastRunNote}` : ''} — this board is stale, not a quiet market)` : ''}`
-      + ` · next check ${watchWhen(d.nextRunAt)}.`;
+    const adBody = (ad) => { const s = (ad || {}).snapshot || {}; return trunc((typeof s.body === 'string' ? s.body : s.body?.text) || ad?.headline || ad?.description || ''); };
+    const winners = (d.winners || []).map(w => ({ competitor: w.competitor || '', platform: w.platform || '', days: w.days || 30, link: w.link || '', at: w.at || 0, body: adBody(w.ad),
+      brief: `Make my own version of this ${w.competitor || 'competitor'} ad, which has been running ${w.days || 30}+ days${w.link ? ` (${w.link})` : ''}. Keep what makes it work, make it about my product and in my voice.` }));
+    const trends = (d.trends || []).map(t => ({ name: t.name, what: t.what, count: t.count, at: t.at || 0, examples: (t.examples || []).map(p => ({ link: p.link, author: p.author, plays: p.plays })) }));
+    const topPosts = (d.topPosts || []).map(p => ({ topic: p.topic, platform: p.platform, desc: trunc(p.desc), author: p.author, link: p.link, plays: p.plays, at: p.at || 0 }));
+    const ideas = (d.ideas || []).map(i => ({ title: i.title, why: i.why, kind: i.kind, brief: i.brief, at: i.at || 0 }));
+    const state = `Watching: ${names.join(', ') || '(nobody)'}${(d.topics || []).length ? ` · topics: ${d.topics.join(', ')}` : ''} · modules on: ${radarOn(d.modules)} · ${d.cadence || 'weekly'}`
+      + ` · last check ${watchWhen(d.lastRun)}${d.lastRunOk === false ? ` (DID NOT COMPLETE${d.lastRunNote ? `: ${d.lastRunNote}` : ''} — this board is stale, not a quiet market)` : ''}`
+      + ` · next check ${watchWhen(d.nextRunAt)}. ${radarCost(d.quote)}`
+      + `${d.run ? ` A check is running now (${d.run.stage || d.run.status}).` : ''}${d.lastResult?.summary ? ` Last check: ${d.lastResult.summary}` : ''}`;
     // The watch board is an ad grid too — same card, so "what's new from our competitors?" SHOWS the creative.
     // Each finding already carries its own platform label, and `ad` holds the still the card wants as its thumb.
     const wcards = adSpyCards(findings.map((f) => ({
@@ -20988,16 +21080,22 @@ function memoryNoteVerdict(text) {
       thumb: f.ad?.imageUrl || f.ad?.image || f.ad?.snapshot?.images?.[0]?.resized_image_url || f.ad?.snapshot?.cards?.[0]?.resized_image_url || f.ad?.snapshot?.videos?.[0]?.video_preview_image_url || '',
       dates: [f.ad?.start_date_string, f.ad?.end_date_string].filter(Boolean).join(' → '),
     })));
-    const out = { watching: !!d.watching, competitors: d.competitors || [], platforms: d.platforms || [], lastRun: d.lastRun || 0, lastRunOk: d.lastRunOk !== false, lastRunNote: d.lastRunNote || '', nextRunAt: d.nextRunAt || 0, findings, total: rows.length, ...(hostRendersWidgets() ? adSpyBlock('new ads', rows.length, wcards) : {}) };
-    if (!findings.length) return ok(`${state}\nNo findings recorded yet${want ? ` for "${a.competitor}"` : ''}${d.lastRun ? '' : ' — the first check has not run'}.`, out);
+    const out = { watching: !!d.watching, competitors: d.competitors || [], topics: d.topics || [], modules: d.modules || {}, cadence: d.cadence || 'weekly', platforms: d.platforms || [], lastRun: d.lastRun || 0, lastRunOk: d.lastRunOk !== false, lastRunNote: d.lastRunNote || '', paused: d.paused || null, nextRunAt: d.nextRunAt || 0, quote: d.quote || null, run: d.run || null, lastResult: d.lastResult || null, findings, total: rows.length, winners, trends, topPosts, ideas, ...(hostRendersWidgets() ? adSpyBlock('new ads', rows.length, wcards) : {}) };
     const line = (f) => `  • ${f.seed ? '[already running] ' : '[NEW] '}${f.competitor} · ${WATCH_PLATFORM_LABEL[f.platform] || f.platform} — ${f.advertiser}${f.body ? `: ${f.body}` : ''}${f.media ? `  ${f.media}` : ''}`;
-    return ok(`${state}\n${rows.length} finding(s)${want ? ` for "${a.competitor}"` : ''}${findings.length < rows.length ? ` — showing ${findings.length}` : ''}:\n` + findings.map(line).join('\n'), out);
-  }));
+    const sections = [
+      winners.length ? `Winners (running 30+ days, want your version?):\n` + winners.slice(0, 8).map(w => `  • ${w.competitor} · ${w.days} days${w.body ? `: ${w.body}` : ''}${w.link ? `  ${w.link}` : ''}`).join('\n') : '',
+      trends.length ? `Trending formats:\n` + trends.slice(0, 5).map(t => `  • ${t.name} (${t.count} posts): ${t.what}`).join('\n') : '',
+      topPosts.length ? `Top posts:\n` + topPosts.slice(0, 6).map(p => `  • ${p.plays || 0} views · ${p.author || ''}${p.desc ? `: ${p.desc}` : ''}  ${p.link || ''}`).join('\n') : '',
+      ideas.length ? `Ideas to make (each brief is ready for render_ad / plan_ad):\n` + ideas.slice(0, 3).map(i => `  • ${i.title}: ${i.brief}`).join('\n') : '',
+    ].filter(Boolean).join('\n');
+    if (!findings.length) return ok(`${state}\nNo new ads recorded yet${want ? ` for "${a.competitor}"` : ''}${d.lastRun ? '' : ' — the first check has not run'}.${sections ? '\n' + sections : ''}`, out);
+    return ok(`${state}\n${rows.length} ad finding(s)${want ? ` for "${a.competitor}"` : ''}${findings.length < rows.length ? ` — showing ${findings.length}` : ''}:\n` + findings.map(line).join('\n') + (sections ? '\n' + sections : ''), out);
+  })));
 
   server.registerTool('research_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Researching ads…', 'Ad research ready'),
     title: 'Research ads',
-    description: 'Use this when the user wants to see the ads a brand or competitor is running, or ad examples for a market. Open-ended ad research that needs JUDGMENT across platforms — comparisons, "what angle is working", "who else is doing this", anything where the right sources are not known up front. It is an agentic loop (several rounds of library pulls plus a written synthesis) and typically takes 30-60 seconds, so it is the WRONG tool for a question that names its own answer. For one named brand\u2019s live ads use pull_competitor_ads; for one keyword or one advertiser on Meta use search_meta_ads \u2014 both are a single call and return in a few seconds. Spends credits — an agentic loop, so a handful rather than the one-call cost of a targeted search.',
+    description: 'Use this when the user asks an open-ended ad question across several brands or platforms, such as comparisons, which angles are working in a market, or ad examples for a category. Do not use for one named brand\u2019s current ads: pull_competitor_ads covers that. Open-ended ad research that needs JUDGMENT across platforms — comparisons, "what angle is working", "who else is doing this", anything where the right sources are not known up front. It is an agentic loop (several rounds of library pulls plus a written synthesis) and typically takes 30-60 seconds, so it is the WRONG tool for a question that names its own answer. For one named brand\u2019s live ads use pull_competitor_ads; for one keyword or one advertiser on Meta use search_meta_ads \u2014 both are a single call and return in a few seconds. Spends credits — an agentic loop, so a handful rather than the one-call cost of a targeted search.',
     inputSchema: {
       query: z.string().describe('what to research, e.g. "the longest-running protein-pancake ads on Meta"'),
       brand: z.union([z.string(), z.object({}).passthrough()]).optional().describe('brand name or profile object to tailor the research to; omit to use the workspace’s saved brand'),
@@ -21210,7 +21308,7 @@ function memoryNoteVerdict(text) {
       queries: z.number().optional().describe('query variants per platform, 1–4 (default 3); each is a paid search call'),
       minAvgViews: z.number().optional(),
       minEngagement: z.number().optional().describe('interactions per view, 0–1 (0.05 = 5%)'),
-      enrich: z.boolean().optional().describe('read follower counts for the top 6 (default true, ~1 credit each)'),
+      enrich: z.boolean().optional().describe('followers + public contact for the top 3 on TikTok and on Instagram (default true, 1 credit each)'),
       marketplace: z.boolean().optional().describe('also search Instagram’s creator marketplace (Meta’s own creator directory, free) for the same niche; needs the Meta connector'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
@@ -21532,6 +21630,26 @@ function memoryNoteVerdict(text) {
     return ok(`${assets.length} asset${assets.length === 1 ? '' : 's'} (newest first):\n` + assets.map((x) => `  ${x.id}. [${x.kind || '?'}${x.model ? ' · ' + x.model : ''}${x.ageHours != null ? ' · ' + x.ageHours + 'h ago' : ''}] ${x.url}`).join('\n'), { assets });
   }));
 
+  // DELETE FROM THE LIBRARY (2026-10-23). A customer was told it could not be done and sent to support. The server
+  // resolves what to delete against THIS brand's Library only, deletes the stored file where it is ours, and reads
+  // the Library back (POST /api/library/delete, lib/library-delete.mjs).
+  server.registerTool('delete_library_item', {
+    title: 'Delete from Library',
+    description: "PERMANENTLY delete images/videos from this brand's Library: the entry and the stored file. Pass ids (L0… from list_library) or urls. Without confirm it lists what would be deleted; ask the user, then call again with confirm:true. Free.",
+    inputSchema: {
+      ids: z.array(z.string()).optional().describe('Library ids from list_library'),
+      urls: z.array(z.string()).optional().describe('file links'),
+      confirm: z.boolean().optional().describe('true deletes'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async ({ ids, urls, confirm }) => {
+    const d = await apiPost('/api/library/delete', { ids: ids || [], urls: urls || [], confirm: confirm === true });
+    const items = (d?.items || d?.removed || []).map((x) => `  ${x.id} [${x.kind || '?'}] ${abs(x.url)}`).join('\n');
+    const kept = (d?.files || []).filter((f) => !f.fileDeleted).map((f) => `  ${f.id}: ${f.note}`).join('\n');
+    const nf = (d?.notFound || []).length ? `\nNot in this brand's Library: ${d.notFound.join(', ')}` : '';
+    return ok(`${d?.message || ''}${items ? '\n' + items : ''}${kept ? '\n' + kept : ''}${nf}`, { deleted: !!d?.deleted, needsConfirm: !!d?.needsConfirm });
+  }));
+
   server.registerTool('fetch_asset', {
     title: 'Fetch asset',
     description: 'Resolve a generated asset reference (a /generated/… path or any URL) to a clickable absolute URL + a direct download URL.',
@@ -21740,6 +21858,7 @@ function memoryNoteVerdict(text) {
   }, wrap(async ({ video, instruction, keepAudio, lighting, reference, literal, previewFirstFrame, previewStill, previewAt, elements, interactionId, engine, faceRoute }) => {
     const prompt = String(instruction || '').trim();
     if (!prompt) return { content: [{ type: 'text', text: 'Say what to change — edit_video needs an instruction.' }], isError: true };
+    if (previewFirstFrame !== true && !previewStill) { const _rm = await designRemakeFirst(video, prompt); if (_rm) return _rm; } // words in a design: re-made
     const _ref = reference ? await toRef(reference) : undefined;
     if (previewFirstFrame === true) {
       const d = await apiPost('/api/video/edit/preview', { video, instruction: prompt, ...(lighting ? { lighting } : {}), ...(_ref ? { reference: _ref } : {}), ...(literal === true ? { literal: true } : {}), ...(Number.isFinite(previewAt) ? { previewAt } : {}) });
@@ -22322,9 +22441,10 @@ function memoryNoteVerdict(text) {
   // Brand tab; nothing is billed, so nothing is booked.
   server.registerTool('fetch_app_screens', {
     title: 'Fetch App Store screens',
-    description: "Pull an APP brand's REAL App Store screenshots into the workspace brand, so a screen-hungry native format can use them. Use when the brand has 0–1 app screens on file and you want make_template_ad(template:'app-ui-tour'), or the user asks to 'pull my app's screenshots'. Pass appName (defaults to the saved brand's name). FREE — a keyless App Store lookup. It needs a CONFIDENT match: an ambiguous or unknown app returns 0 screens and saves nothing, which you should relay plainly rather than retrying with guesses. On success the screens are saved to the brand (durable URLs) and are immediately usable.",
+    description: "Pull an APP brand's REAL store screenshots (Google Play or App Store) into the workspace brand, so a screen-hungry native format can use them. Use when the brand has 0–1 app screens on file and you want make_template_ad(template:'app-ui-tour'), or the user asks to 'pull my app's screenshots'. A store link or package id goes in storeUrl and is read exactly; else pass appName (defaults to the saved brand's name). FREE — a keyless store lookup. It needs a CONFIDENT match: an ambiguous or unknown app returns 0 screens and saves nothing, which you should relay plainly rather than retrying with guesses. On success the screens are saved to the brand (durable URLs) and are immediately usable.",
     inputSchema: {
       appName: z.string().optional().describe("the app's name to look up on the App Store — defaults to the saved brand's name"),
+      storeUrl: z.string().optional().describe('a Google Play / App Store link or package id'),
       brandId: z.string().optional().describe('a profile id/name from list_brands to save the screens onto; omit to use the active profile'),
     },
     outputSchema: {
@@ -22334,14 +22454,15 @@ function memoryNoteVerdict(text) {
       saved: z.boolean().optional().describe('true when the screens were written onto the brand profile'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, wrap(async ({ appName, brandId }) => {
+  }, wrap(async ({ appName, storeUrl, brandId }) => {
     const brand = await activeBrand(brandId);
     const name = String(appName || brand?.name || '').trim();
-    if (!name) return { content: [{ type: 'text', text: "I need the app's name — this workspace has no saved brand to fall back on. Pass appName." }], isError: true };
-    const d = await apiGet(`/api/brand/app-screens?name=${encodeURIComponent(name)}&domain=${encodeURIComponent(brand?.domain || '')}`);
+    const store = String(storeUrl || '').trim();
+    if (!name && !store) return { content: [{ type: 'text', text: "I need the app's name or store link — this workspace has no saved brand to fall back on. Pass appName or storeUrl." }], isError: true };
+    const d = await apiGet(`/api/brand/app-screens?name=${encodeURIComponent(name)}&domain=${encodeURIComponent(brand?.domain || '')}${store ? `&store=${encodeURIComponent(store)}` : ''}`);
     const found = d?.data || d || {};
     const screens = (found.screens || []).map(s => abs(s && (s.image || s.url) ? (s.image || s.url) : s)).filter(Boolean);
-    if (!screens.length) return ok(`No confident App Store match for “${name}”, so nothing was saved. Say that plainly — ask the user for the exact app name, or pick a format that needs no app screens (value-prop, myth-vs-fact, chatgpt-chat).`, { screens: [], appName: '', saved: false });
+    if (!screens.length) return ok(`${found.note || `No confident App Store match for “${name}”, so nothing was added.`} Nothing was saved. Say that plainly — ask the user for the app's store link or exact name, or pick a format that needs no app screens (value-prop, myth-vs-fact, chatgpt-chat).`, { screens: [], appName: '', saved: false });
     // Typed single-field write (never a blind blob PUT): merge `appScreens` onto the saved brand and leave every other
     // field exactly as it was — the same rule update_brand follows.
     let saved = false;
@@ -22350,7 +22471,7 @@ function memoryNoteVerdict(text) {
       await writeStore('heist.brand.v1', { ...b, appScreens: found });
       saved = true;
     } catch { saved = false; }
-    return ok(`Pulled ${screens.length} App Store screen(s) for “${found.appName || name}”${saved ? ' and saved them to the brand' : ' (they could NOT be saved to the brand — pass them as reference URLs instead)'}.\n${screens.join('\n')}\n${saved ? "You can render the app UI tour now — make_template_ad(template:'app-ui-tour') with one punchy caption per screen (≤42 chars)." : ''}`, { screens, appName: found.appName || name, appStoreUrl: found.appStoreUrl || '', saved });
+    return ok(`Pulled ${screens.length} screen(s) from ${found.store || 'the App Store'} for “${found.appName || name}”${saved ? ' and saved them to the brand' : ' (they could NOT be saved to the brand — pass them as reference URLs instead)'}.\n${screens.join('\n')}\n${saved ? "You can render the app UI tour now — make_template_ad(template:'app-ui-tour') with one punchy caption per screen (≤42 chars)." : ''}`, { screens, appName: found.appName || name, appStoreUrl: found.appStoreUrl || '', saved });
   }));
   // ══ POST PERFORMANCE (2026-08-04) ══════════════════════════════════════════════════════════════════════════════
   // Every per-post measurement tool below already existed and every one needs a postId the caller must ALREADY hold.
