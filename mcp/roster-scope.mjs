@@ -99,6 +99,8 @@ export const TOOL_PROVIDER_RULES = [
   [/intercom/, 'intercom'],
   // Vercel (2026-10-16): the brand's OWN websites, offered only to a workspace that connected Vercel.
   [/vercel/, 'vercel'],
+  // Notion (2026-10-25): the user's OWN Notion workspace, offered only to a workspace that connected it.
+  [/notion/, 'notion'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],

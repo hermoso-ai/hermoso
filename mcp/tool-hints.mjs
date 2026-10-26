@@ -85,6 +85,7 @@ export function videoChoiceHints(tool, choice, opts = {}) {
       ? { do: `tell the user the video needs ${c.short ?? '?'} more credits than the account has; they manage credits in their Hermoso account at ${ACCOUNT_INFO_URL}`, why: 'this host does not offer purchases, so nothing is bought from here' }
       : { do: 'buy_credits({})', why: `${c.short ?? '?'} credits short of the video; a pack or a plan covers it, then the same call plans the video` },
   ];
+  if (c.welcomeClaim && c.welcomeClaim.url) out.unshift(welcomeClaimHint(c.welcomeClaim));
   if (o.draft && o.draft.model) out.push({ do: videoChoiceDraftCall(tool, o.draft), why: `a light draft on ${o.draft.label || o.draft.model} (${o.draft.durationSeconds}s) is ~${(Number(o.draft.credits) || 0) + (Number(o.draft.planCredits) || 0)} credits and fits the balance; render the premium version after topping up` });
   return out;
 }
@@ -101,6 +102,7 @@ export function videoChoiceText(tool, choice, opts = {}) {
       ? `  2. The user can add credits in their Hermoso account (${ACCOUNT_INFO_URL}); then the same call makes the video as asked. Nothing can be bought from here.`
       : `  2. Add credits: buy_credits({}) quotes a pack on a saved card or returns a checkout link${o.topup?.url ? ` (or ${o.topup.url})` : ''}; then repeat the same call and the video goes ahead as asked.`,
   ];
+  if (c.welcomeClaim && c.welcomeClaim.url) lines.splice(1, 0, `  First: ${welcomeClaimSentence(c.welcomeClaim)}`);
   if (d) lines.push(`  3. Render the video anyway as a light draft on ${d.label || d.model} (${d.durationSeconds}s, ~${(Number(d.credits) || 0) + (Number(d.planCredits) || 0)} credits${d.audio === false ? '; SILENT: no voice, dialogue or music, so tell the user before they pick it for a spoken ad' : ''}): ${videoChoiceDraftCall(tool, d)}.${opts.widgetHost ? '' : ' Premium models once they top up.'}`);
   else lines.push(`  (No light-model draft fits this balance, so there is no "render anyway" option here.)`);
   return lines.join('\n');
@@ -116,6 +118,12 @@ export function videoChoiceText(tool, choice, opts = {}) {
 export const ACCOUNT_INFO_URL = 'https://hermoso.ai/pricing';
 export const CREDITS_LOW_NOTE = `The Hermoso account's credit balance is too low for this. Tell the user plainly; they manage their account and credits at ${ACCOUNT_INFO_URL}. Nothing can be bought from here.`;
 const UPSELL_SENTENCE_RE = /\s*(?:please\s+)?(?:upgrade(?:\s+your\s+plan)?\s+or\s+top\s+up|top\s+up|add\s+credits|buy\s+(?:more\s+)?credits|monthly\s+plans\s+have\s+no\s+markup\s+on\s+models)\b[^.!\n]*[.!]?/gi; // the monthly-plan upsell (2026-10-20) is a promotion too: a widget host (ChatGPT) never hears it
+// ── FREE CREDITS NOT CLAIMED YET (2026-10-25, ChatGPT funnel) ─────────────────────────────────────────────────────
+// An account whose welcome credits were never added (the one-time check that a person is behind it did not pass
+// silently at sign-in) reads 0 credits. Its fix is opening the app once, signed in, which is not a purchase, so it is
+// said on every host, ChatGPT included. The server marks the refusal (meta.welcomeClaim = {credits, url}).
+export const welcomeClaimSentence = (w) => `This account has not received its ${Number(w?.credits) || 0} free credits yet. The user opens ${w?.url} once in a browser, signed in with the same account, and they arrive in a few seconds after a quick check that a person is there (no card).`;
+export const welcomeClaimHint = (w) => ({ do: `ask the user to open ${w?.url} once in a browser, signed in with the same account, to receive the ${Number(w?.credits) || 0} free credits; then run the same call again`, why: 'the account never received its free credits: they wait behind a one-time check that a person is behind the account, which runs in the browser' });
 export function neutralCreditsText(msg) {
   const base = String(msg ?? '').replace(UPSELL_SENTENCE_RE, '').replace(/[ \t]+$/gm, '').replace(/\s*[—–,:-]\s*$/gm, '.').trim();
   return `${base}${base ? '\n' : ''}${CREDITS_LOW_NOTE}`;
