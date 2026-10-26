@@ -16,6 +16,14 @@
 // Byte-identical in mcp/ and cli/mcp/ (the CLI ships rooted at cli/), and imported by server.js for /v1 and the Studio.
 
 export const UNKNOWN_ARGS_SYM = Symbol.for('hermoso.unknownArgs');
+// The same facts as data (2026-10-27, customer ask: the note was only in the text). Rides the parsed args beside the
+// sentence; a refused call carries it under REFUSED so the handler wrapper answers without running the tool.
+export const UNKNOWN_ARGS_DETAIL_SYM = Symbol.for('hermoso.unknownArgsDetail');
+export const UNKNOWN_ARGS_REFUSED_SYM = Symbol.for('hermoso.unknownArgsRefused');
+/** [{name, didYouMean}] — didYouMean is a key THIS tool declares, or null. The structured twin of unknownArgsNote. */
+export function unknownArgsDetail(unknown = [], declared = []) {
+  return unknown.map((k) => ({ name: k, didYouMean: didYouMean(k, declared) || null }));
+}
 
 /**
  * 'typo' (default) | 'reject' | 'warn' | 'off' from the environment value. Anything unrecognised is `typo`:

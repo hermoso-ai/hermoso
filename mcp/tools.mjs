@@ -12,7 +12,7 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 // The UTF-16 well-formedness law — see wellFormedServer() below for why it is applied here, and
 // ./well-formed.mjs for why that specifier is the only one that can work in a byte-identical twin.
 import { wellFormedValue, wellFormedString } from './well-formed.mjs';
-import { UNKNOWN_ARGS_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
+import { UNKNOWN_ARGS_SYM, UNKNOWN_ARGS_DETAIL_SYM, UNKNOWN_ARGS_REFUSED_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote, unknownArgsDetail } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
 // WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
 // re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
 // twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
@@ -2811,6 +2811,7 @@ export const undeclaredArgs = (h, input) => {
   if (catType && !/never/i.test(catType)) return [];
   return keys.filter((k) => !Object.prototype.hasOwnProperty.call(shape, k));
 };
+export const undeclaredArgsStructured = (extra, h) => ({ error: 'unknown_arguments', unknownArguments: unknownArgsDetail(extra, h && h.inputSchema && typeof h.inputSchema.shape === 'object' ? Object.keys(h.inputSchema.shape) : []) });
 export const undeclaredArgsText = (name, extra, h) => {
   const shape = h && h.inputSchema && h.inputSchema.shape;
   const takes = shape && typeof shape === 'object' ? Object.keys(shape) : [];
@@ -2830,7 +2831,7 @@ export async function legacyToolAnswer(name, request, extra, ctx) {
   const fn = h && (h.handler || h.callback);
   if (typeof fn !== 'function') return withStaleNote({ content: [{ type: 'text', text: `${name} was renamed to ${spec.to}, which is not part of this session's roster.` }], isError: true }, ctx);
   let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
-  { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return withStaleNote({ content: [{ type: 'text', text: undeclaredArgsText(spec.to, extraKeys, h) }], isError: true }, ctx); }
+  { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return withStaleNote({ content: [{ type: 'text', text: undeclaredArgsText(spec.to, extraKeys, h) }], structuredContent: undeclaredArgsStructured(extraKeys, h), isError: true }, ctx); }
   if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
     const parsed = h.inputSchema.safeParse(input);
     if (!parsed.success) {
@@ -3240,7 +3241,7 @@ export function installHeldToolCalls(mcp, ctx) {
         const fn = h.handler || h.callback;
         if (typeof fn === 'function') {
           let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
-          { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return { content: [{ type: 'text', text: undeclaredArgsText(name, extraKeys, h) }], isError: true }; }
+          { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return { content: [{ type: 'text', text: undeclaredArgsText(name, extraKeys, h) }], structuredContent: undeclaredArgsStructured(extraKeys, h), isError: true }; }
           if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
             const parsed = h.inputSchema.safeParse(input);
             if (!parsed.success) {
@@ -3598,19 +3599,35 @@ export function guardUnknownArgs(server) {
     const mode = argGuardMode();
     if (unknown.length && mode !== 'off') {
       try { console.error(`[mcp-unknown-arg] tool=${toolName} keys=${unknown.join(',')} mode=${mode}`); } catch {}
-      if (argGuardRefuses(mode, unknown, declared)) throw new Error(unknownArgsNote(toolName, unknown, declared, { rejected: true }));
+      // REFUSED WITHOUT RUNNING, answered by withUnknownArgsNote so the refusal carries `unknownArguments` as data
+      // (a throw here would reach the caller as text only). The SDK's own validation still runs first, so a call
+      // that is malformed in another way is refused for that too.
+      if (argGuardRefuses(mode, unknown, declared)) {
+        await orig.call(this, tool, Object.fromEntries(Object.entries(args || {}).filter(([k]) => !unknown.includes(k))), toolName);
+        const marker = {};
+        Object.defineProperty(marker, UNKNOWN_ARGS_REFUSED_SYM, { value: { text: unknownArgsNote(toolName, unknown, declared, { rejected: true }), detail: unknownArgsDetail(unknown, declared) }, enumerable: false });
+        return marker;
+      }
     }
     const out = await orig.call(this, tool, args, toolName);
-    if (unknown.length && mode !== 'off' && out && typeof out === 'object') { try { Object.defineProperty(out, UNKNOWN_ARGS_SYM, { value: unknownArgsNote(toolName, unknown, declared), enumerable: false, configurable: true }); } catch {} }
+    if (unknown.length && mode !== 'off' && out && typeof out === 'object') { try { Object.defineProperty(out, UNKNOWN_ARGS_SYM, { value: unknownArgsNote(toolName, unknown, declared), enumerable: false, configurable: true }); Object.defineProperty(out, UNKNOWN_ARGS_DETAIL_SYM, { value: unknownArgsDetail(unknown, declared), enumerable: false, configurable: true }); } catch {} }
     return out;
   };
   try { Object.defineProperty(server, 'validateToolInput', { value: guarded, configurable: true, writable: true }); Object.defineProperty(server, UNKNOWN_ARGS_SYM, { value: true }); } catch {}
   return server;
 }
+// THE NOTE IS TEXT AND DATA (2026-10-27): `ignoredArguments` [{name, didYouMean}] rides structuredContent on a call
+// that ran, and `unknownArguments` on one that was refused, so a program reads it without parsing the sentence.
 export function withUnknownArgsNote(result, args) {
   const note = args && typeof args === 'object' ? args[UNKNOWN_ARGS_SYM] : '';
   if (!note || !result || typeof result !== 'object' || !Array.isArray(result.content)) return result;
-  return { ...result, content: [{ type: 'text', text: note }, ...result.content] };
+  const detail = args[UNKNOWN_ARGS_DETAIL_SYM] || [];
+  const sc = result.structuredContent && typeof result.structuredContent === 'object' && !Array.isArray(result.structuredContent) ? result.structuredContent : null;
+  return { ...result, content: [{ type: 'text', text: note }, ...result.content], ...(sc || !result.isError ? { structuredContent: { ...(sc || {}), ignoredArguments: detail } } : {}) };
+}
+export function unknownArgsRefusal(args) {
+  const r = args && typeof args === 'object' ? args[UNKNOWN_ARGS_REFUSED_SYM] : null;
+  return r ? { content: [{ type: 'text', text: r.text }], structuredContent: { error: 'unknown_arguments', unknownArguments: r.detail }, isError: true } : null;
 }
 export function wellFormedServer(rawServer) {
   guardUnknownArgs(rawServer);
@@ -3620,7 +3637,7 @@ export function wellFormedServer(rawServer) {
         let safe = _wfWrapped.get(handler);
         if (!safe) {
           safe = async (args, extra) => {
-            try { return wellFormedValue(withUnknownArgsNote(await handler(args, extra), args)); }
+            try { const refused = unknownArgsRefusal(args); if (refused) return refused; return wellFormedValue(withUnknownArgsNote(await handler(args, extra), args)); }
             catch (e) {
               try { const m = wellFormedString(e?.message); if (e && m !== e.message) e.message = m; } catch {}
               throw e;
@@ -4257,7 +4274,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const extraKeys = undeclaredArgs(h, input);
     if (extraKeys.length) {
       const params = Object.entries(compactParams(h)).map(([k, v]) => `${k}: ${v}`).join(' | ');
-      return { content: [{ type: 'text', text: `${undeclaredArgsText(n, extraKeys, h)}${params ? ` Expected params: ${params}` : ''}` }], isError: true };
+      return { content: [{ type: 'text', text: `${undeclaredArgsText(n, extraKeys, h)}${params ? ` Expected params: ${params}` : ''}` }], structuredContent: undeclaredArgsStructured(extraKeys, h), isError: true };
     }
     if (h.inputSchema) {
       const parsed = h.inputSchema.safeParse(input);
@@ -7426,14 +7443,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_youtube_comment_replies', {
     title: 'Read the replies under one YouTube comment',
-    description: 'Every reply under ONE comment on the connected channel, newest pages first via cursor: check that a reply the brand posted landed, or whether someone already answered a viewer before replying. Pass the top-level comment id from list_youtube_comments (each comment line shows its id and reply count). Read-only, free.',
+    description: 'Every reply under ONE comment on the connected channel, newest pages first via cursor: check that a reply the brand posted landed, or whether someone already answered a viewer before replying. Pass the top-level comment id from list_youtube_comments (each comment line shows its id and reply count); a REPLY id is recognised and its whole thread is returned, with `note` and `requestedId` saying so. Read-only, free.',
     inputSchema: { commentId: z.string().describe('the top-level comment id from list_youtube_comments'), limit: z.number().optional().describe('max replies per page, default 25, cap 100'), cursor: z.string().optional().describe('nextCursor from the previous page') },
-    outputSchema: { commentId: z.string().optional(), count: z.number().optional(), replies: z.array(z.object({ id: z.string().optional(), author: z.string().optional(), authorChannelId: z.string().optional(), text: z.string().optional(), likes: z.number().optional(), at: z.string().optional(), editedAt: z.string().optional() })).optional(), nextCursor: z.string().optional() },
+    outputSchema: { commentId: z.string().optional(), count: z.number().optional(), replies: z.array(z.object({ id: z.string().optional(), author: z.string().optional(), authorChannelId: z.string().optional(), text: z.string().optional(), likes: z.number().optional(), at: z.string().optional(), editedAt: z.string().optional() })).optional(), nextCursor: z.string().optional(), requestedId: z.string().optional(), resolvedFromReply: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/youtube/comment-replies', { commentId: a.commentId, ...(a.limit ? { limit: a.limit } : {}), ...(a.cursor ? { cursor: a.cursor } : {}) });
     const rl = (d.replies || []).map(r => `  • ${r.author || 'someone'}${r.likes ? ` (${r.likes} like${r.likes === 1 ? '' : 's'})` : ''}: ${String(r.text || '').replace(/\s+/g, ' ').trim().slice(0, 400)}${r.at ? ` · ${r.at}` : ''}${r.id ? ` (id ${r.id})` : ''}`);
-    return ok(`${d.count} repl${d.count === 1 ? 'y' : 'ies'} under comment ${d.commentId}:\n${rl.join('\n') || '  (none yet)'}${d.nextCursor ? `\nMore: pass cursor "${d.nextCursor}".` : ''}`, d);
+    return ok(`${d.note ? `${d.note}\n` : ''}${d.count} repl${d.count === 1 ? 'y' : 'ies'} under comment ${d.commentId}:\n${rl.join('\n') || '  (none yet)'}${d.nextCursor ? `\nMore: pass cursor "${d.nextCursor}".` : ''}`, d);
   }));
   server.registerTool('reply_to_youtube_comment', {
     title: 'Reply to a YouTube comment',
