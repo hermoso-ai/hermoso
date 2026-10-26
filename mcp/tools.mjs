@@ -18897,6 +18897,41 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(text, c);
   }));
 
+  // ── CLICK TO AD (2026-10-26) ─────────────────────────────────────────────────────────────────────────────────
+  // A product page link → the product read from its own page (saved to the brand's catalog), its real packshot checked and
+  // locked as the product photo, and a UGC-style video plan. Stops at the plan like clone_video: render_ad is the spend.
+  server.registerTool('click_to_ad', {
+    title: 'Make a video ad from a product link',
+    description: 'Paste a product page link (Shopify, Amazon or any store page) and get a creator-style video ad planned for that product. Hermoso reads the page (name, photos, what it says about the product, price), saves the product to the brand\'s catalog, checks the page\'s real product photo and locks it as the photo the ad is built on, then plans the ad. Nothing renders here: show the user the concept, then call render_ad with the returned creative (dryRun:true first for the exact price). Works with or without a saved brand.',
+    inputSchema: {
+      url: z.string().describe('the product page link, https://…'),
+      style: z.enum(['ugc_selfie', 'ugc_unboxing', 'ugc_demo', 'ugc_tryon', 'ugc_product', 'ugc_shopping', 'ugc_delivery', 'transformation', 'day_in_life', 'grwm', 'ugc_addiction']).optional().describe('ugc_selfie (talking to camera, default), ugc_unboxing, ugc_demo (how-to), ugc_tryon (try-on or haul), ugc_product (product close-ups, no face), ugc_shopping (in-store find), ugc_delivery, transformation (before and after), day_in_life (at home), grwm (get ready with me), ugc_addiction (obsessed with it)'),
+      durationSeconds: z.number().optional().describe('length in seconds, 4-180; default 15'),
+      say: z.string().optional().describe('what the creator should say, or the angle, in the user\'s words'),
+      language: z.string().optional().describe('language for the script and copy, default English'),
+    },
+    outputSchema: {
+      product: z.any().optional().describe('the product as read from its page: {id, title, url, priceLabel, sellingPoints, images, host}'),
+      photo: z.any().optional().describe('the product photo locked for the render {url, from, savedToBrand}, or null when no page image passed the check'),
+      format: z.string().optional(), concept: z.string().optional(), copy: z.array(z.any()).optional(),
+      video_storyboard: z.any().optional(), render_plan: z.any().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async ({ url, style, durationSeconds, say, language }) => {
+    const link = String(url || '').trim();
+    if (!/^https?:\/\//i.test(link)) return ok('click_to_ad needs the product page link, starting with https://. Nothing was read or charged.', {});
+    const r = await apiPost('/api/click-to-ad/product', { url: link, style, durationSeconds, say, language });
+    const d = (r && r.data) || r || {};
+    const s = await apiSSE('/api/create', { stream: true, ...(d.plan || {}) });
+    if (s?.data?.choice && typeof s.data.choice === 'object') throw Object.assign(new Error(String(s.data.choice.message || 'This video does not fit your balance.')), { status: 402, videoChoice: s.data.choice, _viaApi: true });
+    const c = s?.data?.creative || s?.creative || s;
+    const p = d.product || {};
+    const planned = Math.round(+c.render_plan?.duration_seconds || (c.video_storyboard?.scenes || []).reduce((n, x) => n + (+x.seconds || 0), 0) || 0);
+    const photoLine = d.photo ? `Product photo: the page's own photo, checked and locked (${d.photo.url}).` : `⚠ No product photo was locked: ${d.photoNote || 'no page image passed the check'}. Tell the user; render_ad will ask for one (set_product_image).`;
+    const text = `Read "${p.title || 'the product'}"${p.host ? ` from ${p.host}` : ''}${p.priceLabel ? ` (${p.priceLabel})` : ''}, saved to the brand's products.\n${photoLine}\nPlan: "${c.concept || ''}"\nLength: ${planned || '—'}s\nHeadline: ${c.copy?.[0]?.headline || ''}\nNext: show the user this concept, then call render_ad with this creative (dryRun:true first for the exact price).`;
+    return ok(text, { ...c, product: p, photo: d.photo || null });
+  }));
+
   // ---------- image (synchronous) ----------
   server.group('create');
   server.registerTool('generate_image', {
@@ -19623,6 +19658,104 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // the `—` placeholder rather than inventing a number from the ask (the read-back law: only a measurement ships).
     if (d.lane === 'blocks') return okVideo(`Explainer ready — ${d.blocks} video blocks of ${d.blockSeconds}s on ${d.videoModel === 'omni' ? 'Gemini Omni 720p' : 'MiniMax H3 2K'}${d.cutsPerBlock ? `, ${d.cutsPerBlock} cuts each` : ''}, ${d.durationSeconds == null ? '—' : d.durationSeconds + 's'}${fin}: ${r.url}  [job ${r.jobId}]${(d.divergences || []).length ? `\n${d.divergences.join('\n')}` : ''}`, r);
     return okVideo(`Explainer ready${d.sections ? ` — ${d.sections} sections, ${d.frames || d.sections} frames, ${d.durationSeconds == null ? '—' : d.durationSeconds + 's'}` : ''}${d.lengthNote ? ` (${d.lengthNote})` : ''}${d.style ? ` in the ${String(d.style).replace(/_/g, ' ')} style${d.styleLocked ? '' : ' (style key unavailable — the look rides on the prompt only)'}` : ''}${fin}: ${r.url}  [job ${r.jobId}]${d.musicNote ? `\n${d.musicNote}` : ''}${d.captionNote ? `\n⚠ ${d.captionNote}` : ''}${d.upscaleNote ? `\n⚠ ${d.upscaleNote}` : ''}`, r);
+  }));
+
+  // ── CONTENT FACTORY (2026-10-26): a SERIES of faceless shorts from one topic, optionally in a reference video's style.
+  // A content factory, in shape: reference + "make a video about…" + length + episodes. Our renderer is
+  // the faceless explainer job, one per episode; the planning (watch the reference once, write N distinct episodes and a
+  // style card) is POST /api/series/plan. A series multiplies cost, so it is QUOTED FIRST and runs only on confirm:true.
+  const seriesEpisodeInput = (topic, plan, ep, n, a, vo) => {
+    const s = plan.style || {};
+    const how = [s.hookDevice ? `Open the way the reference opens: ${s.hookDevice}` : '', s.pacing ? `Pacing: ${s.pacing}` : '', s.narration ? `Narration: ${s.narration}` : ''].filter(Boolean).join('. ');
+    const captions = typeof a.captions === 'boolean' ? a.captions : !!s.captions;
+    const voice = (a.voice || s.voice) === 'male' ? (vo.male || 'George') : (vo.female || 'Sarah');
+    return {
+      topic: `Episode ${ep.episode} of ${n} in a faceless short-video series about "${topic}". This episode: ${ep.title}. ${ep.brief}${how ? ` ${how}.` : ''} No presenter on camera.`,
+      durationSeconds: plan.durationSeconds, aspectRatio: a.aspectRatio || s.aspectRatio || '9:16',
+      ...(a.style ? { style: a.style } : (s.look ? { style: s.look } : {})),
+      ...(s.channel ? { channel: s.channel } : {}), voice,
+      ...(captions ? { captions: true } : {}), ...(a.format ? { format: a.format } : {}),
+    };
+  };
+  const seriesWallClock = (at, plusHours) => {
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(String(at || '').trim());
+    if (!m) { const t = Date.parse(at); return Number.isFinite(t) ? new Date(t + plusHours * 3600e3).toISOString() : null; }
+    const d = new Date(`${m[1]}T${m[2]}:${m[3]}:00Z`); d.setUTCHours(d.getUTCHours() + plusHours);
+    return d.toISOString().slice(0, 16); // a local wall clock stays a wall clock: read in the brand's zone on THAT date
+  };
+  server.registerTool('make_series', {
+    title: 'Make a series of faceless short videos (Content Factory)',
+    description: 'CONTENT FACTORY: turn ONE topic into a SERIES of faceless short videos (narration over pictures, no presenter), optionally in the STYLE of a trending reference video. Give `topic` ("make a video about…"), `episodes` (1-10, default 1) or your own `episodeTitles`, `durationSeconds` (20-120 per episode, default 30) and optionally `reference` (a TikTok / Reel / YouTube Short / Facebook / X link or a video file URL whose look, pacing, opening hook and caption style every episode copies; never its words or characters). Find a trending reference with search_tiktok / search_instagram / search_youtube when the user wants one. THREE STEPS, ALWAYS IN THIS ORDER: (1) call with no `confirm` for a FREE quote of the whole series (per episode and total); (2) optionally `planOnly:true` to see the episode titles and the style card first (a small planning charge); (3) `confirm:true` (pass the `plan` from step 2 to reuse it) queues every episode and returns their job ids; poll get_job. Each finished episode can be scheduled with this tool again: pass `jobIds` plus `schedule` {channels, at, everyHours, timezone} and it books one post per finished episode, spaced `everyHours` apart (default 24). Captions follow the reference (on if it burns words on screen) unless `captions` says otherwise.',
+    inputSchema: {
+      topic: z.string().optional().describe('what the series is about, in the user\'s words'),
+      episodes: z.number().optional().describe('how many episodes, 1-10 (default 1)'),
+      episodeTitles: z.array(z.string()).optional().describe('your own episode titles, in order (sets the episode count)'),
+      durationSeconds: z.number().optional().describe('length of EACH episode, 20-120 seconds (default 30)'),
+      reference: z.string().optional().describe('a video link whose style every episode copies'),
+      aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional().describe('default: the reference\'s shape, else 9:16'),
+      style: z.string().optional().describe('override the look in words (e.g. "flat 2D cartoon") instead of the reference\'s'),
+      captions: z.boolean().optional().describe('burn subtitles of every spoken word; default follows the reference'),
+      voice: z.enum(['female', 'male']).optional().describe('narrator; default follows the reference'),
+      format: z.enum(['explainer', 'faceless_channel']).optional().describe("renderer lane: 'explainer' (default; exact length) or 'faceless_channel' (2K, whole 10s blocks)"),
+      planOnly: z.boolean().optional().describe('write the episode plan and style card, render nothing (a small planning charge)'),
+      plan: z.any().optional().describe('the `plan` a planOnly call returned, to run it without planning again'),
+      confirm: z.boolean().optional().describe('REQUIRED true to start rendering (real spend). Without it you get a free quote'),
+      jobIds: z.array(z.string()).optional().describe('SCHEDULE MODE: the episode job ids to schedule (finished ones are booked)'),
+      schedule: z.object({ channels: z.array(z.string()), at: z.string(), everyHours: z.number().optional(), timezone: z.string().optional() }).optional().describe('SCHEDULE MODE: where and when the first episode posts; the rest follow every `everyHours` (default 24)'),
+      postCaptions: z.array(z.string()).optional().describe('SCHEDULE MODE: one post caption per episode, in order (default: the episode title)'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    // SCHEDULE MODE: book one post per finished episode. A job still rendering is named, never silently skipped.
+    if (Array.isArray(a.jobIds) && a.jobIds.length) {
+      if (!a.schedule || !Array.isArray(a.schedule.channels) || !a.schedule.channels.length || !a.schedule.at) throw new Error('To schedule a series, pass `schedule` with `channels` and `at` (the first post\'s time).');
+      const every = +a.schedule.everyHours > 0 ? +a.schedule.everyHours : 24;
+      const lines = []; const booked = [];
+      for (let i = 0; i < a.jobIds.length; i++) {
+        const id = String(a.jobIds[i]);
+        let job = null; try { job = await getJob(id); } catch (e) { lines.push(`${id}: could not be read (${e.message}), not scheduled.`); continue; }
+        const r = jobResult(job) || {};
+        const url = r.video || r.url;
+        if (job?.status !== 'done' || !url) { lines.push(`${id}: ${job?.status === 'error' ? 'failed, not scheduled' : 'still rendering, not scheduled yet'}.`); continue; }
+        const at = seriesWallClock(a.schedule.at, i * every);
+        const title = String(job.label || '').split(': ').slice(1).join(': ') || `Episode ${i + 1}`;
+        const message = (a.postCaptions && a.postCaptions[i]) || title;
+        const d = await apiPost('/api/schedule', { channels: a.schedule.channels, at, ...(a.schedule.timezone ? { timezone: a.schedule.timezone } : {}), message, videoUrl: url, title });
+        const sid = d?.id || d?.data?.id || d?.job?.id || '';
+        booked.push({ jobId: id, scheduleId: sid, at });
+        lines.push(`Episode ${i + 1} → ${a.schedule.channels.join(', ')} at ${at}${sid ? ` [scheduled ${sid}]` : ''}.`);
+      }
+      return ok(`${booked.length} of ${a.jobIds.length} episodes scheduled (free; posting costs no credits).\n${lines.join('\n')}`, { booked });
+    }
+    const topic = String(a.topic || '').trim();
+    if (topic.length < 3) throw new Error('Say what the series is about (`topic`), e.g. "what if the Moon had a city".');
+    const titles = (a.episodeTitles || []).map((t) => String(t || '').trim()).filter(Boolean);
+    const n = titles.length || Math.round(+a.episodes || 1);
+    if (n < 1 || n > 10) throw new Error('A series is 1 to 10 episodes per run. Nothing was charged.');
+    const secs = Math.round(+a.durationSeconds || 30);
+    if (secs < 20 || secs > 120) throw new Error(`Each episode runs 20 to 120 seconds; ${secs}s is outside that. Ask for a length in that range (or a longer single explainer with make_explainer). Nothing was charged.`);
+    let vo = {}; try { vo = (await apiGet('/api/generate/status'))?.voVoices || {}; } catch {}
+    // FREE QUOTE: the renderer's own dry run for one episode, times the count, plus the planning estimate.
+    const planEst = a.reference ? 14 : 6;
+    const probe = seriesEpisodeInput(topic, { durationSeconds: secs, style: {} }, { episode: 1, title: topic, brief: '' }, n, a, vo);
+    const q = await quoteJob('explainer', probe);
+    const per = q && Number.isFinite(+q.credits) ? +q.credits : null;
+    const quoteLine = per == null ? `the renderer would not quote it${q?.refused ? `: ${q.refused}` : ''}` : `about ${per} credits per ${secs}s episode, ${per * n} for ${n} episode${n === 1 ? '' : 's'}, plus about ${planEst} credits to plan the series${a.reference ? ' and watch the reference' : ''} (total about ${per * n + planEst})`;
+    if (!a.confirm && !a.planOnly) return ok(`QUOTE (nothing planned, rendered or charged): ${quoteLine}. ${PRICE_ESTIMATE_LINE} Call again with planOnly:true to see the episode titles first, or confirm:true to make the series.`, { perEpisodeCredits: per, episodes: n, totalCredits: per == null ? null : per * n + planEst });
+    let plan = a.plan && Array.isArray(a.plan.episodes) && a.plan.episodes.length ? a.plan : null;
+    if (!plan) plan = await apiPost('/api/series/plan', { topic, episodes: n, episodeTitles: titles, durationSeconds: secs, reference: a.reference || '' });
+    const eps = (plan.episodes || []).slice(0, n);
+    const list = eps.map((e) => `${e.episode}. ${e.title}`).join('\n');
+    const s = plan.style || {};
+    const styleLine = s.look ? `Style: ${s.look}${s.captions ? `; captions on (${s.captionLook || 'subtitles'})` : '; no captions'}; ${s.aspectRatio || '9:16'}.` : '';
+    const watched = plan.reference ? ` Reference watched: ${plan.reference.frames || 0} frames${plan.reference.transcript ? ' + transcript' : ''}${plan.reference.note ? ` (${plan.reference.note})` : ''}.` : '';
+    if (!a.confirm) return ok(`SERIES PLAN (nothing rendered yet):\n${list}\n${styleLine}${watched}\nRendering it: ${quoteLine.replace(/, plus about.*$/, '')}. Call again with confirm:true and this plan to make it.`, { plan });
+    const jobs = [];
+    for (const e of eps) {
+      const j = await submitJob('explainer', seriesEpisodeInput(topic, plan, e, n, a, vo), { label: `Series · ${topic.slice(0, 40)} · Ep ${e.episode}/${n}: ${e.title}` });
+      jobs.push({ episode: e.episode, title: e.title, jobId: j?.id || null });
+    }
+    return ok(`Series started: ${jobs.length} episode${jobs.length === 1 ? '' : 's'} rendering (${secs}s each, a few minutes per episode).\n${jobs.map((j) => `${j.episode}. ${j.title} [job ${j.jobId}]`).join('\n')}\n${styleLine}${watched}\nPoll get_job for each id. To schedule them once done, call make_series with jobIds and schedule {channels, at, everyHours}.`, { jobs, plan });
   }));
 
   server.registerTool('product_sizzle', {
