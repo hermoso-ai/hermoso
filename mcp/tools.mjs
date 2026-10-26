@@ -15,6 +15,7 @@ import { wellFormedValue, wellFormedString } from './well-formed.mjs';
 // WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
 // re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
 // twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
+import { MOTION_STYLE_IDS, motionStyleMenu } from './motion-styles.mjs';
 import { toolHeldBackByConnectors as heldBackByConnectorsOf, toolProvider as providerOf, toolUnoffered, toolWithheldByServer as withheldByServerOf, metaAlternativeNote as metaAlternativeNoteOf } from './roster-scope.mjs';
 // A tool a widget host lists under ANOTHER name (a WIDGET_HOST_RENAMES alias, or one operation of a WIDGET_HOST_SPLITS
 // tool) is gated, attributed and explained as the tool it comes from: same connector, same Instagram-Login exemption,
@@ -18902,7 +18903,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // locked as the product photo, and a UGC-style video plan. Stops at the plan like clone_video: render_ad is the spend.
   server.registerTool('click_to_ad', {
     title: 'Make a video ad from a product link',
-    description: 'Paste a product page link (Shopify, Amazon or any store page) and get a creator-style video ad planned for that product. Hermoso reads the page (name, photos, what it says about the product, price), saves the product to the brand\'s catalog, checks the page\'s real product photo and locks it as the photo the ad is built on, then plans the ad. Nothing renders here: show the user the concept, then call render_ad with the returned creative (dryRun:true first for the exact price). Works with or without a saved brand.',
+    description: 'Paste a product page link (Shopify, Amazon or any store page) and get a creator-style video ad planned for that product. Hermoso reads the page (name, photos, what it says about the product, price), saves the product to the brand\'s catalog, checks the page\'s real product photo and pins it to this ad (the brand\'s saved default photo is not changed), then plans the ad. A store that hides its page from servers is read in a real browser; failing that the name comes from the link and the photo from a search, and the reply says so. Nothing renders here: show the user the concept, then call render_ad with the returned creative (dryRun:true first for the exact price). Works with or without a saved brand.',
     inputSchema: {
       url: z.string().describe('the product page link, https://…'),
       style: z.enum(['ugc_selfie', 'ugc_unboxing', 'ugc_demo', 'ugc_tryon', 'ugc_product', 'ugc_shopping', 'ugc_delivery', 'transformation', 'day_in_life', 'grwm', 'ugc_addiction']).optional().describe('ugc_selfie (talking to camera, default), ugc_unboxing, ugc_demo (how-to), ugc_tryon (try-on or haul), ugc_product (product close-ups, no face), ugc_shopping (in-store find), ugc_delivery, transformation (before and after), day_in_life (at home), grwm (get ready with me), ugc_addiction (obsessed with it)'),
@@ -18927,7 +18928,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const c = s?.data?.creative || s?.creative || s;
     const p = d.product || {};
     const planned = Math.round(+c.render_plan?.duration_seconds || (c.video_storyboard?.scenes || []).reduce((n, x) => n + (+x.seconds || 0), 0) || 0);
-    const photoLine = d.photo ? `Product photo: the page's own photo, checked and locked (${d.photo.url}).` : `⚠ No product photo was locked: ${d.photoNote || 'no page image passed the check'}. Tell the user; render_ad will ask for one (set_product_image).`;
+    const photoLine = d.photo ? `Product photo: ${d.product?.readFrom === 'search' ? 'found by searching for the product (the store hid its page): check it is the right product' : 'the page\'s own photo'}, checked and pinned to this ad (${d.photo.url}). ${d.photo.savedToBrand ? 'The brand had no product photo, so it is also saved as the brand\'s default.' : 'The brand\'s saved default photo is unchanged.'}` : `⚠ No product photo was locked: ${d.photoNote || 'no page image passed the check'}. Tell the user; render_ad will ask for one (set_product_image).`;
     const text = `Read "${p.title || 'the product'}"${p.host ? ` from ${p.host}` : ''}${p.priceLabel ? ` (${p.priceLabel})` : ''}, saved to the brand's products.\n${photoLine}\nPlan: "${c.concept || ''}"\nLength: ${planned || '—'}s\nHeadline: ${c.copy?.[0]?.headline || ''}\nNext: show the user this concept, then call render_ad with this creative (dryRun:true first for the exact price).`;
     return ok(text, { ...c, product: p, photo: d.photo || null });
   }));
@@ -19771,6 +19772,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       cta: z.string().optional().describe('closing CTA line, ≤30 chars'),
       brandName: z.string().optional().describe('brand name on the cards — defaults to the workspace brand'),
       musicMood: z.string().optional().describe('music-bed mood, e.g. driving / cinematic / upbeat'),
+      style: z.enum(MOTION_STYLE_IDS).optional().describe('the LOOK of the sizzle (same price for every look): ' + motionStyleMenu() + '. Default hypermotion.'),
     },
     outputSchema: { ...JOB_OUT },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -19778,7 +19780,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     let b = await readStore('heist.brand.v1'); if (!b || typeof b !== 'object') b = {}; // the cards want the REAL palette/logo, same as post_edit
     const pal = (Array.isArray(b.palette) ? b.palette : []).filter(c => /^#[0-9a-f]{6}$/i.test(String(c || '')));
     const r = await renderJob('hypermotion', {
-      prompt: a.prompt, seconds: a.seconds, refImage: a.refImage, aspectRatio: a.aspectRatio, resolution: a.resolution, musicMood: a.musicMood,
+      prompt: a.prompt, seconds: a.seconds, refImage: a.refImage, aspectRatio: a.aspectRatio, resolution: a.resolution, musicMood: a.musicMood, style: a.style,
       cardCopy: { specs: a.specs, cta: a.cta || b.cta || '' },
       brand: { name: a.brandName || b.name || '', domain: b.domain || '', logo: b.logo || '', palette: pal },
     }, 'MCP product sizzle');
@@ -22200,7 +22202,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('edit_video', {
     title: 'Edit a video clip',
-    description: "EDIT an existing clip from a plain instruction (video-to-video): the motion, timing, framing and cut stay, the named thing changes. 'change only the mug to red', 'make it nighttime', 'restyle it as claymation'. Your words are wrapped so the model keeps everything else identical, changes only what you named and repeats that lock; lighting is kept unless the change needs new light (set lighting to force either); literal:true sends your words as written. One change per call holds best. previewFirstFrame:true edits ONE still first (one image edit; previewAt picks the second) and quotes the clip; nothing else runs until you call again, ideally with previewStill. The reply scores how well the shot held outside the change (free) and flags an edit that touched more than asked. NOT for cuts/trims/end cards (post_edit), a new video (generate_video / render_ad), translation (dub_video) or a saved creator's face (recast_motion). Best on 3-15s clips.",
+    description: "SWAP AN OBJECT IN A VIDEO ('replace the cup with our can' + the product photo as elements) or EDIT an existing clip from a plain instruction (video-to-video): the motion, timing, framing and cut stay, the named thing changes. 'change only the mug to red', 'make it nighttime', 'restyle it as claymation'. Your words are wrapped so the model keeps everything else identical, changes only what you named and repeats that lock; lighting is kept unless the change needs new light (set lighting to force either); literal:true sends your words as written. One change per call holds best. previewFirstFrame:true edits ONE still first (one image edit; previewAt picks the second) and quotes the clip; nothing else runs until you call again, ideally with previewStill. The reply scores how well the shot held outside the change (free) and flags an edit that touched more than asked. NOT for cuts/trims/end cards (post_edit), a new video (generate_video / render_ad), translation (dub_video) or a saved creator's face (recast_motion). Best on 3-15s clips.",
     inputSchema: {
       video: z.string().describe('the source video URL (a render, job result or list_library)'),
       instruction: z.string().describe('the change, in the user’s own words'),
@@ -22354,7 +22356,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('recast_motion', {
     title: 'Recast motion',
-    description: "Motion transfer: re-perform a clip's motion, camera and timing with YOUR character, product, clothes or place; sound kept. image (+ images, @Image1, @Image2… in prompt) = who and what. engine auto (default), a person clip recast with people: one photo (talking, dance or full-body) or an AI person made from words, ≤15s -> wan (on the beat, keeps set and framing, follows every blink and mouth shape); several photos (one per person) or >15s -> h3 (H3 Max Recast: ≤4 photos, one per person, 5-30s, no shot over 15s, keeps set, light, cuts; engine h3 picks it by name); otherwise seedance (Seedance 2.5, ≤9 pictures, 4-30s, keeps set and beats; a person clip only if our render or faceRoute, else wan/kling). kling = Kling Motion Control (ONE picture, its background becomes the set, 3-30s); wan = Wan 3.0, recommended (≤9 pictures, keeps the set, ≤15s); wan-prime = Wan 3.0 Prime by name (costs more). voice/language: the new performer gets a new voice (same timing) or speaks another language (lip-synced), in the same job and price. Billed per output second, ~5 min per 5s; dryRun quotes.",
+    description: "Copy the motion of any video (motion transfer): re-perform a clip's motion, camera and timing with YOUR character, product, clothes or place; sound kept. image (+ images, @Image1, @Image2… in prompt) = who and what. engine auto (default), a person clip recast with people: one photo (talking, dance or full-body) or an AI person made from words, ≤15s -> wan (on the beat, keeps set and framing, follows every blink and mouth shape); several photos (one per person) or >15s -> h3 (H3 Max Recast: ≤4 photos, one per person, 5-30s, no shot over 15s, keeps set, light, cuts; engine h3 picks it by name); otherwise seedance (Seedance 2.5, ≤9 pictures, 4-30s, keeps set and beats; a person clip only if our render or faceRoute, else wan/kling). kling = Kling Motion Control (ONE picture, its background becomes the set, 3-30s); wan = Wan 3.0, recommended (≤9 pictures, keeps the set, ≤15s); wan-prime = Wan 3.0 Prime by name (costs more). voice/language: the new performer gets a new voice (same timing) or speaks another language (lip-synced), in the same job and price. Billed per output second, ~5 min per 5s; dryRun quotes.",
     inputSchema: {
       image: z.string().optional().describe('who performs it: the actor/character image URL (@Image1). Required on kling. No one yet: generate_image a portrait of an AI person from words (no reference photo) and pass its url, or a saved / preset creator’s portrait (list_creators). ' + LIKENESS_TERMS),
       images: z.array(z.string()).max(8).optional().describe('seedance/wan: more pictures, @Image2…: a character, product, outfit or place'),
