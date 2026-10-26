@@ -2850,7 +2850,7 @@ export const WITHHELD_FROM_DIRECTORY = new Set([
   'buy_credits', 'upgrade_plan', 'set_auto_reload',
   'generate_image', 'generate_video', 'generate_avatar', 'generate_voice', 'render_ad', 'plan_ad', 'plan_variations',
   'make_thumbnail', 'make_explainer', 'product_sizzle', 'dub_video', 'change_voice', 'edit_video', 'recast_motion',
-  'upscale_video', 'reframe_video', 'multiply_ad', 'clone_static', 'remix_static', 'stitch_video', 'fix_beat',
+  'upscale_video', 'reframe_video', 'insert_scene', 'multiply_ad', 'clone_static', 'remix_static', 'stitch_video', 'fix_beat',
   'hook_variants',
   // 2026-09-25, after the directory review named "30+ model ids" and the prompt-only mode: the model catalog, the
   // saved cast (it exists to star a person in a render) and mine_angles (its `next` is a render call) point at the
@@ -22109,6 +22109,28 @@ function memoryNoteVerdict(text) {
   }, wrap(async ({ video, aspectRatio }) => {
     const r = await renderJob('reframe', { video, aspectRatio }, `Reframe → ${aspectRatio}`);
     return okVideo(`Reframed video (${aspectRatio}): ${r.url}`, r);
+  }));
+
+  // INSERT A NEW SCENE (2026-10-26, server workInsertScene + lib/insert-scene.mjs): H3 Max insert-video adds a NEW scene
+  // between two points of a clip and returns the whole video. Every vendor rule is checked before anything is charged.
+  server.registerTool('insert_scene', {
+    title: 'Insert a new scene into a video',
+    description: "INSERT a newly generated scene into a clip you already have: the video plays up to startTime, the new scene (5 to 13 seconds) plays, then the original picks up again at resumeTime. Use for a product close-up, a reaction, a reveal or a missing beat in the middle of an ad without re-rendering the rest. resumeTime = startTime keeps every second of the original; a later resumeTime also cuts the footage in between. Describe the scene in prompt and/or attach up to 4 reference pictures (refImages) or 1 reference clip (refVideos). Clips up to 60 seconds; both times between 1.625 and 60 seconds. Paid render (billed per second of NEW scene); returns the whole video's URL.",
+    inputSchema: {
+      video: z.string().describe('the source video URL (a render, job result or list_library item)'),
+      startTime: z.number().describe('seconds into the clip where the new scene starts (1.625-60)'),
+      resumeTime: z.number().describe('seconds into the ORIGINAL clip where it picks up again after the new scene (2.625-60, at or after startTime)'),
+      prompt: z.string().optional().describe('what happens in the new scene: the action, the subject, the camera'),
+      seconds: z.number().optional().describe('length of the new scene, 5-13 seconds (default 5)'),
+      refImages: z.array(z.string()).optional().describe('up to 4 picture URLs of what should appear (the product, a person, a place)'),
+      refVideos: z.array(z.string()).optional().describe('up to 1 clip URL whose look or motion the scene follows'),
+      resolution: z.enum(['480p', '720p']).optional().describe("default 720p (rendered at 768p); '480p' is cheaper"),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async ({ video, startTime, resumeTime, prompt, seconds, refImages, refVideos, resolution }) => {
+    const r = await renderJob('insertscene', { video, startTime, resumeTime, ...(prompt ? { prompt } : {}), ...(seconds != null ? { seconds } : {}), ...(refImages && refImages.length ? { refImages } : {}), ...(refVideos && refVideos.length ? { refVideos } : {}), ...(resolution ? { resolution } : {}) }, `Insert a scene at ${startTime}s`);
+    return okVideo(`Video with the new scene inserted at ${startTime}s: ${r.url}`, r);
   }));
 
   server.registerTool('upscale_video', {
