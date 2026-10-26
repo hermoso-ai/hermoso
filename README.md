@@ -1,7 +1,7 @@
 # Hermoso: MCP, CLI & Skills
 
 **The AI marketing agent with an AI ad generator built in**, run from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
-scripts. Research the ads already winning in a market, generate finished image & video ads (your real product
+scripts. Research the ads already winning in a market, generate image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
@@ -421,7 +421,7 @@ the package, so they need no key, no network and no sign-in.
 | --- | --- |
 | `hermoso-research` | Find competitors, pull their real running ads, surface the hooks worth copying |
 | `hermoso-generate` | A prompt to a finished image, video, avatar clip or stitched cut |
-| `hermoso-ad-from-brand` | A brand or domain to one finished, on-brand ad, concept and copy included |
+| `hermoso-ad-from-brand` | A brand or domain to one on-brand ad, concept and copy included |
 | `hermoso-product-photoshoot` | A real product photo composited into studio, lifestyle or hero scenes |
 | `hermoso-marketing` | The whole loop: research, create, publish and schedule, paid campaigns, measure |
 

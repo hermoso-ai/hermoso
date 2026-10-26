@@ -1,7 +1,7 @@
 ---
 name: hermoso-ad-from-brand
 description: >-
-  Make a finished, on-brand ad for a company end-to-end with Hermoso: onboard the brand, write the concept +
+  Make an on-brand ad for a company end-to-end with Hermoso: onboard the brand, write the concept +
   copy, then render the image or video. Use when the user says "make an ad for <company/website>", "build a
   launch ad for my brand", or gives a domain/brand and wants a complete ad, not just research. NOT for: just
   pulling competitor ads (use hermoso-research) or rendering from a prompt you already have (use hermoso-generate).
@@ -11,7 +11,7 @@ allowed-tools: Bash
 
 # Hermoso: full ad from a brand
 
-Drive the **Hermoso CLI** to go from a brand to a finished ad in three steps. Report the final media URL.
+Drive the **Hermoso CLI** to go from a brand to an on-brand ad in three steps. Report the final media URL.
 
 ## Setup (once)
 - Install the CLI once: `npm install -g hermoso`, then run every command as `hermoso …`, as written below. If you cannot install packages, prefix the commands with `npx -y`, but know that npx asks the npm registry on every single call, so an agent making many calls can be rate-limited by npm (an HTTP 429 from npm, before Hermoso is ever reached). No MCP server is needed.
