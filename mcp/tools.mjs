@@ -12,6 +12,7 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 // The UTF-16 well-formedness law — see wellFormedServer() below for why it is applied here, and
 // ./well-formed.mjs for why that specifier is the only one that can work in a byte-identical twin.
 import { wellFormedValue, wellFormedString } from './well-formed.mjs';
+import { UNKNOWN_ARGS_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
 // WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
 // re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
 // twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
@@ -2085,6 +2086,15 @@ export function inboxReplyTarget(id) {
  * eight vendors disagree about all of them; what comes OUT is always the same, so an agent writes one loop.
  * Returns null when there is no id or no text — an item you can neither quote nor answer is noise.
  */
+// THE SENTENCE A PARTLY-READ SOURCE CONTRIBUTES TO list_inbox `notes`, or '' when it read whole. A route reports a
+// part it could not read as `unreadable: [...]` beside its own `note` (the Meta DM inbox, the conversation list); the
+// note is the route's words, and the label says which source they belong to. PURE, so a check runs it.
+export function inboxShortNote(src, d) {
+  const bad = Array.isArray(d?.unreadable) ? d.unreadable : [];
+  if (!bad.length) return '';
+  const said = typeof d?.note === 'string' && d.note.trim() ? d.note.trim() : bad.map((u) => String(u?.error || 'could not be read')).join('; ');
+  return `${src?.label || 'A source'}s were not read in full: ${said.slice(0, 600)}`;
+}
 export function normalizeInboxItem(source, row = {}) {
   const src = BY_SOURCE.get(source);
   if (!src) return null;
@@ -2805,7 +2815,7 @@ export const undeclaredArgsText = (name, extra, h) => {
   const shape = h && h.inputSchema && h.inputSchema.shape;
   const takes = shape && typeof shape === 'object' ? Object.keys(shape) : [];
   const brandNote = extra.includes('brand') ? ` ${name} acts on the profile this connection is on — pin another with use_brand first, then call it again.` : '';
-  return `${name} does not take ${extra.map((k) => `\`${k}\``).join(', ')}, so nothing was run: an argument a tool does not declare would be silently ignored.${brandNote} It takes: ${takes.length ? takes.join(', ') : '(no arguments)'}.`;
+  return `${name} does not take ${extra.map((k) => { const m = didYouMean(k, takes); return `\`${k}\`${m ? ` (did you mean \`${m}\`?)` : ''}`; }).join(', ')}, so nothing was run: an argument a tool does not declare would be silently ignored.${brandNote} It takes: ${takes.length ? takes.join(', ') : '(no arguments)'}.`;
 };
 export async function legacyToolAnswer(name, request, extra, ctx) {
   const spec = LEGACY_TOOL_NAMES[name];
@@ -3574,14 +3584,43 @@ function registerWidgetHostSplits(rawServer, ctx, opts) {
 const _wfWrapped = new WeakMap();
 // EXPORTED so tools/well-formed-law-check.mjs can RUN the real seam over real fixtures rather than read it. It is
 // not part of the module's public surface in any other sense — `registerTools` is the only caller.
+// UNKNOWN ARGUMENTS ON A HOST'S OWN tools/call (2026-10-26, customer report — see mcp/arg-guard.mjs). The SDK parses
+// `arguments` with the tool's zod object, which strips an undeclared key before any handler sees it, so the only place
+// the raw keys exist is the SDK's validateToolInput. It is wrapped ONCE per server instance: a refusal throws (the SDK
+// turns that into an isError result), and a key that is noted rather than refused rides the parsed args under a
+// symbol until withUnknownArgsNote puts the sentence at the top of the answer.
+export function guardUnknownArgs(server) {
+  if (!server || typeof server.validateToolInput !== 'function' || server[UNKNOWN_ARGS_SYM]) return server;
+  const orig = server.validateToolInput;
+  const guarded = async function (tool, args, toolName) {
+    const declared = declaredArgKeys(tool?.inputSchema);
+    const unknown = unknownArgs(declared, args);
+    const mode = argGuardMode();
+    if (unknown.length && mode !== 'off') {
+      try { console.error(`[mcp-unknown-arg] tool=${toolName} keys=${unknown.join(',')} mode=${mode}`); } catch {}
+      if (argGuardRefuses(mode, unknown, declared)) throw new Error(unknownArgsNote(toolName, unknown, declared, { rejected: true }));
+    }
+    const out = await orig.call(this, tool, args, toolName);
+    if (unknown.length && mode !== 'off' && out && typeof out === 'object') { try { Object.defineProperty(out, UNKNOWN_ARGS_SYM, { value: unknownArgsNote(toolName, unknown, declared), enumerable: false, configurable: true }); } catch {} }
+    return out;
+  };
+  try { Object.defineProperty(server, 'validateToolInput', { value: guarded, configurable: true, writable: true }); Object.defineProperty(server, UNKNOWN_ARGS_SYM, { value: true }); } catch {}
+  return server;
+}
+export function withUnknownArgsNote(result, args) {
+  const note = args && typeof args === 'object' ? args[UNKNOWN_ARGS_SYM] : '';
+  if (!note || !result || typeof result !== 'object' || !Array.isArray(result.content)) return result;
+  return { ...result, content: [{ type: 'text', text: note }, ...result.content] };
+}
 export function wellFormedServer(rawServer) {
+  guardUnknownArgs(rawServer);
   return new Proxy(rawServer, {
     get(t, p) {
       if (p === 'registerTool') return (name, def, handler) => {
         let safe = _wfWrapped.get(handler);
         if (!safe) {
           safe = async (args, extra) => {
-            try { return wellFormedValue(await handler(args, extra)); }
+            try { return wellFormedValue(withUnknownArgsNote(await handler(args, extra), args)); }
             catch (e) {
               try { const m = wellFormedString(e?.message); if (e && m !== e.message) e.message = m; } catch {}
               throw e;
@@ -4477,6 +4516,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       try {
         const d = await apiGet(whole ? src.readAll : src.read, q);
         const rows = Array.isArray(d) ? d : (d.comments || d.replies || d.mentions || d.reviews || d.messages || d.events || d.items || d.data || []);
+        // A SOURCE THAT READ ONLY PART OF ITSELF SAYS SO (2026-10-26, customer report: Instagram DMs at limit >= 32 came
+        // back as 0 items and NO note, because the DM inbox route reported its failure in `unreadable` + `note` and this
+        // loop only ever read the rows). Any route answering `unreadable` has its sentence carried into `notes`, on both
+        // branches, so a short list is never mistaken for a quiet inbox.
+        const short = inboxShortNote(src, d);
+        if (short) notes.push(short);
         if (whole) { for (const r of rows) { const it = normalizeInboxItem(src.source, r); if (it) items.push(it); } continue; } // already one row per conversation
         // A DM FOLDS TO ONE ITEM AND CARRIES THE ID YOU ANSWER TO — see foldConversationRows. Deriving this from
         // `kind` rather than naming the two sources means a third DM channel inherits it by declaring its kind.
@@ -4488,6 +4533,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         const use = src.dmReplyId ? foldConversationRows(rows, d?.[src.dmReplyId]) : rows;
         for (const r of use) { const it = normalizeInboxItem(src.source, src.dmReplyId && typeof d?.conversationId === 'string' && !r.conversationId ? { ...r, conversationId: d.conversationId } : r); if (it) items.push(it); }
       } catch (e) {
+        // AN ID THAT DOES NOT RESOLVE ENDS THE CALL AS AN ERROR (2026-10-26, customer report: an unconnected pageId
+        // answered "0 items"). The caller named a Page; reading nothing from it is not a quiet inbox, it is a wrong id.
+        if (e?.apiCode === 'meta_page_not_connected') return { content: [{ type: 'text', text: String(e.message) }], isError: true };
         // NAMED, never swallowed. A connector that is simply not linked is not worth a line; anything else is.
         const msg = String(e?.message || e);
         if (e?.status === 401 || /not connected/i.test(msg)) continue;
@@ -5057,7 +5105,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       ...MANAGE_BRAND,
       postId: z.string().describe('post/media id returned by post_to_meta'),
-      target: z.enum(['facebook', 'instagram']).optional().describe('which metric set to ask for (default facebook)'),
+      target: z.enum(['facebook', 'instagram']).optional().describe('which metric set to ask for; an Instagram media id is detected and read as Instagram either way (default: Facebook for a Facebook id)'),
       account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). Needed when several are linked, and the way an Instagram Login (standalone) account is reached; omit for the one Page-linked account.'),
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
     },
