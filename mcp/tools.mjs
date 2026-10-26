@@ -19668,7 +19668,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const seriesEpisodeInput = (topic, plan, ep, n, a, vo) => {
     const s = plan.style || {};
     const how = [s.hookDevice ? `Open the way the reference opens: ${s.hookDevice}` : '', s.pacing ? `Pacing: ${s.pacing}` : '', s.narration ? `Narration: ${s.narration}` : ''].filter(Boolean).join('. ');
-    const captions = typeof a.captions === 'boolean' ? a.captions : !!s.captions;
+    const captions = typeof a.captions === 'boolean' ? a.captions : !!(plan.reference && s.captions); // on only when the WATCHED reference burns subtitles (no-overlays law, 2026-10-26)
     const voice = (a.voice || s.voice) === 'male' ? (vo.male || 'George') : (vo.female || 'Sarah');
     return {
       topic: `Episode ${ep.episode} of ${n} in a faceless short-video series about "${topic}". This episode: ${ep.title}. ${ep.brief}${how ? ` ${how}.` : ''} No presenter on camera.`,
@@ -19695,7 +19695,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       reference: z.string().optional().describe('a video link whose style every episode copies'),
       aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional().describe('default: the reference\'s shape, else 9:16'),
       style: z.string().optional().describe('override the look in words (e.g. "flat 2D cartoon") instead of the reference\'s'),
-      captions: z.boolean().optional().describe('burn subtitles of every spoken word; default follows the reference'),
+      captions: z.boolean().optional().describe('burn subtitles of every spoken word. Default: on only when the reference itself burns its spoken words as subtitles, otherwise off; nothing else is ever put on screen (no app screens, URLs, cards or stickers) unless the user asks'),
       voice: z.enum(['female', 'male']).optional().describe('narrator; default follows the reference'),
       format: z.enum(['explainer', 'faceless_channel']).optional().describe("renderer lane: 'explainer' (default; exact length) or 'faceless_channel' (2K, whole 10s blocks)"),
       planOnly: z.boolean().optional().describe('write the episode plan and style card, render nothing (a small planning charge)'),
