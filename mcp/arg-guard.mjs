@@ -95,6 +95,7 @@ export function didYouMean(key, declared = []) {
   if (alias) return alias;
   const lower = declared.find((d) => d.toLowerCase() === k.toLowerCase() || d.toLowerCase().replace(/_/g, '') === k.toLowerCase().replace(/_/g, ''));
   if (lower) return lower;
+  if (/id$/i.test(k) && k.length > 2 && declared.includes('id') && !declared.some((d) => /id$/i.test(d) && d !== 'id')) return 'id'; // jobId / job_id for a tool whose only id is `id`
   let best = '', bd = Infinity;
   for (const d of declared) { const x = lev(k, d); if (x < bd) { bd = x; best = d; } }
   return bd <= Math.max(2, Math.floor(k.length / 3)) ? best : '';
