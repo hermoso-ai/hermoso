@@ -1,6 +1,6 @@
-// mcp/motion-styles.mjs (byte-twin of cli/mcp/motion-styles.mjs; server.js imports this copy) — THE PRODUCT-SIZZLE LOOKS (2026-10-26, Higgsfield Marketing Studio parity).
+// mcp/motion-styles.mjs (byte-twin of cli/mcp/motion-styles.mjs; server.js imports this copy) — THE PRODUCT-SIZZLE LOOKS (2026-10-26, parity with the gold-standard studio's motion looks).
 //
-// Higgsfield's Marketing Studio ▸ Video ▸ Motion offers eight product-motion looks (read live 2026-10-26): 2D product
+// The gold-standard studio's Marketing Studio ▸ Video ▸ Motion offers eight product-motion looks (read live 2026-10-26): 2D product
 // motion, Hypermotion, Typography, Dark Minimalism, Color pop, Mixed media, SaaS, Product Showcase. Our product sizzle
 // (the 'hypermotion' job: one paid hero clip diced on its beats, intercut with typeset cards, over a music bed) already
 // IS their Hypermotion; this file adds the other seven as a `style` on the same lane, in our own words. One paid leg,
