@@ -1274,7 +1274,7 @@ const PROVIDER_INFO = {
   openai_ads: ['ChatGPT Ads', 'ads'], apple_ads: ['Apple Ads', 'ads'], applovin_ads: ['AppLovin Ads', 'ads'],
   google_drive: ['Google Drive, Sheets and Docs', 'data'], onedrive: ['OneDrive', 'data'], google_analytics: ['Google Analytics', 'data'],
   search_console: ['Google Search Console', 'data'], merchant_center: ['Google Merchant Center', 'data'], slack: ['Slack', 'data'],
-  shopify: ['Shopify', 'data'], stripe: ['Stripe', 'data'], hubspot: ['HubSpot', 'data'], notion: ['Notion', 'data'],
+  shopify: ['Shopify', 'data'], stripe: ['Stripe', 'data'], hubspot: ['HubSpot', 'data'], notion: ['Notion', 'data'], canva: ['Canva', 'data'],
 };
 export const providerInfo = (p) => {
   const hit = PROVIDER_INFO[p];

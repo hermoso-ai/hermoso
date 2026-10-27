@@ -423,7 +423,10 @@ export async function connectedProviders() {
     const connectLink = typeof r?.connectLink === 'string' && r.connectLink.includes('{provider}') ? r.connectLink : '';
     // withheld: tools the server does not offer right now (roster-scope.mjs toolWithheldByServer). Absent = none.
     const withheld = new Set((Array.isArray(r?.withheld) ? r.withheld : []).filter((n) => typeof n === 'string' && n));
-    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld };
+    // shopifyStore (2026-10-27): true/false when the server could tell whether this account has a Shopify store;
+    // anything else is null = unknown, which holds nothing back (roster-scope.mjs toolHeldForNoShopifyStore).
+    const shopifyStore = r?.shopifyStore === true ? true : r?.shopifyStore === false ? false : null;
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld, shopifyStore };
   } catch { return { connected: new Set(), readOk: false }; }
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so

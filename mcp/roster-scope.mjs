@@ -101,6 +101,8 @@ export const TOOL_PROVIDER_RULES = [
   [/vercel/, 'vercel'],
   // Notion (2026-10-25): the user's OWN Notion workspace, offered only to a workspace that connected it.
   [/notion/, 'notion'],
+  // Canva (2026-10-27): the user's OWN Canva, offered only to a workspace that connected it.
+  [/canva/, 'canva'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],
@@ -170,7 +172,20 @@ export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(na
 // creator marketplace trio while META_CREATOR_MARKETPLACE_SCOPE is off). ONE server flag decides it, so flipping the
 // env var lights every surface back up with no code change. Absent or unreadable = nothing withheld (fail open, like
 // every other read of this set); a withheld tool is held like a connector-gated one and answered as 'unavailable'.
-export function toolWithheldByServer(name, conn) { return !!(conn && conn.withheld instanceof Set && conn.withheld.has(String(name || ''))); }
+// ── SHOPIFY IS AN ACCOUNT TYPE, NOT A CONNECTOR (2026-10-27) ────────────────────────────────────────────────────────
+// The Shopify tools (list_shopify_products, publish_to_shopify_product, the marketing-activity tools) work only for an
+// account created by installing Hermoso from the Shopify App Store: the store is derived server-side from the verified
+// account and there is no "connect Shopify" tile. So they cannot ride TOOL_PROVIDER_RULES — every provider there must
+// be a CONNECTOR_INFO key (property 3), and "connect it under Settings ▸ Connectors" would be a dead end. Instead the
+// same /api/connectors/providers read answers `shopifyStore`: true (this account has a live store), false (it does not,
+// or Shopify is off on this deployment), or absent when the server could not tell. ONLY a definite false holds them
+// back — an unreadable answer keeps them, like every other read of this set (property 1). Held, they are answered by
+// their own reason ('shopify_store'), never as "not available in Hermoso yet".
+export const SHOPIFY_STORE_TOOL_RE = /shopify/;
+export const toolNeedsShopifyStore = (name) => SHOPIFY_STORE_TOOL_RE.test(String(name || ''));
+export function toolHeldForNoShopifyStore(name, conn) { return !!(conn && conn.shopifyStore === false && toolNeedsShopifyStore(name)); }
+export const SHOPIFY_STORE_NOTE = 'works only for a Shopify store that installed Hermoso from the Shopify App Store, and this account has no linked store. An existing Hermoso account cannot be linked to a store from here; a merchant who did install it opens Hermoso once from their Shopify admin (Apps \u2192 Hermoso).';
+export function toolWithheldByServer(name, conn) { return !!(conn && ((conn.withheld instanceof Set && conn.withheld.has(String(name || ''))) || toolHeldForNoShopifyStore(name, conn))); }
 export function toolHeldBackByConnectors(name, conn) {
   if (toolWithheldByServer(name, conn)) return true;              // the server says this capability is not offered now
   if (!conn || !conn.readOk) return false;                       // property 1 — fail OPEN on an unreadable store
