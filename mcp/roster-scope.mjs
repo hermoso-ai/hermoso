@@ -82,7 +82,7 @@ export const TOOL_PROVIDER_RULES = [
   [/^threads_|_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
   [/_meta_|^meta_|_meta$|instagram|whatsapp|messenger/, 'meta'], // messenger: Page marketing messages ride the Meta connector (2026-09-07)
   // ── analytics / measurement, each its own connection ──
-  [/_analytics_|^analytics_(realtime|report)$|analytics_compatibility|analytics_stream/, 'google_analytics'],
+  [/_analytics_|^analytics_(realtime|report|data_retention)$|analytics_compatibility|analytics_stream/, 'google_analytics'],
   [/mixpanel/, 'mixpanel'],
   [/tag_manager/, 'google_tag_manager'],
   [/search_console/, 'google_search_console'],
@@ -109,7 +109,7 @@ export const TOOL_PROVIDER_RULES = [
   [/bluesky/, 'bluesky'],
   [/telegram/, 'telegram'],
   [/^post_to_tiktok$|^tiktok_|_tiktok_/, 'tiktok'],
-  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|_x_broadcast|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
+  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^hide_x_reply$|_x_broadcast|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
   [/pinterest/, 'pinterest'],
   [/reddit/, 'reddit'],
   [/snapchat/, 'snapchat'],
