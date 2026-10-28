@@ -52,6 +52,7 @@
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
+  'search_meta_places', // place search runs on our data provider and a web search, never on a Meta connection (2026-10-27)
 ]);
 
 // Tool-name → connector provider. ORDERED: the first match wins, so the more specific pattern must come first.
