@@ -24613,7 +24613,7 @@ function memoryNoteVerdict(text) {
   // described look) runs as a video edit: same engines, same price, same free preservation read-back as edit_video.
   server.registerTool('restyle_video', {
     title: 'Restyle a video',
-    description: "RESTYLE a clip into a new LOOK: every frame redrawn, shots, motion, camera, framing, timing and sound kept. Looks: `Restyle looks` in hermoso_capabilities (claymation, knitted yarn, cel-shaded CG anime…), your own words, or a look BUILT FROM YOUR IMAGES (styleImages); characters draws your own characters in. engine auto (default) picks by what is in the clip: a real-looking person -> kling (Kling O3 Edit, 3-15s); none -> wan (Wan 3.0, recommended, ≤15s) else seedance (Seedance 2.5, 4-30s); wan-prime = Wan 3.0 Prime by name (costs more). Paid; dryRun quotes it. One change only: edit_video.",
+    description: "RESTYLE a clip into a new LOOK: every frame redrawn, shots, motion, camera, framing, timing and sound kept. Looks: `Restyle looks` in hermoso_capabilities (claymation, knitted yarn, cel-shaded CG anime…), your own words, or a look BUILT FROM YOUR IMAGES (styleImages); characters draws your own characters in. engine auto (default) picks by what is in the clip: a real-looking person -> kling (Kling 4.0 Edit, 3-15s); none -> wan (Wan 3.0, recommended, ≤15s) else seedance (Seedance 2.5, 4-30s); wan-prime = Wan 3.0 Prime by name (costs more). Paid; dryRun quotes it. One change only: edit_video.",
     inputSchema: {
       video: z.string().describe('the source video URL (a render, job result or list_library)'),
       style: z.string().optional().describe('a look id from hermoso_capabilities (e.g. claymation, knitted-yarn, cel-shaded-anime-cg)'),
@@ -24651,7 +24651,7 @@ function memoryNoteVerdict(text) {
       previewAt: z.number().optional().describe('second to preview (default 0); resend with previewStill'),
       elements: z.array(z.object({ frontal: z.string().describe('the reference image URL'), refs: z.array(z.string()).optional().describe('up to 2 extra angles of the SAME subject') }).passthrough()).optional().describe('OPTIONAL identity/product grounding (≤4): a creator portrait or the real product photo, so the edit restores the REAL thing. Describe each one in the instruction'),
       interactionId: z.string().optional().describe('OPTIONAL: the interactionId an earlier Gemini Omni render or edit returned; the edit continues that clip on the same Omni model. If it cannot run, the video editor edits it and the reply says so.'),
-      engine: z.enum(['auto', 'seedance', 'kling']).optional().describe("default auto: Seedance 2.5 Edit without a real-looking person, else Kling O3 Edit"),
+      engine: z.enum(['auto', 'seedance', 'kling']).optional().describe("default auto: Seedance 2.5 Edit without a real-looking person, else Kling 4.0 Edit"),
       faceRoute: z.enum(['face_lane']).optional().describe(FACE_ROUTE_CLIP_DESC),
     },
     outputSchema: { ...JOB_OUT },
