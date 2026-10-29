@@ -128,6 +128,28 @@ export const TOOL_PROVIDER_RULES = [
 // in every listing. If Reddit ever approves the app, remove it from this set and the whole surface returns.
 export const UNOFFERED_PROVIDERS = new Set(['reddit', 'snapchat']);
 export function toolUnoffered(name) { const p = toolProvider(name); return !!p && UNOFFERED_PROVIDERS.has(p); }
+
+// ── WHICH TOOLS TAKE `account` (2026-10-29, customer bug fb_f6f7b0371d42) ─────────────────────────────────────────────
+// A brand can connect several accounts of these channels (lib/multi-account.mjs), and the server refuses a write that
+// names none. Only the post_to_* tools declared `account`, so a user with two YouTube channels was told "name one with
+// account: …" by update_youtube_video, which had no such argument. Every surface (both MCP twins' registration seam,
+// the Studio agent's schema and executor) asks THIS function, so the answer cannot differ between them.
+// The set mirrors lib/multi-account.mjs MULTI_ACCOUNT_PROVIDERS, which the npm package cannot import;
+// tools/multi-account-arg-check.mjs fails when the two differ, and DERIVES the tool split below from server.js.
+export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'reddit', 'pinterest', 'instagram']));
+// Filed under a multi-account channel, but routed through a connection that holds ONE grant per brand, so `account`
+// would do nothing there: every other tiktok_* tool rides the TikTok Business account-holder grant or TikTok Ads (not
+// the per-account posting row), and these two Pinterest reads ride the ad-account (pinterest_ads) row.
+const TIKTOK_PER_ACCOUNT_TOOLS = new Set(['post_to_tiktok', 'tiktok_post_status', 'tiktok_creator_info', 'tiktok_account', 'list_tiktok_videos']);
+const SINGLE_GRANT_TOOLS = new Set(['pinterest_targeting_analytics', 'pinterest_audience_insights']);
+export function accountScopedTool(name) {
+  const p = String(toolProvider(name) || '');
+  if (!MULTI_ACCOUNT_CHANNELS.has(p)) return false;
+  return p === 'tiktok' ? TIKTOK_PER_ACCOUNT_TOOLS.has(String(name)) : !SINGLE_GRANT_TOOLS.has(String(name));
+}
+// The channel an account-scoped tool's `account` names, or null.
+export const accountChannelOf = (name) => (accountScopedTool(name) ? String(toolProvider(name)) : null);
+export const ACCOUNT_ARG_TEXT = 'which connected account: its @handle or id from list_connector_accounts; needed only when several are connected';
 export function toolProvider(name) {
   const n = String(name || '');
   if (!n) return null;

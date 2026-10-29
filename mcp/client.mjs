@@ -84,10 +84,23 @@ const scopedBrand = (p) => {
   const b = brandScope.getStore()?.brand;
   return typeof b === 'string' && b.trim() && !/^\/api\/apple-ads\//.test(String(p || '')) ? b.trim() : '';
 };
+// ── AN ACCOUNT NAMED ON ONE TOOL CALL SCOPES EVERY REQUEST THAT CALL MAKES (2026-10-29) ──────────────────────────
+// A brand can hold several accounts of one channel (lib/multi-account.mjs), and the server refuses a write that names
+// none: "2 youtube accounts are connected, name one with account: …". `update_youtube_video` had no `account`
+// argument to name one with, so a customer with two channels could not flip a video public (fb_f6f7b0371d42). Same
+// shape as the brand above: wrap() (tools.mjs) puts the caller's `account` in toolCtx for a tool whose provider is a
+// multi-account channel, and it rides here as `?account=`, which the server's connCtxFor reads on every method.
+// A body `account` the handler already sends is read FIRST by the server and is the same value.
+const scopedAccount = () => { const a = toolCtx.getStore()?.account; return typeof a === 'string' && a.trim() ? a.trim() : ''; };
+const withAccountScope = (p) => {
+  const a = scopedAccount();
+  if (!a || /[?&]account=/.test(String(p))) return p;
+  return `${p}${String(p).includes('?') ? '&' : '?'}account=${encodeURIComponent(a)}`;
+};
 export const withBrandScope = (p) => {
   const b = scopedBrand(p);
-  if (!b || /[?&]brandId=/.test(String(p))) return p;
-  return `${p}${String(p).includes('?') ? '&' : '?'}brandId=${encodeURIComponent(b)}`;
+  if (!b || /[?&]brandId=/.test(String(p))) return withAccountScope(p);
+  return withAccountScope(`${p}${String(p).includes('?') ? '&' : '?'}brandId=${encodeURIComponent(b)}`);
 };
 
 function headers(extra = {}) {
