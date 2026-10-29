@@ -111,7 +111,14 @@ export const TOOL_PROVIDER_RULES = [
   [/onedrive/, 'microsoft_onedrive'],
   [/bluesky/, 'bluesky'],
   [/telegram/, 'telegram'],
-  [/^post_to_tiktok$|^tiktok_|_tiktok_/, 'tiktok'],
+  // TIKTOK IS THREE CREDENTIALS, AND ONLY FIVE TOOLS RIDE THE POSTING ONE (2026-10-29). Until this date the bare rule sent
+  // every remaining tiktok name to 'tiktok', so 41 Business, analytics and creator-marketplace tools were offered by the
+  // POSTING login while their routes spend the TikTok Ads advertiser token or its account-holder grant: a TikTok Ads-only
+  // brand lost tools that work, a posting-only brand saw tools that 401. The posting family is named exactly; every
+  // other tiktok tool is the Ads connection (see TIKTOK_ACCOUNT_GRANT_TOOLS for the grant either row can host).
+  // tools/tiktok-roster-gate-check.mjs derives each tool's credential from server.js and fails when this disagrees.
+  [/^(post_to_tiktok|tiktok_post_status|tiktok_creator_info|tiktok_account|list_tiktok_videos)$/, 'tiktok'],
+  [/tiktok/, 'tiktok_ads'],
   [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^hide_x_reply$|_x_broadcast|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
   [/pinterest/, 'pinterest'],
   [/reddit/, 'reddit'],
@@ -138,14 +145,13 @@ export function toolUnoffered(name) { const p = toolProvider(name); return !!p &
 // tools/multi-account-arg-check.mjs fails when the two differ, and DERIVES the tool split below from server.js.
 export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'reddit', 'pinterest', 'instagram']));
 // Filed under a multi-account channel, but routed through a connection that holds ONE grant per brand, so `account`
-// would do nothing there: every other tiktok_* tool rides the TikTok Business account-holder grant or TikTok Ads (not
-// the per-account posting row), and these two Pinterest reads ride the ad-account (pinterest_ads) row.
-const TIKTOK_PER_ACCOUNT_TOOLS = new Set(['post_to_tiktok', 'tiktok_post_status', 'tiktok_creator_info', 'tiktok_account', 'list_tiktok_videos']);
+// would do nothing there: these two Pinterest reads ride the ad-account (pinterest_ads) row. (The TikTok Business and
+// Ads tools are no longer filed under 'tiktok' at all — only the five posting tools are — so they need no entry.)
 const SINGLE_GRANT_TOOLS = new Set(['pinterest_targeting_analytics', 'pinterest_audience_insights']);
 export function accountScopedTool(name) {
   const p = String(toolProvider(name) || '');
   if (!MULTI_ACCOUNT_CHANNELS.has(p)) return false;
-  return p === 'tiktok' ? TIKTOK_PER_ACCOUNT_TOOLS.has(String(name)) : !SINGLE_GRANT_TOOLS.has(String(name));
+  return !SINGLE_GRANT_TOOLS.has(String(name));
 }
 // The channel an account-scoped tool's `account` names, or null.
 export const accountChannelOf = (name) => (accountScopedTool(name) ? String(toolProvider(name)) : null);
@@ -183,12 +189,25 @@ export const INSTAGRAM_LOGIN_TOOLS = new Set([
 // row whose business token `waToken` resolves FIRST, with no Meta connection at all — holding its WhatsApp tools back
 // as "needs meta" would refuse a working connection. Nobody needs BOTH for one account, on either channel.
 export const isWhatsAppTool = (name) => /whatsapp/.test(String(name || ''));
+// THE SAME SHAPE FOR TIKTOK'S ACCOUNT-HOLDER GRANT (2026-10-29). These tools map to 'tiktok_ads' and spend the TikTok
+// ACCOUNT authorization (server.js ttAccountGrant), which lives on the TikTok Ads row when there is one and otherwise on
+// the TikTok posting row (lib/tiktok-account.mjs TIKTOK_ACCOUNT_HOSTS: a personal creator with no ad account). So either
+// row is enough to offer them. tools/tiktok-roster-gate-check.mjs derives this set from server.js and fails on drift.
+export const TIKTOK_ACCOUNT_GRANT_TOOLS = new Set([
+  'comment_on_tiktok_video', 'list_tiktok_comments', 'list_tiktok_comment_replies', 'reply_to_tiktok_comment', 'moderate_tiktok_comment', 'upload_tiktok_comment_image',
+  'list_tiktok_mentions', 'get_tiktok_mention', 'list_tiktok_mention_comments', 'tiktok_mention_top_terms',
+  'list_tiktok_brand_hashtags', 'list_tiktok_brand_hashtag_posts', 'manage_tiktok_brand_hashtags', 'tiktok_hashtag_suggestions',
+  'get_tiktok_post_ad_authorization', 'set_tiktok_post_ad_authorization', 'extend_tiktok_post_ad_authorization', 'delete_tiktok_post_ad_authorization',
+  'tiktok_account_insights', 'tiktok_account_status', 'tiktok_video_insights', 'tiktok_category_benchmark', 'tiktok_spark_recommendations', 'tiktok_trends',
+]);
 // The ONE sentence every surface appends when a 'meta'-mapped tool is held and an alternative connection exists.
 export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(name || ''))
   ? ' For an Instagram account with no Facebook Page, the "instagram" connection alone is enough for this tool; "meta" covers an Instagram account linked to a Page (and ads). One account never needs both.'
   : isWhatsAppTool(name)
     ? ' A WhatsApp Business Account the business already manages is ticked on the "meta" connection\'s assets step; the "whatsapp" connection sets up a number the business does not have yet. Either one is enough for this tool.'
-    : '';
+    : TIKTOK_ACCOUNT_GRANT_TOOLS.has(String(name || ''))
+      ? ' A creator with no TikTok ad account can use the "tiktok" connection instead; either one, plus authorizing the TikTok account on its card, is enough for this tool.'
+      : '';
 // ── A TOOL THE SERVER WITHHOLDS FROM EVERY ROSTER (2026-09-27, owner: "why do we even allow access to creator
 // marketplace if we can't even access it ourselves?"). `withheld` rides the same /api/connectors/providers read as the
 // connected set: the server names the tools whose capability it does not offer right now (today: the Instagram
@@ -217,5 +236,6 @@ export function toolHeldBackByConnectors(name, conn) {
   const on = conn.connected instanceof Set ? conn.connected : new Set(conn.connected || []);
   if (p === 'meta' && on.has('instagram') && INSTAGRAM_LOGIN_TOOLS.has(name)) return false;
   if (p === 'meta' && on.has('whatsapp') && isWhatsAppTool(name)) return false;
+  if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
   return !on.has(p);
 }
