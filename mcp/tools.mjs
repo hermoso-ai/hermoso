@@ -2552,7 +2552,14 @@ const splitW = (destructiveHint, idempotentHint) => Object.freeze({ readOnlyHint
 const splitOp = (name, set, params, ann, title, description, desc) => Object.freeze({ name, set: Object.freeze(set), params: Object.freeze(params), ann, title, description, ...(desc ? { desc: Object.freeze(desc) } : {}) });
 const X_BILLED = ' Needs X connected; X bills per call, so it costs credits.';
 const META_ACCT = ['account', 'pageId'];
-export const WIDGET_HOST_SPLITS = Object.freeze({
+// A MULTI-ACCOUNT CHANNEL'S OPERATIONS NAME THE ACCOUNT TOO (2026-10-30). withAccountArg gives every tool of a channel in
+// MULTI_ACCOUNT_CHANNELS an `account` argument at the registry, but an operation tool takes ONLY the params its op lists
+// (widgetSplitDef / widgetSplitHandler), so on a widget host every YouTube / X / Bluesky / Pinterest operation silently
+// lost it: a ChatGPT user with two channels connected could not say which one a playlist, caption or board change was
+// for. Appended here, once, for every op of an account-scoped tool, so a split added tomorrow inherits it.
+const withSplitAccounts = (m) => Object.fromEntries(Object.entries(m).map(([from, ops]) => [from, !accountScopedTool(from) ? ops
+  : ops.map((o) => (o.params.some((p) => p.replace(/!$/, '') === 'account') ? o : splitOp(o.name, o.set, [...o.params, 'account'], o.ann, o.title, o.description, o.desc)))]));
+export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
   moderate_meta_comment: [
     splitOp('hide_meta_comment', { action: 'hide' }, ['commentId!', ...META_ACCT], splitW(true, true), 'Hide a Facebook or Instagram comment', 'Use this when a comment on the brand’s own Facebook or Instagram post should be hidden from the public. Reversible with unhide_meta_comment. Get commentId from list_meta_comments. Free.'),
     splitOp('unhide_meta_comment', { action: 'unhide' }, ['commentId!', ...META_ACCT], splitW(true, true), 'Unhide a Facebook or Instagram comment', 'Use this when a comment the brand hid on its own Facebook or Instagram post should be visible again. Get commentId from list_meta_comments. Free.'),
@@ -2749,7 +2756,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze({
     splitOp('edit_pinterest_board_details', {}, ['boardId!', 'name', 'description'], splitW(true, true), 'Rename a Pinterest board or edit its description', 'Use this when a Pinterest board’s name or description should change. It overwrites the public text. Get boardId from list_pinterest_boards. 0 credits.', { name: 'the new board name' }),
     splitOp('set_pinterest_board_visibility', {}, ['boardId!', 'privacy!'], splitW(true, true), 'Make a Pinterest board public or secret', 'Use this when a Pinterest board should become SECRET (hidden, with every Pin on it, from everyone but this account) or PUBLIC again. Say what SECRET hides and get a yes first. It is reversible, and the reply reports how many Pins were hidden. 0 credits.', { privacy: 'PUBLIC or SECRET; SECRET hides every Pin on the board from everyone but this account' }),
   ],
-});
+}));
 // op tool name → the multi-op tool it comes from.
 export const WIDGET_SPLIT_OF = Object.freeze(Object.fromEntries(Object.entries(WIDGET_HOST_SPLITS).flatMap(([from, ops]) => ops.map((o) => [o.name, from]))));
 // Every name a widget host is never LISTED, whatever its scope. Pure, so the checks run it.
@@ -6296,6 +6303,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       description: z.string().optional().describe('YOUTUBE — replace the video description; "" clears it and the caption is used.'),
       tags: z.array(z.string()).optional().describe('YOUTUBE — replaces the WHOLE tag list; an empty array [] clears the tags.'),
       thumbnailUrl: z.string().optional().describe('YOUTUBE: replace the custom thumbnail; "" goes back to a frame of the video, "auto" to YouTube’s pick.'),
+      paidProductPlacement: z.boolean().optional().describe('YOUTUBE: paid product placement (shows the disclosure) — false removes it'),
+      brandPartner: z.string().optional().describe('YOUTUBE: sponsoring brand channel (UC… or @handle); "" removes it'),
       // The same six the CREATE path gained — a field you can set at create and not at edit is a one-way door,
       // and reschedule_post is how an agent corrects a queued post it got wrong.
       replyControl: z.enum(['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only']).optional().describe('THREADS ONLY — who may reply.'),
@@ -18557,6 +18566,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'TikTok post insights',
     description: 'Per-POST analytics for the connected TikTok account: views, reach, likes, comments, shares, saves, average watch time, full-watch rate, the RETENTION CURVE (share still watching at each second — the hook read), traffic sources (For You, Follow, Search, Sound, profile…), new followers, profile views, website clicks, lead submissions and the audience by country, gender and new-vs-returning. Newest posts first, up to 20 a page (cursor for more), or name videoIds. Data lags 24-48 hours. Needs the TikTok ACCOUNT authorization; an older one says which permission to re-authorize for. Read-only, free.',
     inputSchema: {
+      ...MANAGE_BRAND,
       videoIds: z.array(z.string()).optional().describe('post ids to read; omit for the newest posts'),
       maxCount: z.number().optional().describe('1-20, default 20'),
       cursor: z.string().optional().describe('pagination cursor from the previous reply, to fetch the next page'),
@@ -18565,7 +18575,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { videos: z.array(z.any()).optional(), cursor: z.any().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/tiktok-account/videos', { ...a, videoIds: a.videoIds ? a.videoIds.join(',') : undefined });
+    const { brand, ...q } = a; // the brand scopes the call (?brandId=), it is not a query field of its own
+    const d = await apiGet('/api/tiktok-account/videos', queryBrand(a, { ...q, videoIds: a.videoIds ? a.videoIds.join(',') : undefined }));
     return ok(`${d.note}\n${(d.videos || []).map(v => `• ${v.itemId}: ${v.views ?? '?'} views, reach ${v.reach ?? '?'}, avg watch ${v.averageWatchSeconds ?? '?'}s, ${v.retentionAt3s ?? '?'}% still watching at 3s — ${(v.caption || '').slice(0, 60)}`).join('\n')}`, d);
   }));
   server.registerTool('tiktok_spark_recommendations', {
@@ -19885,7 +19896,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // which is how "we have no data on that post" becomes a confident "it got no engagement".
   server.registerTool('linkedin_profile_followers', {
     title: 'Followers of a personal LinkedIn profile',
-    description: 'Follower count of the PERSONAL LinkedIn profile shared with this brand — the lifetime total and, with startDate / endDate, the new followers per day (LinkedIn\u2019s memberFollowersCount). This is the creator / founder growth number; Company Page followers are in linkedin_page_analytics. It needs a personal profile ticked in Manage accounts (list_connector_accounts provider linkedin) and the LinkedIn analytics authorization on the LinkedIn card — if the reply says re-authorize, say exactly that. Read-only, free.',
+    description: 'Follower count of the PERSONAL LinkedIn profile shared with this brand — the lifetime total and, with startDate / endDate, the new followers per day (LinkedIn\u2019s memberFollowersCount). This is the creator / founder growth number; Company Page followers are in linkedin_page_analytics. It needs a personal profile ticked in Manage accounts (list_connector_accounts provider linkedin, then set_connector_accounts with its id to tick it) and the LinkedIn analytics authorization on the LinkedIn card — if the reply says re-authorize, say exactly that. Read-only, free.',
     inputSchema: {
       startDate: z.string().optional().describe('YYYY-MM-DD — include for a daily series'),
       endDate: z.string().optional().describe('YYYY-MM-DD, exclusive, default today'),
@@ -22079,7 +22090,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const s = plan.style || {};
     const how = [s.hookDevice ? `Open the way the reference opens: ${s.hookDevice}` : '', s.pacing ? `Pacing: ${s.pacing}` : '', s.narration ? `Narration: ${s.narration}` : ''].filter(Boolean).join('. ');
     const captions = typeof a.captions === 'boolean' ? a.captions : !!(plan.reference && s.captions); // on only when the WATCHED reference burns subtitles (no-overlays law, 2026-10-26)
-    const voice = (a.voice || s.voice) === 'male' ? (vo.male || 'George') : (vo.female || 'Sarah');
+    // female/male are shortcuts onto the default voices; any other name is a narration voice passed straight through,
+    // exactly as make_explainer takes it (never rigid: presets are shortcuts, never the only door — enum-ledger.json).
+    const _v = String(a.voice || s.voice || '').trim();
+    const voice = /^male$/i.test(_v) ? (vo.male || 'George') : (!_v || /^female$/i.test(_v)) ? (vo.female || 'Sarah') : _v;
     return {
       topic: `Episode ${ep.episode} of ${n} in a faceless short-video series about "${topic}". This episode: ${ep.title}. ${ep.brief}${how ? ` ${how}.` : ''} No presenter on camera.`,
       durationSeconds: plan.durationSeconds, aspectRatio: a.aspectRatio || s.aspectRatio || '9:16',
@@ -22106,7 +22120,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional().describe('default: the reference\'s shape, else 9:16'),
       style: z.string().optional().describe('override the look in words (e.g. "flat 2D cartoon") instead of the reference\'s'),
       captions: z.boolean().optional().describe('burn subtitles of every spoken word. Default: on only when the reference itself burns its spoken words as subtitles, otherwise off; nothing else is ever put on screen (no app screens, URLs, cards or stickers) unless the user asks'),
-      voice: z.enum(['female', 'male']).optional().describe('narrator; default follows the reference'),
+      voice: z.string().optional().describe("narrator: 'female' or 'male' (default follows the reference), or any narration voice name make_explainer takes"),
       format: z.enum(['explainer', 'faceless_channel']).optional().describe("renderer lane: 'explainer' (default; exact length) or 'faceless_channel' (2K, whole 10s blocks)"),
       planOnly: z.boolean().optional().describe('write the episode plan and style card, render nothing (a small planning charge)'),
       plan: z.any().optional().describe('the `plan` a planOnly call returned, to run it without planning again'),
