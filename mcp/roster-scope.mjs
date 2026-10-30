@@ -176,7 +176,7 @@ export function toolProvider(name) {
 // could connect Instagram and then had no tool to post, reply, read its inbox or measure with. Only routes verified
 // to take the Login token are listed; a Page-only tool (ads, hashtag search, comment_on_meta_post) stays gated on meta.
 export const INSTAGRAM_LOGIN_TOOLS = new Set([
-  'post_to_meta', 'list_meta_posts', 'list_instagram_media', 'instagram_insights', 'meta_post_insights',
+  'post_to_meta', 'list_meta_posts', 'list_instagram_media', 'list_meta_stories', 'get_meta_story', 'instagram_insights', 'meta_post_insights',
   'list_meta_comments', 'reply_to_meta_comment', 'moderate_meta_comment', 'like_instagram',
   'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
   'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',
