@@ -18,8 +18,8 @@ website.
 and insights, comments and DMs, connectors, profiles and team seats are **free on every plan**, with no
 per-post or per-channel fee and no seat pricing. Credits are spent only on running an AI model (image, video,
 voice, text, planning, post-production) and on Ad Spy research, and posting an ad you already rendered is never a
-second charge. The one exception is X (Twitter), where posting and reads bill a few credits per call because X
-charges per API request.
+second charge. The one exception is X (Twitter), where posting and reads bill credits per call because X
+charges per API request (`hermoso_credits` prints the exact credits per X post).
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
 Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads, plus

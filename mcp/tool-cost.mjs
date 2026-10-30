@@ -70,7 +70,7 @@ export function toolCostClass(name, group, provider = null) {
 // The sentence each class prints. NO DIGITS HERE — see the header. `range` is filled in by the caller from the
 // live catalog when it has read one.
 export function costLabel(cls, range = '') {
-  if (cls === 'percall') return 'a few credits per call (X charges per API request)';
+  if (cls === 'percall') return 'credits per call at X’s per-request price, a post with a link far more than one without (hermoso_credits has the exact figures)';
   if (cls === 'research') return 'credits (Ad Spy research)';
   if (cls === 'model') return range ? `credits — ${range}` : 'credits (runs a model; hermoso_capabilities has the exact per-model figure)';
   return 'free';
