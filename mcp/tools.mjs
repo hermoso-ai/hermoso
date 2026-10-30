@@ -4800,8 +4800,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // binds both, so the human is told exactly what they pay and what they get.
     const packs = (cfg.packs || []).map(p => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd }));
     const priceText = (p) => `$${p.priceUsd}`;
+    // THE PACK-VS-PLAN COMPARISON (2026-10-30): an account with no monthly plan is told, on the pack it is about to buy, the
+    // plan that beats it and by how much, measured by the server (packs[].planCompare, lib/pack-plan-compare.mjs). Not on a
+    // host that renders widgets, the same rule as hermoso_credits' upsell line.
+    const _cmp = new Map((cfg.packs || []).filter(p => p.planCompare).map(p => [p.id, p.planCompare]));
+    const cmpOf = (id) => (hostRendersWidgets() ? null : _cmp.get(id) || null);
+    const cmpLine = (c) => c ? `\n\nBefore paying: ${c.line} A monthly plan is the better buy here; upgrade_plan moves the account to ${c.planName} (a person pays on Stripe).` : '';
     if (!pack) {
-      const lines = packs.map(p => `• ${p.id} — ${p.credits.toLocaleString()} credits · ${priceText(p)}`).join('\n') || '(no packs configured)';
+      const lines = packs.map(p => `• ${p.id} — ${p.credits.toLocaleString()} credits · ${priceText(p)}${cmpOf(p.id) ? ` (${cmpOf(p.id).headline})` : ''}`).join('\n') || '(no packs configured)';
       let _up = null; try { _up = (await apiGet('/api/billing/status'))?.planUpsell || null; } catch {}
       return ok(`Credit packs you can buy:\n${lines}\n\nCall buy_credits again with pack="<id>". With a saved card it's a one-click charge (you'll be asked to confirm); otherwise you get a checkout link for your human.${_up ? `\n\n${_up.line} ${_up.note} Top-up credits use standard prices; upgrade_plan lists the monthly plans.` : ''}\n\nTip: to never run out again, turn on auto-reload (set_auto_reload) — it auto-tops-up from the saved card the moment your balance runs low.`, { packs });
     }
@@ -4822,7 +4828,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const mintQuote = () => {
         const t = `qt1|${match.id}|${match.priceUsd}|${Math.floor(Date.now() / 1000) + 600}|${(globalThis.crypto?.randomUUID?.() || String(Date.now())).slice(0, 8)}`;
         _mintedQuotes.add(t); if (_mintedQuotes.size > 50) _mintedQuotes.delete(_mintedQuotes.values().next().value); // bounded
-        return ok(`Ready to charge ${card} ${priceText(match)} for ${match.credits.toLocaleString()} credits (one-click, no redirect — same as the app's Add credits button). Confirm with your human if they haven't already asked for this, then call buy_credits again with pack="${match.id}", confirm:true and quote_token="${t}" (valid 10 minutes).`, { quote: { packId: match.id, credits: match.credits, priceUsd: match.priceUsd, card: st.card || null, quoteToken: t, expiresInSeconds: 600 } });
+        return ok(`Ready to charge ${card} ${priceText(match)} for ${match.credits.toLocaleString()} credits (one-click, no redirect — same as the app's Add credits button). Confirm with your human if they haven't already asked for this, then call buy_credits again with pack="${match.id}", confirm:true and quote_token="${t}" (valid 10 minutes).${cmpLine(cmpOf(match.id))}`, { quote: { packId: match.id, credits: match.credits, priceUsd: match.priceUsd, card: st.card || null, quoteToken: t, expiresInSeconds: 600 } });
       };
       if (!confirm || !quote_token) return mintQuote();
       const qp = String(quote_token).split('|');
@@ -4836,7 +4842,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return ok(`Done — charged ${card} ${priceText(match)}; ${match.credits.toLocaleString()} credits are on the account now. (Receipt lands in Billing → invoice history.)`, d);
     }
     const d = await apiPost('/api/billing/checkout-link', { packId: pack });
-    return ok(`Checkout link for ${Number(d.credits ?? match.credits).toLocaleString()} credits ($${d.amountUsd ?? match.priceUsd}):\n${d.url}\n\nGive this URL to your human to pay on Stripe's secure page — credits post automatically once payment completes, and their card saves for one-click top-ups (in-app AND via this tool) from then on. Nothing is charged until they pay.`, d);
+    return ok(`Checkout link for ${Number(d.credits ?? match.credits).toLocaleString()} credits ($${d.amountUsd ?? match.priceUsd}):\n${d.url}\n\nGive this URL to your human to pay on Stripe's secure page — credits post automatically once payment completes, and their card saves for one-click top-ups (in-app AND via this tool) from then on. Nothing is charged until they pay.${cmpLine(hostRendersWidgets() ? null : d.planCompare || cmpOf(match.id))}`, d);
   }));
 
   // BILLING SURFACE (read → top-up → plan/auto-reload): hermoso_credits (balance) → buy_credits (top-up link) →
@@ -13630,7 +13636,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     targetUrl: z.string().describe('the landing page (must not block OAI-AdsBot / OAI-SearchBot in robots.txt)'),
     imageUrl: z.string().optional().describe('public https URL of a STILL image — every text ad needs imageUrl OR fileId (ChatGPT Ads refuses an ad with no creative.file_id unless the campaign is a product feed; measured 2026-09-06); a video URL is refused, this channel has no video format'),
     fileId: z.string().optional().describe('reuse an image ChatGPT Ads already holds: the fileId list_openai_ads_campaigns returns for an existing ad (list with adGroupId). Wins over imageUrl; use it to copy an ad exactly'),
-    imageUrls: z.array(z.string()).optional().describe('4–6 public https URLs of SQUARE stills, in display order, for an ad with MULTIPLE images (one title, body and landing page shared by all). OpenAI enables this per ad account, and with automatic bidding only if the account is also enabled for that — otherwise use a fixed bid. Not with imageUrl/fileId or price'),
+    imageUrls: z.array(z.string()).optional().describe('4–6 public https URLs of EXACTLY square (1:1) stills, in display order, for an ad with MULTIPLE images (one title, body and landing page shared by all). Each URL is measured before anything is uploaded: OpenAI refuses an image even 1 pixel off square, and a set of 16:9 images. OpenAI enables this per ad account, and with automatic bidding only if the account is also enabled for that — otherwise use a fixed bid. Not with imageUrl/fileId or price'),
     fileIds: z.array(z.string()).optional().describe('the same as imageUrls with images already on the account (4–6 file ids); may be mixed with imageUrls, ids first. On an edit, omit both to keep the ad\u2019s current images; a new list replaces them all'),
     price: z.string().optional().describe('optional price string shown on the card'),
   });
@@ -15113,7 +15119,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_openai_ads_ad', {
     title: 'Create a ChatGPT Ads ad',
-    description: 'Create the actual AD inside a ChatGPT Ads ad group — the object that carries the creative; a campaign or ad group alone shows nothing at all. The creative is a TEXT + IMAGE CARD: a title of 3–50 characters, body copy of 100 characters maximum, one landing page URL and one still image. THERE IS NO VIDEO FORMAT ON THIS PLATFORM — a video URL is refused outright, so never offer one. Created paused; creating it active inside a live ad group starts REAL AD SPEND, so that needs confirm:true. OpenAI REVIEWS every ad (usually a few minutes) and the ad is read back with its review status: until that says approved the ad CANNOT show, so report the review status rather than calling it live. The landing page is also checked against robots.txt for OAI-AdsBot / OAI-SearchBot blocks — a page that blocks those agents cannot run ChatGPT ads at all, and the note says so.',
+    description: 'Create the actual AD inside a ChatGPT Ads ad group — the object that carries the creative; a campaign or ad group alone shows nothing at all. The creative is a TEXT + IMAGE CARD: a title of 3–50 characters, body copy of 100 characters maximum, one landing page URL and one still image. THERE IS NO VIDEO FORMAT ON THIS PLATFORM — a video URL is refused outright, so never offer one. Created paused; creating it active inside a live ad group starts REAL AD SPEND, so that needs confirm:true. OpenAI REVIEWS every ad (usually a few minutes) and the ad is read back with its review status: until that says approved the ad CANNOT show, so report the review status rather than calling it live. The landing page is also checked against robots.txt for OAI-AdsBot / OAI-SearchBot blocks — a page that blocks those agents cannot run ChatGPT ads at all, and the note says so. OpenAI creative enhancements (on by default for self-serve campaigns since 2026-10-30) may serve this copy rewritten, translated or on another page of the same site; the switch is in ChatGPT Ads Manager (account and campaign) and the API does not expose it, so never promise the exact words will run.',
     inputSchema: {
       adGroupId: z.string().describe('ad group id to create the ad in'), name: z.string().optional().describe('internal name — defaults to the title'),
       creative: oaiCreativeShape.describe('title 3-50 characters, body up to 100, landing page URL and one still image; no video'),
