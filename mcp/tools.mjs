@@ -601,6 +601,7 @@ const wrap = (fn) => {
       // A PUBLISH OUTCOME IS DATA (2026-10-25, fb_679fd3573ff0): "nothing was posted" and "could not confirm" both arrive
       // as 502, so the hint follows the server's `remedy.posted`, never the status or the prose.
       if (e?.remedy?.code === 'publish_not_sent') _hints.push({ do: 'call this tool again with the same arguments', why: 'nothing was posted: it failed before anything was sent to the platform, so a retry cannot double-post' });
+      else if (e?.remedy?.code === 'publish_refused') _hints.push(e.remedy.retryable === false ? { do: 'tell the user what the platform refused and what to change; do not send the same post again until it is changed', why: 'the platform answered that this post failed, so nothing is live, and the same post would be refused the same way' } : { do: 'call this tool again with the same arguments', why: 'the platform answered that this post failed, so nothing is live and a retry cannot double-post' });
       else if (e?.remedy?.code === 'publish_unconfirmed' || e?.remedy?.code === 'publish_in_progress') _hints.push({ do: 'check the account for the post before anything else; do not retry with a new idempotency key', why: 'the publishing call did not answer cleanly, so the post may be live; allowDuplicate:true is the only way to post it again' });
     }
       // ── THE STRUCTURED ERROR MARKER (2026-08-26) ──────────────────────────────────────────────────────────
@@ -8410,13 +8411,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       yourBrand: z.boolean().optional().describe('discloses that this promotes the creator’s own brand'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (TikTok video_cover_timestamp_ms, on a direct post \u2014 a draft takes no cover, you pick it in the TikTok app). true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
-    outputSchema: { ok: z.boolean().optional(), publishId: z.string().optional(), status: z.string().optional(), destination: z.string().optional(), media: z.string().optional(), images: z.number().optional(), coverIndex: z.number().optional(), postId: z.string().nullable().optional(), url: z.string().nullable().optional(), account: z.string().nullable().optional(), pending: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), publishId: z.string().optional(), status: z.string().optional(), destination: z.string().optional(), media: z.string().optional(), images: z.number().optional(), coverIndex: z.number().optional(), postId: z.string().nullable().optional(), url: z.string().nullable().optional(), account: z.string().nullable().optional(), pending: z.boolean().optional(), mediaConformedNote: z.string().optional(), reencodedNote: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok/post', a);
     const what = d.media === 'photo' ? (d.images > 1 ? `photo post (${d.images} slides)` : 'photo post') : 'video';
-    if (d.destination === 'draft') return ok(`Sent the ${what} to TikTok${d.account ? ` on @${d.account}` : ''} — it's waiting in the TikTok app (inbox notification, or ＋ ▸ drafts) for the user to finish and post.${d.pending ? ' TikTok was still processing when polling stopped; it usually lands within a minute.' : ''}`, d);
-    return ok(`Posted the ${what} to TikTok${d.account ? ` as @${d.account}` : ''}${d.url ? ` — ${d.url}` : ''}.${d.pending ? ' TikTok was still processing when polling stopped — it normally appears within a minute or two. Do not post it again.' : ''}`, d);
+    if (d.destination === 'draft') return ok(`Sent the ${what} to TikTok${d.account ? ` on @${d.account}` : ''} — it's waiting in the TikTok app (inbox notification, or ＋ ▸ drafts) for the user to finish and post.${[d.mediaConformedNote, d.reencodedNote].filter(Boolean).map(n => ` ${n}`).join('')}${d.pending ? ' TikTok was still processing when polling stopped; it usually lands within a minute.' : ''}`, d);
+    return ok(`Posted the ${what} to TikTok${d.account ? ` as @${d.account}` : ''}${d.url ? ` — ${d.url}` : ''}.${d.pending ? ' TikTok was still processing when polling stopped — it normally appears within a minute or two. Do not post it again.' : ''}${[d.mediaConformedNote, d.reencodedNote].filter(Boolean).map(n => ` ${n}`).join('')}`, d);
   }));
   // A publish TikTok was still PROCESSING when post_to_tiktok stopped polling came back `pending:true` with a publishId
   // and the words "do not post it again", and nothing to follow it with: an agent asked call_tool for
@@ -8428,12 +8429,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       publishId: z.string().describe('the publishId post_to_tiktok returned'),
       account: z.string().optional().describe('which connected TikTok account the post went out on (@handle or id from list_connector_accounts) when the profile has more than one'),
     },
-    outputSchema: { publishId: z.string().optional(), status: z.string().optional(), done: z.boolean().optional(), failed: z.boolean().optional(), postId: z.string().nullable().optional(), failReason: z.string().nullable().optional(), uploadedBytes: z.number().nullable().optional() },
+    outputSchema: { publishId: z.string().optional(), status: z.string().optional(), done: z.boolean().optional(), failed: z.boolean().optional(), postId: z.string().nullable().optional(), failReason: z.string().nullable().optional(), failMessage: z.string().optional(), uploadedBytes: z.number().nullable().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok/publish-status', { publishId: a.publishId, ...(a.account ? { account: a.account } : {}) });
     if (d.done) return ok(`TikTok finished publishing it${d.postId ? ` (post id ${d.postId})` : ''}.`, d);
-    if (d.failed) return ok(`TikTok did not publish it: ${d.failReason || 'no reason given'}.`, d);
+    if (d.failed) return ok(d.failMessage || `TikTok did not publish it: ${d.failReason || 'no reason given'}.`, d);
     return ok(`TikTok is still processing it (${d.status || 'no status yet'}). That is normal for a few minutes; check again shortly and do not post it again.`, d);
   }));
   server.group('channel_admin');
