@@ -7859,11 +7859,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('x_follows', {
     title: 'Who follows an X account (or who it follows)',
-    description: 'The follower or following LIST for an X account \u2014 handles, names, bios, locations and each one\u2019s own follower/following/post counts. The COUNTS are already free on x_account and x_user; this is WHO, which is what audience analysis and creator vetting actually need. With no username it reads the CONNECTED account (\u201cwho follows us\u201d); pass a handle to read anyone public (\u201cwho follows our competitor\u201d). Warning: NEEDS THE follows.read PERMISSION, added 2026-08-31: an X connection authorized before that date does NOT carry it and cannot have it added \u2014 the tool says so and asks for a reconnect rather than surfacing X\u2019s raw refusal. Capped at 100 per call because X bills per user returned; page with nextToken. Needs X connected.',
+    description: 'The follower or following LIST for an X account \u2014 handles, names, bios, locations and each one\u2019s own follower/following/post counts. The COUNTS are already free on x_account and x_user; this is WHO, which is what audience analysis and creator vetting actually need. With no username it reads the CONNECTED account (\u201cwho follows us\u201d); pass a handle to read anyone public (\u201cwho follows our competitor\u201d). Warning: NEEDS THE follows.read PERMISSION, added 2026-08-31: an X connection authorized before that date does NOT carry it and cannot have it added \u2014 the tool says so and asks for a reconnect rather than surfacing X\u2019s raw refusal. Default 20, max 100 per call (X bills per account returned); page with nextToken. Needs X connected.',
     inputSchema: {
       username: z.string().optional().describe('handle with or without the @ \u2014 omit to read the connected account'),
       direction: z.enum(['followers', 'following']).optional().describe('default followers'),
-      maxResults: z.number().optional().describe('1\u2013100, default 50'),
+      maxResults: z.number().optional().describe('1\u2013100, default 20'),
       paginationToken: z.string().optional().describe('next page token from the previous reply'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
