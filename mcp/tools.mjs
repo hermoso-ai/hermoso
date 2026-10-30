@@ -6047,7 +6047,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       crossreshareDarkMode: z.boolean().optional().describe('THREADS ONLY — render that Instagram Story in dark mode. Only meaningful alongside crossreshareToIg; on its own it is refused rather than silently ignored, because a parameter that never reaches the wire must not look accepted.'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (Instagram Reel: thumb_offset; Facebook video/Reel: an uploaded cover image) \u2014 and on Threads, which has no cover setting, a blank first frame is replaced on a copy sent to Threads only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     }).loose(),
-    outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), url: z.string().optional(), target: z.string().optional(), page: z.string().optional(), account: z.string().optional(), publishIssues: z.array(z.object({ field: z.string(), code: z.string(), text: z.string() })).optional(), publishIssuesNote: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), postId: z.string().optional(), url: z.string().optional(), target: z.string().optional(), page: z.string().optional(), account: z.string().optional(), mediaConformedNote: z.string().optional(), publishIssues: z.array(z.object({ field: z.string(), code: z.string(), text: z.string() })).optional(), publishIssuesNote: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/meta/post', a);
@@ -6061,7 +6061,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // an account that has not accepted it — and may never.
     // A PUBLISH CAN SUCCEED AND STILL DROP PART OF THE POST (Instagram's config_issue / caption add-on status): the note
     // says what went out without its caption, tags, poll or prompt, so "it's live" is never the whole story told.
-    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}${d.publishIssuesNote ? ` ${d.publishIssuesNote}` : ''}`, d);
+    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}${d.publishIssuesNote ? ` ${d.publishIssuesNote}` : ''}${d.mediaConformedNote ? ` ${d.mediaConformedNote}` : ''}`, d);
   }));
   // ── SCHEDULING (2026-07-30). ONE mechanism for every channel — our durable queue, not a per-platform special case.
   // Product feedback: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
@@ -6656,13 +6656,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dmDeepLink: z.union([z.string(), z.boolean()]).optional().describe('a "Message us" button: true for the connected account, or https://x.com/messages/compose?recipient_id=<id>. TEXT posts only \u2014 X refuses it alongside media.'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. X has no cover setting and shows the video\u2019s FIRST frame, so by default Hermoso checks it and, only when that frame is blank (a template ad\u2019s empty opening card), sends X a copy with the first frame replaced by the video\u2019s best frame. Your Library file is never changed. true = send the file exactly as it is.'),
     },
-    outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional(), thread: z.boolean().optional(), media: z.boolean().optional(), altText: z.boolean().optional(), poll: z.boolean().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), text: z.string().optional(), url: z.string().optional() })).optional(), quotedPostId: z.string().optional(), communityId: z.string().optional(), paidPartnership: z.boolean().optional() },
+    outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), url: z.string().optional(), thread: z.boolean().optional(), media: z.boolean().optional(), altText: z.boolean().optional(), poll: z.boolean().optional(), mediaNote: z.string().optional(), costCredits: z.number().optional(), posts: z.array(z.object({ id: z.string().optional(), text: z.string().optional(), url: z.string().optional() })).optional(), quotedPostId: z.string().optional(), communityId: z.string().optional(), paidPartnership: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/post', a);
     if (d && d.dryRun === true) return ok(`Not posted (price check). This ${Array.isArray(a.thread) && a.thread.length > 1 ? `${a.thread.length}-post thread` : 'post'} costs ${d.costCredits} credits at X's per-post price. ${d.note || ''}`.trim(), d);
     const extra = d.media ? (d.altText ? ' with the render + alt text' : ' with the render attached (no alt text was written)') : d.poll ? ' with a poll' : '';
-    return ok(`Published to X${d.thread ? ` — a ${(d.posts || []).length}-post thread` : ''}${extra}: ${d.url}. Cost ${d.costCredits ?? '?'} credits.`, d);
+    return ok(`Published to X${d.thread ? ` — a ${(d.posts || []).length}-post thread` : ''}${extra}: ${d.url}. Cost ${d.costCredits ?? '?'} credits.${d.mediaNote ? ` ${d.mediaNote}` : ''}`, d);
   }));
   server.registerTool('post_x_article', {
     title: 'Publish a long-form Article to X',
