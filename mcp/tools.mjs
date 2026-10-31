@@ -4758,6 +4758,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Credit balance',
     description: 'Return the credit balance, recent priced calls with their credits, and costModel (the one-sentence rule of what costs credits). THE RULE: only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management, analytics, comments, DMs and connectors are FREE on every plan (X is the single per-call exception; xCost gives its exact credits per post, with and without a link). Check before kicking off paid generation; answer "does posting cost credits?" with NO. Paid plans: media models at cost + 10% (memberRate).',
     inputSchema: {}, outputSchema: {
+      accountHeld: z.number().nullable().optional().describe('credits on hold for a render in progress: not spent yet, and already taken out of accountBalance, which is what can be spent now. If you state the balance while this is above 0, say both once'),
       accountBalance: z.number().nullable().optional().describe('the account’s Hermoso credit balance (authoritative when authed)'),
       balance: z.number().optional().describe('raw vendor meter balance (operator/local-dev surface)'),
       sessionStart: z.number().nullable().optional().describe('vendor balance at session start (operator surface)'),
