@@ -7083,6 +7083,28 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), verified: z.boolean().optional(), deleted: z.boolean().optional(), productGroup: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/product-group', a); return ok(d.note, d); }));
+  // Gap rows 9, 12, 13 (2026-11-01): board sections, followers and websites, on the organic connection.
+  server.registerTool('list_pinterest_board_sections', {
+    title: 'List Pinterest board sections',
+    description: 'List the SECTIONS of a Pinterest board with their ids (the boardSectionId post_to_pinterest and save_pinterest_pin take), or with sectionId the Pins in one section. Read-only, 0 credits.',
+    inputSchema: { boardId: z.string().describe('from list_pinterest_boards'), sectionId: z.string().optional().describe('read the Pins in this section'), bookmark: z.string().optional().describe('the next page, from the last reply') },
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), sections: z.array(z.any()).optional(), pins: z.array(z.any()).optional(), bookmark: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/pinterest/board-sections', a); return ok(`${d.note}\n${JSON.stringify(d.sections || d.pins || []).slice(0, 5000)}`, d); }));
+  server.registerTool('manage_pinterest_board_section', {
+    title: 'Create, rename or delete a Pinterest board section',
+    description: 'Create, rename or delete a section of a Pinterest board. action:"create" needs name; "rename" needs sectionId and name; "delete" needs sectionId and confirm:true (without confirm it reports what would go). Read back from Pinterest. 0 credits.',
+    inputSchema: { boardId: z.string().describe('from list_pinterest_boards'), action: z.enum(['create', 'rename', 'delete']).optional().describe('default create'), sectionId: z.string().optional().describe('rename, delete: from list_pinterest_board_sections'), name: z.string().optional().describe('create, rename: up to 180 characters'), confirm: z.boolean().optional().describe('delete: required true') },
+    outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), verified: z.boolean().optional(), deleted: z.boolean().optional(), needsConfirm: z.boolean().optional(), section: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/board-section', a); return ok(d.note, d); }));
+  server.registerTool('pinterest_account_lists', {
+    title: 'Pinterest followers, following and websites',
+    description: 'Read lists on the connected Pinterest account. what: followers, following, following_boards, websites (each site and whether it is claimed; a site that is not claimed explains a refused link) or website_verification (the code to put on a site to claim it). Claiming itself happens in Pinterest. Read-only, 0 credits.',
+    inputSchema: { what: z.enum(['followers', 'following', 'following_boards', 'websites', 'website_verification']).describe('which list'), limit: z.number().optional().describe('up to 250 per page'), bookmark: z.string().optional().describe('the next page, from the last reply') },
+    outputSchema: { ok: z.boolean().optional(), what: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), verification: z.any().optional(), bookmark: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/pinterest/account-lists', a); return ok(`${d.note}${d.rows ? `\n${JSON.stringify(d.rows).slice(0, 5000)}` : ''}`, d); }));
   server.registerTool('create_pinterest_board', {
     title: 'Create a Pinterest board',
     description: "Create a board on the connected Pinterest account. Needed because a Pin cannot exist without a board, and a NEW Pinterest business account has none — if list_pinterest_boards comes back empty, make one here rather than telling the user you can't pin. Boards are PUBLIC unless you pass privacy 'SECRET'; a Pin on a secret board is invisible to everyone, so only choose that if the user asked for it.",
@@ -15752,6 +15774,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       objective: z.enum(['AWARENESS', 'CONSIDERATION', 'WEB_CONVERSION', 'CATALOG_SALES', 'VIDEO_COMPLETION', 'APP_INSTALL', 'SALES', 'LEADS', 'CTV_CONSIDERATION']).describe('Pinterest requires an objective and will not guess one'),
       dailyBudget: z.number().optional().describe('daily cap in the ad account’s currency'),
       lifetimeBudget: z.number().optional().describe('lifetime cap instead of a daily one — Pinterest then requires endTime'),
+      isPerformancePlus: z.boolean().optional().describe('Pinterest Performance+ on this campaign; with no lifetime budget Pinterest also requires isFlexibleDailyBudgets:true'),
+      isAutomatedCampaign: z.boolean().optional().describe('Pinterest automated campaign'),
+      isTopOfSearch: z.boolean().optional().describe('top-of-search campaign'),
+      isFlexibleDailyBudgets: z.boolean().optional().describe('flexible daily budgets'),
+      isLtvOptimized: z.boolean().optional().describe('optimize for long-term value'),
+      isCampaignBudgetOptimization: z.boolean().optional().describe('default true at Pinterest: the budget sits on the campaign'),
+      intendedPromotionType: z.enum(['LEGACY', 'STANDARD_AD', 'CATALOG']).optional().describe('the kind of ads it will carry'),
+      bidOptions: z.record(z.any()).optional().describe('Pinterest bid_options object: multipliers by age, gender, placement, audience or frequency'),
       startTime: z.number().optional().describe('Unix timestamp in SECONDS'),
       endTime: z.number().optional().describe('Unix timestamp in SECONDS'),
       adGroup: z.object({ ...pinAdGroupShape, name: z.string().optional().describe('ad group name'), ad: z.object(pinAdShape).optional().describe('the ad created in this ad group; promotes an existing Pin') }).optional().describe('build the serving tree in the same call — WITHOUT this you get a campaign shell that can never show an ad'),
@@ -16009,6 +16039,68 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), operation: z.string().optional(), sent: z.number().optional(), before: z.any().optional(), after: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/pinterest/customer-list/update', a); return ok(d.note, d); }));
+  // Gap rows 6-15 (2026-11-01): keywords, audience size, bulk, and the ad-account extras. lib/pinterest-phase2.mjs reads each off Pinterest's own spec.
+  const pinKeywordList = z.array(z.object({ value: z.string().describe('the search words, up to 120 characters'), matchType: z.enum(['BROAD', 'PHRASE', 'EXACT', 'EXACT_NEGATIVE', 'PHRASE_NEGATIVE']).optional().describe('default BROAD; a campaign takes only the _NEGATIVE types') }));
+  server.registerTool('list_pinterest_ads_keywords', {
+    title: 'List Pinterest ad keywords',
+    description: 'Read the KEYWORDS on a Pinterest ad group or campaign: the searches a SEARCH placement serves on, each with its match type. Pass adGroupId or campaignId (neither lists the account’s own negative keywords). Read-only, 0 credits.',
+    inputSchema: { adAccountId: pinAcct, adGroupId: z.string().optional().describe('the ad group'), campaignId: z.string().optional().describe('the campaign'), matchTypes: z.array(z.enum(['BROAD', 'PHRASE', 'EXACT', 'EXACT_NEGATIVE', 'PHRASE_NEGATIVE'])).optional().describe('only these match types'), bookmark: z.string().optional().describe('the next page, from the last reply') },
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), keywords: z.array(z.any()).optional(), bookmark: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/pinterest/ads-keywords', { adAccountId: a.adAccountId, adGroupId: a.adGroupId, campaignId: a.campaignId, matchTypes: (a.matchTypes || []).join(',') || undefined, bookmark: a.bookmark }); return ok(`${d.note}\n${JSON.stringify(d.keywords || []).slice(0, 5000)}`, d); }));
+  server.registerTool('manage_pinterest_ads_keywords', {
+    title: 'Add or archive Pinterest ad keywords',
+    description: 'Add keywords to a Pinterest ad group, or archive them. action:"add" needs parentId (an ad group; a campaign takes only the _NEGATIVE match types) and keywords; Pinterest’s per-keyword refusals are reported. action:"archive" needs keywordIds; archiving is how Pinterest deletes a keyword. Read back from Pinterest. pinterest_ads_keyword_ideas finds candidates. 0 credits.',
+    inputSchema: { adAccountId: pinAcct, action: z.enum(['add', 'archive']).optional().describe('default add'), parentId: z.string().optional().describe('add: the ad group, or a campaign for negative keywords'), keywords: pinKeywordList.optional().describe('add: the keywords'), keywordIds: z.array(z.string()).optional().describe('archive: ids from list_pinterest_ads_keywords') },
+    outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), verified: z.boolean().optional(), added: z.array(z.any()).optional(), refused: z.array(z.any()).optional(), archived: z.number().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-keywords', a); return ok(d.note, d); }));
+  server.registerTool('pinterest_ads_audience_size', {
+    title: 'Pinterest audience size',
+    description: 'Estimate how many people a Pinterest ad group’s targeting can reach per month, before spending. Pass targetingSpec (e.g. {"GEO":["US"],"AGE_BUCKET":["25-34"]}), keywords and/or productGroupIds. A range from Pinterest’s historical data, not a promise. Read-only, 0 credits.',
+    inputSchema: { adAccountId: pinAcct, targetingSpec: z.record(z.any()).optional().describe('Pinterest targeting object, the same one an ad group takes'), keywords: pinKeywordList.optional().describe('keywords to size'), placementGroup: z.enum(['ALL', 'SEARCH', 'BROWSE', 'OTHER']).optional().describe('default ALL'), autoTargetingEnabled: z.boolean().optional().describe('default true at Pinterest'), creativeTypes: z.array(z.string()).optional().describe('e.g. REGULAR, VIDEO, SHOPPING'), productGroupIds: z.array(z.string()).optional().describe('product groups to size') },
+    outputSchema: { ok: z.boolean().optional(), lower: z.number().nullable().optional(), upper: z.number().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-audience-size', a); return ok(d.note, d); }));
+  server.registerTool('pinterest_ads_bulk', {
+    title: 'Pinterest bulk export and upsert',
+    description: 'Pinterest’s BULK lane: many campaigns, ad groups, ads, keywords or product groups in one request. action:"download" exports them; action:"upsert" creates or updates them from create and update, in Pinterest’s own object shapes; action:"status" reads a request by requestId and gives the result file link. Download and upsert run in the background, so read status next. A created object with no status goes in PAUSED; anything that starts delivery or changes a budget or bid is refused until the user agrees and confirm:true is passed. 0 credits.',
+    inputSchema: {
+      adAccountId: pinAcct, action: z.enum(['download', 'upsert', 'status']).optional().describe('default download'), requestId: z.string().optional().describe('status: the id download or upsert answered'),
+      entityTypes: z.array(z.enum(['CAMPAIGN', 'AD_GROUP', 'PRODUCT_GROUP', 'AD', 'KEYWORD', 'LABEL', 'SCHEDULE', 'ENTITY_HISTORY'])).optional().describe('download: up to 6 types'), outputFormat: z.enum(['JSON', 'CSV']).optional().describe('download: default JSON'), entityIds: z.array(z.string()).optional().describe('download: only these ids'), campaignFilter: z.record(z.any()).optional().describe('download: Pinterest’s campaign_filter object'), updatedSince: z.string().optional().describe('download: a Unix timestamp'),
+      create: z.record(z.any()).optional().describe('upsert: objects to create by type, e.g. {"campaigns":[...],"ad_groups":[...],"keywords":[...]}'), update: z.record(z.any()).optional().describe('upsert: objects to change by type'), confirm: z.boolean().optional().describe('upsert: required true when it starts delivery or changes a budget or bid'),
+    },
+    outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), requestId: z.string().optional(), status: z.string().optional(), resultUrl: z.string().nullable().optional(), counts: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-bulk', a); return ok(d.note, d); }));
+  server.registerTool('pinterest_ads_account_data', {
+    title: 'Pinterest ad-account data',
+    description: 'Read Pinterest ad-account data. what: conversion_eqs (Event Quality Score of the conversion signals; lookback 1d or 14d, optional sourcePlatform, ingestionSource), metrics_ready_state (whether a date’s numbers are final; date YYYY-MM-DD), report_templates, promotions, targeting_templates. Read-only, 0 credits.',
+    inputSchema: { adAccountId: pinAcct, what: z.enum(['conversion_eqs', 'metrics_ready_state', 'report_templates', 'promotions', 'targeting_templates']).describe('which data'), lookback: z.enum(['1d', '14d']).optional().describe('conversion_eqs: default 14d'), sourcePlatform: z.string().optional().describe('conversion_eqs: e.g. WEB'), ingestionSource: z.string().optional().describe('conversion_eqs: e.g. TAG, CONVERSIONS_API'), date: z.string().optional().describe('metrics_ready_state: YYYY-MM-DD'), searchQuery: z.string().optional().describe('targeting_templates: by name'), includeSizing: z.boolean().optional().describe('targeting_templates: add the audience size'), bookmark: z.string().optional().describe('the next page, from the last reply') },
+    outputSchema: { ok: z.boolean().optional(), what: z.string().optional(), count: z.number().optional(), rows: z.array(z.any()).optional(), state: z.any().optional(), score: z.any().optional(), bookmark: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/pinterest/ads-account-data', a); return ok(`${d.note}${d.rows ? `\n${JSON.stringify(d.rows).slice(0, 5000)}` : ''}`, d); }));
+  server.registerTool('manage_pinterest_ads_targeting_template', {
+    title: 'Manage Pinterest targeting templates',
+    description: 'Save a Pinterest targeting set to reuse across ad groups, or remove one. action:"create" needs name and targetingSpec; "remove" needs templateId. Pinterest does not let an ordinary account edit a saved one, so a changed set is a new template. Read back from Pinterest. 0 credits.',
+    inputSchema: { adAccountId: pinAcct, action: z.enum(['create', 'remove']).optional().describe('default create'), templateId: z.string().optional().describe('remove: from pinterest_ads_account_data what:targeting_templates'), name: z.string().optional().describe('create: the template name'), targetingSpec: z.record(z.any()).optional().describe('Pinterest targeting object, e.g. {"GEO":["US"],"AGE_BUCKET":["25-34"]}'), keywords: pinKeywordList.optional().describe('keywords to hold'), placementGroup: z.enum(['ALL', 'SEARCH', 'BROWSE', 'OTHER']).optional().describe('create: default ALL'), autoTargetingEnabled: z.boolean().optional().describe('create: default true at Pinterest') },
+    outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), verified: z.boolean().optional(), deleted: z.boolean().optional(), template: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-targeting-template', a); return ok(d.note, d); }));
+  server.registerTool('manage_pinterest_ads_promotion', {
+    title: 'Manage Pinterest promotions',
+    description: 'Create, change or delete a Pinterest PROMOTION, the discount an ad group can show. action:"create" needs title and type (the kind of offer, which sets the text shown) and takes code, startTime, endTime (Unix seconds), templateValues (what fills the text), discountStatus, and any other Pinterest field in fields; "update" needs promotionId; "delete" needs promotionId and confirm:true. Read back from Pinterest. 0 credits.',
+    inputSchema: { adAccountId: pinAcct, action: z.enum(['create', 'update', 'delete']).optional().describe('default create'), promotionId: z.string().optional().describe('update, delete: from pinterest_ads_account_data what:promotions'), title: z.string().optional().describe('create: the internal name'), type: z.enum(['VARIABLE', 'SITEWIDE', 'CHECKOUT', 'SAVE_X_ON_Y', 'BUY_X_GET_Y', 'SPEND_X_SAVE_Y', 'FREE_SHIPPING', 'FREE_SHIPPING_MINIMUM', 'FREE_SHIPPING_WITH_DISCOUNT', 'SITEWIDE_IN_STORES', 'EXTRA_PERCENT_OFF', 'GIFT_WITH_PURCHASE', 'GIFT_WITH_PURCHASE_MINIMUM', 'FIXED', 'PERCENT_OFF_CLEARANCE', 'X_OFF_Y', 'GIFT_WITH_FIRST_PURCHASE', 'BUY_X_GET_ONE_FREE', 'CASH_BACK', 'POINTS_ON_ALL_PURCHASES', 'BONUS', 'POINTS_WITH_PURCHASE', 'CUSTOM']).optional().describe('create: the kind of offer'), templateValues: z.array(z.record(z.any())).optional().describe('what fills the offer text, at most 2, in Pinterest template_values shape'), code: z.string().optional().describe('the code a buyer redeems'), customId: z.string().optional().describe('your own id for it'), discountStatus: z.string().optional().describe('Pinterest’s discount_status value'), startTime: z.number().optional().describe('Unix seconds'), endTime: z.number().optional().describe('Unix seconds'), fields: z.record(z.any()).optional().describe('any other promotion field, by Pinterest’s own name'), confirm: z.boolean().optional().describe('delete: required true') },
+    outputSchema: { ok: z.boolean().optional(), action: z.string().optional(), verified: z.boolean().optional(), deleted: z.boolean().optional(), needsConfirm: z.boolean().optional(), promotion: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-promotion', a); return ok(d.note, d); }));
+  server.registerTool('run_pinterest_ads_report_template', {
+    title: 'Run a Pinterest report template',
+    description: 'Run a saved Pinterest report template (pinterest_ads_account_data what:report_templates lists them) for an optional date range. It runs in the background and answers a token; pinterest_ads_async_report with that token gives the rows. 0 credits.',
+    inputSchema: { adAccountId: pinAcct, templateId: z.string().describe('the template id'), startDate: z.string().optional().describe('YYYY-MM-DD'), endDate: z.string().optional().describe('YYYY-MM-DD'), granularity: z.enum(['TOTAL', 'DAY', 'HOUR', 'WEEK', 'MONTH']).optional().describe('default the template’s own') },
+    outputSchema: { ok: z.boolean().optional(), token: z.string().optional(), status: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pinterest/ads-report-template', a); return ok(d.note, d); }));
   server.registerTool('pinterest_ads_keyword_ideas', {
     title: 'Pinterest keyword ideas',
     description: 'Pinterest KEYWORD RESEARCH through the Pinterest Ads connection. mode:"related" (default): terms related to each of your terms ("workout" -> "yoga workout", "workout motivation"); mode:"suggested": popular searches that BEGIN with the term; mode:"metrics": Pinterest-wide search volume for up to 2,000 keywords in one country. Feeds ad-group KEYWORD targeting and Pin titles. Read-only, 0 credits.',
@@ -21905,6 +21997,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       mood: z.enum(['elegant', 'epic', 'upbeat', 'hype', 'calm', 'tense', 'playful']).optional().describe('music and pace'),
       music: z.string().optional().describe("'off' = silent"),
       theme: z.enum(['light', 'dark']).optional().describe("logo: dark for a light logo"),
+      energy: z.number().optional().describe('how much the film keeps moving, 0 to 1; 0 films exactly what is written'),
       spec: z.object({}).passthrough().optional().describe('the whole film as JSON, from a quote or a saved film; help:true shows the spec language'),
       projectUrl: z.string().optional().describe("a past film's url; returns its saved spec to edit and render again"),
       help: z.boolean().optional().describe('true returns the spec language and recipes; renders nothing'),
@@ -21932,7 +22025,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     let credits = null, previewCredits = null, bpm = null;
     if (!spec) {
       if (!a.recipe) throw Object.assign(new Error("Pass a recipe ('type', 'logo', 'launch', 'product' or 'social') with words, or a whole spec."), { status: 400, _userInput: true });
-      const d = await apiPost('/api/motion/build', { recipe: a.recipe, size: a.size || null, seconds: a.seconds ?? null, mood: a.mood || null, theme: a.theme || null, brand: { name, palette: pal, logo: brandLogo ? 'yes' : '' }, words: { hook: a.hook || '', lines: a.lines || [], tagline: a.tagline || '' }, images });
+      const d = await apiPost('/api/motion/build', { recipe: a.recipe, size: a.size || null, seconds: a.seconds ?? null, mood: a.mood || null, theme: a.theme || null, ...(a.energy != null ? { energy: a.energy } : {}), brand: { name, palette: pal, logo: brandLogo ? 'yes' : '' }, words: { hook: a.hook || '', lines: a.lines || [], tagline: a.tagline || '' }, images });
       spec = d.spec; if (!music) music = d.music || ''; credits = d.credits; previewCredits = d.previewCredits; bpm = d.bpm;
     }
     const film = { config: { template: 'motion', spec, ...(music ? { music } : {}) }, brand: { name, domain: b.domain || '', logo: brandLogo, palette: pal } };
@@ -24943,9 +25036,12 @@ function memoryNoteVerdict(text) {
   // motion and the ORIGINAL AUDIO untouched. The plan is one server call; every variant is a `multiply` job (opening-frame keyframe edit → motion transfer driven by the source, so length, cut, motion and audio are the original's).
   server.registerTool('multiply_ad', {
     title: 'Multiply an ad',
-    description: "MULTIPLY a winning video ad into N variants: each gets a NEW character, outfit, location and/or objects while the cut, the camera motion, the pacing and the ORIGINAL AUDIO stay exactly as they were (that is what made the ad work), and any burned-in captions are removed. Pass the source video URL (a previous render, a job result, list_library, or the top performer from post_performance / meta_insights). HOW: the source video itself DRIVES each variant (motion transfer from one image-edited opening frame), so every variant comes back the SAME LENGTH as the source with the same cut, the same performance and the original audio — only the person, outfit, set and props change. Sources up to 30 seconds work as they are; longer ones are refused for free with the way out (trim it first: post_edit with ops [{op:'trim', start:0, end:30}] — clip_video is the AI highlight clipper, not a trim). Returns the plan and ONE JOB PER VARIANT — call get_job on each until it reports done; do not describe a variant before its URL arrives. COST: quoteOnly:true returns the exact credits free: state that first. A paid planning read (planCredits) runs next, then each variant bills perVariantCredits. dryRun:true pays for that read; pass its `plan` back to render without paying again. Regions: pass regions:['Berlin','Tokyo'] to restyle variants per market; translation is a separate, explicit step — dub_video on a finished variant. `change` is what should change, in the user's own words ('older women', 'winter streets', 'swap the mug for our bottle'): every variant applies it and the variants still differ around it; a part of it about the voice, words, language, music, length or captions cannot change here, and the reply says so and names the tool that can.",
+    description: "MULTIPLY a winning video ad into N variants: each gets a NEW character, outfit, location and/or objects while the cut, the camera motion, the pacing and the ORIGINAL AUDIO stay exactly as they were (that is what made the ad work), and any burned-in captions are removed. Pass the source video URL (a previous render, a job result, list_library, or the top performer from post_performance / meta_insights). HOW: the source video itself DRIVES each variant (motion transfer from one image-edited opening frame), so every variant comes back the SAME LENGTH as the source with the same cut, the same performance and the original audio — only the person, outfit, set and props change. Sources up to 30 seconds work as they are; longer ones are refused for free with the way out (trim it first: post_edit with ops [{op:'trim', start:0, end:30}] — clip_video is the AI highlight clipper, not a trim). Returns the plan and ONE JOB PER VARIANT — call get_job on each until it reports done; do not describe a variant before its URL arrives. COST: quoteOnly:true returns the exact credits free: state that first. A paid planning read (planCredits) runs next, then each variant bills perVariantCredits. dryRun:true pays for that read; pass its `plan` back to render without paying again. Your own pictures: images takes up to 9 of the user's product, people, clothes or places, and change names them @Image1, @Image2 in order ('she holds the bottle in @Image1'); the saved brand's product photo is read as a reference to its real look (useBrand:false leaves it out). A TikTok, Reel, Facebook, X or YouTube post link works as the source: one paid lookup reads it into a file. quality: 1080p (default) or 720p; quoteOnly prices both. Regions: pass regions:['Berlin','Tokyo'] to restyle variants per market; translation is a separate, explicit step — dub_video on a finished variant. `change` is what should change, in the user's own words ('older women', 'winter streets', 'swap the mug for our bottle'): every variant applies it and the variants still differ around it; a part of it about the voice, words, language, music, length or captions cannot change here, and the reply says so and names the tool that can.",
     inputSchema: {
-      video: z.string().describe('the source video URL'),
+      video: z.string().describe('the source video: a file URL, or a TikTok, Reel, Facebook, X or YouTube post link'),
+      images: z.array(z.union([z.string(), z.object({ url: z.string(), role: z.string().optional().describe('what it is, in your words, e.g. "our founder"') })])).optional().describe('up to 9 pictures to put in the variants, in the order @Image1, @Image2 name them: URLs or local paths'),
+      quality: z.enum(['1080p', '720p']).optional().describe('1080p is the default; 720p costs less, and hands holding a product are less reliable at 720p'),
+      useBrand: z.boolean().optional().describe('false = send no brand product photo (for a video that is not this workspace brand)'),
       count: z.number().optional().describe('how many variants, 1-12 (default 6)'),
       change: z.string().optional().describe("what should change, in the user's own words, e.g. 'older women, winter streets'; every variant applies it (omit to let the variants vary freely)"),
       axes: z.array(z.string()).optional().describe('what to vary: character, outfit, location, objects (default all four), or your own, e.g. "season"'),
@@ -24955,32 +25051,39 @@ function memoryNoteVerdict(text) {
       dryRun: z.boolean().optional().describe('true = the paid plan and the price, no render'),
       plan: z.any().optional().describe('the `plan` a dryRun returned, rendered without planning again'),
     },
-    outputSchema: { jobs: z.array(z.any()).optional(), plan: z.any().optional(), perVariantCredits: z.number().nullable().optional(), totalCredits: z.number().nullable().optional(), planCredits: z.number().optional(), planCreditsUsed: z.number().optional(), dryRun: z.boolean().optional() },
+    outputSchema: { jobs: z.array(z.any()).optional(), plan: z.any().optional(), perVariantCredits: z.number().nullable().optional(), perVariantMaxCredits: z.number().nullable().optional(), qualities: z.any().optional(), seconds: z.number().optional(), quoteOnly: z.boolean().optional(), totalCredits: z.number().nullable().optional(), planCredits: z.number().optional(), planCreditsUsed: z.number().optional(), dryRun: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ video, count, change, axes, notes, regions, quoteOnly, dryRun, plan: savedPlan }) => {
+  }, wrap(async ({ video, count, change, axes, notes, regions, images, quality, useBrand, quoteOnly, dryRun, plan: savedPlan }) => {
     const src = String(video || '').trim();
-    if (!/^https?:\/\//.test(src)) return { content: [{ type: 'text', text: 'Pass the source video as a URL — a previous render, a job result, or an entry from list_library.' }], isError: true };
+    if (!/^https?:\/\//.test(src) && !src.startsWith('/generated/')) return { content: [{ type: 'text', text: 'Pass the source video as a URL: a previous render, a job result, an entry from list_library, or a social post link.' }], isError: true };
     const n = Math.max(1, Math.min(12, Math.round(+count) || 6));
     if (quoteOnly) {
-      const q = await apiPost('/api/multiply/quote', { video: src, count: n });
+      const q = await apiPost('/api/multiply/quote', { video: src, count: n, ...(quality ? { quality } : {}) });
       if (!(q?.perVariantCredits > 0)) return ok(`No price for this source${q?.seconds > 0 ? `: it is ${q.seconds}s, over the length a variant can be driven from` : ': pass a playable video file URL (a post link is priced after its plan, with dryRun)'}. Nothing was charged.`, { perVariantCredits: null, totalCredits: null, quoteOnly: true });
-      return ok(`Exact price, nothing charged: ${q.perVariantCredits} credits per variant, ${q.totalCredits} credits for ${n} (${q.seconds}s source), plus about ${q.planCredits} credits for the planning read that runs first. ${PRICE_ESTIMATE_LINE}`, { perVariantCredits: q.perVariantCredits, totalCredits: q.totalCredits, planCredits: q.planCredits, seconds: q.seconds, quoteOnly: true });
+      const _qs = Object.entries(q.qualities || {}).map(([k, c]) => `${k}: ${c}`).join(', ');
+      return ok(`Exact price, nothing charged: ${q.perVariantCredits} credits per variant${q.quality === '720p' ? ' at 720p' : ''}, ${q.totalCredits} credits for ${n} (${q.seconds}s source), plus about ${q.planCredits} credits for the planning read that runs first.${_qs ? ` Per variant by quality: ${_qs}.` : ''}${q.perVariantMaxCredits ? ` A tight close-up the driver cannot read goes through the video editor instead, up to ${q.perVariantMaxCredits} per variant.` : ''} ${PRICE_ESTIMATE_LINE}`, { perVariantCredits: q.perVariantCredits, perVariantMaxCredits: q.perVariantMaxCredits ?? null, totalCredits: q.totalCredits, planCredits: q.planCredits, seconds: q.seconds, qualities: q.qualities, quoteOnly: true });
     }
     const hasSaved = savedPlan && typeof savedPlan === 'object' && Array.isArray(savedPlan.variants) && savedPlan.variants.length && savedPlan.perVariantCredits > 0;
-    const plan = hasSaved ? savedPlan : await apiPost('/api/multiply/plan', { video: src, count: n, ...(change ? { change } : {}), ...(axes ? { axes } : {}), ...(notes ? { notes } : {}), ...(regions ? { regions } : {}) });
-    const p = plan?.data || plan;
+    let _imgs;
+    if (!hasSaved && Array.isArray(images) && images.length) _imgs = (await Promise.all(images.map(async (x) => { const u = await toRef(typeof x === 'object' && x ? x.url : x); return u ? (typeof x === 'object' && x?.role ? { url: u, role: x.role } : u) : null; }))).filter(Boolean);
+    const plan = hasSaved ? savedPlan : await apiPost('/api/multiply/plan', { video: src, count: n, ...(change ? { change } : {}), ...(axes ? { axes } : {}), ...(notes ? { notes } : {}), ...(regions ? { regions } : {}), ...(_imgs ? { images: _imgs } : {}), ...(quality ? { quality } : {}), ...(useBrand === false ? { useBrand: false } : {}) });
+    const p = { ...(plan?.data || plan) };
+    // A saved plan rendered at another quality is priced at that quality before anything is queued.
+    if (hasSaved && quality && quality !== p.quality) { const rq = await apiPost('/api/multiply/quote', { video: p.video || src, count: 1, quality }); if (rq?.perVariantCredits > 0) { p.perVariantCredits = rq.perVariantCredits; p.perVariantMaxCredits = rq.perVariantMaxCredits; } p.quality = quality; }
+    const _jobSrc = p.video || src;
+    const _srcLine = `${p.sourceLink ? `\nRead from the post into ${p.video}. Pass that file next time so it is not looked up again.` : ''}${(p.images || []).length ? `\nPictures: ${p.images.map((im, i) => `@Image${i + 1}${im.role ? ` (${im.role})` : ''}`).join(', ')}.` : ''}`;
     const changeLine = `${p.change ? `\nEvery variant: ${p.change}` : ''}${p.changeNote ? `\n${p.changeNote}` : ''}`; // WHAT SHOULD CHANGE (2026-09-29), and what of it a variant cannot change
     const lines = (p.variants || []).map((v, i) => `${i + 1}. ${v.label} — ${['character', 'outfit', 'location', 'objects'].filter(a => v[a] && v[a] !== 'same').map(a => a + ': ' + v[a]).join('; ')}`);
     const _nV = (p.variants || []).length;
     const _planPaid = hasSaved ? 0 : (Number(p.planCreditsUsed) || 0); // only the read this call paid for; a saved plan was paid for by the dry run that made it
-    const quote = `${p.perVariantCredits} credits per variant, ${p.perVariantCredits * _nV} credits for ${_nV}${_planPaid ? ` (the planning read just billed ${_planPaid} credits)` : ''}`;
-    if (dryRun) return { content: [{ type: 'text', text: `Plan (nothing rendered). Source: ${Object.entries(p.source || {}).map(([k, v]) => k + ': ' + v).join('; ')}\n${lines.join('\n')}${changeLine}\n${quote}. ${PRICE_ESTIMATE_LINE} Call again with plan set to this plan (and no dryRun) to render exactly these without paying to plan again.` }], structuredContent: { plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.perVariantCredits * _nV, planCreditsUsed: _planPaid, dryRun: true } };
+    const quote = `${p.perVariantCredits} credits per variant${p.quality === '720p' ? ' at 720p' : ''}, ${p.perVariantCredits * _nV} credits for ${_nV}${p.perVariantMaxCredits ? ` (up to ${p.perVariantMaxCredits} per variant if a tight close-up goes through the video editor)` : ''}${_planPaid ? ` (the planning read just billed ${_planPaid} credits)` : ''}`;
+    if (dryRun) return { content: [{ type: 'text', text: `Plan (nothing rendered). Source: ${Object.entries(p.source || {}).map(([k, v]) => k + ': ' + v).join('; ')}\n${lines.join('\n')}${changeLine}${_srcLine}\n${quote}. ${PRICE_ESTIMATE_LINE} Call again with plan set to this plan (and no dryRun) to render exactly these without paying to plan again.` }], structuredContent: { plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.perVariantCredits * _nV, planCreditsUsed: _planPaid, dryRun: true } };
     const jobs = [];
     for (const v of (p.variants || [])) {
-      const job = await submitJob('multiply', { video: src, instruction: v.instruction, label: v.label }, { label: `Multiply · ${v.label}` });
+      const job = await submitJob('multiply', { video: _jobSrc, instruction: v.instruction, label: v.label, ...((p.images || []).length ? { images: p.images } : {}), ...(p.quality ? { quality: p.quality } : {}) }, { label: `Multiply · ${v.label}` });
       jobs.push({ id: job.id, label: v.label });
     }
-    return { content: [{ type: 'text', text: `Multiplying — ${jobs.length} variant(s) queued, original audio kept on all of them. ${quote}.${changeLine}\n${jobs.map((j, i) => `${i + 1}. ${j.label} → job ${j.id}`).join('\n')}\nEach variant is one keyframe edit plus a motion transfer of the whole source (2-6 minutes) and comes back the SAME length as the source. Call get_job with each id until it reports done; a variant has NO file until then.` }], structuredContent: { jobs, plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.perVariantCredits * _nV, planCreditsUsed: _planPaid } };
+    return { content: [{ type: 'text', text: `Multiplying — ${jobs.length} variant(s) queued, original audio kept on all of them. ${quote}.${changeLine}${_srcLine}\n${jobs.map((j, i) => `${i + 1}. ${j.label} → job ${j.id}`).join('\n')}\nEach variant is one keyframe edit plus a motion transfer of the whole source (2-6 minutes) and comes back the SAME length as the source. Call get_job with each id until it reports done; a variant has NO file until then.` }], structuredContent: { jobs, plan: p, perVariantCredits: p.perVariantCredits, totalCredits: p.perVariantCredits * _nV, planCreditsUsed: _planPaid } };
   }));
 
   // HOOK MULTIPLIER (2026-09-18): ONE finished video ad → N complete versions with NEW opening hooks, the rest of the ad and
