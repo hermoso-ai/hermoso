@@ -184,7 +184,7 @@ export const ENTRY_ICON = Object.freeze({ src: 'data:image/svg+xml;base64,' + Bu
 // BUTTONS AND ACCENT ARE OURS, NOT THE HOST'S (2026-10-03, founder, from ChatGPT dark mode): the primary button used
 // the host's info blue (--color-text-info) with the page background as its text, which ChatGPT dark mode painted as
 // near-black text on a mid blue. Buttons now use the Typeset tokens: --btn-bg/--btn-fg (near-black on light, near-white
-// on dark), a hairline --ring on secondary buttons, and one warm accent (coral #B23A2C, lifted to #ef6f5e on dark; 2026-10-07) for focus,
+// on dark), a hairline --ring on secondary buttons, and one accent (#BE4420 as text on light, #FC734D on dark; the approved palette, 2026-10-31) for focus,
 // selection and progress only. tools/chatgpt-extensions-check.mjs computes every button's text contrast in both themes.
 // String.raw so regex backslashes in the inline script survive; nothing below uses ${} or a backtick. The one value
 // spliced in is the bloom (%%BLOOM%%), so the hash below covers it.
@@ -196,11 +196,11 @@ const APP_STYLE = String.raw`<style>
  --line:var(--color-border-secondary,light-dark(rgba(26,28,31,.1),rgba(255,255,255,.12)));
  --card:color-mix(in oklab,var(--fg) 5%,var(--bg));
  --card2:color-mix(in oklab,var(--fg) 9%,var(--bg));
- --accent:light-dark(#B23A2C,#ef6f5e);
- --accent-ink:light-dark(#9c3226,#ffb4a8);
- --accent-bg:light-dark(#fbe9e6,#3a1a16);
- --btn-bg:light-dark(#0a0a0a,#fafafa);
- --btn-fg:light-dark(#ffffff,#0a0a0a);
+ --accent:light-dark(#BE4420,#FC734D);
+ --accent-ink:light-dark(#BE4420,#FF8A68);
+ --accent-bg:light-dark(#FFECE6,#2A1712);
+ --btn-bg:light-dark(#02070A,#F5F7F8);
+ --btn-fg:light-dark(#ffffff,#02070A);
  --ring:light-dark(rgba(10,10,10,.22),rgba(250,250,250,.28));
  --ok:var(--color-text-success,light-dark(#118a3e,#62d38d));
  --warn:var(--color-text-warning,light-dark(#b8450a,#ff8549));
