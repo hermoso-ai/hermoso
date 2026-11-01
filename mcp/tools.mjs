@@ -22397,7 +22397,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   };
   server.registerTool('make_series', {
     title: 'Make a series of faceless short videos (Content Factory)',
-    description: 'CONTENT FACTORY: turn ONE topic into a SERIES of faceless short videos (narration over pictures, no presenter), optionally in the STYLE of a trending reference video. Give `topic` ("make a video about…"), `episodes` (1-10, default 1) or your own `episodeTitles`, `durationSeconds` (20-120 per episode, default 30) and optionally `reference` (a TikTok / Reel / YouTube Short / Facebook / X link or a video file URL whose look, pacing and opening hook every episode copies, with plain subtitles only if the reference burns its own; never its words or characters). Find a trending reference with search_tiktok / search_instagram / search_youtube when the user wants one. THREE STEPS, ALWAYS IN THIS ORDER: (1) call with no `confirm` for a FREE quote of the whole series (per episode and total); (2) optionally `planOnly:true` to see the episode titles and the style card first (a small planning charge); (3) `confirm:true` (pass the `plan` from step 2 to reuse it) queues every episode and returns their job ids; poll get_job. Each finished episode can be scheduled with this tool again: pass `jobIds` plus `schedule` {channels, at, everyHours, timezone} and it books one post per finished episode, spaced `everyHours` apart (default 24). Captions follow the reference (on if it burns words on screen) unless `captions` says otherwise.',
+    description: 'CONTENT FACTORY: turn ONE topic into a SERIES of faceless short videos (narration over pictures, no presenter), optionally in the STYLE of a trending reference video. Give `topic` ("make a video about…"), `episodes` (1-10, default 1) or your own `episodeTitles`, `durationSeconds` (20-120 per episode, default 30) and optionally `reference` (a TikTok / Reel / YouTube Short / Facebook / X link or a video file URL whose look, pacing and opening hook every episode copies, with plain subtitles only if the reference burns its own; never its words or characters). Find a trending reference with search_tiktok / search_instagram / search_youtube when the user wants one. THREE STEPS, ALWAYS IN THIS ORDER: (1) call with no `confirm` for a FREE quote of the whole series (per episode and total); (2) optionally `planOnly:true` to see the episode titles and the style card first (a small planning charge); (3) `confirm:true` (pass the `plan` from step 2 to reuse it) queues every episode and returns their job ids; poll get_job. To make MORE of a series later, pass its returned plan as `moreOf`: same style, no episode repeated, the reference not watched again. Each finished episode can be scheduled with this tool again: pass `jobIds` plus `schedule` {channels, at, everyHours, timezone} and it books one post per finished episode, spaced `everyHours` apart (default 24). Captions follow the reference (on if it burns words on screen) unless `captions` says otherwise.',
     inputSchema: {
       topic: z.string().optional().describe('what the series is about, in the user\'s words'),
       episodes: z.number().optional().describe('how many episodes, 1-10 (default 1)'),
@@ -22411,6 +22411,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       format: z.enum(['explainer', 'faceless_channel']).optional().describe("renderer lane: 'explainer' (default; exact length) or 'faceless_channel' (2K, whole 10s blocks)"),
       planOnly: z.boolean().optional().describe('write the episode plan and style card, render nothing (a small planning charge)'),
       plan: z.any().optional().describe('the `plan` a planOnly call returned, to run it without planning again'),
+      moreOf: z.any().optional().describe('MORE EPISODES: the `plan` an earlier call returned. Keeps its style and length, writes new episodes only'),
       confirm: z.boolean().optional().describe('REQUIRED true to start rendering (real spend). Without it you get a free quote'),
       jobIds: z.array(z.string()).optional().describe('SCHEDULE MODE: the episode job ids to schedule (finished ones are booked)'),
       schedule: z.object({ channels: z.array(z.string()).describe('channels to post each episode to, e.g. tiktok, instagram, youtube (as schedule_post takes them)'), at: z.string().describe('time of the first post: YYYY-MM-DDTHH:MM wall-clock, or an ISO date-time'), everyHours: z.number().optional().describe('hours between episodes; default 24'), timezone: z.string().optional().describe('timezone name for at, as schedule_post takes it') }).optional().describe('SCHEDULE MODE: where and when the first episode posts; the rest follow every `everyHours` (default 24)'),
@@ -22444,30 +22445,79 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const titles = (a.episodeTitles || []).map((t) => String(t || '').trim()).filter(Boolean);
     const n = titles.length || Math.round(+a.episodes || 1);
     if (n < 1 || n > 10) throw new Error('A series is 1 to 10 episodes per run. Nothing was charged.');
-    const secs = Math.round(+a.durationSeconds || 30);
+    const prior = a.moreOf && typeof a.moreOf === 'object' ? a.moreOf : null; // more of an earlier series: its plan comes back
+    const secs = Math.round(+a.durationSeconds || +prior?.durationSeconds || 30);
     if (secs < 20 || secs > 120) throw new Error(`Each episode runs 20 to 120 seconds; ${secs}s is outside that. Ask for a length in that range (or a longer single explainer with make_explainer). Nothing was charged.`);
     let vo = {}; try { vo = (await apiGet('/api/generate/status'))?.voVoices || {}; } catch {}
     // FREE QUOTE: the renderer's own dry run for one episode, times the count, plus the planning estimate.
-    const planEst = a.reference ? 14 : 6;
-    const probe = seriesEpisodeInput(topic, { durationSeconds: secs, style: {} }, { episode: 1, title: topic, brief: '' }, n, a, vo);
+    const planEst = a.reference && !prior ? 14 : 6;
+    const probe = seriesEpisodeInput(topic, { durationSeconds: secs, style: prior?.style || {}, reference: prior?.reference || null }, { episode: 1, title: topic, brief: '' }, n, a, vo);
     const q = await quoteJob('explainer', probe);
     const per = q && Number.isFinite(+q.credits) ? +q.credits : null;
-    const quoteLine = per == null ? `the renderer would not quote it${q?.refused ? `: ${q.refused}` : ''}` : `about ${per} credits per ${secs}s episode, ${per * n} for ${n} episode${n === 1 ? '' : 's'}, plus about ${planEst} credits to plan the series${a.reference ? ' and watch the reference' : ''} (total about ${per * n + planEst})`;
+    const quoteLine = per == null ? `the renderer would not quote it${q?.refused ? `: ${q.refused}` : ''}` : `about ${per} credits per ${secs}s episode, ${per * n} for ${n} episode${n === 1 ? '' : 's'}, plus about ${planEst} credits to plan the series${a.reference && !prior ? ' and watch the reference' : ''} (total about ${per * n + planEst})`;
     if (!a.confirm && !a.planOnly) return ok(`QUOTE (nothing planned, rendered or charged): ${quoteLine}. ${PRICE_ESTIMATE_LINE} Call again with planOnly:true to see the episode titles first, or confirm:true to make the series.`, { perEpisodeCredits: per, episodes: n, totalCredits: per == null ? null : per * n + planEst });
     let plan = a.plan && Array.isArray(a.plan.episodes) && a.plan.episodes.length ? a.plan : null;
-    if (!plan) plan = await apiPost('/api/series/plan', { topic, episodes: n, episodeTitles: titles, durationSeconds: secs, reference: a.reference || '' });
+    if (!plan) plan = await apiPost('/api/series/plan', { topic, episodes: n, episodeTitles: titles, durationSeconds: secs, reference: a.reference || '', ...(prior ? { moreOf: prior } : {}) });
     const eps = (plan.episodes || []).slice(0, n);
     const list = eps.map((e) => `${e.episode}. ${e.title}`).join('\n');
     const s = plan.style || {};
     const styleLine = s.look ? `Style: ${s.look}${s.captions ? `; captions on (${s.captionLook || 'subtitles'})` : '; no captions'}; ${s.aspectRatio || '9:16'}.` : '';
     const watched = plan.reference ? ` Reference watched: ${plan.reference.frames || 0} frames${plan.reference.transcript ? ' + transcript' : ''}${plan.reference.note ? ` (${plan.reference.note})` : ''}.` : '';
-    if (!a.confirm) return ok(`SERIES PLAN (nothing rendered yet):\n${list}\n${styleLine}${watched}\nRendering it: ${quoteLine.replace(/, plus about.*$/, '')}. Call again with confirm:true and this plan to make it.`, { plan });
+    if (!a.confirm) return ok(`SERIES PLAN (nothing rendered yet${plan.planCredits ? `; planning charged ${plan.planCredits} credits` : ''}):\n${list}\n${styleLine}${watched}\nRendering it: ${quoteLine.replace(/, plus about.*$/, '')}. Call again with confirm:true and this plan to make it.`, { plan });
     const jobs = [];
     for (const e of eps) {
-      const j = await submitJob('explainer', seriesEpisodeInput(topic, plan, e, n, a, vo), { label: `Series · ${topic.slice(0, 40)} · Ep ${e.episode}/${n}: ${e.title}` });
+      const total = plan.totalEpisodes || n; // a continued series keeps counting: episode 5 of 6, not 2 of 2
+      const j = await submitJob('explainer', seriesEpisodeInput(topic, plan, e, total, a, vo), { label: `Series · ${topic.slice(0, 40)} · Ep ${e.episode}/${total}: ${e.title}` });
       jobs.push({ episode: e.episode, title: e.title, jobId: j?.id || null });
     }
-    return ok(`Series started: ${jobs.length} episode${jobs.length === 1 ? '' : 's'} rendering (${secs}s each, a few minutes per episode).\n${jobs.map((j) => `${j.episode}. ${j.title} [job ${j.jobId}]`).join('\n')}\n${styleLine}${watched}\nPoll get_job for each id. To schedule them once done, call make_series with jobIds and schedule {channels, at, everyHours}.`, { jobs, plan });
+    return ok(`Series started: ${jobs.length} episode${jobs.length === 1 ? '' : 's'} rendering (${secs}s each, a few minutes per episode).\n${jobs.map((j) => `${j.episode}. ${j.title} [job ${j.jobId}]`).join('\n')}\n${styleLine}${watched}\nPoll get_job for each id. To schedule them once done, call make_series with jobIds and schedule {channels, at, everyHours}. For more episodes later, call it with moreOf set to this plan.`, { jobs, plan });
+  }));
+
+  // THE EFFECTS, FOR AGENTS (2026-11-01; held since the 2026-10-09 parity batch): the same presets as the /tools effect pages, the
+  // same two jobs (still, then clip), each with its own free quote and its own confirm. The server writes the prompt from the id.
+  const effectQuote = (q, what) => { const c = q && (q.priceCredits || q.credits); return c != null && Number.isFinite(+c) ? `QUOTE (nothing made, nothing charged): ${what} is about ${c} credits. ${PRICE_ESTIMATE_LINE} Add confirm:true to make it.` : `${what} would not start${q && q.refused ? `: ${q.refused}` : ', so it has no price'}. Nothing was charged.`; };
+  const effectLine = (x) => `${x.id}: ${x.short} [takes ${x.inputs.map((f) => `${f.id}${f.optional ? ' (optional)' : ''}`).join(', ') || 'no picture'}${x.options.length ? `; ${x.options.map((o) => `${o.id}=${o.values.join('|')}${o.orDescribe ? '|custom' : ''}`).join('; ')}` : ''}${x.text ? `; text up to ${x.text.max}` : ''}; ${x.moves ? 'can move' : 'picture only'}]`;
+  server.registerTool('make_effect', {
+    title: 'Run a one-click effect on a photo',
+    description: "ONE-CLICK EFFECTS, the same ones as the /tools pages: a photo goes in, a styled picture comes out, and most can then become a 5-second clip. Plush toy, 3D figure, mascot, comic book, pixel game, billboard ad, giant product, bullet time, packshot, outfit swap, headshot, relight and many more. Name no `effect` for the free list. `effect` alone: what it takes. `effect` + `images`: a free quote; add confirm:true to make the picture. Then `effect` + `still` (that picture's URL): a free quote for the clip; confirm:true makes it. `describe` adds anything of your own. For a look not on the list use generate_image. A real person's photo follows the same likeness rules as every render.",
+    inputSchema: {
+      effect: z.string().optional().describe('effect id from the list'),
+      images: z.array(z.string()).optional().describe('its pictures, in the order listed: URL, local path or Library id'),
+      options: z.record(z.string(), z.string()).optional().describe('its listed options, e.g. {material:"knit"}; "custom" means use `describe`'),
+      text: z.string().optional().describe('a line printed exactly, on an effect that takes one'),
+      describe: z.string().optional().describe('your own words: added to the look, or the custom choice'),
+      aspectRatio: z.string().optional().describe('one of its listed shapes'),
+      still: z.string().optional().describe('CLIP STEP: the finished picture to animate'),
+      speech: z.string().optional().describe('CLIP STEP: a line said in the clip, on an effect that speaks'),
+      confirm: z.boolean().optional().describe('true = run it (real spend); without it, a free quote'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    if (!a.effect) {
+      const list = (await apiGet('/api/effects'))?.effects || [];
+      return ok(`${list.length} effects (free to list; each run is quoted first). Call with effect and images:\n${list.map(effectLine).join('\n')}`, { count: list.length });
+    }
+    const row = (await apiGet('/api/effects', { id: a.effect }))?.effect;
+    if (!row) throw new Error(`There is no effect called "${String(a.effect).slice(0, 60)}". Call make_effect with no effect for the list. Nothing was charged.`);
+    const describe = String(a.describe || '').trim();
+    if (a.still) {
+      if (!row.moves) throw new Error(`${row.title} makes a picture only. Nothing was charged.`);
+      const refImage = await toRef(a.still);
+      if (!refImage) throw new Error('The `still` could not be read: pass the picture\'s URL or a Library id. Nothing was charged.');
+      const input = { effect: row.id, refImage, ...(a.aspectRatio ? { aspectRatio: a.aspectRatio } : {}), ...(describe ? { effectDescribe: describe } : {}), ...(a.speech ? { effectSpeech: String(a.speech) } : {}) };
+      if (!a.confirm) return ok(effectQuote(await quoteJob('video', input), `a 5-second ${row.title} clip`));
+      const r = await renderJob('video', input, `Effect clip · ${row.title}`);
+      if (r?.stillRendering) return ok(`${row.title} clip still rendering [job ${r.jobId}]. Call get_job with that id.`, r);
+      return okVideo(`${row.title} clip ready: ${r.url}  [job ${r.jobId}]`, r);
+    }
+    if (!a.images?.length && row.inputs.some((f) => !f.optional)) return ok(`${effectLine(row)}\nShapes: ${row.aspects.join(', ')} (default ${row.aspect}). Pass images to get a quote.`, { effect: row });
+    const refs = (await Promise.all((a.images || []).map(toRef))).filter(Boolean);
+    if (refs.length !== (a.images || []).length) throw new Error('One of the pictures could not be read: pass a URL, a local path or a Library id. Nothing was charged.');
+    const input = { effect: row.id, refImages: refs, aspectRatio: a.aspectRatio || row.aspect, ...(a.options && Object.keys(a.options).length ? { effectOptions: a.options } : {}), ...(a.text ? { effectText: String(a.text) } : {}), ...(describe ? { effectDescribe: describe } : {}) };
+    if (!a.confirm) return ok(effectQuote(await quoteJob('image', input), `this ${row.title} picture`));
+    const r = await renderJob('image', input, `Effect · ${row.title}`);
+    if (r?.stillRendering) return ok(`${row.title} still rendering [job ${r.jobId}]. Call get_job with that id.`, r);
+    return ok(`${row.title} ready: ${r.url}  [job ${r.jobId}]${row.moves ? `\nTo make it move: make_effect({effect:'${row.id}', still:'${r.url}'}) for its price, then confirm:true.` : ''}${row.grid ? `\nOne ${row.grid} sheet: each panel is a shot.` : ''}`, r);
   }));
 
   server.registerTool('product_sizzle', {
