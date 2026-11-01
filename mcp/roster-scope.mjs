@@ -119,7 +119,7 @@ export const TOOL_PROVIDER_RULES = [
   // tools/tiktok-roster-gate-check.mjs derives each tool's credential from server.js and fails when this disagrees.
   [/^(post_to_tiktok|tiktok_post_status|tiktok_creator_info|tiktok_account|list_tiktok_videos)$/, 'tiktok'],
   [/tiktok/, 'tiktok_ads'],
-  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^hide_x_reply$|_x_broadcast|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
+  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^hide_x_reply$|_x_broadcast|_x_stream_source|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
   [/pinterest/, 'pinterest'],
   [/reddit/, 'reddit'],
   [/snapchat/, 'snapchat'],
@@ -176,7 +176,7 @@ export function toolProvider(name) {
 // could connect Instagram and then had no tool to post, reply, read its inbox or measure with. Only routes verified
 // to take the Login token are listed; a Page-only tool (ads, hashtag search, comment_on_meta_post) stays gated on meta.
 export const INSTAGRAM_LOGIN_TOOLS = new Set([
-  'post_to_meta', 'list_meta_posts', 'list_instagram_media', 'list_meta_stories', 'get_meta_story', 'instagram_insights', 'meta_post_insights',
+  'post_to_meta', 'list_meta_posts', 'list_instagram_media', 'list_meta_stories', 'get_meta_story', 'instagram_story_insights', 'instagram_insights', 'meta_post_insights',
   'list_meta_comments', 'reply_to_meta_comment', 'moderate_meta_comment', 'like_instagram',
   'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
   'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',

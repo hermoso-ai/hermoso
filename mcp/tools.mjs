@@ -2610,15 +2610,30 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('delete_youtube_comment', { action: 'delete' }, ['commentId!', 'confirm'], splitW(true, true), 'Delete a YouTube comment', 'Use this when a comment must be removed for good; YouTube has no undelete. Needs confirm:true. To only take it out of public view use reject_youtube_comment. Free.', { confirm: 'must be true to delete' }),
   ],
   manage_x_broadcast: [
-    splitOp('schedule_x_broadcast', { action: 'schedule' }, ['sourceId!', 'startAt!', 'manualPublish!', 'endAt', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'recurrence', 'confirm'], splitW(false, false), 'Schedule an X live broadcast', 'Use this when the brand wants to schedule an X live video broadcast. sourceId is the stream key from Media Studio > Producer on x.com. manualPublish is required: true waits for start_x_broadcast; false makes X put the brand on air automatically at startAt and needs confirm:true.' + X_BILLED),
-    splitOp('update_x_broadcast', { action: 'update' }, ['id!', 'startAt', 'endAt', 'manualPublish', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'recurrence', 'confirm'], splitW(true, true), 'Change a scheduled X broadcast', 'Use this when a scheduled X broadcast needs a new time, title or setting. Only the fields you pass change. Turning manualPublish off needs confirm:true.' + X_BILLED),
+    splitOp('schedule_x_broadcast', { action: 'schedule' }, ['sourceId!', 'startAt!', 'manualPublish!', 'endAt', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(false, false), 'Schedule an X live broadcast', 'Use this when the brand wants to schedule an X live video broadcast. sourceId comes from list_x_stream_sources. manualPublish is required: true waits for start_x_broadcast; false makes X put the brand on air automatically at startAt and needs confirm:true.' + X_BILLED),
+    splitOp('update_x_broadcast', { action: 'update' }, ['id!', 'startAt', 'endAt', 'manualPublish', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(true, true), 'Change a scheduled X broadcast', 'Use this when a scheduled X broadcast needs a new time, title or setting. Only the fields you pass change. Turning manualPublish off needs confirm:true.' + X_BILLED),
     splitOp('start_x_broadcast', { action: 'go_live' }, ['id!', 'confirm'], splitW(true, false), 'Go live on a scheduled X broadcast', 'Use this when a broadcast scheduled with manualPublish:true should go on air NOW, publicly, as the brand. Needs confirm:true after the user approved the exact broadcast and stream.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
-    splitOp('cancel_x_broadcast', { action: 'cancel' }, ['id!', 'rollForward', 'confirm'], splitW(true, true), 'Cancel a scheduled X broadcast', 'Use this when a scheduled X broadcast should be deleted. Cannot be undone; needs confirm:true. rollForward:true shifts a recurring series instead of leaving a gap.' + X_BILLED, { confirm: 'must be true to cancel' }),
+    splitOp('create_x_broadcast', { action: 'create' }, ['sourceId!'], splitW(false, false), 'Create an X broadcast on a stream source', 'Use this when the brand wants a broadcast without a schedule. It posts nothing until publish_x_broadcast, and X deletes it after 7 days if never published.' + X_BILLED),
+    splitOp('publish_x_broadcast', { action: 'publish' }, ['id!', 'title', 'locale', 'chatOption', 'skipPost', 'confirm'], splitW(true, false), 'Publish an X broadcast', 'Use this when a created X broadcast should go on air NOW, publicly, as the brand. X also posts it unless skipPost is true. Needs confirm:true.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
+    splitOp('end_x_broadcast', { action: 'end' }, ['id!', 'confirm'], splitW(true, true), 'End an X broadcast', 'Use this when a running X broadcast should stop for everyone watching. Cannot be undone; needs confirm:true.' + X_BILLED, { confirm: 'must be true to end' }),
+    splitOp('delete_x_broadcast', { action: 'delete' }, ['id!', 'confirm'], splitW(true, true), 'Delete an X broadcast', 'Use this when a broadcast and its replay should be removed. End a running one first. Needs confirm:true.' + X_BILLED, { confirm: 'must be true to delete' }),
+    splitOp('cancel_x_broadcast', { action: 'cancel' }, ['id!', 'confirm'], splitW(true, true), 'Cancel a scheduled X broadcast', 'Use this when a scheduled X broadcast should be deleted. Cannot be undone; needs confirm:true.' + X_BILLED, { confirm: 'must be true to cancel' }),
+  ],
+  manage_x_stream_source: [
+    splitOp('list_x_stream_sources', { action: 'list' }, [], SPLIT_RO, 'List the X stream sources', 'Use this when you need the brand’s RTMP stream sources on X: id, stream key, RTMPS URL, region, whether video is arriving. Read-only.' + X_BILLED),
+    splitOp('get_x_stream_source', { action: 'get' }, ['id!'], SPLIT_RO, 'Read one X stream source', 'Use this when you need one stream source’s stream key, RTMPS URL, region and whether video is arriving. Read-only.' + X_BILLED),
+    splitOp('get_x_ingest_region', { action: 'region' }, [], SPLIT_RO, 'Read the nearest X ingest region', 'Use this when you need the ingest region nearest X’s server, to pass when creating a stream source. Read-only.' + X_BILLED),
+    splitOp('create_x_stream_source', { action: 'create' }, ['name!', 'region'], splitW(false, false), 'Create an X stream source', 'Use this when the brand needs a new RTMP ingest point for live video on X. The stream key is a secret, so never post it.' + X_BILLED),
+    splitOp('rename_x_stream_source', { action: 'rename' }, ['id!', 'name!'], splitW(false, true), 'Rename an X stream source', 'Use this when a stream source needs a new label. The stream key does not change.' + X_BILLED),
+    splitOp('delete_x_stream_source', { action: 'delete' }, ['id!', 'confirm'], splitW(true, true), 'Delete an X stream source', 'Use this when a stream source is no longer used. It kills the stream key; needs confirm:true.' + X_BILLED, { confirm: 'must be true to delete' }),
   ],
   moderate_x_broadcast: [
     splitOp('remove_x_broadcast_chat_message', { action: 'remove_message' }, ['broadcastId!', 'messageId!', 'confirm'], splitW(true, true), 'Remove a message from an X broadcast chat', 'Use this when one message in the brand’s live broadcast chat must be removed. Cannot be undone; needs confirm:true. Get messageId from read_x_broadcast_chat.' + X_BILLED, { confirm: 'must be true to remove' }),
-    splitOp('mute_x_broadcast_chat_user', { action: 'mute' }, ['broadcastId!', 'userId', 'username', 'until', 'messageId'], splitW(true, true), 'Mute someone in an X broadcast chat', 'Use this when a viewer should be muted in the brand’s live broadcast chat. Pass userId or username; until ends a timeout (omit to mute for the broadcast); messageId also removes that message.' + X_BILLED),
+    splitOp('mute_x_broadcast_chat_user', { action: 'mute' }, ['broadcastId!', 'userId', 'username', 'until', 'messageId'], splitW(true, true), 'Mute someone in an X broadcast chat', 'Use this when a viewer should be muted in the brand’s live broadcast chat. Pass userId or username; until ends a timeout (omit to mute indefinitely); messageId also removes that message.' + X_BILLED),
     splitOp('unmute_x_broadcast_chat_user', { action: 'unmute' }, ['broadcastId!', 'userId', 'username'], splitW(true, true), 'Unmute someone in an X broadcast chat', 'Use this when a muted viewer may chat again in the brand’s live broadcast. Pass userId or username.' + X_BILLED),
+    splitOp('list_x_broadcast_chat_mutes', { action: 'list_mutes' }, [], SPLIT_RO, 'List who is muted in the X broadcast chats', 'Use this when you need everyone muted across the brand’s broadcast chats, with when each timeout ends. Read-only.' + X_BILLED),
+    splitOp('mute_x_chat_user_everywhere', { action: 'mute_everywhere' }, ['userId', 'username', 'until', 'broadcastId', 'messageId'], splitW(true, true), 'Mute someone in every X broadcast chat', 'Use this when a viewer should be muted in all the brand’s broadcast chats. Pass userId or username; until ends a timeout. broadcastId is for moderating another host.' + X_BILLED),
+    splitOp('unmute_x_chat_user_everywhere', { action: 'unmute_everywhere' }, ['userId', 'username', 'broadcastId'], splitW(true, true), 'Unmute someone in every X broadcast chat', 'Use this when a viewer muted across the brand’s broadcast chats may chat again. Pass userId or username.' + X_BILLED),
     splitOp('list_x_broadcast_chat_moderators', { action: 'list_moderators' }, [], SPLIT_RO, 'List the X broadcast chat moderators', 'Use this when you need the brand’s persistent X broadcast chat moderators, who moderate every current and future broadcast. Read-only.' + X_BILLED),
     splitOp('add_x_broadcast_chat_moderator', { action: 'add_moderator' }, ['userId', 'username'], splitW(false, true), 'Add an X broadcast chat moderator', 'Use this when someone should moderate the chat on every current and future broadcast of the brand. Pass userId or username.' + X_BILLED),
     splitOp('remove_x_broadcast_chat_moderator', { action: 'remove_moderator' }, ['userId', 'username'], splitW(true, true), 'Remove an X broadcast chat moderator', 'Use this when someone should stop moderating the brand’s broadcast chats. Pass userId or username.' + X_BILLED),
@@ -5254,22 +5269,47 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // row carries no CDN urls, and get_meta_story returns one Story in full.
   server.registerTool('list_meta_stories', {
     title: 'List the Stories live right now',
-    description: 'The Stories live right now on the connected Instagram accounts and Facebook Pages: id, caption (Instagram), posted time, hours left and permalink. Use it to check that a post or reel really went to Stories, or to match a story id against what is live. Meta serves a Story for 24 hours and leaves live video and reshared stories out of this list. A source that could not be read comes back in `unreadable`, never as an empty list. Read-only, 0 credits.',
+    description: 'The Stories live right now on the connected Instagram accounts and Facebook Pages: id, caption (Instagram), posted time, hours left and permalink, and on Instagram `insights`: reach, views, replies, link clicks and navigation (forward, back, next story, exit). Use it to check that a post or reel really went to Stories, or to match a story id against what is live. includeEnded also returns `ended`, the Stories that have ended with the numbers kept from before they ended. Meta marks nothing on a Story to say it is a reshared reel, so `origin` appears only when the share went through Hermoso, and says how it was found. Meta serves a Story for 24 hours and leaves live video and reshared stories out of this list. A source that could not be read comes back in `unreadable`, never as an empty list. Read-only, 0 credits.',
     inputSchema: {
       ...MANAGE_BRAND,
       channel: z.enum(['instagram', 'facebook', 'all']).optional().describe('default all'),
       account: z.string().optional().describe('one Instagram account: an @handle or id'),
       pageId: z.string().optional().describe('one Facebook Page, and its linked Instagram'),
       limit: z.number().optional().describe('rows, newest first (1-100, default 25)'),
+      includeEnded: z.boolean().optional().describe('also list Stories that ended, with their kept numbers'),
+      days: z.number().optional().describe('how far back includeEnded goes (1-400, default 30)'),
     },
-    outputSchema: { count: z.number().optional(), stories: z.array(z.any()).optional(), read: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), note: z.string().optional(), caveat: z.string().optional() },
+    outputSchema: { count: z.number().optional(), stories: z.array(z.any()).optional(), ended: z.array(z.any()).optional(), read: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), note: z.string().optional(), caveat: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/meta/stories', queryBrand(a, { channel: a.channel, account: a.account, pageId: a.pageId, limit: a.limit }));
-    const lines = (d.stories || []).map(s => `• [${s.channel} ${s.account}] ${s.mediaType || 'story'}${s.caption ? ` ${JSON.stringify(s.caption.slice(0, 90))}` : ''} · posted ${s.postedAt || 'unknown'}${s.hoursLeft != null ? ` · ${s.hoursLeft}h left` : ''}\n  id ${s.id}${s.permalink ? ` · ${s.permalink}` : ''}`);
+    const d = await apiGet('/api/meta/stories', queryBrand(a, { channel: a.channel, account: a.account, pageId: a.pageId, limit: a.limit, ...(a.includeEnded ? { includeEnded: 'true' } : {}), ...(a.days ? { days: a.days } : {}) }));
+    const lines = (d.stories || []).map(s => `• [${s.channel} ${s.account}] ${s.mediaType || 'story'}${s.caption ? ` ${JSON.stringify(s.caption.slice(0, 90))}` : ''} · posted ${s.postedAt || 'unknown'}${s.hoursLeft != null ? ` · ${s.hoursLeft}h left` : ''}\n  id ${s.id}${s.permalink ? ` · ${s.permalink}` : ''}${s.insights ? `\n  ${s.insights.summary}` : ''}${s.origin?.sameFileAsReel ? `\n  Posted through Hermoso with the same file as reel ${s.origin.sameFileAsReel.postId}${s.origin.sameFileAsReel.url ? ` (${s.origin.sameFileAsReel.url})` : ''}.` : ''}`);
+    const endedLines = (d.ended || []).map(s => `• [ended ${s.account}] posted ${s.postedAt || 'unknown'}${s.caption ? ` ${JSON.stringify(s.caption.slice(0, 90))}` : ''}\n  id ${s.storyId}\n  ${s.summary}`);
     const read = (d.read || []).map(r => `${r.account} ${r.count}`).join(', ');
     const bad = (d.unreadable || []).map(u => `${u.account}: ${u.error}`).join('; ');
-    return ok(`${d.count} Stor${d.count === 1 ? 'y' : 'ies'} live${read ? ` (${read})` : ''}.\n${lines.join('\n')}${bad ? `\nCould not read ${bad}. That is not the same as no Stories there.` : ''}${d.note ? `\n${d.note}` : ''}\n${d.caveat || ''}`.trim(), d);
+    return ok(`${d.count} Stor${d.count === 1 ? 'y' : 'ies'} live${read ? ` (${read})` : ''}.\n${lines.join('\n')}${endedLines.length ? `\nEnded:\n${endedLines.join('\n')}` : ''}${bad ? `\nCould not read ${bad}. That is not the same as no Stories there.` : ''}${d.note ? `\n${d.note}` : ''}\n${d.caveat || ''}`.trim(), d);
+  }));
+  // A STORY'S NUMBERS OUTLIVE IT (2026-10-31). Meta keeps them for 24 hours, so the server reads every live Story on a schedule
+  // and takes the story_insights webhook; this reads what is kept. Every state but `numbers` is a statement about what is
+  // unknown, never a zero.
+  server.registerTool('instagram_story_insights', {
+    title: 'An Instagram Story\u2019s numbers, kept past its 24 hours',
+    description: 'An Instagram Story\u2019s numbers: reach, views, replies, shares, link clicks, profile visits, follows, and navigation (forward, back, next story, exit). Meta keeps them for 24 hours, so Hermoso reads every live Story on a schedule, including ones posted from the phone, and they stay readable here after the Story ends. Pass storyId for one, or nothing for the recent ones. `state` says what is known: numbers, below_minimum (Meta withholds them under 5 viewers), not_captured (it ended before a read), or why a read failed; none of those means zero. Meta returns 0 replies for Stories created in Europe and Japan, and the answer says so. Link clicks need a Facebook-login connection. Read-only, 0 credits.',
+    inputSchema: {
+      ...MANAGE_BRAND,
+      storyId: z.string().optional().describe('one Story id, from list_meta_stories'),
+      account: z.string().optional().describe('one Instagram account: an @handle or id'),
+      pageId: z.string().optional().describe('one Facebook Page, for its linked Instagram'),
+      days: z.number().optional().describe('how far back (1-400, default 30)'),
+      limit: z.number().optional().describe('rows, newest first (1-100, default 25)'),
+    },
+    outputSchema: { count: z.number().optional(), days: z.number().optional(), stories: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), state: z.string().optional(), note: z.string().optional(), caveat: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/meta/story-insights', queryBrand(a, { storyId: a.storyId, account: a.account, pageId: a.pageId, days: a.days, limit: a.limit }));
+    const lines = (d.stories || []).map(s => `• [${s.account}] posted ${s.postedAt || 'unknown'}${s.ended ? ' (ended)' : ''}${s.caption ? ` ${JSON.stringify(s.caption.slice(0, 90))}` : ''}\n  id ${s.storyId}${s.permalink ? ` · ${s.permalink}` : ''}\n  ${s.summary}`);
+    const bad = (d.unreadable || []).map(u => `${u.account || 'Instagram'}: ${u.error}`).join('; ');
+    return ok(`${d.count} Stor${d.count === 1 ? 'y' : 'ies'} with a record in the last ${d.days} days.${d.state ? ` ${d.note}` : ''}\n${lines.join('\n')}${bad ? `\nCould not read ${bad}. That is not the same as no numbers.` : ''}${d.note && !d.state ? `\n${d.note}` : ''}\n${d.caveat || ''}`.trim(), d);
   }));
   server.registerTool('get_meta_story', {
     title: 'Look up one Story by id',
@@ -6073,7 +6113,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       paidPartnership: z.boolean().optional().describe('INSTAGRAM — the PAID PARTNERSHIP label. A COMPLIANCE DECLARATION: set it whenever the post is sponsored, gifted or otherwise paid for. Opt-in and never inferred — it is the poster’s own statement about their commercial relationship.'),
       brandedContentSponsorIds: z.array(z.string()).optional().describe('INSTAGRAM — the numeric Instagram USER IDS of the brands behind that label (at most 2, and ids rather than @handles). Naming sponsors IS asking for the label, so setting these with `paidPartnership:false` is refused instead of publishing brand credits with no disclosure.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE']).optional().describe('INSTAGRAM TRIAL REEL \u2014 publish this Reel to NON-FOLLOWERS ONLY at first (Instagram allows trials only on accounts above its follower threshold — about 1,000 followers; an ineligible account is refused by name and nothing is posted), so a hook can be tested on a cold audience without spending it on the people who already follow the brand. Instagram then shows it to followers only if it graduates. MANUAL = the creator graduates it by hand in the Instagram app; SS_PERFORMANCE = Instagram graduates it automatically if it performs well. REELS ONLY and INSTAGRAM ONLY: an image, a carousel, a Facebook post or a Threads post is REFUSED BY NAME rather than quietly published as an ordinary post \u2014 a trial that silently goes to every follower is the exact opposite of what was asked for. Omit it for a normal Reel.'),
-      story: z.boolean().optional().describe('INSTAGRAM OR FACEBOOK PAGE STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. An Instagram Story keeps its caption: people see the start under the Story in the app and tap for the rest (instagram.com does not show it). It takes NO collaborators, product tags or trialReel \u2014 any of those is refused by name and nothing is posted. FACEBOOK PAGE STORIES WORK TOO (target facebook): one image, or one vertical 9:16 video of 3–90 seconds, no caption (a message is refused by name), not schedulable natively — use schedule_post to queue one; the reply reads the story back from the Page.'),
+      story: z.boolean().optional().describe('INSTAGRAM OR FACEBOOK PAGE STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. A link sticker cannot be added through Meta\u2019s publishing API on either channel: add it in the Instagram app. An Instagram Story keeps its caption: people see the start under the Story in the app and tap for the rest (instagram.com does not show it). It takes NO collaborators, product tags or trialReel \u2014 any of those is refused by name and nothing is posted. FACEBOOK PAGE STORIES WORK TOO (target facebook): one image, or one vertical 9:16 video of 3–90 seconds, no caption (a message is refused by name), not schedulable natively — use schedule_post to queue one; the reply reads the story back from the Page.'),
       aiGenerated: z.boolean().optional().describe('INSTAGRAM / FACEBOOK REEL / THREADS \u2014 Meta\u2019s is_ai_generated self-disclosure (Threads: is_made_with_ai, the AI info label; a text-only Threads post is declared only when you pass true). OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, media that came through upload_file or from an external URL (the user\u2019s own photographs or footage) is NOT \u2014 a real photo must never carry Instagram\u2019s \u201cAI info\u201d label. Pass true or false only to override: false strips the label from something Hermoso would otherwise declare, true declares a render the user uploaded themselves.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('ACCESSIBILITY \u2014 the description screen readers announce, and what the platform otherwise auto-generates badly or not at all. Describe what is actually IN the picture, never the caption. ONE STRING describes the picture; on a CAROUSEL it describes EVERY slide. Pass an ARRAY of strings instead to describe each slide separately, aligned to the slide order \u2014 use that on a multi-slide post, because one sentence read out over six different pictures is wrong for five of them. More descriptions than pictures is refused rather than dropped. WHERE IT LANDS, per Meta\u2019s own docs: INSTAGRAM image posts and the IMAGE slides of an Instagram carousel (up to 1000 characters; dropped rather than sent on a Reel or a video slide, which Meta do not support); FACEBOOK Page photos including every photo of an album, via alt_text_custom (Meta publish no length for it, so nothing is truncated); THREADS on a single-image or single-video post ONLY \u2014 Meta document no way to attach alt text to a Threads CAROUSEL slide, so a Threads carousel publishes undescribed and the reply says so rather than risking the whole post on a guess. (Meta\u2019s AI disclosure defaults from PROVENANCE: a Hermoso render is declared is_ai_generated; media that came through upload_file or an external URL, i.e. the user\u2019s own photos or footage, is NOT. Pass `aiGenerated` to force it either way.)'),
       pageId: z.string().optional().describe('target Page id (from list_meta_pages); omit = first Page'),
@@ -6236,7 +6276,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       instagramLocationId: z.string().optional().describe('INSTAGRAM — tag a place (called locationId on post_to_meta; locationId here is the Google Business listing). It is the pageId from search_meta_places, the NUMERIC ID OF A FACEBOOK PAGE associated with that location, not a place name and not coordinates; a non-numeric value is refused rather than sent.'),
       brandedContentSponsorIds: z.array(z.string()).optional().describe('INSTAGRAM — the numeric Instagram USER IDS of the brands behind that label (at most 2, and ids rather than @handles). Naming sponsors IS asking for the label, so setting these with `paidPartnership:false` is refused instead of publishing brand credits with no disclosure.'),
       trialReel: z.enum(['MANUAL', 'SS_PERFORMANCE']).optional().describe('INSTAGRAM TRIAL REEL \u2014 publish this Reel to NON-FOLLOWERS ONLY at first (Instagram allows trials only on accounts above its follower threshold — about 1,000 followers; an ineligible account is refused by name and nothing is posted), so a hook can be tested on a cold audience without spending it on the people who already follow the brand; Instagram shows it to followers only if it graduates. MANUAL = the creator graduates it by hand in the Instagram app; SS_PERFORMANCE = Instagram graduates it automatically if it performs. REELS ONLY and INSTAGRAM ONLY: an image, a carousel, or a Facebook/Threads channel is REFUSED BY NAME rather than quietly published as an ordinary post \u2014 a trial that silently goes to every follower is the exact opposite of what was asked for, so Instagram must be one of the `channels` and the item must carry a video. Omit it for a normal Reel.'),
-      story: z.boolean().optional().describe('INSTAGRAM OR FACEBOOK PAGE STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. An Instagram Story keeps its caption: people see the start under the Story in the app and tap for the rest (instagram.com does not show it). It takes NO collaborators, product tags or trialReel \u2014 any of those is refused by name and nothing is posted. FACEBOOK PAGE STORIES WORK TOO (target facebook): one image, or one vertical 9:16 video of 3–90 seconds, no caption (a message is refused by name), not schedulable natively — use schedule_post to queue one; the reply reads the story back from the Page.'),
+      story: z.boolean().optional().describe('INSTAGRAM OR FACEBOOK PAGE STORY \u2014 publish this as a 24-hour Story instead of a feed post. One image OR one video: Instagram has no carousel story, so a carousel is REFUSED BY NAME rather than quietly posted to the feed. A link sticker cannot be added through Meta\u2019s publishing API on either channel: add it in the Instagram app. An Instagram Story keeps its caption: people see the start under the Story in the app and tap for the rest (instagram.com does not show it). It takes NO collaborators, product tags or trialReel \u2014 any of those is refused by name and nothing is posted. FACEBOOK PAGE STORIES WORK TOO (target facebook): one image, or one vertical 9:16 video of 3–90 seconds, no caption (a message is refused by name), not schedulable natively — use schedule_post to queue one; the reply reads the story back from the Page.'),
       aiGenerated: z.boolean().optional().describe('AI-CONTENT DISCLOSURE (Instagram / Facebook Reel is_ai_generated, TikTok is_aigc, YouTube containsSyntheticMedia, Pinterest ai_disclosures, Threads is_made_with_ai). OMIT IT and Hermoso decides from provenance: a Hermoso render is declared AI-generated, media that came through upload_file or from an external URL (the user\u2019s own photos or footage) is NOT. Pass true or false only to override.'),
       // ── WHICH ACCOUNT (server-side SCHED_ID_FIELDS). Every one of these is an answer the publish helper REFUSES
       // to guess, so a schedule that cannot carry it can only fail at fire time with nobody watching.
@@ -6305,7 +6345,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         ...(r.xArticle && r.xArticle.title ? { xArticle: { title: r.xArticle.title } } : {}),
         media: r.videoUrl ? 'video' : slides > 1 ? `carousel of ${slides}` : (r.imageUrl || slides) ? 'image' : 'none',
         ...((r.videoUrl || r.imageUrl) ? { mediaUrl: r.videoUrl || r.imageUrl } : {}),
-        ...(Array.isArray(r.results) ? { results: r.results.map(x => ({ channel: x?.channel, ok: x?.ok, ...(x?.id ? { id: String(x.id) } : {}), ...(x?.url ? { url: x.url } : {}), ...(x?.error ? { error: String(x.error).slice(0, 300) } : {}) })) } : {}),
+        ...(Array.isArray(r.results) ? { results: r.results.map(x => ({ channel: x?.channel, ok: x?.ok, ...(x?.id ? { id: String(x.id) } : {}), ...(x?.url ? { url: x.url } : {}), ...(x?.urlStatus && x.urlStatus !== 'ready' ? { urlStatus: x.urlStatus, ...(x.urlNote ? { urlNote: x.urlNote } : {}) } : {}), ...(x?.error ? { error: String(x.error).slice(0, 300) } : {}) })) } : {}),
         ...(r.error ? { error: String(r.error).slice(0, 300) } : {}),
       };
     };
@@ -7944,10 +7984,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const XB_SCOPE_NOTE = ' Needs X connected with the broadcast permissions added 2026-09-21: an X connection made before then must be reconnected once under Settings > Connectors > X (the tool says so without calling X). Costs credits (X bills per call).';
   server.registerTool('list_x_broadcasts', {
     title: 'List X live broadcasts',
-    description: "The connected X account's LIVE VIDEO broadcasts: past and current ones (title, state, share URL, live and total viewers, start/end) and SCHEDULED ones (start, end, whether it goes live automatically or waits for go_live, recurring series). kind 'all' (default) reads both, 'live' or 'scheduled' one; pass id for a single broadcast. Read-only." + XB_SCOPE_NOTE,
+    description: "The connected X account's LIVE VIDEO broadcasts: past and current ones (title, state, share URL, live and total viewers, start/end) and SCHEDULED ones (start, end, whether it goes live automatically or waits for go_live). kind 'all' (default) reads both, 'live' or 'scheduled' one; pass id for a single broadcast. Read-only." + XB_SCOPE_NOTE,
     inputSchema: {
       kind: z.enum(['all', 'live', 'scheduled']).optional().describe('all (default), live or scheduled'),
-      id: z.string().optional().describe('one broadcast id (alphanumeric, up to 13 characters)'),
+      id: z.string().optional().describe('one broadcast id (alphanumeric, up to 24 characters)'),
       ids: z.string().optional().describe('comma-separated broadcast ids (live kind, up to 100)'),
       maxResults: z.number().optional().describe('1-100, default 25'),
       paginationToken: z.string().optional().describe('next page token from the previous reply'),
@@ -7958,16 +7998,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/x/broadcasts', a);
     const live = (d.broadcasts || []).slice(0, 15).map((b) => `- ${b.title || '(untitled)'} [${b.id}] ${b.state || ''}${b.watched != null ? ` - ${b.watched} watched` : ''}${b.shareUrl ? ` - ${b.shareUrl}` : ''}`).join('\n');
-    const sch = (d.scheduled || []).slice(0, 15).map((s) => `- ${s.title || '(untitled)'} [${s.id}] ${s.start || ''}${s.manualPublish ? ' - manual go-live' : ' - auto-publishes'}${s.recurringScheduleId ? ' - recurring' : ''}`).join('\n');
-    return ok([d.broadcasts ? `Broadcasts (${d.broadcasts.length}):\n${live || '(none)'}` : '', d.scheduled ? `Scheduled (${d.scheduled.length}):\n${sch || '(none)'}` : ''].filter(Boolean).join('\n\n') + `\nCost ${d.costCredits ?? '?'} credits.`, d);
+    const sch = (d.scheduled || []).slice(0, 15).map((s) => `- ${s.title || '(untitled)'} [${s.id}] ${s.start || ''}${s.manualPublish ? ' - manual go-live' : ' - auto-publishes'}`).join('\n');
+    return ok([d.broadcastsRefused ? `Past and live broadcasts could not be read: ${d.broadcastsRefused}` : '', d.broadcasts ? `Broadcasts (${d.broadcasts.length}):\n${live || '(none)'}` : '', d.scheduled ? `Scheduled (${d.scheduled.length}):\n${sch || '(none)'}` : ''].filter(Boolean).join('\n\n') + `\nCost ${d.costCredits ?? '?'} credits.`, d);
   }));
   server.registerTool('manage_x_broadcast', {
     title: 'Schedule, update, go live on or cancel an X broadcast',
-    description: "Schedule, update, go live on, or cancel an X LIVE VIDEO broadcast on the connected account. action 'schedule' needs sourceId (the stream key of the ingest source, from Media Studio > Producer on x.com), startAt, and manualPublish, which is REQUIRED with no default: true = nothing airs until action 'go_live'; false = X puts the brand ON AIR automatically at startAt (needs confirm:true). 'update' changes only the fields you pass (Hermoso re-sends the rest, because X's update replaces the whole schedule). 'go_live' airs a manualPublish schedule NOW, publicly, as the brand (confirm:true). 'cancel' deletes a schedule and cannot be undone (confirm:true; rollForward:true shifts a recurring series instead of leaving a gap). Confirm the exact broadcast, time and stream with the user before passing confirm:true; a refusal is free." + XB_SCOPE_NOTE,
+    description: "Schedule, update, go live on, or cancel an X LIVE VIDEO broadcast on the connected account. action 'schedule' needs sourceId (from manage_x_stream_source), startAt, and manualPublish, which is REQUIRED with no default: true = nothing airs until action 'go_live'; false = X puts the brand ON AIR automatically at startAt (needs confirm:true). 'update' changes only the fields you pass (Hermoso re-sends the rest, because X's update replaces the whole schedule). 'go_live' airs a manualPublish schedule NOW, publicly, as the brand (confirm:true). 'cancel' deletes a schedule and cannot be undone (confirm:true). X retired recurring broadcasts: schedule each occurrence on its own. WITHOUT A SCHEDULE: 'create' makes a broadcast on sourceId that posts nothing, 'publish' puts it on air (confirm:true; skipPost:true skips the announcing post), 'end' stops one for everyone (confirm:true), 'delete' removes one and its replay (confirm:true; end it first). X limits broadcasting by account (Premium or 1,000 followers) and says so. Confirm the exact broadcast, time and stream with the user before passing confirm:true; a refusal is free." + XB_SCOPE_NOTE,
     inputSchema: {
-      action: z.enum(['schedule', 'update', 'go_live', 'cancel']).describe('schedule, update, go_live or cancel'),
-      id: z.string().optional().describe('broadcast id, for update / go_live / cancel'),
-      sourceId: z.string().optional().describe('stream key of the ingest source (schedule)'),
+      action: z.enum(['schedule', 'update', 'go_live', 'cancel', 'create', 'publish', 'end', 'delete']).describe('schedule, update, go_live, cancel, create, publish, end or delete'),
+      id: z.string().optional().describe('broadcast id, for every action but schedule and create'),
+      sourceId: z.string().optional().describe('stream source id from manage_x_stream_source (schedule, create)'),
       startAt: z.string().optional().describe('ISO 8601 or epoch ms'),
       endAt: z.string().optional().describe('ISO 8601 or epoch ms; X requires one on update'),
       manualPublish: z.boolean().optional().describe('required on schedule: true waits for go_live, false auto-publishes at startAt'),
@@ -7975,16 +8015,39 @@ function buildTools(rawServer, opts = {}, sink = null) {
       availableForReplay: z.boolean().optional().describe('true = keep the broadcast available as a replay'), isLocked: z.boolean().optional().describe("true = lock the broadcast (X's isLocked flag)"),
       chatOption: z.string().optional().describe('X chat permission option (numeric string)'),
       thumbnailMediaId: z.string().optional().describe('pre-live slate media id'),
-      recurrence: z.object({ frequency: z.enum(['Daily', 'Weekly']).describe('Daily or Weekly'), repeats: z.string().describe('repeat value for the recurrence, passed to X as it expects it') }).optional().describe('repeat a scheduled broadcast: {frequency, repeats}'),
-      rollForward: z.boolean().optional().describe('cancel only: true shifts a recurring series forward instead of leaving a gap'),
+      skipPost: z.boolean().optional().describe('publish: true skips the post X would make announcing it'),
       confirm: z.boolean().optional().describe('true only after the user approved this exact public or irreversible action'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/broadcasts/manage', a);
     if (d.action === 'cancel') return ok(d.deleted ? `Cancelled the scheduled broadcast ${d.id}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm cancelling ${d.id}.`, d);
+    if (d.action === 'create') return ok(`Created broadcast [${d.broadcast?.id}] on the source, not on air. ${d.note}${d.shareUrl ? ` ${d.shareUrl}` : ''} Cost ${d.costCredits ?? '?'} credits.`, d);
+    if (d.action === 'publish') return ok(`Broadcast ${d.id} published, state ${d.state || '?'}. Cost ${d.costCredits ?? '?'} credits.`, d);
+    if (d.action === 'end') return ok(d.ended ? `Ended broadcast ${d.id}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm ending ${d.id} (state ${d.state || '?'}).`, d);
+    if (d.action === 'delete') return ok(d.deleted ? `Deleted broadcast ${d.id} and its replay. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm deleting ${d.id}.`, d);
     const s = d.scheduled || {};
     return ok(`${d.action === 'go_live' ? 'Went live' : d.action === 'update' ? 'Updated' : 'Scheduled'}: ${s.title || '(untitled)'} [${s.id}] start ${s.start || '?'}, state ${s.state || '?'}.${d.note ? ` ${d.note}` : ''} Cost ${d.costCredits ?? '?'} credits.`, d);
+  }));
+  server.registerTool('manage_x_stream_source', {
+    title: 'Manage X stream sources',
+    description: "The connected X account's STREAM SOURCES, the RTMP ingest points a live broadcast plays from. action 'list' (default) and 'get' (id) show each source's id, stream key, RTMPS URL, region and whether video is arriving; 'create' (name, optional region) makes one; 'rename' (id, name); 'delete' (id, confirm:true: it kills the stream key); 'region' reads the nearest ingest region. Pass a source's id as sourceId to manage_x_broadcast. The stream key is a secret, so never post it." + XB_SCOPE_NOTE,
+    inputSchema: {
+      action: z.enum(['list', 'get', 'create', 'rename', 'delete', 'region']).optional().describe("default 'list'"),
+      id: z.string().optional().describe('source id, for get, rename and delete'),
+      name: z.string().optional().describe('label, for create and rename'),
+      region: z.string().optional().describe("create only: 'atla' or 'pdxa', or an AWS region X maps onto one"),
+      confirm: z.boolean().optional().describe('true only after the user approved deleting this source'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiPost('/api/x/stream-sources', a);
+    const cost = `Cost ${d.costCredits ?? '?'} credits.`;
+    if (d.action === 'region') return ok(`Nearest ingest region: ${d.region || '?'}. ${cost}`, d);
+    if (d.action === 'delete') return ok(`Deleted stream source ${d.id}. ${cost}`, d);
+    if (d.action === 'list') return ok(`${d.count} stream source(s):\n` + (d.sources || []).map((x) => `- ${x.name || '(no name)'} [${x.id}] ${x.region || ''}${x.receivingVideo ? ' - receiving video' : ''}\n  ${x.rtmpsUrl || ''}`).join('\n') + `\n${cost}`, d);
+    const x = d.source || {};
+    return ok(`${x.name || '(no name)'} [${x.id}] ${x.region || ''}${x.receivingVideo ? ' - receiving video' : ''}\nRTMPS ${x.rtmpsUrl || '?'}, stream key ${x.streamKey || '?'}.${d.note ? ` ${d.note}` : ''} ${cost}`, d);
   }));
   server.registerTool('read_x_broadcast_chat', {
     title: 'Read an X broadcast chat',
@@ -8006,9 +8069,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('moderate_x_broadcast', {
     title: 'Moderate an X broadcast chat',
-    description: "Moderate the connected X account's live broadcast chat. action 'remove_message' (broadcastId + messageId; cannot be undone, confirm:true), 'mute' (broadcastId + userId or username; until = when a timeout ends, omit to mute for the broadcast; messageId removes that message while muting), 'unmute', and the account's PERSISTENT chat moderators, which apply to every current and future broadcast: 'list_moderators', 'add_moderator', 'remove_moderator' (userId or username). Only the host or a moderator can moderate, and X says so if not. A username costs one extra lookup." + XB_SCOPE_NOTE,
+    description: "Moderate the connected X account's live broadcast chat. action 'remove_message' (broadcastId + messageId; cannot be undone, confirm:true), 'mute' (broadcastId + userId or username; until = when a timeout ends, omit to mute indefinitely; messageId removes that message while muting), 'unmute', 'list_mutes' (everyone muted across the brand's chats), 'mute_everywhere' / 'unmute_everywhere' (userId or username, every chat of the brand; when the brand moderates another host, broadcastId scopes it to that host), and the account's PERSISTENT chat moderators, which apply to every current and future broadcast: 'list_moderators', 'add_moderator', 'remove_moderator' (userId or username). Only the host or a moderator can moderate, and X says so if not. A username costs one extra lookup." + XB_SCOPE_NOTE,
     inputSchema: {
-      action: z.enum(['remove_message', 'mute', 'unmute', 'list_moderators', 'add_moderator', 'remove_moderator']).describe('remove_message, mute, unmute, list_moderators, add_moderator or remove_moderator'),
+      action: z.enum(['remove_message', 'mute', 'unmute', 'list_moderators', 'add_moderator', 'remove_moderator', 'list_mutes', 'mute_everywhere', 'unmute_everywhere']).describe('remove_message, mute, unmute, list_moderators, add_moderator, remove_moderator, list_mutes, mute_everywhere or unmute_everywhere'),
       broadcastId: z.string().optional().describe('broadcast id; for remove_message, mute and unmute'), messageId: z.string().optional().describe('chat message id to remove; with mute, also removes that message'),
       userId: z.string().optional().describe('numeric X account id'), username: z.string().optional().describe('X handle, resolved to the id for you'),
       until: z.string().optional().describe('mute end, ISO 8601 or epoch ms'),
@@ -8020,6 +8083,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (d.action === 'list_moderators') return ok(`${d.count} chat moderator(s):\n` + (d.moderators || []).map((u) => `- ${u.username} (${u.id})`).join('\n'), d);
     if (d.action === 'remove_message') return ok(d.removed ? `Removed message ${d.messageId}.` : `X did not confirm removing ${d.messageId}.`, d);
     if (d.action === 'mute' || d.action === 'unmute') return ok(`${d.username || d.userId} is ${d.muted ? 'muted' : 'not muted'} in broadcast ${d.broadcastId}.`, d);
+    if (d.action === 'list_mutes') return ok(`${d.count} muted in the brand's chats:\n` + (d.mutes || []).map((m) => `- ${m.username || m.userId}${m.until ? ` until ${m.until}` : ''}`).join('\n'), d);
+    if (d.action === 'mute_everywhere' || d.action === 'unmute_everywhere') return ok(`${d.username || d.userId} is ${d.muted ? 'muted' : 'not muted'} across the brand's chats.`, d);
     return ok(`Chat moderators now: ${(d.moderatorIds || []).join(', ') || '(none)'}.`, d);
   }));
   // X CHAT (2026-10-02) — the /2/chat/* endpoints X's OpenAPI 2.169 added, as four tools; gates and payloads live in
@@ -8055,7 +8120,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_x_chats', {
     title: 'List X Chat conversations',
-    description: "The connected X account's X CHAT conversations: id (group ids start with g), type, muted, disappearing-message timer, screenshot controls, admins, members, PENDING join requests, which actions are admin-only, and the active invite link. X Chat is END-TO-END ENCRYPTED, so message text and group names cannot be read here (list_x_dms reads the plain direct-message history). view 'admin_requests' (id = a group the brand admins) lists who asked to become an admin; view 'invite' (inviteLink, or id + inviteToken) previews an invite link: group name, member count, whether the brand is in it. view 'message_requests' lists the MESSAGE REQUESTS waiting outside the inbox (inbox 'priority', the default, or 'low_quality' for X's filtered tab): who sent each one (@handle, name, followers, verified), which accounts the brand follows also follow them, and whether they changed their name or picture recently (X's impersonation hint); the message itself is encrypted. Show that to the user before manage_x_chat accept_request. withMembers:true resolves member @handles, and each user X returns is billed. Read-only. Billed per conversation or request returned, plus one user lookup per request sender, so keep maxResults small." + XC_SCOPE_NOTE,
+    description: "The connected X account's X CHAT conversations: id (group ids start with g), type, muted, disappearing-message timer, screenshot controls, admins, members, PENDING join requests, which actions are admin-only, and the active invite link. X Chat is END-TO-END ENCRYPTED, so message text and group names cannot be read here (list_x_dms reads the plain direct-message history). A filtered page can be short or empty while more remain: keep paging with the same filters. view 'admin_requests' (id = a group the brand admins) lists who asked to become an admin; view 'invite' (inviteLink, or id + inviteToken) previews an invite link: group name, member count, whether the brand is in it. view 'message_requests' lists the MESSAGE REQUESTS waiting outside the inbox (inbox 'priority', the default, or 'low_quality' for X's filtered tab): who sent each one (@handle, name, followers, verified), which accounts the brand follows also follow them, and whether they changed their name or picture recently (X's impersonation hint); the message itself is encrypted. Show that to the user before manage_x_chat accept_request. withMembers:true resolves member @handles, and each user X returns is billed. Read-only. Billed per conversation or request returned, plus one user lookup per request sender, so keep maxResults small." + XC_SCOPE_NOTE,
     inputSchema: {
       view: z.enum(['conversations', 'admin_requests', 'invite', 'message_requests']).optional().describe("default 'conversations'"),
       inbox: z.enum(['priority', 'low_quality']).optional().describe("message_requests: X's Priority tab (default) or the filtered low-quality one"),
@@ -8064,6 +8129,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       maxResults: z.number().optional().describe('1-100 (message_requests 1-50), default 10; every conversation or request returned is billed'),
       paginationToken: z.string().optional().describe('nextToken from a previous call'),
       withMembers: z.boolean().optional().describe('also resolve member/admin @handles (each one billed)'),
+      unreadOnly: z.boolean().optional().describe('only unread conversations'),
+      type: z.enum(['direct', 'group']).optional().describe('only 1:1 or only group conversations'),
+      isArchived: z.boolean().optional().describe('true only archived, false only not archived'),
+      isMuted: z.boolean().optional().describe('true only muted, false only not muted'),
+      participantIds: z.string().optional().describe('1-10 numeric X account ids, comma-separated, all in the chat'),
+      participantQuery: z.string().optional().describe('name or @username prefix, 1-50 characters'),
+      startTime: z.string().optional().describe('latest message at or after this ISO 8601 time'),
+      endTime: z.string().optional().describe('latest message before this ISO 8601 time'),
       inviteLink: z.string().optional().describe('an x.com/i/chat/group_join/... link, for view invite'),
       inviteToken: z.string().optional().describe('the 10-character token, with id, for view invite'),
     },
@@ -8469,29 +8542,30 @@ function buildTools(rawServer, opts = {}, sink = null) {
       yourBrand: z.boolean().optional().describe('discloses that this promotes the creator’s own brand'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (TikTok video_cover_timestamp_ms, on a direct post \u2014 a draft takes no cover, you pick it in the TikTok app). true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
-    outputSchema: { ok: z.boolean().optional(), publishId: z.string().optional(), status: z.string().optional(), destination: z.string().optional(), media: z.string().optional(), images: z.number().optional(), coverIndex: z.number().optional(), postId: z.string().nullable().optional(), url: z.string().nullable().optional(), account: z.string().nullable().optional(), pending: z.boolean().optional(), mediaConformedNote: z.string().optional(), reencodedNote: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), publishId: z.string().optional(), status: z.string().optional(), destination: z.string().optional(), media: z.string().optional(), images: z.number().optional(), coverIndex: z.number().optional(), postId: z.string().nullable().optional(), url: z.string().nullable().optional(), urlStatus: z.string().optional(), urlNote: z.string().optional(), account: z.string().nullable().optional(), pending: z.boolean().optional(), mediaConformedNote: z.string().optional(), reencodedNote: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok/post', a);
     const what = d.media === 'photo' ? (d.images > 1 ? `photo post (${d.images} slides)` : 'photo post') : 'video';
     if (d.destination === 'draft') return ok(`Sent the ${what} to TikTok${d.account ? ` on @${d.account}` : ''} — it's waiting in the TikTok app (inbox notification, or ＋ ▸ drafts) for the user to finish and post.${[d.mediaConformedNote, d.reencodedNote].filter(Boolean).map(n => ` ${n}`).join('')}${d.pending ? ' TikTok was still processing when polling stopped; it usually lands within a minute.' : ''}`, d);
-    return ok(`Posted the ${what} to TikTok${d.account ? ` as @${d.account}` : ''}${d.url ? ` — ${d.url}` : ''}.${d.pending ? ' TikTok was still processing when polling stopped — it normally appears within a minute or two. Do not post it again.' : ''}${[d.mediaConformedNote, d.reencodedNote].filter(Boolean).map(n => ` ${n}`).join('')}`, d);
+    return ok(`Posted the ${what} to TikTok${d.account ? ` as @${d.account}` : ''}${d.url ? ` — ${d.url}` : ''}.${d.pending ? ' TikTok was still processing when polling stopped — it normally appears within a minute or two. Do not post it again.' : ''}${!d.url && d.urlNote ? ` ${d.urlNote}` : ''}${[d.mediaConformedNote, d.reencodedNote].filter(Boolean).map(n => ` ${n}`).join('')}`, d);
   }));
   // A publish TikTok was still PROCESSING when post_to_tiktok stopped polling came back `pending:true` with a publishId
   // and the words "do not post it again", and nothing to follow it with: an agent asked call_tool for
   // `tiktok_post_status` on 2026-10-01 and dead-ended. Same read as the web app's /api/tiktok/publish-status.
   server.registerTool('tiktok_post_status', {
     title: 'Check whether a TikTok post finished publishing',
-    description: 'Follow a TikTok post that post_to_tiktok sent but TikTok was still processing (it came back pending:true). Pass the publishId it returned. Answers one of three states: done (PUBLISH_COMPLETE, with the public postId when TikTok gives one), failed (with TikTok\u2019s reason), or still processing, which is normal for a few minutes and is NOT a failure. Never post the video again while it is processing. Free, read-only. Needs TikTok connected (Settings > Connectors > TikTok).',
+    description: 'Follow a TikTok post that post_to_tiktok sent but TikTok was still processing (it came back pending:true). Pass the publishId it returned. Answers one of three states: done (PUBLISH_COMPLETE, with the public `url` once TikTok\u2019s moderation has named it; `urlStatus` is ready, pending, private or draft), failed (with TikTok\u2019s reason), or still processing, which is normal for a few minutes and is NOT a failure. Never post the video again while it is processing. Free, read-only. Needs TikTok connected (Settings > Connectors > TikTok).',
     inputSchema: {
       publishId: z.string().describe('the publishId post_to_tiktok returned'),
       account: z.string().optional().describe('which connected TikTok account the post went out on (@handle or id from list_connector_accounts) when the profile has more than one'),
     },
-    outputSchema: { publishId: z.string().optional(), status: z.string().optional(), done: z.boolean().optional(), failed: z.boolean().optional(), postId: z.string().nullable().optional(), failReason: z.string().nullable().optional(), failMessage: z.string().optional(), uploadedBytes: z.number().nullable().optional() },
+    outputSchema: { publishId: z.string().optional(), status: z.string().optional(), done: z.boolean().optional(), failed: z.boolean().optional(), postId: z.string().nullable().optional(), url: z.string().nullable().optional(), urlStatus: z.string().optional(), urlNote: z.string().optional(), foundBy: z.string().optional(), failReason: z.string().nullable().optional(), failMessage: z.string().optional(), uploadedBytes: z.number().nullable().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok/publish-status', { publishId: a.publishId, ...(a.account ? { account: a.account } : {}) });
-    if (d.done) return ok(`TikTok finished publishing it${d.postId ? ` (post id ${d.postId})` : ''}.`, d);
+    if (d.done) return ok(`TikTok finished publishing it${d.url ? `: ${d.url}` : d.postId ? ` (post id ${d.postId})` : ''}.${d.urlNote ? ` ${d.urlNote}` : ''}`, d);
+    if (d.urlStatus === 'draft') return ok(`It is waiting as a draft in the TikTok app, for the user to finish and post. ${d.urlNote || ''}`.trim(), d);
     if (d.failed) return ok(d.failMessage || `TikTok did not publish it: ${d.failReason || 'no reason given'}.`, d);
     return ok(`TikTok is still processing it (${d.status || 'no status yet'}). That is normal for a few minutes; check again shortly and do not post it again.`, d);
   }));
@@ -10435,6 +10509,43 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // d.note is written from the READ-BACK and says so when Google reports a status different to the one we asked
     // for — print it rather than re-asserting `a.status`, which would be a claim about the request, not the account.
     return ok(d.note || `${d.level || 'campaign'} → ${d.verifiedStatus || a.status}.`, d);
+  }));
+  server.registerTool('manage_google_ads_budget_networks', {
+    title: 'Google Ads waterfall priorities and network spend caps',
+    description: "Google Ads WATERFALL AND NETWORK CAPS: which network a budget spends on first and how much the others may take. action 'read' (default), 'set' (settings) or 'clear', on the ACCOUNT DEFAULT or, with budgetId, on one campaign budget, which then wins. Every channel a campaign type supports must be in a tier and caps only go on tier2; Google says which if not. A budget's read says whether it can use these and why not. 'set' and 'clear' move real spend on the next auction: show the user, get a yes, then confirm:true; dryRun:true validates without changing anything.",
+    inputSchema: {
+      action: z.enum(['read', 'set', 'clear']).optional().describe("default 'read'"),
+      customerId: z.string().optional().describe('10-digit account id (dashes ok); omit to use the brand’s selected default account'),
+      budgetId: z.string().optional().describe('numeric campaign budget id; omit for the account default'),
+      settings: z.array(z.object({
+        channelType: z.string().describe('campaign type: SEARCH, DISPLAY, SHOPPING, VIDEO, PERFORMANCE_MAX, DEMAND_GEN and so on'),
+        tier1: z.array(z.enum(['OWNED_AND_OPERATED', 'SEARCH_PARTNER', 'GOOGLE_DISPLAY'])).optional().describe('channels that spend first'),
+        tier2: z.array(z.enum(['OWNED_AND_OPERATED', 'SEARCH_PARTNER', 'GOOGLE_DISPLAY'])).optional().describe('channels that get what is left'),
+        caps: z.array(z.object({ channel: z.string().describe('a channel in tier2'), percent: z.number().describe('most of the budget it may spend, 0-100') })).optional().describe('spend caps on tier2 channels'),
+      })).optional().describe('for set: one entry per campaign type'),
+      confirm: z.boolean().optional().describe('REQUIRED true for set and clear, after the user approved'),
+      dryRun: z.boolean().optional().describe('validate with Google, write nothing'),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), changed: z.boolean().optional(), eligible: z.boolean().nullable().optional(), settings: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => {
+    const d = await apiPost('/api/google-ads/budget-networks', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('google_ads_local_services_eligibility', {
+    title: 'Check Google Local Services eligibility',
+    description: 'Ask Google whether a Business Profile listing can run LOCAL SERVICES ads on this Google Ads account: eligible or not, why not, and which lead types and categories it qualifies for. listingId is the numeric id at the end of a location name from list_business_locations. Read-only.',
+    inputSchema: {
+      listingId: z.string().describe('numeric Business Profile location id'),
+      customerId: z.string().optional().describe('10-digit account id (dashes ok); omit to use the brand’s selected default account'),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), eligible: z.boolean().optional(), reasons: z.array(z.any()).optional(), goals: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/local-services-eligibility', a);
+    return ok(d.note, d);
   }));
   server.registerTool('set_google_ads_networks', {
     title: 'Change where a Google Ads campaign serves (Search partners / Display)',
@@ -14669,7 +14780,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       name: z.string().optional().describe('new campaign name'),
       dailyBudget: z.number().optional().describe("in the ad account's currency"),
       totalBudget: z.number().optional().describe('new lifetime budget in ad account currency'),
-      standardDelivery: z.boolean().optional().describe('false = accelerated: spend the budget as fast as the auction allows'),
+      standardDelivery: z.boolean().optional().describe('false = accelerated. Works on a campaign-budget campaign; with line item budgets set it on the line item'),
       purchaseOrderNumber: z.string().optional().describe('purchase order number recorded on the campaign'),
     },
     outputSchema: { accountId: z.string().optional(), campaignId: z.string().optional(), updated: z.array(z.string()).optional(), changed: z.number().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
@@ -14687,6 +14798,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       startTime: z.string().optional().describe('ISO 8601'), endTime: z.string().optional().describe('ISO 8601 end time for this line item'),
       dailyBudget: z.number().optional().describe('only if the campaign is not budget-optimised'),
       totalBudget: z.number().optional().describe('only if the campaign is not budget-optimised'),
+      standardDelivery: z.boolean().optional().describe('false = accelerated, only with line item budgets; X refuses it under a campaign budget'),
     },
     outputSchema: { accountId: z.string().optional(), lineItemId: z.string().optional(), updated: z.array(z.string()).optional(), changed: z.number().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -14776,6 +14888,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       productType: z.enum(['MEDIA', 'PROMOTED_ACCOUNT', 'PROMOTED_TWEETS']).optional().describe('default PROMOTED_TWEETS \u2014 PROMOTED_ACCOUNT when objective is FOLLOWERS, and that line item serves the ACCOUNT attached with create_x_ads_promoted_account'),
       placements: z.array(z.enum(['ALL_ON_TWITTER', 'PUBLISHER_NETWORK', 'TAP_BANNER', 'TAP_FULL', 'TAP_FULL_LANDSCAPE', 'TAP_MRECT', 'TAP_NATIVE', 'TWITTER_MEDIA_VIEWER', 'TWITTER_PROFILE', 'TWITTER_REPLIES', 'TWITTER_SEARCH', 'TWITTER_TIMELINE'])).optional().describe('default ALL_ON_TWITTER'),
       goal: z.enum(['APP_CLICKS', 'APP_INSTALLS', 'APP_PURCHASES', 'ENGAGEMENT', 'FOLLOWERS', 'LINK_CLICKS', 'MAX_REACH', 'PREROLL', 'PREROLL_STARTS', 'REACH_WITH_ENGAGEMENT', 'SITE_VISITS', 'SOCIAL_ENGAGEMENT', 'VIDEO_VIEW', 'VIEW_15S', 'VIEW_3S_100PCT', 'VIEW_6S', 'WEBSITE_CONVERSIONS', 'WEBSITE_CONVERSIONS_V2']).optional().describe('optimization goal, e.g. LINK_CLICKS or WEBSITE_CONVERSIONS; these are goals, not objectives'),
+      standardDelivery: z.boolean().optional().describe('false = accelerated, only with line item budgets; X refuses it under a campaign budget'),
       bidStrategy: z.enum(['AUTO', 'GUARANTEED', 'MAX', 'TARGET']).optional().describe('AUTO lets X set the bid; MAX and TARGET need bidAmount'),
       bidAmount: z.number().optional().describe("required for MAX/TARGET; in the ad account's currency"),
       totalBudget: z.number().optional().describe('lifetime budget for this line item in ad account currency'),
@@ -16026,6 +16139,28 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/reddit-ads/forecast', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('reddit_ads_plan_forecast', {
+    title: 'Forecast a Reddit campaign plan',
+    description: 'Reddit Campaign Planner’s forecast for a proposed campaign: the audience, projected reach, impressions, clicks, frequency and CPM/CPC/CPV for this budget, and a curve of reach at ten budgets to compare. Creates nothing and spends nothing. Use reddit_ads_forecast for a quick audience size. Reddit allows 30 of these a minute. These are Reddit’s estimates, not a guarantee, and they reserve nothing; say so, and keep each result beside the inputs that made it.',
+    inputSchema: {
+      adAccountId: z.string().optional().describe('Reddit ad account id (a2_...); omit when only one is shared'),
+      objective: z.enum(['APP_INSTALLS', 'BRAND_AWARENESS', 'CATALOG_SALES', 'CLICKS', 'CONVERSIONS', 'IMPRESSIONS', 'LEAD_GENERATION', 'SALES', 'VIDEO_VIEWABLE_IMPRESSIONS']).describe('campaign objective'),
+      goalType: z.enum(['DAILY_SPEND', 'LIFETIME_SPEND']).describe('whether budget is per day or for the whole plan'),
+      budget: z.number().describe('budget in the ad account’s currency (not micro-currency)'),
+      startTime: z.string().optional().describe('ISO 8601; default now'),
+      endTime: z.string().optional().describe('ISO 8601; default 30 days after the start, at most 365'),
+      bidType: z.enum(['CPC', 'CPM', 'CPV', 'CPV6', 'CPV15']).optional().describe('CPC, CPM, CPV, CPV6 or CPV15'),
+      bidStrategy: z.enum(['BIDLESS', 'MANUAL_BIDDING', 'MAXIMIZE_VOLUME', 'TARGET_CPX']).optional().describe('BIDLESS, MANUAL_BIDDING, MAXIMIZE_VOLUME or TARGET_CPX'),
+      bidAmount: z.number().optional().describe('bid in the ad account currency'),
+      useCatalog: z.boolean().optional().describe('SALES objective: true forecasts catalog sales'),
+      targeting: z.record(z.any()).optional().describe('same shape as create_reddit_ads_ad_group targeting'),
+    },
+    outputSchema: { audience: z.any().optional(), projection: z.any().optional(), curve: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/reddit-ads/plan-forecast', a);
     return ok(d.note, d);
   }));
   server.registerTool('reddit_ads_bid_suggestion', {
@@ -25553,10 +25688,12 @@ function memoryNoteVerdict(text) {
     const folTxt = Array.isArray(d.followers) ? d.followers.slice(0, 12).map(f => `• ${f.channel}${f.label ? ` ${f.label}` : ''}: ${f.last ? `${fmtN(f.last.followers)} on ${f.last.day}${f.change != null && f.first && f.first.day !== f.last.day ? ` (${f.change >= 0 ? '+' : ''}${fmtN(f.change)} since ${f.first.day})` : ''}` : 'unknown'}${f.lastWhy ? ` — latest read unknown: ${f.lastWhy.why}` : ''}`) : [];
     const archTxt = d.archive?.used ? `\n\nIncludes ${d.archive.rows} older post(s) from the brand's archive.` : (d.archive?.unreadable ? `\n\n⚠ ${d.archive.why}` : '');
     const overTime = `${boardTxt.length ? `\n\nBEST AND WORST POSTS (last ${d.days || 30} days):\n${boardTxt.join('\n')}` : ''}${trendTxt.length ? `\n\nOVER TIME (last ${d.trend.weeks.length} weeks, 7-day readings where they exist):\n${trendTxt.join('\n')}` : ''}${healthTxt.length ? `\n\nMEASUREMENT GAPS:\n${healthTxt.join('\n')}` : ''}${folTxt.length ? `\n\nFOLLOWERS (daily snapshot):\n${folTxt.join('\n')}` : (d.followers?.unreadable ? `\n\nFOLLOWERS: ${d.followers.why}` : '')}${archTxt}`;
-    if (!gs.length) return ok(`Nothing to compare on "${d.axis}" yet. ${d.finding?.why || ''}`.trim() + overTime, d);
+    // INSTAGRAM STORIES (2026-10-31): kept numbers for Stories posted by any route. Unknown is printed as unknown, never 0.
+    const storyTxt = d.stories ? `\n\nINSTAGRAM STORIES (${d.stories.count ?? 0}, ${d.stories.withNumbers ?? 0} with numbers):\n${(d.stories.rows || []).slice(0, 10).map(x => `• ${x.account} ${x.postedAt || 'unknown'}${x.caption ? ` ${JSON.stringify(x.caption.slice(0, 60))}` : ''}: ${x.summary}`).join('\n')}${(d.stories.unreadable || []).length ? `\nCould not read some of them: ${d.stories.unreadable[0].error}` : ''}` : '';
+    if (!gs.length) return ok(`Nothing to compare on "${d.axis}" yet. ${d.finding?.why || ''}`.trim() + overTime + storyTxt, d);
     const rows = gs.map(g => `• "${g.key}" · ${g.channel} — ${g.meanRate == null ? (g.meanEngagement == null ? 'no measurable engagement' : `${g.meanEngagement.toFixed(1)} engagements (no reach denominator on this channel, so no rate)`) : `${(g.meanRate * 100).toFixed(2)}% engagement`} · ${g.n} post(s), ${g.nRated} measured${g.verdict === 'ready' ? '' : ` — ${g.suppressed}`}`);
     const head = d.finding?.finding ? `FINDING: ${d.finding.finding}` : `NO FINDING YET: ${d.finding?.why || 'not enough measured posts'}`;
-    return ok(`${head}\n\nBy ${d.axis}:\n${rows.join('\n')}${d.excludedUnattributed ? `\n\n${d.excludedUnattributed} post(s) were excluded from this axis because no hook was recorded for them — they still count toward channel and format totals.` : ''}${overTime}`, d);
+    return ok(`${head}\n\nBy ${d.axis}:\n${rows.join('\n')}${d.excludedUnattributed ? `\n\n${d.excludedUnattributed} post(s) were excluded from this axis because no hook was recorded for them — they still count toward channel and format totals.` : ''}${overTime}${storyTxt}`, d);
   }));
 
   server.registerTool('diagnose_posts', {
