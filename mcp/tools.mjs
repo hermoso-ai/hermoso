@@ -21983,7 +21983,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   };
   server.registerTool('make_motion_film', {
     title: 'Make a motion graphics video',
-    description: "MOTION GRAPHICS and ANIMATED VIDEO in one call, made in code with no video model: kinetic typography (animated text), a logo animation or intro, a product launch film, an animated social cut. Type, the user's pictures and drawn graphics are filmed by a moving virtual camera and cut on the music's beat: a 1080p MP4 in about a minute, billed for its compute only. Pick it for 'animated video', 'motion graphics', 'kinetic text', 'text animation', 'logo animation', 'logo intro', 'animated explainer' asks. recipe: 'type' (every line its own animated card, no picture needed), 'logo' (the logo assembles out of dots and settles, the name and tagline land under it), 'launch' (30s 16:9), 'product' (15s), 'social' (15s 9:16). Or `spec`, the whole film as JSON (help:true returns the language). STEPS: without confirm it is a FREE quote (price, length, the music's tempo; the spec in structuredContent); preview:true is a 1-credit contact sheet to approve; confirm:true renders. Only the user's or the brand's words appear: never invent a claim, number or review. projectUrl = a past film's url returns its saved spec to edit and render again.",
+    description: "MOTION GRAPHICS and ANIMATED VIDEO in one call: kinetic typography (animated text), a logo animation or intro, a product launch film, an animated social cut. MOVING PICTURES are the default for launch, product and social: in each scene with a picture, one thing physically happens (a seed splits open, an eye opens, the view travels through a forest), filmed by an image-to-video model, with the type, transitions and the music's beat put on top; a few minutes, priced per shot, and with no pictures given each scene paints its own. moving:false, and always for type and logo, makes it in code with no video model: type, pictures and drawn graphics filmed by a moving virtual camera, a 1080p MP4 in about a minute, billed for its compute only. Pick it for 'animated video', 'motion graphics', 'kinetic text', 'text animation', 'logo animation', 'logo intro', 'animated explainer' asks. recipe: 'type' (every line its own animated card, no picture needed), 'logo' (the logo assembles out of dots and settles, the name and tagline land under it), 'launch' (30s 16:9), 'product' (15s), 'social' (15s 9:16). Or `spec`, the whole film as JSON (help:true returns the language). STEPS: without confirm it is a FREE quote that gives both prices (length, the music's tempo; the spec in structuredContent): say both; preview:true is a 1-credit contact sheet of the still version; confirm:true renders. You may write `moves` yourself, or the film's own planner writes them for a few credits. Only the user's or the brand's words appear: never invent a claim, number or review. projectUrl = a past film's url returns its saved spec to edit and render again.",
     inputSchema: {
       recipe: z.enum(['type', 'logo', 'launch', 'product', 'social']).optional().describe('type, logo, launch, product or social; help:true lists the recipes'),
       hook: z.string().optional().describe("opening line; '*word*' = italic accent"),
@@ -21998,6 +21998,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       music: z.string().optional().describe("'off' = silent"),
       theme: z.enum(['light', 'dark']).optional().describe("logo: dark for a light logo"),
       energy: z.number().optional().describe('how much the film keeps moving, 0 to 1; 0 films exactly what is written'),
+      moving: z.boolean().optional().describe('true: one thing physically happens in each picture, filmed by a video model. false: stills moved by a virtual camera, far cheaper. Default true for launch, product, social'),
+      moves: z.array(z.object({ scene: z.string().describe('scene id'), action: z.string().describe('the one thing that physically happens, in plain words'), still: z.string().optional().describe('a picture to animate, when not the one in the scene'), stillPrompt: z.string().optional().describe('a picture to paint first, for a scene with none'), layer: z.string().optional().describe("the picture layer's id, when the scene has several"), video: z.string().optional().describe('a shot already filmed: kept, and not paid for again'), matchNext: z.boolean().optional().describe("the shot ends on the next scene's picture") })).optional().describe('per scene, what happens in its picture; omit and the planner writes them'),
+      brief: z.string().optional().describe('what the film is about, for the planner'),
+      model: z.string().optional().describe('image-to-video model id from hermoso_capabilities; default is the best value for short shots'),
+      resolution: z.string().optional().describe('the moving shots: 720p or 1080p (default) where the model has them'),
       spec: z.object({}).passthrough().optional().describe('the whole film as JSON, from a quote or a saved film; help:true shows the spec language'),
       projectUrl: z.string().optional().describe("a past film's url; returns its saved spec to edit and render again"),
       help: z.boolean().optional().describe('true returns the spec language and recipes; renders nothing'),
@@ -22023,15 +22028,31 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const name = String(a.name || b.name || '').slice(0, 40), brandLogo = logo || b.logo || '';
     let spec = a.spec && typeof a.spec === 'object' ? a.spec : null, music = typeof a.music === 'string' && a.music.trim() ? a.music.trim().slice(0, 300) : '';
     let credits = null, previewCredits = null, bpm = null;
+    // the moving version is the default wherever a film has pictures to move; a spec already holding filmed shots stays as it is unless asked, so changing a word does not re-buy them
+    const hasClips = Array.isArray(spec?.scenes) && spec.scenes.some((s) => Array.isArray(s?.layers) && s.layers.some((l) => l && l.type === 'clip'));
+    const wantMoving = a.moving ?? (a.preview ? false : Array.isArray(a.moves) && a.moves.length ? true : spec ? !hasClips : a.recipe === 'launch' || a.recipe === 'product' || a.recipe === 'social');
     if (!spec) {
       if (!a.recipe) throw Object.assign(new Error("Pass a recipe ('type', 'logo', 'launch', 'product' or 'social') with words, or a whole spec."), { status: 400, _userInput: true });
-      const d = await apiPost('/api/motion/build', { recipe: a.recipe, size: a.size || null, seconds: a.seconds ?? null, mood: a.mood || null, theme: a.theme || null, ...(a.energy != null ? { energy: a.energy } : {}), brand: { name, palette: pal, logo: brandLogo ? 'yes' : '' }, words: { hook: a.hook || '', lines: a.lines || [], tagline: a.tagline || '' }, images });
+      const d = await apiPost('/api/motion/build', { ...(wantMoving ? { moving: true } : {}), recipe: a.recipe, size: a.size || null, seconds: a.seconds ?? null, mood: a.mood || null, theme: a.theme || null, ...(a.energy != null ? { energy: a.energy } : {}), brand: { name, palette: pal, logo: brandLogo ? 'yes' : '' }, words: { hook: a.hook || '', lines: a.lines || [], tagline: a.tagline || '' }, images });
       spec = d.spec; if (!music) music = d.music || ''; credits = d.credits; previewCredits = d.previewCredits; bpm = d.bpm;
     }
     const film = { config: { template: 'motion', spec, ...(music ? { music } : {}) }, brand: { name, domain: b.domain || '', logo: brandLogo, palette: pal } };
     if (credits == null) { const q = await quoteJob('templatead', film); credits = q?.credits ?? null; if (q?.refused) throw Object.assign(new Error(`The film was refused before anything rendered (free): ${q.refused}`), { status: 400, _userInput: true }); }
     const secs = Array.isArray(spec?.scenes) ? +spec.scenes.reduce((x, s) => x + (+s.seconds || 0), 0).toFixed(2) : null;
     const what = `${secs != null ? secs + 's, ' : ''}${spec?.size || '16:9'}, ${Array.isArray(spec?.scenes) ? spec.scenes.length : '?'} scenes${music && music !== 'off' ? `, music "${music}"${bpm ? ` at ${bpm} BPM` : ''}` : ''}`;
+    if (wantMoving) {
+      const mv = { ...(a.model ? { model: a.model } : {}), ...(a.resolution ? { resolution: a.resolution } : {}) };
+      const q = await apiPost('/api/motion/moving-quote', { spec, music, ...(Array.isArray(a.moves) && a.moves.length ? { moves: a.moves } : {}), ...mv });
+      if (q?.moving) {
+        if (!a.confirm) return ok(`QUOTE (nothing rendered or charged): with moving pictures this film is about ${q.credits} credits (${what}; ${q.moving} moving shot${q.moving === 1 ? '' : 's'} on ${q.model} at ${q.resolution}). With still pictures moved by a virtual camera it is ${q.stillFilmCredits} credits (moving:false). ${PRICE_ESTIMATE_LINE} Tell the user both prices, then call again with the same arguments and confirm:true (pass structuredContent.spec as spec to keep this exact film).`, { credits: q.credits, stillFilmCredits: q.stillFilmCredits, moving: q.moving, shots: q.scenes, lines: q.lines, model: q.model, resolution: q.resolution, seconds: secs, music, bpm, spec });
+        let moves = Array.isArray(a.moves) && a.moves.length ? a.moves : null, planned = 0;
+        if (!moves) { const p = await apiPost('/api/motion/moves', { spec, brief: a.brief || [a.hook, ...(a.lines || []), a.tagline].filter(Boolean).join(' / '), brand: { name } }); moves = p?.moves; planned = +p?.planCreditsUsed || 0; if (!Array.isArray(moves) || !moves.length) throw new Error('The moves for this film could not be written. Nothing else was charged. Try again, or pass moves yourself.'); }
+        const r = await renderJob('motionmoving', { ...film, moves, ...mv }, 'MCP moving motion film');
+        const raw = r?.raw || {};
+        const notes = Array.isArray(raw.notes) && raw.notes.length ? `\nNOTE: ${raw.notes.join('; ')}` : '';
+        return okVideo(`Motion film ready (${what}, ${raw.movingShots ?? moves.length} moving shot${(raw.movingShots ?? moves.length) === 1 ? '' : 's'}): ${r.url}  [job ${r.jobId}]${planned ? ` Writing the moves was ${planned} credits.` : ''}${notes}\nIts spec is saved with the shots in it: make_motion_film({projectUrl: this url}) opens it, and changing the words costs only the render.`, r);
+      }
+    }
     if (a.preview) {
       const r = await renderJob('templatead', { ...film, config: { ...film.config, preview: true } }, 'MCP motion contact sheet');
       if (r?.stillRendering) return ok(stillMsg(r), r);
