@@ -276,6 +276,8 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute
 .quick{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:12px 0 4px}
 .chip{font-size:13px;background:var(--card)}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.ccard{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px}
+.ccard .row{margin-top:4px}
 .gcard{text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px;cursor:var(--cur)}
 .gcard b{display:block;margin-bottom:2px}.gcard span{color:var(--muted);font-size:12px}
 .field{margin:12px 0}
@@ -360,7 +362,7 @@ const APP_SCRIPT = String.raw`<script>
   var TOOL_VIEW = { open_hermoso_home: 'home', open_library: 'library', open_ad_brief: 'create', set_up_hermoso: 'setup', show_ad_concepts: 'concepts', show_ad_results: 'results' };
   var CARD_VIEWS = ['concepts', 'results'];
   var PANEL_VIEWS = ['home', 'library', 'jobs', 'calendar', 'ads', 'create', 'setup'];
-  var SECTIONS_FOR = { home: ['brand', 'brands', 'library', 'jobs', 'prefs'], library: ['library', 'jobs', 'brands', 'calendar'], jobs: ['jobs', 'brands'], calendar: ['calendar', 'brands', 'prefs'], ads: ['ads', 'brands'], create: ['brand', 'brands', 'library', 'creators', 'products', 'prefs'], setup: ['brand', 'brands', 'connectors'] };
+  var SECTIONS_FOR = { home: ['brand', 'brands', 'library', 'jobs', 'prefs', 'connectors'], library: ['library', 'jobs', 'brands', 'calendar'], jobs: ['jobs', 'brands'], calendar: ['calendar', 'brands', 'prefs'], ads: ['ads', 'brands'], create: ['brand', 'brands', 'library', 'creators', 'products', 'prefs'], setup: ['brand', 'brands', 'connectors'] };
   var EDITABLE = ['queued', 'scheduled'];
   var state = {
     view: 'home', surface: 'panel', data: null, host: {}, caps: {}, selected: [], focus: null, busy: false, pollTimer: null, pollStarted: 0, routed: false, ready: false,
@@ -659,6 +661,7 @@ const APP_SCRIPT = String.raw`<script>
       + '<button class="chip" data-act="create" data-format="video">Make a video ad</button>'
       + '<button class="chip" data-act="msg" data-text="Help me schedule a post from my Hermoso Library.">Schedule a post</button>'
       + '</div></section>';
+    html += connectCardHtml(d);
     html += '<h3>Get started</h3><div class="cards">'
       + gcard('tab', 'library', 'Library', 'Your images and videos')
       + gcard('tab', 'create', 'Create', 'Pick options, see concepts, then render')
@@ -671,6 +674,14 @@ const APP_SCRIPT = String.raw`<script>
     if (live) html += '<div class="note left"><button class="btn" data-act="tab" data-view="jobs">' + live + ' render' + (live === 1 ? '' : 's') + ' in progress</button></div>';
     if (d.notes && d.notes.brand) html += sectionNote('brand');
     return html;
+  }
+  // NOTHING CONNECTED YET: posting from here starts with one browser sign-in. Absent while the read is pending or failed,
+  // because an unread list is not an empty one. The links leave through openLink, like every other link in this app.
+  function connectCardHtml(d){
+    var c = d.connectCard; if (!c || !c.channels || !c.channels.length) return '';
+    return '<div class="ccard" data-connect-card="1"><b>Post what you make from this chat</b><span class="s">Nothing is connected yet. Sign in once on the platform, then ask here to post or schedule.</span><div class="row">'
+      + c.channels.map(function(x){ return '<button class="btn primary" data-act="open-link" data-url="' + esc(x.url) + '">' + esc(x.name) + '</button>'; }).join('')
+      + '<button class="btn" data-act="setup" data-step="connections">All channels</button></div></div>';
   }
   function gcard(act, target, title, sub){
     return '<button class="gcard" data-act="' + act + '" ' + (act === 'setup' ? 'data-step' : 'data-view') + '="' + target + '"><b>' + esc(title) + '</b><span>' + esc(sub) + '</span></button>';
@@ -1142,6 +1153,7 @@ const APP_SCRIPT = String.raw`<script>
     if (a === 's-draft') return draftBrand();
     if (a === 's-step') { state.setup.step = el.getAttribute('data-step'); if (state.setup.step === 'connections') load(['connectors']); return render(); }
     if (a === 's-check') return load(['connectors']);
+    if (a === 'open-link') { var ou = el.getAttribute('data-url'); if (ou) openLink(ou); return; }
     if (a === 's-connect') { var pv = el.getAttribute('data-p'); var c = (d.connections || []).filter(function(x){ return x.provider === pv; })[0]; if (c && c.connectUrl) { openLink(c.connectUrl).then(function(){ startWatch(pv); render(); }); } return; }
     // concepts
     if (a === 'c-pick') { state.concepts.open = i; return render(); }
@@ -1287,6 +1299,17 @@ const CHANNELS_OF = { meta: ['facebook', 'instagram'], instagram: ['instagram'],
 const CHANNEL_LABEL = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest', google_business: 'Google Business Profile', bluesky: 'Bluesky', telegram: 'Telegram' };
 export const ALL_CHANNELS = Object.freeze(Object.keys(CHANNEL_LABEL));
 
+// THE HOME SCREEN'S CARD FOR AN ACCOUNT WITH NOTHING TO POST TO (2026-11-02): the first channels on offer, in the server's
+// fixed order (`channelOrder`), each with its one-click link. A connected posting channel
+// answers null: there is nothing to ask for. `via` names this surface on the admin Funnel tab.
+export const HOME_CONNECT_VIA = 'chatgpt-home';
+export function homeConnectCard(connections = [], order = []) {
+  const rows = (Array.isArray(connections) ? connections : []).filter((c) => c && CHANNELS_OF[c.provider] && c.provider !== 'google_business');
+  if (!rows.length || rows.some((c) => c.connected)) return null;
+  const rank = (p) => { const i = (Array.isArray(order) ? order : []).indexOf(p); return i < 0 ? 999 : i; };
+  return { channels: [...rows].sort((a, b) => rank(a.provider) - rank(b.provider)).slice(0, 3).map((c) => ({ provider: c.provider, name: c.name, url: `${c.connectUrl}&via=${HOME_CONNECT_VIA}` })) };
+}
+
 export function libraryPayload(reads = {}, { view = 'library', origins = [], proxyBase = '', abs = (u) => u } = {}) {
   const appOrigin = (() => { try { return new URL(proxyBase).origin; } catch { return ''; } })();
   const own = (u) => { try { return origins.includes(new URL(u).origin); } catch { return false; } };
@@ -1376,6 +1399,7 @@ export function libraryPayload(reads = {}, { view = 'library', origins = [], pro
       // The channels a post can be scheduled to right now: schedule_post's ids, from the connections that are on.
       // Google Business Profile is left out because schedule_post refuses it at enqueue (held back by Google).
       out.channels = [...new Set(out.connections.filter((c) => c.connected).flatMap((c) => CHANNELS_OF[c.provider] || []))].filter((id) => id !== 'google_business').map((id) => ({ id, label: CHANNEL_LABEL[id] }));
+      if (view === 'home') out.connectCard = homeConnectCard(out.connections, d.channelOrder);
     }
   }
   if (reads.ads) {
@@ -1821,7 +1845,7 @@ export function libraryToolDefs() {
 // proxyBase (our /api/img), abs (absolute asset URLs), call(name, args, extra), which runs an EXISTING tool's handler
 // for this session, and prefs {read, write} for the per-brand defaults this app adds.
 export function registerLibraryApp(server, deps) {
-  const { resourceMeta, origins = [], proxyBase = '', abs = (u) => u, call = async () => null, prefs = null } = deps || {};
+  const { resourceMeta, origins = [], proxyBase = '', abs = (u) => u, call = async () => null, prefs = null, markHomeConnectCard = null } = deps || {};
   const meta = libraryResourceMeta(resourceMeta, origins);
   const description = meta['openai/widgetDescription'];
   server.registerResource('hermoso-library-app', LIBRARY_APP_URI, { description, mimeType: LIBRARY_APP_MIME, _meta: meta },
@@ -1850,7 +1874,11 @@ export function registerLibraryApp(server, deps) {
   const handles = {};
   const reg = (name, fn) => { handles[name] = server.registerTool(name, defs[name], fn); };
 
-  reg(EXT_HOME_TOOL, async (args, extra) => answer(args, extra, ['brand', 'brands', 'library', 'jobs', 'prefs'], 'home'));
+  reg(EXT_HOME_TOOL, async (args, extra) => {
+    const out = await answer(args, extra, ['brand', 'brands', 'library', 'jobs', 'prefs', 'connectors'], 'home');
+    if (out?.structuredContent?.connectCard && typeof markHomeConnectCard === 'function') { try { Promise.resolve(markHomeConnectCard()).catch(() => {}); } catch {} } // counted on the admin Funnel tab; never holds the screen up
+    return out;
+  });
   reg(EXT_ENTRY_TOOL, async (args, extra) => answer(args, extra, ['library', 'jobs', 'brands', 'calendar'], PANEL_VIEWS.includes(args?.view) ? args.view : 'library'));
   reg(EXT_BRIEF_TOOL, async (args, extra) => answer(args, extra, ['brand', 'brands', 'library', 'creators', 'products', 'prefs'], 'create', { surface: 'card', payload: { brief: { format: args?.format === 'video' ? 'video' : args?.format === 'image' ? 'image' : '', product: clip(args?.product, 600) } } }));
   reg(EXT_SETUP_TOOL, async (args, extra) => answer(args, extra, ['brand', 'brands', 'connectors'], 'setup', { surface: 'card', payload: { step: args?.step === 'connections' ? 'connections' : 'brand' } }));

@@ -109,6 +109,25 @@ export function videoChoiceText(tool, choice, opts = {}) {
 }
 
 
+// ── A FINISHED RENDER, READ FROM THE REPLY (2026-11-02) ─────────────────────────────────────────────────────────────
+// Which replies may carry the "post this" next step (lib/connect-prompt.mjs): the tools that make a file, and only once
+// that file exists. A hosted video answers {stillRendering} and arrives through get_job, so get_job is on the list and a
+// queued, running or failed job is not a finished render. Pure, no imports — the twin rule above.
+export const RENDER_REPLY_TOOLS = Object.freeze(['generate_image', 'generate_video', 'render_ad', 'make_template_ad', 'make_motion_film', 'make_thumbnail', 'make_explainer', 'generate_avatar', 'stitch_video', 'product_sizzle', 'recast_motion', 'finish_video', 'multiply_ad', 'clone_video', 'clone_static', 'remix_static', 'get_job']);
+const _VIDEO_FILE = /\.(mp4|mov|webm|m4v)(\?|#|$)/i, _IMAGE_FILE = /\.(png|jpe?g|webp|gif)(\?|#|$)/i;
+export function finishedRenderKind(tool, r) {
+  if (!RENDER_REPLY_TOOLS.includes(String(tool || '')) || !r || r.isError || !Array.isArray(r.content)) return '';
+  const s = r.structuredContent;
+  if (!s || typeof s !== 'object' || s.stillRendering) return '';
+  if (typeof s.status === 'string' && s.status && s.status !== 'done') return '';
+  const inner = [s, s.raw, s.result, s.result && s.result.data].filter((x) => x && typeof x === 'object');
+  const has = (k) => inner.some((x) => (Array.isArray(x[k]) ? x[k].length > 0 : !!x[k]));
+  const url = String(s.url || '');
+  if (has('video') || _VIDEO_FILE.test(url)) return 'video';
+  if (has('image') || has('images') || has('thumbnails') || has('slides') || _IMAGE_FILE.test(url)) return 'image';
+  return '';
+}
+
 // ── OUT OF CREDITS ON A HOST THAT FORBIDS SELLING CREDITS (2026-09-30, OpenAI's plugin guidelines) ─────────────────
 // "Plugins may: explain that a certain feature is not available with the user's current plan or entitlement; link to
 // an informational page … Plugins may not: link directly to a checkout … or promote upgrades." ChatGPT is not offered

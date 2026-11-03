@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate image & video ad
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**1109 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1110 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -16,7 +16,7 @@ website.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
 and insights, comments and DMs, connectors, profiles and team seats cost **no credits on any plan**, with no
-per-post fee and no seat pricing. The Free plan includes 30 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($9.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 250+ free credits as the Free plan, monthly credits start on Starter, and Autopilot spends credits. Credits are spent only on running an AI model (image, video,
+per-post fee and no seat pricing. The Free plan includes 10 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($9.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 250+ free credits as the Free plan, monthly credits start on Starter, and Autopilot spends credits. Credits are spent only on running an AI model (image, video,
 voice, text, planning, post-production) and on Ad Spy research, and posting an ad you already rendered is never a
 second charge. The one exception is X (Twitter), where posting and reads bill credits per call because X
 charges per API request (`hermoso_credits` prints the exact credits per X post).
@@ -214,7 +214,7 @@ your browser (`--no-browser` prints the link on a headless machine). Measured ag
 
 Your agent now has the full studio **with your profile's context**: the brand details, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
-`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits, at the same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics cost no credits on any plan (posting to X and reading X data are the one per-call exception, managing X ads is free). The Free plan includes 30 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($9.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 250+ free credits as the Free plan, monthly credits start on Starter, and Autopilot spends credits.
+`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits, at the same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics cost no credits on any plan (posting to X and reading X data are the one per-call exception, managing X ads is free). The Free plan includes 10 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($9.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 250+ free credits as the Free plan, monthly credits start on Starter, and Autopilot spends credits.
 
 ## 1. MCP server (stdio), optional in a coding agent
 
@@ -242,7 +242,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1109 tools cover
+### What the 1110 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
