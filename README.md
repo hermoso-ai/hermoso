@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate image & video ad
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**1110 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1182 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -23,9 +23,9 @@ charges per API request (`hermoso_credits` prints the exact credits per X post).
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
 Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads, plus
-product feeds in Google Merchant Center. Publishing and scheduling — **eleven** channels: Facebook, Instagram,
-Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky, Telegram and Google Business Profile. Messaging: WhatsApp (you message a
-person, so it is not a twelfth publishing channel) and DM automations on Instagram, Facebook Pages and
+product feeds in Google Merchant Center. Publishing and scheduling — **fifteen** channels: Facebook, Instagram,
+Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky, Telegram, WordPress, Discord, Slack, Whop and Google Business Profile. Messaging: WhatsApp (you message a
+person, so it is not a sixteenth publishing channel) and DM automations on Instagram, Facebook Pages and
 Messenger, and X (a keyword comment, a DM, a story reply or an ig.me / m.me link gets an automatic reply). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
 Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
 connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
@@ -242,7 +242,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1110 tools cover
+### What the 1182 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -278,13 +278,16 @@ Real faces from your own photos need a paid plan; AI people work on every plan.
 per-render credit cost) with no ad framing: `generate_image` / `generate_video` with `useBrand:false`,
 `generate_voice`, `generate_text`. The image default is Nano Banana 2.1.
 
-**Publish to your own channels** — **eleven** of them: Facebook, Instagram and Threads (`post_to_meta`), TikTok
+**Publish to your own channels** — **fifteen** of them: Facebook, Instagram and Threads (`post_to_meta`), TikTok
 (`post_to_tiktok`), YouTube (`post_to_youtube` + `update_youtube_video`, `youtube_video_insights`, comments
 read/reply), X (`post_to_x`, `x_post_metrics`, `x_post_insights`, `x_mentions`, `list_x_dms`, `send_x_dm`),
 LinkedIn profile **and** company Pages (`post_to_linkedin`, `post_to_linkedin_page`), Pinterest
 (`post_to_pinterest` + boards), Bluesky (`post_to_bluesky`, `delete_bluesky_post`, `bluesky_post_metrics`, plus
 `list_bluesky_convos` / `read_bluesky_dm` / `send_bluesky_dm`) and Telegram (`post_to_telegram`,
-`delete_telegram_message`, `list_telegram_chats`) and Google Business Profile (below). `schedule_post` / `list_scheduled` / `cancel_scheduled` give
+`delete_telegram_message`, `list_telegram_chats`), WordPress (`post_to_wordpress`, `update_wordpress_post`,
+`delete_wordpress_post`, `list_wordpress_posts`), Discord and Slack announcements (`post_to_discord`, `edit_discord_message`,
+`delete_discord_message`, `post_to_slack`), Whop (`post_to_whop`, `edit_whop_post`, `delete_whop_post`, `get_whop_post`,
+`list_whop_destinations`) and Google Business Profile (below). `schedule_post` / `list_scheduled` / `cancel_scheduled` give
 you one content calendar over exactly that set. `upload_file` brings in any external or local media, not just
 Hermoso renders.
 *X posting bills credits per API call (X charges per request); a post containing a link costs 13× one without.*

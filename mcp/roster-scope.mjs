@@ -52,6 +52,7 @@
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
+  'tiktok_ideas', // public TikTok post lookups on our research key + one writing call, never a TikTok connection (2026-11-03)
   'search_meta_places', // place search runs on our data provider and a web search, never on a Meta connection (2026-10-27)
 ]);
 
@@ -104,6 +105,10 @@ export const TOOL_PROVIDER_RULES = [
   [/notion/, 'notion'],
   // Canva (2026-10-27): the user's OWN Canva, offered only to a workspace that connected it.
   [/canva/, 'canva'],
+  // Klaviyo (2026-11-03): the brand's OWN email marketing, offered only to a workspace that connected it.
+  [/klaviyo/, 'klaviyo'],
+  // Mailchimp (2026-11-03): the brand's OWN email marketing, offered only to a workspace that connected it.
+  [/mailchimp/, 'mailchimp'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],
@@ -111,6 +116,13 @@ export const TOOL_PROVIDER_RULES = [
   [/onedrive/, 'microsoft_onedrive'],
   [/bluesky/, 'bluesky'],
   [/telegram/, 'telegram'],
+  // WordPress, Discord and Slack publishing (2026-11-03): the brand's OWN site and webhooks. Discord/Slack posting rides the
+  // same connector row as their alerts (a second, announcement webhook), so the provider is the bare name.
+  [/wordpress/, 'wordpress'],
+  [/discord/, 'discord'],
+  [/slack/, 'slack'],
+  // Whop (2026-11-03): the brand's OWN whop, offered only to a workspace whose whop installed Hermoso.
+  [/whop/, 'whop'],
   // TIKTOK IS THREE CREDENTIALS, AND ONLY FIVE TOOLS RIDE THE POSTING ONE (2026-10-29). Until this date the bare rule sent
   // every remaining tiktok name to 'tiktok', so 41 Business, analytics and creator-marketplace tools were offered by the
   // POSTING login while their routes spend the TikTok Ads advertiser token or its account-holder grant: a TikTok Ads-only
@@ -126,13 +138,12 @@ export const TOOL_PROVIDER_RULES = [
 ];
 
 // The provider a tool needs, or null when this module cannot attribute it. null ⇒ NEVER dropped (property 2).
-// ── PROVIDERS HERMOSO DOES NOT OFFER, AND AS OF NOW WILL NOT (2026-09-03) ────────────────────────────────
-// "make sure posting to reddit or snapchat are never offered, never described, never wasting context in a tools
-// list". Reddit organic posting needs Reddit's API approval we do not have; Snapchat posting is not even built. Both
-// have ADS connectors that are live and are NOT in this set (`reddit_ads`, `snapchat_ads`). A tool whose provider
-// is here is not registered on any roster, not listed by find_tools, not offered by the Studio agent, and not
-// counted. Gating at call time was not enough: a disabled tool still costs its schema in every canon and its name
-// in every listing. If Reddit ever approves the app, remove it from this set and the whole surface returns.
+// ── PROVIDERS HERMOSO DOES NOT OFFER: REDDIT AND SNAPCHAT ORGANIC POSTING, PERMANENTLY ────────────────────────
+// Permanently not offered (owner 2026-11-03: "reddit posting and snapchat posting are never happening … they should
+// never be in the static list or anywhere"). Their OAuth descriptors, gates, tiles, routes and tools were DELETED that
+// day; this set is the BELT that stays, so a tool named for either provider that ever reappears is not registered on
+// any roster, not listed by find_tools, not offered by the Studio agent and not counted. The ADS connectors are live
+// and are NOT in this set (`reddit_ads`, `snapchat_ads`). Never remove an entry from this set.
 export const UNOFFERED_PROVIDERS = new Set(['reddit', 'snapchat']);
 export function toolUnoffered(name) { const p = toolProvider(name); return !!p && UNOFFERED_PROVIDERS.has(p); }
 
@@ -143,7 +154,7 @@ export function toolUnoffered(name) { const p = toolProvider(name); return !!p &
 // the Studio agent's schema and executor) asks THIS function, so the answer cannot differ between them.
 // The set mirrors lib/multi-account.mjs MULTI_ACCOUNT_PROVIDERS, which the npm package cannot import;
 // tools/multi-account-arg-check.mjs fails when the two differ, and DERIVES the tool split below from server.js.
-export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'reddit', 'pinterest', 'instagram']));
+export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'pinterest', 'instagram']));
 // Filed under a multi-account channel, but routed through a connection that holds ONE grant per brand, so `account`
 // would do nothing there: these two Pinterest reads ride the ad-account (pinterest_ads) row. (The TikTok Business and
 // Ads tools are no longer filed under 'tiktok' at all — only the five posting tools are — so they need no entry.)
@@ -227,7 +238,14 @@ export const SHOPIFY_STORE_TOOL_RE = /shopify/;
 export const toolNeedsShopifyStore = (name) => SHOPIFY_STORE_TOOL_RE.test(String(name || ''));
 export function toolHeldForNoShopifyStore(name, conn) { return !!(conn && conn.shopifyStore === false && toolNeedsShopifyStore(name)); }
 export const SHOPIFY_STORE_NOTE = 'works only for a Shopify store that installed Hermoso from the Shopify App Store, and this account has no linked store. An existing Hermoso account cannot be linked to a store from here; a merchant who did install it opens Hermoso once from their Shopify admin (Apps \u2192 Hermoso).';
-export function toolWithheldByServer(name, conn) { return !!(conn && ((conn.withheld instanceof Set && conn.withheld.has(String(name || ''))) || toolHeldForNoShopifyStore(name, conn))); }
+// ── A TOOL THAT SHIPS DARK (2026-11-03, owner: "reangle_video can't stay offered while it fails its one promise") ──
+// The opposite polarity of `withheld`: a tool here is OFF unless the server's providers read names it in `flagsOn`
+// (server.js reangleOffered(), env REANGLE_VIDEO=on). FAIL CLOSED: no read, a failed read or an older server all keep
+// it hidden, so the docs build, a CLI with no session and an unreadable store never offer a capability that is not
+// ready. The route and its job types refuse it for free as well, so a stale roster cannot spend.
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video']);
+export function toolFlaggedOff(name, conn) { const n = String(name || ''); return FLAGGED_OFF_TOOLS.has(n) && !(conn && conn.flagsOn instanceof Set && conn.flagsOn.has(n)); }
+export function toolWithheldByServer(name, conn) { return toolFlaggedOff(name, conn) || !!(conn && ((conn.withheld instanceof Set && conn.withheld.has(String(name || ''))) || toolHeldForNoShopifyStore(name, conn))); }
 export function toolHeldBackByConnectors(name, conn) {
   if (toolWithheldByServer(name, conn)) return true;              // the server says this capability is not offered now
   if (!conn || !conn.readOk) return false;                       // property 1 — fail OPEN on an unreadable store

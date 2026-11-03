@@ -1,0 +1,17 @@
+hermoso (CLI and MCP server)
+Copyright 2026 Hermoso (hermoso.ai)
+
+This package is MIT licensed (see LICENSE) and contains no file copied from the projects below. The hosted Hermoso service
+it talks to draws on them, each licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0), so their credit lines ride here too.
+
+Slate, the prompt studio for AI filmmaking
+Copyright 2026 Sam Wasserman
+https://wassermanproductions.com  https://wasserman.ai
+Credit: Sam Wasserman (wassermanproductions.com)
+
+Imagination Studio by keys+Wasserman
+Copyright 2026 Keys (drowzeys) and Sam Wasserman (Wasserman Productions)
+https://github.com/drowzeys  https://wassermanproductions.com
+Credit: Keys (github.com/drowzeys)
+Credit: Sam Wasserman / Wasserman Productions (wassermanproductions.com)

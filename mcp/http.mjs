@@ -16,7 +16,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups } from './tools.mjs';
 import { chatgptExtAsked } from './openai-extensions.mjs';
 import { mcpCtx, connectedProviders } from './client.mjs';
 
@@ -120,24 +120,24 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
 
   // Per-session Streamable-HTTP transports. Each authenticated session gets its own McpServer with the same tools.
   //
-  // ── A SESSION WAS EXPENSIVE, AND THIS MAP IS WHY PROD OOM'd (2026-08-01, again 2026-08-24) ───────────────────
+  // ── A SESSION WAS EXPENSIVE, AND THIS MAP IS WHY IT IS BOUNDED (2026-08-01, again 2026-08-24) ─────────────────
   // registerTools() used to rebuild all 681 tool definitions with their zod schemas on EVERY `initialize`:
   // **114.36 MB of RETAINED heap per McpServer** (measured, node --expose-gc, 25 instances; 114.48 MB measured
   // again end-to-end through this very transport). The older note here said ~36 MB — true at the 248-tool roster
   // it was written against, and 3.2x stale by August. This map used to be unbounded and never expired — the only
-  // removal was transport.onclose, which never fires for a client that simply goes away. Prod took 238
-  // `initialize` handshakes in 49 minutes on a 4 GiB, maxScale=1 instance and died of
-  // `FATAL ERROR: Reached heap limit` six times in that hour, every crash a full outage.
+  // removal was transport.onclose, which never fires for a client that simply goes away, so a burst of
+  // `initialize` handshakes from clients that never close can grow the heap until the process reaches its
+  // memory limit.
   //
-  // THE CAP AND THE TTL WERE NEVER THE FIX, AND 2026-08-24 PROVED IT: they worked exactly as designed (peak
-  // concurrent sessions measured at exactly SESSION_MAX) and prod still crashed four times in twelve hours,
-  // because the cost is CHURN, not retention — one client opened ~175 sessions in 65 minutes. Worse, the cap was
-  // FEEDING the churn: 157 of 258 session closures in a 3-day window were 'over cap', each one answering that
+  // THE CAP AND THE TTL ARE NOT THE FIX ON THEIR OWN: they work exactly as designed (peak concurrent sessions
+  // measured at exactly SESSION_MAX) and memory still runs short under load,
+  // because the cost is CHURN, not retention — one client re-initialized over and over. Worse, the cap was
+  // FEEDING the churn: most session closures in a 3-day window were 'over cap', each one answering that
   // client's next call with a 404, which obliges it to re-initialize, which allocates another full roster and
   // evicts somebody else. A self-sustaining spiral. The durable fix is in mcp/tools.mjs: the tool definitions are
   // static per process, so they are built ONCE and replayed. A session now costs **3.06-3.19 MB** — 36x less —
   // and it is the per-`initialize` figure, not the per-live-session one, that decides whether this survives a
-  // retry storm. See tools/mcp-tool-canon-check.mjs.
+  // burst of retries. See tools/mcp-tool-canon-check.mjs.
   //
   // The 400-on-a-session-miss below was the ACCELERANT: a client that cannot re-initialize opens a NEW session
   // instead of reusing its own, so the leak fed itself. Both are fixed here — bound + expire the map, and answer
@@ -150,11 +150,10 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   const SESSION_IDLE_MS = Math.max(1000, Number(process.env.MCP_SESSION_IDLE_MS || 30 * 60e3)); // 1s floor so the expiry is TESTABLE; a short TTL is merely wasteful now that eviction is recoverable
   const sessions = new Map(); // mcp-session-id -> { transport, server, user, lastSeen }  (insertion-ordered = LRU)
   // ── A STANDALONE SSE STREAM HOLDS A CLOUD RUN REQUEST SLOT FOR AS LONG AS IT LIVES (2026-09-15) ──────────────
-  // OUTAGE, 13:00–13:22 UTC: every request to the app answered 429 "no available instance" for 22 minutes with the
-  // instance at 1% CPU. Nothing was down and nobody was busy — the instance's 200 concurrent-request slots were all
-  // held by `GET /mcp` notification streams (99 of them from ChatGPT's connector that morning, each held until the
-  // 30-minute session idle), and Cloud Run refuses a request it has no slot for BEFORE the container sees it, so
-  // the app could not even log it. maxScale=1 turns "one host holds too many streams" into a total outage.
+  // An instance's concurrent-request slots can all be held by `GET /mcp` notification streams (ChatGPT's connector
+  // opens one per session and holds it until the 30-minute session idle) while its CPU sits idle, and Cloud Run
+  // refuses a request it has no slot for BEFORE the container sees it, so the app cannot even log the refusal.
+  // Unbounded, "one host holds too many streams" saturates the instance for every other caller.
   // The GET stream is optional in the spec (a server may answer 405 or close it at any time; clients reconnect),
   // and this server sends nothing on it but a one-shot tools/list_changed nudge. So: a stream lives at most
   // MCP_GET_STREAM_MS (5 min, env-tunable) and the instance holds at most MCP_GET_STREAM_MAX of them at once —
@@ -221,13 +220,13 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
   // MCP spec 2025-06-18, Transports § Session Management: a server that no longer has a session MUST answer 404,
   // and on 404 the client MUST start a new session with a fresh InitializeRequest. 400 carries no such obligation,
-  // so a 400 here is permanent death for that connection — which is exactly what every deploy used to do to every
-  // hosted customer. -32001 "Session not found" is the SDK's own code for this case; we mint it ourselves because
+  // so a 400 here is permanent death for that connection, which is what a restart would otherwise do to every
+  // hosted connection. -32001 "Session not found" is the SDK's own code for this case; we mint it ourselves because
   // the SDK's branch is unreachable when there is no initialized transport left to compare the id against.
   const sessionGone = (res) => res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found' }, id: null });
   // The SDK's own answer for a non-initialize request that names no session at all. We reply BEFORE constructing
-  // anything: building a 36 MB McpServer purely to have it reject the request is what turned a retry storm into
-  // an OOM. Status and message are byte-identical to the SDK's, so no client sees a behaviour change.
+  // anything: building a 36 MB McpServer purely to have it reject the request turns a burst of retries into
+  // memory pressure. Status and message are byte-identical to the SDK's, so no client sees a behaviour change.
   const needSession = (res) => res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: Mcp-Session-Id header is required' }, id: null });
   // The one place the host name is turned into a decision, so the anon and session paths cannot diverge.
   //
@@ -407,7 +406,9 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // every one of those the roster IS the product description. Serving them the core set would publish Hermoso as
     // a 22-tool server on ~430 directory pages. So an UNSTATED scope here resolves to the full pre-core-first
     // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
-    registerTools(server, { only: scope?.groups || [...DEFAULT_TOOL_GROUPS], directory: scope?.directory || false, widgetHost, hosted: true, ext: extAsked(req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    // A widget host in full mode gets every group here too, so the anonymous roster and the signed-in one agree (see
+    // chatgptRosterMode in tools.mjs: ChatGPT cannot reach an unlisted tool).
+    registerTools(server, { only: scope?.groups || anonDiscoveryGroups(widgetHost), directory: scope?.directory || false, widgetHost, hosted: true, ext: extAsked(req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     // WHO PROBES US WITHOUT A TOKEN, BY NAME (2026-09-25). A host's add-connector dialog decides "sign-in needed or
     // not" from THIS answer: ChatGPT probes with an empty body and gets the 401; claude.ai's dialog sends a real
     // tokenless initialize (UA python-httpx) and our 200 made it pre-select "No sign-in". The UA alone cannot tell
@@ -456,7 +457,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       return challenge(res);
     }
 
-    // The stream cap, BEFORE any session work: a reconnect storm must be refused at the door, not after allocating.
+    // The stream cap, BEFORE any session work: a burst of reconnects must be refused at the door, not after allocating.
     if (req.method === 'GET') {
       if (openGetStreams >= GET_STREAM_MAX) {
         res.set('Retry-After', '30');
@@ -534,8 +535,8 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
       // A CHATGPT ACCOUNT THAT HAS MADE NOTHING YET (2026-10-19). Read once per session, ChatGPT hosts only, bounded so a slow
       // read can never hold the connect: null (no note) is the answer to every failure. The first successful tool reply of
-      // the session then offers one concrete next ask (firstRunNote in tools.mjs). 9 of 13 ChatGPT signups since the
-      // 10-15 publish spent nothing, and a live "make me a video ad" chat on a connected account never called us.
+      // the session then offers one concrete next ask (firstRunNote in tools.mjs). Most ChatGPT signups since the
+      // 10-15 publish had made nothing, and a live "make me a video ad" chat on a connected account never called us.
       let firstRun = null;
       if (widgetHost && typeof firstRunFor === 'function' && user.accountId) {
         try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
@@ -578,7 +579,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       else if (m === 'tools/call') {
         entry.calls = (entry.calls || 0) + 1;
         // THE FIRST CALL IS THE MILESTONE, NOT THE LISTING (2026-09-07). The connect_mcp reward was granted on "an API
-        // key exists", and 37 sessions last week listed the roster and never called a tool while 803 grants went out.
+        // key exists", and many sessions listed the roster and never called a tool while the grant still went out.
         // A session's first tools/call is what proves the connection is USED; the hook stamps the account's touch row.
         if (entry.calls === 1 && typeof onFirstCall === 'function' && entry.user?.accountId) { try { onFirstCall({ accountId: entry.user.accountId, userId: entry.user.userId || null, client: entry.client || '', ua: entry.ua || '', src: entry.src || null }); } catch {} }
       }

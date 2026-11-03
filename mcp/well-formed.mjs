@@ -58,7 +58,7 @@ export const NEEDS_REPAIR_RE = new RegExp(
   + '|\\\\u0000'                      // the escape for one
   // A surrogate-range \uXXXX escape, paired or not — the repair decides. THE RANGE IS D800–DFFF, i.e. the second
   // hex digit is 8–F and NOT just 8–B: the first draft of this line covered only the HIGH half (D800–DBFF), so a
-  // lone LOW surrogate escape — `\ude00`, the exact other half of the emoji in the incident — sailed straight
+  // lone LOW surrogate escape — `\ude00`, the exact other half of the emoji in the bug report — sailed straight
   // through the detector and was returned unrepaired. Caught by a check before it shipped.
   + '|\\\\u[dD][89a-fA-F][0-9a-fA-F]{2}'
 );

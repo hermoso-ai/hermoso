@@ -5,7 +5,7 @@
 // different selling angle with its headline and CTA on the image, in 1:1, 4:5 or 9:16. We had every part of that
 // (draft_brand, the product library, the batch planner the web Studio fans into up to 30 ranked statics) but an agent
 // had to stitch it together itself: plan_variations (capped at 8, plans only), then one generate_image per variant —
-// and a CLI generate_image held past 60s died client-side while the render still billed. This is the one-call shape.
+// and a CLI generate_image held past 60s timed out client-side while the render still billed. This is the one-call shape.
 //
 // Everything here is PURE so tools/static-ads-batch-check.mjs runs the real functions. Byte-twin: cli/mcp/static-batch.mjs.
 
@@ -144,7 +144,10 @@ export function staticAdPrompt(v, { logo = 'server', productPhoto = false, layou
     x.supporting ? `supporting line "${String(x.supporting).trim()}"` : '',
     x.cta ? `call to action "${String(x.cta).trim()}"` : '',
   ].filter(Boolean);
-  if (words.length) lines.push(`On-image text, spelled exactly as given and nothing else: ${words.join(', ')}.${L ? '' : ' Bold ad typography with a clear hierarchy, crisp and correctly spelled.'} A finished, ready-to-run static ad.`);
+  // TEXT SLOTS (2026-11-03, catalog audit §3): every slot carries its literal
+  // quoted words, and type under ~2% of the picture's height turns to gibberish, so no line is set that small and a line
+  // set small is 4-6 words (a longer one breaks onto two lines rather than shrinking).
+  if (words.length) lines.push(`On-image text, spelled exactly as given and nothing else: ${words.join(', ')}.${L ? '' : ' Bold ad typography with a clear hierarchy, crisp and correctly spelled.'} No line of text is smaller than about 2% of the picture's height (smaller type turns to gibberish); a line set in small type holds at most 4-6 words, so a longer one breaks onto two lines instead of shrinking. A finished, ready-to-run static ad.`);
   if (L) lines.push('Show the product once (one unit as it is sold) unless the layout is a flat lay or a set of its range; any person has at most two hands and every hand in frame belongs to a visible arm.');
   if (productPhoto) lines.push('The first reference image is the REAL product: keep its shape, colours and label exactly.');
   // THE LOGO IS LAID ON, NEVER PAINTED (2026-10-06): 'overlay' (and the old 'attached' / 'server') add nothing here. The

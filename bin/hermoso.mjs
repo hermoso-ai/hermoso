@@ -153,7 +153,7 @@ async function main() {
         return out(`Balance: ${bal ?? '—'} credits`, d); }
       case 'brand': {
         // BARE `hermoso brand` SHOWS THE SAVED BRAND (2026-09-25). The docs have always listed it as "the saved brand
-        // profile" and it died with the `brand draft` usage line instead — the first command a new user copies off
+        // profile" and it printed the `brand draft` usage line instead — the first command a new user copies off
         // the CLI page. It is get_brand, run through the same handler the MCP twins use.
         if (!sub) { const reg = await import('../mcp/registry.mjs'); return await runTool(reg, 'get_brand', flags, []); }
         if (sub !== 'draft') return die('usage: hermoso brand            the saved profile (a brand, creator or personal workspace)\n       hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');

@@ -27,6 +27,7 @@ Pick the tool that fits the ask:
 3. **Natural-language research** (Claude tool-use over ad libraries + organic TikTok): `hermoso research "<request>"`
    - e.g. `hermoso research "the longest-running protein-pancake ads on Meta and what hooks they use"`. Prints a summary + the found ads with their URLs.
 4. **Synthesize**: report the strongest hooks, angles, formats, and what's worth copying, be specific (quote the actual headlines/angles). If the user then wants to build one, hand off to `hermoso-ad-from-brand` / `hermoso-generate`.
+5. **What to post on TikTok**, from posts working this month: `hermoso call tiktok_ideas --json '{"category":"<niche>","dryRun":true}'` prices it (nothing runs); run it without `dryRun` after the user agrees. Up to 6 ideas, each backed by linked TikTok posts with their views. To make one: `hermoso call tiktok_ideas --json '{"pick":<that idea object>,"to":"render_ad"}'` (free) returns the plan_ad brief with the claims the ad may make; nothing renders until that next call.
 
 ## Notes
 - Research spends credits (ad-library calls); keep platform scope to what's asked.

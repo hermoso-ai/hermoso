@@ -253,10 +253,9 @@ const isTransport = (e) => !!e && e.name === 'TypeError' && TRANSPORT_RE.test(St
 
 // ── THE PLATFORM'S OWN 429 NEVER REACHED US, SO IT IS RETRIED HERE (2026-10-04) ───────────────────────────────
 // Polling a job every 10 seconds from the CLI answered HTTP 429, and it was not a limit of ours: the app has no limiter
-// on GET /api/jobs/:id, and /v1 reads allow 300 a minute per key. Every one of those 429s in the Cloud Run request log
-// (36 between 18:35 and 18:39Z, on /api/credits, GET / and webhooks as much as on job polls) is the platform's "The
+// on GET /api/jobs/:id, and /v1 reads allow 300 a minute per key. A JSON-less 429 is the platform's "The
 // request was aborted because there was no available instance": a plain-text body, latency 0s, refused before the
-// container saw it, while the one instance's CPU sat pegged by local renders at 2-7 concurrent requests. The browser's
+// container sees it, and it can land on any route, not only on job polls. The browser's
 // api() has retried that answer since 2026-09-06; the CLI and the stdio MCP read it as a failed call, so one busy
 // second ended a render wait. A refusal that never reached the app ran nothing, so it is retried for ANY method; the
 // app's own refusals always answer JSON and pass through untouched (their rules are theirs). A read also rides out a
@@ -439,7 +438,9 @@ export async function connectedProviders() {
     // shopifyStore (2026-10-27): true/false when the server could tell whether this account has a Shopify store;
     // anything else is null = unknown, which holds nothing back (roster-scope.mjs toolHeldForNoShopifyStore).
     const shopifyStore = r?.shopifyStore === true ? true : r?.shopifyStore === false ? false : null;
-    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld, shopifyStore };
+    // flagsOn (2026-11-03): tools that ship dark and are switched ON on this server (roster-scope.mjs FLAGGED_OFF_TOOLS).
+    const flagsOn = new Set((Array.isArray(r?.flagsOn) ? r.flagsOn : []).filter((n) => typeof n === 'string' && n));
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld, flagsOn, shopifyStore };
   } catch { return { connected: new Set(), readOk: false }; }
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so

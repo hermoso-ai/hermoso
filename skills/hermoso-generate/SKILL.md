@@ -30,6 +30,14 @@ You drive the **Hermoso CLI** (`hermoso`) to render images and videos. Always re
 4. Video/avatar/stitch are **job-based**: keep `--wait` (default) so the command blocks and prints the final URL. If you don't wait, poll with `hermoso jobs get <id> --wait`.
 5. **Report the served URL** (e.g. `https://assets.hermoso.ai/…`), never a raw job id. If the user wants the file, `hermoso fetch <url> --out name.png`.
 
+## Prompt craft
+- Write concrete, sensory prompts: subject + setting + style, then the camera (lens such as 35mm or 85mm, the angle, the move), the light (rim light, soft window light, neon glow) and the medium (photograph, watercolour, 3D render).
+- **Image to video:** the `--ref` frame is already the first picture, so the prompt describes only the MOTION (the camera dollies in, steam rises, she turns to the window); never describe the still frame again.
+- **Editing an image:** pass it as `--ref` and describe only what CHANGES ("make it a winter evening, warm window light"), never the whole picture again.
+- Phrase what you want rather than what you do not: "tack sharp" instead of "no blur", "an empty beach" instead of "no people".
+- **Confirm what each supplied image is for** before you use it: the product, a person to keep, or only a style to borrow. A style reference is studied, never copied: do not reproduce its people, logos or composition.
+- **A model the user names stays in use** for follow-ups on the same piece of work. Do not switch to a cheaper or faster model unless the user asks for one, and do not downgrade because another model's options look simpler.
+
 ## Notes
 - `--ref` accepts local file paths (read + sent as data) or URLs; a real product/logo ref makes the output product-accurate.
 - Add `--json` to any command for machine-readable output.

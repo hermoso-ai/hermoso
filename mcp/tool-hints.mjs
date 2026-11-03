@@ -128,6 +128,19 @@ export function finishedRenderKind(tool, r) {
   return '';
 }
 
+// ── A FINISHED RENDER ON A WIDGET HOST NEEDS NO OTHER PICTURE (2026-11-03) ───────────────────────────────────────────
+// Measured on ChatGPT: after generate_image returned a finished Fernfizz ad, the reply showed ChatGPT's OWN image-search
+// result beside it (a 3D-model page from an unrelated site, rendered as a "search image" chip), because the model wanted
+// a picture in its answer and our card was the only one it had been told not to repeat. The card already shows the
+// result, so the reply says so and asks for no other picture. Agent-facing, not user-facing. Pure, no imports.
+export const WIDGET_RESULT_NOTE = (kind) => `Note for the assistant, not for the user: the Hermoso card in this reply already shows the finished ${kind === 'video' ? 'video' : 'image'}. Show no other picture with it, no image search and no web images, because none of them is this result.`;
+export function withWidgetResultNote(tool, r, widgetHost) {
+  if (!widgetHost) return r;
+  const kind = finishedRenderKind(tool, r);
+  if (!kind) return r;
+  return { ...r, content: [...r.content, { type: 'text', text: WIDGET_RESULT_NOTE(kind) }] };
+}
+
 // ── OUT OF CREDITS ON A HOST THAT FORBIDS SELLING CREDITS (2026-09-30, OpenAI's plugin guidelines) ─────────────────
 // "Plugins may: explain that a certain feature is not available with the user's current plan or entitlement; link to
 // an informational page … Plugins may not: link directly to a checkout … or promote upgrades." ChatGPT is not offered

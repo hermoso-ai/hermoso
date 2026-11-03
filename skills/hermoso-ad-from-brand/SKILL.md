@@ -32,6 +32,9 @@ Drive the **Hermoso CLI** to go from a brand to an on-brand ad in three steps. R
 4. **Report the served URL.** Offer one concrete next step (a punchier hook, a different aspect ratio, or a variation).
 
 ## Notes
+- **Test hooks before formats.** For a test batch, try four different hooks in one format before one hook in four formats: the opening decides performance more than the format does.
+- **Copy a reference ad OR compose from a hook and a setting, never both at once.** When the user hands you an ad to model (a link or a file), follow its structure; when they pick a hook and a scene, build from those; mixing the two blurs both.
+- Formats are not interchangeable: a phone-shot UGC clip and a polished broadcast-style spot read as different brands, so do not mix them in one campaign unless that is the intent.
 - If the brand has a real product photo and the ad features that product, pass it with `--ref ./product.png` on the image step so the packaging is accurate.
 - Quality over cost: prefer the resolved/best model unless the user asks for cheap/fast.
 - Renders run on Hermoso's hosted API and come back as served URLs; `hermoso fetch <url> --out <file>` saves one to disk.
