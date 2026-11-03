@@ -6711,7 +6711,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('run_post_refill', {
     title: 'Run autopilot now / approve its drafts',
-    description: 'Run AUTOPILOT POSTING (autoposting, paid plans only) NOW instead of waiting for its daily turn, or REVIEW the drafts it made — "approve them all", "delete that one", "change the caption", "too salesy, remember that". PREVIEW BY DEFAULT: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. The preview still WRITES the scenes and copy with a model, which bills its model cost (the reply says exactly how many credits). dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first (a new `at` reschedules it); get_post_refill lists them. learn saves notes future batches follow (free). redo remakes ONE draft from a note: PAID, so without confirm:true it returns only the price; confirm only on the user’s yes. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
+    description: 'Run AUTOPILOT POSTING (autoposting, paid plans only) NOW instead of waiting for its daily turn, or review the drafts it made: schedule them, delete one, change a caption, or save a note such as "too salesy". By default it is a preview: it returns the posts it WOULD make — each new picture’s scene, the caption, the channels and the price — rendering nothing and queueing nothing. The preview still WRITES the scenes and copy with a model, which bills its model cost (the reply says exactly how many credits). dryRun:false actually renders a fresh image or video for each post within the budget (credits are spent) and then, by mode, schedules them ("auto") or keeps them as drafts ("review"). It never re-posts the Library. REVIEWING A BATCH: pass approve (draft ids, or ["all"]) to schedule drafts, discard to delete them, edit ([{id, message?, captions?, title?, at?, channels?}]) to change one first (a new `at` reschedules it); get_post_refill lists them. learn saves notes future batches follow (free). redo remakes ONE draft from a note and is paid; without confirm:true it returns only the price. A scheduled post can still be pulled before it goes out with cancel_scheduled. Every caption is screened against the voice rules and a failing one is dropped, so a plan can come back shorter than the cadence — the reason is in the notes.',
     inputSchema: {
       dryRun: z.boolean().optional().describe('default TRUE (a preview: nothing rendered, nothing queued; the copy it writes bills its model cost). false renders fresh creative and schedules or drafts it per the mode.'),
       force: z.boolean().optional().describe('plan a preview even while autoposting is switched off — useful for showing someone what it would do before they turn it on.'),
@@ -24142,6 +24142,20 @@ function memoryNoteVerdict(text) {
     return ok(`Found ${d.candidates?.length || 0}: ${list}`, d);
   }));
 
+  // RUN DATES THE MODEL CAN READ (2026-11-02): "Aug 20 -> now · 74d". Byte-identical inline copy of lib/ad-run-dates.mjs adRunLine
+  // (the CLI package cannot import ../lib); tools/ad-run-dates-check.mjs pins that they agree.
+  const adRunLine = (ad, now = Date.now()) => {
+    const a = ad || {};
+    const ms = (v) => { if (v == null || v === '') return 0; if (typeof v === 'number') return v < 1e12 ? v * 1000 : v; const t = Date.parse(v); return Number.isFinite(t) ? t : 0; };
+    const s = ms(a.start_date_string ?? a.start_date ?? a.startDateString ?? a.firstShown ?? a.first_shown ?? a.startDate);
+    if (!s) return '';
+    const eRaw = ms(a.end_date_string ?? a.end_date ?? a.endDateString ?? a.lastShown ?? a.last_shown ?? a.endDate);
+    const live = a.is_active === true || a.isActive === true;
+    const e = live ? now : (eRaw || now);
+    const d = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const days = Math.max(0, Math.round((e - s) / 86400000));
+    return `${d(s)} -> ${live || !eRaw ? 'now' : d(eRaw)} · ${days}d`;
+  };
   server.registerTool('pull_competitor_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Pulling their live ads…', 'Competitor ads pulled'),
     title: 'Pull competitor ads',
@@ -24216,7 +24230,7 @@ function memoryNoteVerdict(text) {
         // destination rather than replacing it. Meta hands us that page as `ad.url`; Google as `adUrl`. The
         // destination survives only as the last resort, for a row that carries no library page at all.
         const libraryUrl = ad.url || (ad.ad_archive_id ? 'https://www.facebook.com/ads/library?id=' + ad.ad_archive_id : '');
-        rows.push(qp({ platform: p, advertiser: ad.page_name || ad.advertiserName || ad.advertiser || who, body: trunc(body), media, thumb: img, link: libraryUrl || ad.adUrl || s.link_url || ad.destinationUrl || null }));
+        rows.push(qp({ platform: p, advertiser: ad.page_name || ad.advertiserName || ad.advertiser || who, body: trunc(body), dates: adRunLine(ad), media, thumb: img, link: libraryUrl || ad.adUrl || s.link_url || ad.destinationUrl || null }));
         if (img && /^https?:\/\//.test(img)) urls.push(img);
       }
     }
@@ -24432,7 +24446,7 @@ function memoryNoteVerdict(text) {
         advertiser: r?.advertiser || r?.ad?.page_name || r?.ad?.advertiserName || r?.ad?.advertiser || r?.author || r?.tiktok?.author || '',
         body: r?.body || r?.copy || r?.desc || r?.tiktok?.desc || (typeof sn.body === 'string' ? sn.body : sn.body?.text) || r?.ad?.headline || '',
         cta: sn.cta_text || r?.ad?.cta || '',
-        dates: [r?.ad?.start_date_string, r?.ad?.end_date_string].filter(Boolean).join(' → '),
+        dates: adRunLine(r?.ad),
         // `r.tiktok.link` was the one branch this chain forgot, so every TikTok row in a research_ads answer —
         // 8 of 16 tiles on a real pull — rendered as a dead div while the post URL sat unread in the payload.
         link: r?.link || r?.tiktok?.link || r?.ad?.adUrl || sn.link_url || r?.ad?.destinationUrl || '',
@@ -24537,7 +24551,7 @@ function memoryNoteVerdict(text) {
       const s = x.snapshot || {};
       return qp({
         page_name: x.page_name, body: trunc(typeof s.body === 'string' ? s.body : s.body?.text), cta: s.cta_text, link: s.link_url,
-        dates: [x.start_date_string, x.end_date_string].filter(Boolean).join(' → '),
+        dates: adRunLine(x), // start -> end · days running, from epoch seconds too (the string fields alone left rows dateless)
         media: s.videos?.[0]?.video_sd_url || s.images?.[0]?.resized_image_url || s.cards?.[0]?.resized_image_url || s.cards?.[0]?.video_sd_url || s.videos?.[0]?.video_preview_image_url,
         thumb: s.videos?.[0]?.video_preview_image_url || s.images?.[0]?.resized_image_url || s.cards?.[0]?.resized_image_url, // always an IMAGE url when one exists — feeds the markdown gallery (a video url can't render inline)
       });
