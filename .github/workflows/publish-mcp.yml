@@ -231,7 +231,12 @@ jobs:
           // registerTools needs registerResource too; a stub missing it throws, and an over-broad
           // catch upstream would turn that into a silently absent count.
           registerTools({ registerTool: (n) => { seen.add(n); return {}; }, registerResource: () => ({}) });
-          process.stdout.write(String(seen.size));
+          // A tool that ships dark (mcp/roster-scope.mjs FLAGGED_OFF_TOOLS) is registered and offered nowhere,
+          // so the advertised count is the OFFERED one, as in the README and server.json. Tags cut before
+          // the set existed do not export it, and for them every registered tool is offered.
+          let dark = new Set();
+          try { dark = (await import(pathToFileURL(process.cwd() + '/mcp/roster-scope.mjs').href)).FLAGGED_OFF_TOOLS || dark; } catch {}
+          process.stdout.write(String([...seen].filter((n) => !dark.has(n)).length));
           EOF
 
           # Which tags are in scope.
