@@ -243,7 +243,13 @@ export const SHOPIFY_STORE_NOTE = 'works only for a Shopify store that installed
 // (server.js reangleOffered(), env REANGLE_VIDEO=on). FAIL CLOSED: no read, a failed read or an older server all keep
 // it hidden, so the docs build, a CLI with no session and an unreadable store never offer a capability that is not
 // ready. The route and its job types refuse it for free as well, so a stale roster cannot spend.
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video']);
+// THE WHOP TOOLS SHIP DARK WITH THE WHOP CONNECTOR (2026-11-03, owner: "nothing public until it works"). Whop has no
+// app key in production and the App Store listing is not approved, so CONNECTOR_GATES.whop is shut, and a tool for a
+// connector nobody can link is not a capability. They lift with the gate itself: server.js flagsOnNow() names them in
+// `flagsOn` exactly when CONNECTOR_GATES.whop.open() (WHOP_API_KEY present), so putting the key in production turns
+// them on everywhere with no edit here. Until then the docs, the counts and every roster leave them out.
+export const WHOP_DARK_TOOLS = Object.freeze(['post_to_whop', 'list_whop_destinations', 'list_whop_products', 'edit_whop_post', 'delete_whop_post', 'get_whop_post']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS]);
 export function toolFlaggedOff(name, conn) { const n = String(name || ''); return FLAGGED_OFF_TOOLS.has(n) && !(conn && conn.flagsOn instanceof Set && conn.flagsOn.has(n)); }
 export function toolWithheldByServer(name, conn) { return toolFlaggedOff(name, conn) || !!(conn && ((conn.withheld instanceof Set && conn.withheld.has(String(name || ''))) || toolHeldForNoShopifyStore(name, conn))); }
 export function toolHeldBackByConnectors(name, conn) {

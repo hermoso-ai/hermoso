@@ -1281,11 +1281,12 @@ const PROVIDER_INFO = {
   tiktok: ['TikTok', 'channels'], youtube: ['YouTube', 'channels'], linkedin: ['LinkedIn', 'channels'], x: ['X', 'channels'],
   pinterest: ['Pinterest', 'channels'], bluesky: ['Bluesky', 'channels'], telegram: ['Telegram', 'channels'],
   google_business: ['Google Business Profile', 'channels'], whatsapp: ['WhatsApp', 'channels'],
+  wordpress: ['WordPress', 'channels'], discord: ['Discord', 'channels'], slack: ['Slack', 'channels'],
   google_ads: ['Google Ads', 'ads'], tiktok_ads: ['TikTok Ads', 'ads'], linkedin_ads: ['LinkedIn Ads', 'ads'], microsoft_ads: ['Microsoft Advertising', 'ads'],
   reddit_ads: ['Reddit Ads', 'ads'], pinterest_ads: ['Pinterest Ads', 'ads'], snapchat_ads: ['Snapchat Ads', 'ads'], x_ads: ['X Ads', 'ads'],
   openai_ads: ['ChatGPT Ads', 'ads'], apple_ads: ['Apple Ads', 'ads'], applovin_ads: ['AppLovin Ads', 'ads'],
   google_drive: ['Google Drive, Sheets and Docs', 'data'], onedrive: ['OneDrive', 'data'], google_analytics: ['Google Analytics', 'data'],
-  search_console: ['Google Search Console', 'data'], merchant_center: ['Google Merchant Center', 'data'], slack: ['Slack', 'data'],
+  search_console: ['Google Search Console', 'data'], merchant_center: ['Google Merchant Center', 'data'],
   shopify: ['Shopify', 'data'], stripe: ['Stripe', 'data'], hubspot: ['HubSpot', 'data'], notion: ['Notion', 'data'], canva: ['Canva', 'data'],
 };
 export const providerInfo = (p) => {
@@ -1295,8 +1296,10 @@ export const providerInfo = (p) => {
   return { name, group: /_ads$/.test(String(p)) ? 'ads' : 'data' };
 };
 // The publishing channels a connector carries, for the "post here by default" settings. The ids are schedule_post's.
-const CHANNELS_OF = { meta: ['facebook', 'instagram'], instagram: ['instagram'], threads: ['threads'], tiktok: ['tiktok'], youtube: ['youtube'], linkedin: ['linkedin'], x: ['x'], pinterest: ['pinterest'], google_business: ['google_business'], bluesky: ['bluesky'], telegram: ['telegram'] };
-const CHANNEL_LABEL = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest', google_business: 'Google Business Profile', bluesky: 'Bluesky', telegram: 'Telegram' };
+// WordPress, Discord and Slack publish through their own connector rows (lib/channel-registry.mjs). Whop is left out
+// while its tools ship dark (mcp/roster-scope.mjs WHOP_DARK_TOOLS): a default nobody can post to is not offered.
+const CHANNELS_OF = { meta: ['facebook', 'instagram'], instagram: ['instagram'], threads: ['threads'], tiktok: ['tiktok'], youtube: ['youtube'], linkedin: ['linkedin'], x: ['x'], pinterest: ['pinterest'], google_business: ['google_business'], bluesky: ['bluesky'], telegram: ['telegram'], wordpress: ['wordpress'], discord: ['discord'], slack: ['slack'] };
+const CHANNEL_LABEL = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest', google_business: 'Google Business Profile', bluesky: 'Bluesky', telegram: 'Telegram', wordpress: 'WordPress', discord: 'Discord', slack: 'Slack' };
 export const ALL_CHANNELS = Object.freeze(Object.keys(CHANNEL_LABEL));
 
 // THE HOME SCREEN'S CARD FOR AN ACCOUNT WITH NOTHING TO POST TO (2026-11-02): the first channels on offer, in the server's
