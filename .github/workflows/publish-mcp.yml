@@ -226,6 +226,7 @@ jobs:
           # to grep for it. Written outside the checkout so it survives `git checkout <tag>`.
           cat > "$RUNNER_TEMP/count-tools.mjs" <<'EOF'
           import { pathToFileURL } from 'node:url';
+          import { readFileSync } from 'node:fs';
           const { registerTools } = await import(pathToFileURL(process.cwd() + '/mcp/tools.mjs').href);
           const seen = new Set();
           // registerTools needs registerResource too; a stub missing it throws, and an over-broad
@@ -234,8 +235,20 @@ jobs:
           // A tool that ships dark (mcp/roster-scope.mjs FLAGGED_OFF_TOOLS) is registered and offered nowhere,
           // so the advertised count is the OFFERED one, as in the README and server.json. Tags cut before
           // the set existed do not export it, and for them every registered tool is offered.
+          // A dark tool tied to a production gate flag (DARK_TOOL_GATE_FLAG, e.g. the Whop tools) IS offered
+          // while that flag is on in production. mcp/prod-gate-flags.json is the production record of those
+          // flags, booleans only, synced from the main repo with mcp/; darkToolsUnder(flags) is the same
+          // subtraction the hosted server, npm and the registry count with. Without it (tags cut before
+          // 0.1.506) the whole FLAGGED_OFF_TOOLS set is subtracted, which titled 0.1.500-0.1.505 "1176 tools"
+          // against a live 1182 until each title was fixed by hand.
           let dark = new Set();
-          try { dark = (await import(pathToFileURL(process.cwd() + '/mcp/roster-scope.mjs').href)).FLAGGED_OFF_TOOLS || dark; } catch {}
+          try {
+            const scope = await import(pathToFileURL(process.cwd() + '/mcp/roster-scope.mjs').href);
+            let flags = null;
+            try { flags = JSON.parse(readFileSync(process.cwd() + '/mcp/prod-gate-flags.json', 'utf8')).flags; } catch {}
+            if (flags && typeof flags === 'object' && typeof scope.darkToolsUnder === 'function') dark = scope.darkToolsUnder(flags);
+            else dark = scope.FLAGGED_OFF_TOOLS || dark;
+          } catch {}
           process.stdout.write(String([...seen].filter((n) => !dark.has(n)).length));
           EOF
 
