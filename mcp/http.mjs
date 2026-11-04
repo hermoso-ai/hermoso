@@ -162,6 +162,10 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   const GET_STREAM_MS = Math.max(1000, Number(process.env.MCP_GET_STREAM_MS || 5 * 60e3));
 const MCP_CALL_WALL_MS = Number(process.env.MCP_CALL_WALL_MS) || 10 * 60 * 1000; // a tools/call still open after this is ended, so a ghost cannot pin a deploy or a slot
 const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [body]; return msgs.map(m => m?.method === 'tools/call' ? String(m.params?.name || '?').slice(0, 60) : '').filter(Boolean).join(',') || '?'; };
+  // A JSON-RPC id as the SDK's own Map sees it: 7 and "7" are different keys there, so they are different here.
+  const rpcIdKey = (id) => `${typeof id}:${String(id)}`;
+  const rpcRequestIdKeys = (body) => (Array.isArray(body) ? body : [body]).filter((m) => m && typeof m.method === 'string' && m.id !== undefined && m.id !== null).map((m) => rpcIdKey(m.id));
+  const rpcCancelledIdKeys = (body) => (Array.isArray(body) ? body : [body]).filter((m) => m && m.method === 'notifications/cancelled' && m.params && m.params.requestId !== undefined && m.params.requestId !== null).map((m) => rpcIdKey(m.params.requestId));
   const GET_STREAM_MAX = Math.max(1, Number(process.env.MCP_GET_STREAM_MAX || 64));
   let openGetStreams = 0;
   const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS });
@@ -604,8 +608,44 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       ? setTimeout(() => { if (res.writableEnded) return; console.error(`[mcp] tools/call open past ${MCP_CALL_WALL_MS}ms — ending the response (${inflightNameOf(req.body)})`); try { res.end(); } catch {} }, MCP_CALL_WALL_MS)
       : null;
     if (wall && typeof wall.unref === 'function') wall.unref();
+    // ── A REQUEST ID REUSED WHILE STILL IN FLIGHT ORPHANED THE FIRST CALL'S STREAM UNTIL THE WALL (2026-11-04) ─────
+    // The SDK routes a response to its HTTP stream through ONE per-transport map keyed by the CLIENT's JSON-RPC id
+    // (_requestToStreamMapping in webStandardStreamableHttp.js). A second POST carrying an id that is still in flight
+    // on the same session OVERWRITES that entry: the first call's result is written to the SECOND stream (which then
+    // closes), the second call's result finds no mapping and is dropped, and the first POST's stream never receives
+    // anything, so it sat open until the wall above ended it with an empty body. Measured on prod as exactly that
+    // shape: a Cursor tools/call held 600s with a sibling POST from the same client answered in milliseconds
+    // (billing_status 2026-11-03T14:22:09.334Z + .336Z; three such pairs within 3s at 07:21Z), and reproduced
+    // locally against this mount — two concurrent tools/call with id 7 → one 200 in ~0.4s, one held to the wall.
+    // The spec forbids the reuse ("MUST NOT have been previously used by the requestor within the same session"),
+    // but refusing it would fail one of the user's calls; so a colliding request WAITS for the earlier one to end
+    // and then runs normally. Both run (as they already did), each gets its own result, on its own stream.
+    // Released when the response closes as well as when handleRequest settles, so a stream ended by the wall or a
+    // client abort can never leave the id held. Pinned by tools/mcp-request-id-reuse-check.mjs.
+    const idKeys = rpcRequestIdKeys(req.body);
+    const inflight = (entry.inflight ||= new Map());
+    if (idKeys.some((k) => inflight.has(k))) {
+      console.error(`[mcp] request id ${idKeys.filter((k) => inflight.has(k)).join(',')} reused while in flight on one session (${entry.client || '?'}) — queued behind the first (${inflightNameOf(req.body)})`);
+      for (let k = idKeys.find((x) => inflight.has(x)); k; k = idKeys.find((x) => inflight.has(x))) await inflight.get(k).done;
+      if (res.writableEnded || res.destroyed) { if (wall) clearTimeout(wall); return; } // the wall or the client ended it while it waited
+    }
+    let release = () => {};
+    const rec = { res, done: new Promise((r) => { release = r; }) };
+    for (const k of idKeys) inflight.set(k, rec);
+    const free = () => { for (const k of idKeys) if (inflight.get(k) === rec) inflight.delete(k); release(); };
+    res.once('close', free);
     try { await mcpCtx.run({ token, remote: true, client: entry.client || '', firstRun: entry.firstRun || null }, () => entry.transport.handleRequest(req, res, req.body)); }
-    finally { if (wall) clearTimeout(wall); }
+    finally { if (wall) clearTimeout(wall); free(); }
+    // ── A CANCELLED CALL'S STREAM IS ENDED, BECAUSE THE SDK WILL NEVER WRITE TO IT (2026-11-04) ──────────────────
+    // On notifications/cancelled the SDK aborts the handler and, per the spec, sends NO response for that request —
+    // and nothing else ends the SSE stream that was waiting for one, so a client that cancels without aborting its
+    // own fetch (Cursor does not abort it, by its own staff's account) held that POST open until the wall.
+    // Reproduced locally: tools/call id 9, then notifications/cancelled {requestId: 9} → the call held to the wall.
+    // The client has already given up on that id, so ending the response is what it would have done itself.
+    for (const k of rpcCancelledIdKeys(req.body)) {
+      const r = inflight.get(k);
+      if (r && !r.res.writableEnded) { console.error(`[mcp] request ${k} cancelled by the client (${entry.client || '?'}) — ending its stream`); try { r.res.end(); } catch {} }
+    }
   });
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);
