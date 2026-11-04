@@ -3978,6 +3978,28 @@ const TEXT_STYLE_Z = z.union([
     tilt: z.number().optional().describe('degrees, ±45'), cardColor: z.string().optional(),
   }),
 ]);
+// ── WHAT get_job SAYS WHEN IT FINDS NOTHING (chat review 2026-11-04, fi:c9eb3a08e010) ─────────────────────────────────
+// Two generate_voice calls were billed and get_job was then polled eight times with an id that was not a job: the voice
+// tools finish inside their own call and return the file, they never had a job. A real job id is `job_…` and comes back
+// as `jobId` from a render that runs in the background, or from list_jobs. Anything else is read ONCE (an id the server
+// knows is never refused on its shape) and, when nothing is there, the reply names the id, says what it looks like and
+// where real ids come from. PURE, so tools/voice-job-id-check.mjs runs it.
+export const JOB_ID_RE = /^job_[a-z0-9]+$/i;
+export const INLINE_RESULT_NOTE = 'Finished in this call: the file above is the result, so there is no job to poll with get_job.';
+export function jobMissReply(id) {
+  const s = String(id ?? '').trim();
+  if (JOB_ID_RE.test(s)) {
+    return { text: `No job with id "${s}". Nothing is rendering under that id: it does not exist on this workspace (it may have been mistyped, or it may belong to another account or brand). STOP POLLING IT. Do NOT re-run the render on the strength of this: call list_jobs to see this workspace's recent jobs and their real ids.`,
+      error: `No job with id "${s}" on this workspace.` };
+  }
+  const fileLike = /^(https?:)?\/\//i.test(s) || /^\/(generated|api|uploads?)\//i.test(s) || /\.(mp3|wav|m4a|aac|ogg|flac|mp4|mov|webm|png|jpe?g|webp|gif|avif|pdf)(\?.*)?$/i.test(s);
+  return { text: `"${s}" is not a job id, and nothing on this workspace is rendering under it. STOP POLLING IT.`
+      + (fileLike ? ' It is a file link: that file is already finished, so use it as it is.' : '')
+      + ' Real job ids start with job_ and come back as jobId from a render that runs in the background (generate_video, render_ad, edit_video, plan_week and the like), or from list_jobs.'
+      + ' generate_voice and generate_sfx never make a job: they return their MP3 directly in the same reply, so there is nothing to poll for them.'
+      + ' Do NOT re-run anything on the strength of this.',
+    error: `"${s}" is not a job id.` };
+}
 export function registerTools(rawServer, opts = {}) {
   const server = wellFormedServer(rawServer); // the ONE crossing — see above
   // THE CACHE HOLDS SCHEMAS, SO A FLAG THAT CHANGES A SCHEMA MUST INVALIDATE IT (2026-09-16). `hosted` decides
@@ -9343,6 +9365,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     instagramPositions: z.array(z.string()).optional().describe('stream, story, reels, explore, profile_feed, …'),
     messengerPositions: z.array(z.string()).optional().describe('Messenger placements, e.g. sponsored_messages'), audienceNetworkPositions: z.array(z.string()).optional().describe('Audience Network placement names, as Meta defines them'),
     devicePlatforms: z.array(z.enum(['mobile', 'desktop'])).optional().describe('mobile or desktop'), userOs: z.array(z.enum(['iOS', 'Android'])).optional().describe('iOS or Android'),
+    deviceExpansion: z.boolean().optional().describe('only with devicePlatforms / userOs: true lets Meta also show the ad on OTHER devices and operating systems (its "Reach more people across other mobile devices", Sales campaigns only). Default false keeps delivery to exactly the devices and OS you targeted — Hermoso sends the opt-out explicitly, because Meta turns this on by default for new Sales ad sets from Graph v27'),
     advantageAudience: z.boolean().optional().describe('let Meta expand beyond your audience (Advantage+ audience)'),
   }).loose().optional(); // loose for the same reason as metaGeoShape — the server REFUSES an unknown targeting key by name; this twin must not swallow it first
   const metaAdSetFields = {
@@ -10082,7 +10105,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_meta_audience', {
     title: 'Create a Meta custom audience or lookalike',
-    description: 'Build a retargeting audience on a connected Meta ad account. Four kinds: kind:"website" (people whose visited URL contains urlContains, seen by pixelId — pass the brand’s own domain for "all visitors"; retentionDays up to 180), kind:"engagement" (people who did `event` on the brand’s Facebook Page, or its Instagram business profile with source:"instagram"; retentionDays up to 730), or kind:"lookalike" (sourceAudienceId + country + ratio 0.01–0.20, lookalikeType "similarity" or "reach"). CREATING AN AUDIENCE SPENDS NOTHING — it is a definition; money only moves when an ad set targets it and that campaign is activated through set_meta_campaign_status(confirm:true). Meta needs roughly 30 minutes and ~1,000 people before a new audience can be targeted, so a fresh one reporting no size is normal. kind:"customerfile" is the brand\'s OWN CUSTOMER LIST (emails, phones, names…) for retargeting, suppression or as a lookalike seed: pass customerFileSource (a required attestation of where the data came from: USER_PROVIDED_ONLY, PARTNER_PROVIDED_ONLY or BOTH_USER_AND_PARTNER_PROVIDED), plus schema (the column names in order, from EMAIL, PHONE, FN, LN, FI, CT, ST, ZIP, COUNTRY, DOB, DOBY, GEN, MADID, EXTERN_ID) and rows (arrays in that order, up to 10,000 per call) to upload them in the same call. Hermoso normalizes and SHA-256-hashes every value before it leaves the server, exactly as Meta requires, and reports Meta’s own match counts (a mostly-rejected upload is a format problem and says so). To ADD more people to an existing list, call again with kind:"customerfile" + audienceId + schema + rows (uploads add, they never replace). Meta asks the ad account to accept its Custom Audience Terms once; if it has not, Meta’s refusal says so.',
+    description: 'Build a retargeting audience on a connected Meta ad account. Four kinds: kind:"website" (people whose visited URL contains urlContains, seen by pixelId — pass the brand’s own domain for "all visitors"; retentionDays up to 180), kind:"engagement" (people who did `event` on the brand’s Facebook Page, or its Instagram business profile with source:"instagram"; retentionDays up to 730), or kind:"lookalike" (sourceAudienceId + country + ratio 0.01–0.20 = the top 1%–20% most similar people, lookalikeType "similarity" or "reach", or startingRatio for a band such as 1%–3%). Meta delivers a lookalike to the locations of the AD SET that targets it, so `country` is where you will run it — target the same country in that ad set. CREATING AN AUDIENCE SPENDS NOTHING — it is a definition; money only moves when an ad set targets it and that campaign is activated through set_meta_campaign_status(confirm:true). Meta needs roughly 30 minutes and ~1,000 people before a new audience can be targeted, so a fresh one reporting no size is normal. kind:"customerfile" is the brand\'s OWN CUSTOMER LIST (emails, phones, names…) for retargeting, suppression or as a lookalike seed: pass customerFileSource (a required attestation of where the data came from: USER_PROVIDED_ONLY, PARTNER_PROVIDED_ONLY or BOTH_USER_AND_PARTNER_PROVIDED), plus schema (the column names in order, from EMAIL, PHONE, FN, LN, FI, CT, ST, ZIP, COUNTRY, DOB, DOBY, GEN, MADID, EXTERN_ID) and rows (arrays in that order, up to 10,000 per call) to upload them in the same call. Hermoso normalizes and SHA-256-hashes every value before it leaves the server, exactly as Meta requires, and reports Meta’s own match counts (a mostly-rejected upload is a format problem and says so). To ADD more people to an existing list, call again with kind:"customerfile" + audienceId + schema + rows (uploads add, they never replace). Meta asks the ad account to accept its Custom Audience Terms once; if it has not, Meta’s refusal says so.',
     inputSchema: {
       adAccountId: z.string().describe('ad account id (act_… or digits)'),
       kind: z.enum(['website', 'engagement', 'lookalike', 'customerfile']).describe('which kind of audience to build — customerfile = your own customer list'),
@@ -10095,9 +10118,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       source: z.enum(['page', 'instagram']).optional().describe('engagement: Facebook Page (default) or the linked Instagram business profile'),
       event: z.string().optional().describe('engagement: page_engaged | page_visited | page_liked | page_messaged | page_cta_clicked | page_or_post_save | page_post_interaction — or ig_business_profile_all | ig_business_profile_engaged | ig_user_messaged_business | ig_business_profile_visit'),
       sourceAudienceId: z.string().optional().describe('lookalike: the existing audience to model (from list_meta_audiences)'),
-      country: z.string().optional().describe('lookalike: 2-letter country to build it in'),
-      ratio: z.number().optional().describe('lookalike: 0.01–0.20 = the top 1%–20% most similar people in that country (default 0.01)'),
-      startingRatio: z.number().optional().describe('lookalike: optional lower bound, must be less than ratio'),
+      country: z.string().optional().describe('lookalike: REQUIRED 2-letter country you will run it in — Meta delivers a lookalike to the locations of the ad set that targets it, so target this country there'),
+      ratio: z.number().optional().describe('lookalike: 0.01–0.20 = the top 1%–20% most similar people (default 0.01)'),
+      startingRatio: z.number().optional().describe('lookalike: optional lower bound for a band (e.g. 0.01 with ratio 0.03 = the 1%–3% band) — at least 0.01 and less than ratio; not combinable with lookalikeType'),
       lookalikeType: z.enum(['similarity', 'reach']).optional().describe('lookalike: similarity (tighter) or reach (broader) — default similarity'),
       prefill: z.boolean().optional().describe('website/engagement: seed it with activity from BEFORE the audience existed (default true)'),
       customerFileSource: z.enum(['USER_PROVIDED_ONLY', 'PARTNER_PROVIDED_ONLY', 'BOTH_USER_AND_PARTNER_PROVIDED']).optional().describe('customerfile: REQUIRED attestation of where the list came from (customers gave it to you = USER_PROVIDED_ONLY)'),
@@ -17617,11 +17640,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_reddit_ads_catalog', {
     title: 'Create a Reddit product catalog',
-    description: 'Create an empty Reddit PRODUCT CATALOG on the business behind the shared ad account — the product inventory a catalog SALES campaign advertises (dynamic product ads, collection ads). Spends nothing. Name it, give the CURRENCY your prices are in (USD, GBP, CAD, EUR, AUD, JPY, CHF, NZD, SEK or NOK — Reddit’s list) and optionally the language and the Reddit pixel(s) to match products against (list_reddit_ads_pixels; catalog ads optimize on pixel events such as PURCHASE). The currency and language cannot be changed later. Then fill it — upsert_reddit_ads_products for a handful, or create_reddit_ads_product_feed to have Reddit fetch your product file on a schedule — and define which products to advertise with create_reddit_ads_product_set. Reddit requires its Catalog manager role for catalog writes, which Business admin does not include (a login that can run campaigns can still be refused “no permissions to Create Catalog action”) — that refusal is about the role, not the connection, and the reply says how to fix it. Read back from Reddit.',
+    description: 'Create an empty Reddit PRODUCT CATALOG on the business behind the shared ad account — the product inventory a catalog SALES campaign advertises (dynamic product ads, collection ads). Spends nothing. Name it, give the CURRENCY your prices are in (USD, GBP, CAD, EUR, AUD, JPY, CHF, NZD, SEK, NOK or BRL — Reddit’s list) and optionally the language and the Reddit pixel(s) to match products against (list_reddit_ads_pixels; catalog ads optimize on pixel events such as PURCHASE). The currency and language cannot be changed later. Then fill it — upsert_reddit_ads_products for a handful, or create_reddit_ads_product_feed to have Reddit fetch your product file on a schedule — and define which products to advertise with create_reddit_ads_product_set. Reddit requires its Catalog manager role for catalog writes, which Business admin does not include (a login that can run campaigns can still be refused “no permissions to Create Catalog action”) — that refusal is about the role, not the connection, and the reply says how to fix it. Read back from Reddit.',
     inputSchema: {
       adAccountId: z.string().optional().describe('Reddit ad account id (a2_...); omit when only one is shared'),
       name: z.string().describe('catalog name'),
-      defaultCurrency: z.enum(['USD', 'GBP', 'CAD', 'EUR', 'AUD', 'JPY', 'CHF', 'NZD', 'SEK', 'NOK']).describe('the currency your product prices are in — fixed once created'),
+      defaultCurrency: z.enum(['USD', 'GBP', 'CAD', 'EUR', 'AUD', 'JPY', 'CHF', 'NZD', 'SEK', 'NOK', 'BRL']).describe('the currency your product prices are in — fixed once created'),
       defaultLanguage: z.enum(['en', 'de', 'es', 'fr', 'it', 'pt']).optional().describe('default en — fixed once created'),
       pixelIds: z.array(z.string()).optional().describe('Reddit pixel ids from list_reddit_ads_pixels to match products against; each must be on the shared ad account'),
     },
@@ -22811,6 +22834,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       credits: z.number().optional().describe('dryRun: the exact credits it would charge'),
       dryRun: z.boolean().optional(),
       creditsUsed: z.number().optional().describe('credits billed for this clip'),
+      nothingToPoll: z.boolean().optional().describe('true: the MP3 in `audio` is the finished result, never call get_job for it'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ text, engine, voice, lines, dryRun }) => {
@@ -22818,13 +22842,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const d = await apiPost('/api/generate/voice', { lines, ...(engine ? { engine } : {}), ...(dryRun ? { dryRun: true } : {}) });
       const cast = (d.cast || []).map((c) => `${c.speaker}: ${c.voice}`).join(', ');
       if (d.dryRun) return ok(`DIALOGUE QUOTE (nothing made, nothing charged): ${d.lines} lines, ${d.characters} characters, ${cast}, on ${d.model}. Price: ${d.credits} credits, exactly what it charges. Call again without dryRun to make it.`, d);
-      return ok(`Dialogue ready (${d.durationSeconds ?? '?'}s, ${d.model}; ${cast}, ${d.creditsUsed} credits): ${abs(d.audio)}`, { ...d, audio: abs(d.audio) });
+      return ok(`Dialogue ready (${d.durationSeconds ?? '?'}s, ${d.model}; ${cast}, ${d.creditsUsed} credits): ${abs(d.audio)}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
     }
     const d = await apiPost('/api/generate/voice', { text, ...(engine ? { engine } : {}), ...(voice ? { voice } : {}), ...(dryRun ? { dryRun: true } : {}) });
     if (d.dryRun) return ok(`VOICE QUOTE (nothing made, nothing charged): ${d.characters} characters on ${d.model}. Price: ${d.credits} credits, exactly what it charges.`, d);
     // REPORT WHAT SPOKE (GEN-2). `d.voice` is the DISPATCHED voice and is null on a fixed-voice engine — the server
     // refuses an unknown voice for free rather than rendering in a different one and echoing the ask back.
-    return ok(`Voice clip ready — ${d.voice || 'the engine’s own voice'}${d.model ? ` · ${d.model}` : ''}: ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}`, { ...d, audio: abs(d.audio) });
+    // NO JOB TO POLL (fi:c9eb3a08e010): the clip is finished in this reply, said in words and in structuredContent.
+    return ok(`Voice clip ready — ${d.voice || 'the engine’s own voice'}${d.model ? ` · ${d.model}` : ''}: ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
   }));
 
   // A SOUND EFFECT OR AMBIENCE MADE FROM WORDS (2026-11-03): POST /api/generate/sfx, the same engine as the Studio's generate_sfx.
@@ -22850,12 +22875,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       credits: z.number().optional().describe('dryRun: the exact credits it would charge'),
       dryRun: z.boolean().optional(),
       creditsUsed: z.number().optional(),
+      nothingToPoll: z.boolean().optional().describe('true: the MP3 in `audio` is the finished result, never call get_job for it'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ describe, seconds, loop, engine, dryRun }) => {
     const d = await apiPost('/api/generate/sfx', { describe, ...(seconds ? { seconds } : {}), ...(loop ? { loop: true } : {}), ...(engine ? { engine } : {}), ...(dryRun ? { dryRun: true } : {}) });
     if (d.dryRun) return ok(`SOUND QUOTE (nothing made, nothing charged): ${d.seconds}s${d.loop ? ' loopable' : ''} on ${d.model}. Price: ${d.credits} credits, exactly what it charges.`, d);
-    return ok(`Sound ready (${d.durationSeconds ?? '?'}s, ${d.model}, ${d.creditsUsed} credits): ${abs(d.audio)}${d.exactLength === false ? '\nThe length was asked for in words, so it may run a little long or short.' : ''}${d.loopNote ? `\n${d.loopNote}` : ''}`, { ...d, audio: abs(d.audio) });
+    return ok(`Sound ready (${d.durationSeconds ?? '?'}s, ${d.model}, ${d.creditsUsed} credits): ${abs(d.audio)}${d.exactLength === false ? '\nThe length was asked for in words, so it may run a little long or short.' : ''}${d.loopNote ? `\n${d.loopNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
   }));
 
   server.registerTool('generate_music', {
@@ -23869,7 +23895,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('get_job', {
     title: 'Get render job',
     description: 'Poll a render job by id. Returns status (queued|running|done|error), progress, and on done the served media URL. Renders take 1–3 minutes: keep calling this until done/error without asking the user — several calls is normal, not a stall. An id that does not exist on this account answers status "not_found" — that is FINAL: stop polling it, and do not re-fire the render (that double-charges).',
-    inputSchema: { id: z.string().describe('the job id, e.g. job_xxx') },
+    inputSchema: { id: z.string().describe('the job id: starts with job_, from a render tool\'s jobId or from list_jobs (generate_voice and generate_sfx return their file directly and have no job)') },
     outputSchema: {
       id: z.string().optional().describe('the job id'),
       status: z.string().optional().describe('queued | running | done | error | not_found (no job with this id on this account)'),
@@ -23903,7 +23929,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // guessing from prose. The sentence below is unambiguous for the model; `status:'not_found'` is unambiguous for
     // the card; and both say STOP rather than leaving a poller to grind for six minutes.
     const j = await getJobSettled(id); // a 404 is re-read for a few seconds first: a revision taking over mid-render has not yet seen the job (getJobSettled)
-    if (!j) return ok(`No job with id "${id}". Nothing is rendering under that id — it does not exist on this workspace (it may have been mistyped, or it may belong to another account or brand). STOP POLLING IT. Do NOT re-run the render on the strength of this: call list_jobs to see this workspace's recent jobs and their real ids.`, { id, status: 'not_found', progress: 0, error: `No job with id "${id}" on this workspace.`, url: null });
+    // The sentence says what the id LOOKS like (jobMissReply): a voice clip's file link polled as a job is told it is a
+    // finished file, and where real job ids come from (fi:c9eb3a08e010). A non-job_ id is read once (getJobSettled).
+    if (!j) { const miss = jobMissReply(id); return ok(miss.text, { id, status: 'not_found', progress: 0, error: miss.error, url: null }); }
     const res = jobResult(j);
     const url = abs(res?.video || res?.image || res?.url);
     // A RESUMED RENDER READS THE SAME SENTENCE AS AN INLINE ONE. `stillRendering` makes this tool the ordinary way a
@@ -25770,7 +25798,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('search_instagram', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching Instagram reels…', 'Found Instagram reels'),
     title: 'Search Instagram',
-    description: "Organic Instagram REELS keyword search (/v2/instagram/reels/search — our only IG keyword surface; profile/hashtag pulls go through fetch_social_data with a handle). Returns compact JSON {desc, author, handle, plays, likes, link, cover} per reel, ranked by plays. Spends about a credit.",
+    description: "Organic Instagram REELS keyword search (/v2/instagram/reels/search — our only IG keyword surface; profile/hashtag pulls go through fetch_social_data with a handle). Returns compact JSON {desc, author, handle, plays, likes, link, cover} per reel, ranked by plays. It matches captions worldwide and cannot be limited to a country or language: for one market, search in the words people there use, or read named local accounts' Reels through fetch_social_data's Instagram profile endpoint, which is the better first step for a local market. Spends about a credit.",
     inputSchema: {
       query: z.string().describe('keyword to search reels for'),
       limit: z.number().int().optional().describe('max reels returned (1–25, default 8)'),

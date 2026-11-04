@@ -546,7 +546,8 @@ export async function getJob(id) { return apiGet(`/api/jobs/${encodeURIComponent
 // ended the follow-up for good. A 404 is re-read for a short window before it is reported as absent; any other answer
 // returns at once, and an id that really does not exist costs only that window. null = absent after the window.
 export const JOB_READ_GRACE_MS = 12_000;
-export async function getJobSettled(id, { graceMs = JOB_READ_GRACE_MS, intervalMs = 3000, getJobFn = getJob } = {}) {
+// Only a job_-shaped id gets the grace: anything else (a file link, a made-up id) was never a job, so one read settles it.
+export async function getJobSettled(id, { graceMs = /^job_/i.test(String(id ?? '').trim()) ? JOB_READ_GRACE_MS : 0, intervalMs = 3000, getJobFn = getJob } = {}) {
   const until = Date.now() + Math.max(0, graceMs);
   for (;;) {
     try { return await getJobFn(id); }
