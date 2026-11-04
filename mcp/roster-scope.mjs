@@ -249,13 +249,19 @@ export const SHOPIFY_STORE_NOTE = 'works only for a Shopify store that installed
 // `flagsOn` exactly when CONNECTOR_GATES.whop.open() (WHOP_API_KEY present), so putting the key in production turns
 // them on everywhere with no edit here. Until then the docs, the counts and every roster leave them out.
 export const WHOP_DARK_TOOLS = Object.freeze(['post_to_whop', 'list_whop_destinations', 'list_whop_products', 'edit_whop_post', 'delete_whop_post', 'get_whop_post']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS]);
+// THE CANVA TOOLS SHIP DARK WITH CANVA'S APPROVAL GATE (2026-11-04). The Hermoso AI Canva app is in Canva's review, and
+// until Canva approves it only our own Canva team can authorize it, so CONNECTOR_GATES.canva is shut (CANVA_APP_APPROVED
+// unset) and the seven tools are no capability for a customer: not counted, not documented, not on a roster. UNLIKE
+// Whop they are lit PER CALLER: server.js flagsOnNow(connected, req) names them in `flagsOn` for a workspace that already
+// holds a Canva connection (ours and Canva's reviewer's), so an existing connection keeps its tools while the gate is shut.
+export const CANVA_DARK_TOOLS = Object.freeze(['save_to_canva', 'list_canva_designs', 'export_canva_design', 'list_canva_brand_templates', 'autofill_canva_template', 'list_canva_folder', 'create_canva_folder']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
 // docs reference read it through darkToolsUnder(); the per-caller roster still follows `flagsOn` from the server.
 // reangle_video has no entry: it follows its own REANGLE_VIDEO switch, which no production record carries.
-export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries(WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY'])));
+export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY']), ...CANVA_DARK_TOOLS.map((n) => [n, 'CANVA_APP_APPROVED'])]));
 export function darkToolsUnder(flags) {
   const f = flags && typeof flags === 'object' ? flags : {};
   return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));
