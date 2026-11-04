@@ -152,7 +152,7 @@ export function signInMessage(status, body, msg, isSignedOut = signedOut()) {
 // unwrap the {data}|{error} envelope; throw a clean Error (with .status) on failure
 async function unwrap(res, { read = false } = {}) {
   let body = null;
-  try { body = await res.json(); } catch {}
+  try { body = await res.json(); } catch (e) { if (read && isDeadline(e)) throw readDeadlineError(); } // a body cut off by the read deadline is not an empty answer
   if (!res.ok) {
     const msg = signInMessage(res.status, body, (body && (body.error || body.message)) || `HTTP ${res.status}`);
     // `_viaApi` MARKS AN ERROR THAT ALREADY REACHED THE SERVER, so route() has already recorded it in the error
@@ -299,14 +299,26 @@ async function throughFrontDoor(send, { read }) {
   return res;
 }
 
-async function fetchRead(url, init) { return throughFrontDoor(() => fetchReadOnce(url, init), { read: true }); }
+// ── A READ HAS A DEADLINE (2026-11-04) ────────────────────────────────────────────────────────────────────────────
+// fetch has none of its own, only undici's 300-second wait for response headers, and that wait ends in the same bare
+// "fetch failed" as a dropped socket, so the blip retry below SENT THE SLOW READ AGAIN: one hosted
+// read_meta_conversation sat open for the whole 10-minute MCP wall and held off every deploy. A read now ends at
+// READ_DEADLINE_MS with a sentence, and a deadline is never retried (resending a read the server is still working on
+// only doubles the wait). No read a tool makes runs this long: the slowest seen in a week of request logs was under
+// 100 seconds, which is also the edge's limit for a stdio client. A read changes nothing, so ending it is safe.
+export const READ_DEADLINE_MS = Number(process.env.HERMOSO_READ_DEADLINE_MS) > 0 ? Number(process.env.HERMOSO_READ_DEADLINE_MS) : 180000;
+const isDeadline = (e) => !!e && (e.name === 'TimeoutError' || e.name === 'AbortError' || /UND_ERR_(HEADERS|BODY)_TIMEOUT/.test(String(e.cause?.code || '')));
+const readDeadlineError = () => Object.assign(new Error(`Hermoso did not finish that read within ${Math.round(READ_DEADLINE_MS / 1000)} seconds, so it was stopped and nothing came back. It was a read, so nothing was changed. Try again, or ask for less (a smaller limit or one account).`), { status: 504, _readDeadline: true });
+async function fetchRead(url, init) { return throughFrontDoor(() => fetchReadOnce(url, { ...init, signal: AbortSignal.timeout(READ_DEADLINE_MS) }), { read: true }); }
 async function fetchReadOnce(url, init) {
   try { return await fetch(url, init); }
   catch (e) {
+    if (isDeadline(e)) throw readDeadlineError();
     if (!isTransport(e)) throw e;
     await new Promise((r) => setTimeout(r, 400));
     try { return await fetch(url, init); }
     catch (e2) {
+      if (isDeadline(e2)) throw readDeadlineError();
       if (!isTransport(e2)) throw e2;
       throw Object.assign(new Error('Could not reach Hermoso just now — the request never got a response, so nothing was read. This is a connection problem, not a rejected request; try again.'), { _transport: true, _viaApi: true });
     }
