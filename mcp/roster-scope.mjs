@@ -250,6 +250,16 @@ export const SHOPIFY_STORE_NOTE = 'works only for a Shopify store that installed
 // them on everywhere with no edit here. Until then the docs, the counts and every roster leave them out.
 export const WHOP_DARK_TOOLS = Object.freeze(['post_to_whop', 'list_whop_destinations', 'list_whop_products', 'edit_whop_post', 'delete_whop_post', 'get_whop_post']);
 export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS]);
+// THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
+// is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
+// production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
+// docs reference read it through darkToolsUnder(); the per-caller roster still follows `flagsOn` from the server.
+// reangle_video has no entry: it follows its own REANGLE_VIDEO switch, which no production record carries.
+export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries(WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY'])));
+export function darkToolsUnder(flags) {
+  const f = flags && typeof flags === 'object' ? flags : {};
+  return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));
+}
 export function toolFlaggedOff(name, conn) { const n = String(name || ''); return FLAGGED_OFF_TOOLS.has(n) && !(conn && conn.flagsOn instanceof Set && conn.flagsOn.has(n)); }
 export function toolWithheldByServer(name, conn) { return toolFlaggedOff(name, conn) || !!(conn && ((conn.withheld instanceof Set && conn.withheld.has(String(name || ''))) || toolHeldForNoShopifyStore(name, conn))); }
 export function toolHeldBackByConnectors(name, conn) {

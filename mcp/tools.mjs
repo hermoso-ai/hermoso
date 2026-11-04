@@ -3207,7 +3207,7 @@ export const WIDGET_HOST_DESCRIPTIONS = Object.freeze({
   list_linkedin_events: "The events a LinkedIn company Page organizes: name, link, start and end times, online or in person, visibility and state. Only Pages shared with this profile can be read. It needs LinkedIn's Events permission; if a connection made before that permission was enabled is refused, the user reconnects LinkedIn once. Read-only, 0 credits. Needs LinkedIn connected.",
   edit_timeline: "Render one edited video from a timeline the caller describes: segments placed on an output timeline (later segments are drawn on top, and overlapping segments form the transition), each with keyframed position, scale, rotation, speed and opacity, plus optional HTML overlays and masks. Sources are a videoUrl, a Library or render URL, a direct file, or a public TikTok, Reel, Facebook, X or YouTube post link; in and out are source seconds. Audio per segment: gain, mute, and J-cut or L-cut timing. video_frames shows exact frames for free, to find a cut point and to check the result. Costs the flat post_edit price (about 2 credits); a 'generate' segment, which renders a new transition shot with a video model, costs more and is used only when the user asks for one.",
   list_openai_ads_feeds: "The product feeds on this ChatGPT Ads account: id, name, countries, currencies and the campaigns using each. A product-feed campaign advertises the products in one of these feeds. Read-only, 0 credits. Needs ChatGPT Ads connected.",
-  create_openai_ads_feed: "Create an empty product feed on ChatGPT Ads, with a name and the countries it serves (ISO codes). Products are added afterwards with update_openai_ads_feed_products. Needs ChatGPT Ads connected.",
+  create_openai_ads_feed: "Create an empty feed on ChatGPT Ads, with a name and the countries it serves (ISO codes). By default it is a product feed, and products are added afterwards with update_openai_ads_feed_products. inventoryType 'hotel' asks for a hotel property feed instead, which OpenAI accepts only for advertisers in its hotel beta and refuses for everyone else. Needs ChatGPT Ads connected.",
   update_reddit_ads_ad_group: "Edit an existing Reddit ad group: its name, budget, goal type, bid, schedule dates or targeting. Budget and bid are amounts in the ad account's currency. Targeting is updated per key: each targeting key sent replaces that whole list, keys left out stay as they are, and an empty list clears a key. It does not start or pause delivery (set_reddit_ads_status does). The saved ad group is read back from Reddit. Needs Reddit Ads connected.",
   update_reddit_ads_saved_audience: "Edit a Reddit saved audience: its name or its targeting. Targeting is updated per key: each targeting key sent replaces that whole list, keys left out stay as they are, and an empty list clears a key. Changing the targeting of an audience that live ad groups use changes who those ad groups reach right away, so tell the user how many ad groups use it and get a yes first. The saved audience is read back from Reddit. Needs Reddit Ads connected.",
 });
@@ -5099,14 +5099,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('get_whop_post', {
     title: 'Read a Whop post',
-    description: "Read back a Whop forum post or chat message Hermoso posted: its text and the numbers Whop reports (views, likes and comments on a forum post; views and reactions on a chat message). A count Whop does not report is listed as unavailable, never zero. Free.",
-    inputSchema: { ...MANAGE_BRAND, id: z.string(), kind: z.enum(['forum', 'chat']) },
-    outputSchema: { id: z.string().optional(), kind: z.string().optional(), title: z.string().nullable().optional(), content: z.string().optional(), metrics: z.record(z.number()).optional(), absent: z.record(z.string()).optional(), note: z.string().optional() },
+    description: "Read back a Whop forum post or chat message Hermoso posted: its text, the numbers Whop reports (views, likes and comments on a forum post; views and reactions on a chat message), and whether it is still up — state live, deleted or unconfirmed. Whop's read also returns a DELETED chat message, so pass the chat's experienceId (from list_whop_destinations) to confirm a message is still in the chat; one deleted through Hermoso always reads deleted. A count Whop does not report is listed as unavailable, never zero. Free.",
+    inputSchema: { ...MANAGE_BRAND, id: z.string(), kind: z.enum(['forum', 'chat']), experienceId: z.string().optional().describe('the chat it was posted in: confirms a chat message is still up') },
+    outputSchema: { id: z.string().optional(), kind: z.string().optional(), title: z.string().nullable().optional(), content: z.string().optional(), deleted: z.boolean().optional(), state: z.string().optional(), deletedAt: z.string().optional(), metrics: z.record(z.number()).optional(), absent: z.record(z.string()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/whop/post', queryBrand(a, { id: a.id, kind: a.kind }));
+    const d = await apiGet('/api/whop/post', queryBrand(a, { id: a.id, kind: a.kind, ...(a.experienceId ? { experienceId: a.experienceId } : {}) }));
+    const what = d.kind === 'chat' ? 'chat message' : 'forum post';
+    if (d.deleted) return ok(`Whop ${what} ${d.id}: DELETED — ${d.note || 'no longer up'}`, d);
     const m = d.metrics || {};
-    return ok(`Whop ${d.kind === 'chat' ? 'chat message' : 'forum post'} ${d.id}: ${Object.keys(m).length ? Object.entries(m).map(([k, v]) => `${v} ${k}`).join(', ') : 'no counts'}.`, d);
+    return ok(`Whop ${what} ${d.id}${d.state === 'unconfirmed' ? ' (still up: unconfirmed — pass experienceId to check the chat)' : ''}: ${Object.keys(m).length ? Object.entries(m).map(([k, v]) => `${v} ${k}`).join(', ') : 'no counts'}.`, d);
   }));
 
   server.registerTool('list_inbox', {
@@ -17380,7 +17382,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       savedAudienceId: z.string().optional().describe('point this ad group at a saved audience instead'),
       productSetId: z.string().optional().describe('CATALOG SALES — rebind the ad group to another product set (a UUID from Reddit Ads Manager > Catalogs). Reddit stores an edit without checking the set exists or that the campaign uses a catalog, so pass the right id; the note says if it was not kept'),
       shoppingType: z.enum(['DYNAMIC', 'STATIC']).optional().describe('CATALOG SALES — DYNAMIC or STATIC product ads. Reddit has been measured keeping the value an ad group was created with, and the note says when it did not change'),
-      targeting: z.record(z.any()).optional().describe('same shape as create_reddit_ads_ad_group — REPLACES the existing targeting'),
+      targeting: z.record(z.any()).optional().describe('the targeting keys to change, in the same shape as create_reddit_ads_ad_group: each key sent replaces that whole list, keys left out are kept, and an empty list clears one'),
       schedule: z.array(z.any()).optional().describe('weekly delivery windows: startDay, endDay, startHour, endHour (0 = Sunday)'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), budget: z.number().nullable().optional(), productSetId: z.string().nullable().optional(), shoppingType: z.string().nullable().optional(), note: z.string().optional() },
@@ -17997,7 +17999,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       adAccountId: z.string().optional().describe('Reddit ad account id (a2_...); omit when only one is shared'),
       savedAudienceId: z.string().describe('id of the saved audience to edit'),
       name: z.string().optional().describe('new saved audience name'),
-      targeting: z.record(z.any()).optional().describe('REPLACES the existing targeting'),
+      targeting: z.record(z.any()).optional().describe('the targeting keys to change: each key sent replaces that whole list, keys left out are kept, and an empty list clears one'),
     },
     outputSchema: { id: z.string().optional(), name: z.string().optional(), status: z.string().optional(), activeAdGroups: z.number().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
