@@ -3255,6 +3255,7 @@ const splitRef = (m, tool, word) => {
 // delete names the visibility operation. These run BEFORE the split rewrite, so a precise reference wins over the
 // generic "op / op" list.
 const WIDGET_PROXY_REFS = [[/\s*\/\s*fetch_social_data\b/g, ''], [/go through fetch_social_data with a handle/g, 'go through instagram_profile and search_instagram_hashtag'],
+  [/through fetch_social_data's Instagram profile endpoint/g, 'through instagram_profile'], // search_instagram's local-market step (0aec0d65db4)
   [/, which submit_tiktok_ads_verification can reuse/g, ''], [/the code submit_tiktok_ads_verification needs/g, 'its code'],
   [/SECRET with update_pinterest_board\b/g, 'SECRET with set_pinterest_board_visibility']];
 const widgetProxyHit = (d) => WIDGET_PROXY_REFS.some(([re]) => { re.lastIndex = 0; const hit = re.test(d); re.lastIndex = 0; return hit; });
@@ -22634,7 +22635,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       image: z.string().optional().describe('the served absolute URL of the finished image'),
       model: z.string().optional().describe('the product-facing label of the model that rendered it'),
       productCheck: z.any().optional().describe('present when the brand\'s product photo was attached: {verdict: match|mismatch|unclear|absent, wordmark, issues[]} — the render compared against the real product photo. mismatch/absent means the product in the image is NOT the brand\'s product; say so, never present it as done'),
-      logoPlaced: z.any().optional().describe('how the real logo file went on: {applied, mode: in_scene|fix|overlay, object?, fellBack?, notALogo?}; notALogo = the saved logo is a photo, so nothing was added (ask for the logo file)'),
+      logoPlaced: z.any().optional().describe('how the real logo file went on: {applied, mode: in_scene|fix|overlay, object?, fellBack?, notALogo?, asked?}; notALogo = the saved logo is a photo, so nothing was added (ask for the logo file only when the logo was asked for; asked:false means nobody asked for one, so say nothing about it)'),
       labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
