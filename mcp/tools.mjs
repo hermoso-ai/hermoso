@@ -18645,13 +18645,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       advertiserId: z.string().optional().describe('from list_tiktok_ads_accounts — TikTok scopes these lookups to an advertiser'),
       kind: z.enum(['location', 'interest', 'interest_keyword', 'hashtag', 'language']).optional().describe('default location. interest_keyword and hashtag both REQUIRE keyword.'),
-      keyword: z.string().optional().describe('narrows the lookup, e.g. "Canada", "Beauty", "skincare"'),
+      keyword: z.string().optional().describe('narrows the lookup by name, e.g. "Canada" returns Canada rather than every place TikTok has; REQUIRED for interest_keyword and hashtag'),
+      regionCode: z.string().optional().describe('location only: two-letter country code, e.g. CA, to list the places inside one country'),
+      level: z.enum(['country', 'province', 'city', 'district']).optional().describe('location only: return one level'),
+      limit: z.number().optional().describe('rows to return, default 50, max 200; total always counts every match'),
     },
-    outputSchema: { advertiserId: z.string().optional(), kind: z.string().optional(), results: z.array(z.any()).optional() },
+    outputSchema: { advertiserId: z.string().optional(), kind: z.string().optional(), results: z.array(z.any()).optional(), total: z.number().optional(), returned: z.number().optional(), truncated: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-ads/targeting', a);
-    return ok(`${(d.results || []).length} TikTok ${d.kind || a.kind || 'location'} result(s) on advertiser ${d.advertiserId}:\n${JSON.stringify((d.results || []).slice(0, 30))}`, d);
+    return ok(`${d.note || `${(d.results || []).length} TikTok ${d.kind || a.kind || 'location'} result(s).`} Advertiser ${d.advertiserId}:\n${JSON.stringify(d.results || [])}`, d);
   }));
   server.registerTool('tiktok_ads_report', {
     title: 'TikTok ads performance report',
@@ -19302,7 +19305,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       registeredArea: z.string().optional().describe('two-letter country of registration, e.g. US'),
       timezone: z.string().optional().describe('IANA time zone, e.g. America/New_York'),
       currency: z.string().optional().describe('must match the Business Center currency; defaults to it'),
-      promotionLink: z.string().optional().describe('company website; required for an agency Business Center'),
+      promotionLink: z.string().optional().describe('company website; required for an agency Business Center. Pass the brand site when you have it: Hermoso sends it only where TikTok takes it and the reply says when it was not sent'),
       contactName: z.string().optional(), contactEmail: z.string().optional(), contactPhone: z.string().optional(),
       billingAddress: z.string().optional().describe('required for France, Brazil and Mexico'),
       taxId: z.string().optional().describe('VAT, tax id or ABN depending on the country'),
