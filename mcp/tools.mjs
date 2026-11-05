@@ -26036,7 +26036,10 @@ function memoryNoteVerdict(text) {
     // `pp`). Ungated, a SERVICE or APP brand acquired a "product library" from its own og:image — and brandContext
     // would then print "SERVICE BUSINESS — there is NO physical product. NEVER invent a box, bottle, package…"
     // directly above a populated photo library, while assembleAdRender attached that image to every render.
-    if (p && p.domain && p.physical_product !== false) {
+    // A CREATOR'S SITE IS READ FOR PHOTOS ONLY WHEN THE DRAFT NAMED A PRODUCT (journey QA 2026-11-05, @cookingwithlynja): the
+    // photo review is paid, and a handle draft's domain is usually a link-in-bio page. Same rule as the web (brandSellsProduct).
+    const _creatorNoProduct = !!a.socialHandle && !(Array.isArray(p?.productNames) && p.productNames.some((x) => typeof x === 'string' && x.trim()));
+    if (p && p.domain && p.physical_product !== false && !_creatorNoProduct) {
       try {
         const site = await apiGet('/api/site/images', { url: p.domain });
         const imgs = [...(site?.images || [])].filter(Boolean);
