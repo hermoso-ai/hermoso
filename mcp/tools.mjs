@@ -86,6 +86,7 @@ const creatorLine = (c) => {
   if (c.source !== 'generated') bits.push(c.consented ? 'likeness consented' : 'NO likeness consent on file');
   if (c.poses) bits.push(`${c.poses} pose plate${c.poses === 1 ? '' : 's'}`);
   if (c.lowQualityRef && !c.refAccepted) bits.push('PHOTO TOO UNCLEAR TO CAST — not cast by default; replace it with save_creator (same name, a better photo url) or accept it with save_creator(name, useAnyway: true)');
+  if (c.imagesMissing) bits.push(`PHOTOS DELETED — cannot be cast until replaced: ${c.imagesNote || 'regenerate or upload a new photo'} (save_creator with the same name and a new photo url replaces it)`);
   if (c.voiceClone) bits.push('cloned voice');
   else if (c.voice) bits.push(`voice ${c.voice}`);
   return `  • ${c.name} — ${bits.join(', ')}${c.id ? `  [${c.id}]` : ''}\n    ${c.image || '(portrait stored in-app as an uploaded photo — cast them by NAME; there is no url to hand a render tool)'}`;
@@ -335,7 +336,7 @@ export const MCP_INSTRUCTIONS = [
   // is not actually required is a trap in an instruction an agent reads before acting, and this one was not
   // required: `model` is OPTIONAL on generate_image, generate_video and render_ad, and an unnamed render resolves to
   // GEN_MODELS.<kind>[0] in workImage/workVideo, which is the catalog's `best: true` row (for image an unnamed generate_image
-  // here goes further and takes the static_ad job's engine, GPT Image 2.5 since 2026-11-03) and, for video, model-belt.mjs's AUTO_VIDEO_DEFAULT (seedance-2.5, also `video[0]`). The prose below says "the
+  // here goes further and takes the static_ad job's engine, GPT Image 2.6 since 2026-11-05, 2.5 from 2026-11-03) and, for video, model-belt.mjs's AUTO_VIDEO_DEFAULT (seedance-2.5, also `video[0]`). The prose below says "the
   // server's own default" rather than "the best row" on purpose: hermoso_capabilities' own _pickLine states as a RULE
   // that neither `best` nor the longest-clip row decides where an unnamed ask lands, and two shipped sentences that
   // disagree are worse than either one. What the user-facing line has to carry is only that omitting `model` works.
@@ -3980,6 +3981,7 @@ const TEXT_STYLE_Z = z.union([
     position: z.union([z.string(), z.number()]).optional().describe('top|center|lower|bottom or 0.05-0.95 from the top'), textCase: z.enum(['as-is', 'upper', 'lower', 'title']).optional(),
     italic: z.boolean().optional(), subItalic: z.boolean().optional(), outline: z.boolean().optional(), shadow: z.boolean().optional(),
     tilt: z.number().optional().describe('degrees, ±45'), cardColor: z.string().optional(),
+    highlightColor: z.string().optional().describe('word-timed subtitles only: the word being said is lit in this colour (preset highlight sets it)'),
   }),
 ]);
 // ── WHAT get_job SAYS WHEN IT FINDS NOTHING (chat review 2026-11-04, fi:c9eb3a08e010) ─────────────────────────────────
@@ -22617,30 +22619,37 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('create');
   server.registerTool('generate_image', {
     title: 'Generate ad image',
-    description: 'Use this when the user asks for an image ad, ad creative, product photo or social post graphic for their business or product. It renders a finished image on a real image model, on their saved brand (product photos, logo), and returns a URL ready to post. For a video, use render_ad. refImages (paths or URLs) composite a real product into the scene. MULTI-BRAND: hydration uses the SAVED brand; for a different brand (a fresh draft_brand) pass its own productImages/logo as refImages with useBrand:false, or the wrong product lands in the shot. Product photos also pick the ENGINE (the compositing model), so a named `model` is honoured only when no references ride; raw:true or useBrand:false keeps it. model = a catalog id from hermoso_capabilities (omit for the default). A PRODUCT IN A PERSON’S HANDS, or a garment on them: name an id marked `needsRefs` with a `refsMax`; person photo first, then up to three product/garment photos. It EDITS THE PHOTOGRAPH: the person is RE-POSED (stance and hands change; face, clothing, setting and light are kept), so it is the wrong tool when the rest must stay untouched. RAW MODEL ACCESS: ' + RAW_TOOL_NOTE + ' Seconds. Spends credits.',
+    description: 'Use this when the user asks for an image ad, ad creative, product photo or social post graphic for their business or product. It renders a finished image on a real image model, on their saved brand (product photos, logo), and returns a URL ready to post. For a video, use render_ad. refImages (paths or URLs) composite a real product into the scene. MULTI-BRAND: hydration uses the SAVED brand; for a different brand (a fresh draft_brand) pass its own productImages/logo as refImages with useBrand:false, or the wrong product lands in the shot. Product photos also pick the ENGINE (the compositing model), so a named `model` is honoured only when no references ride; raw:true or useBrand:false keeps it. model = a catalog id from hermoso_capabilities (omit for the default). A PRODUCT IN A PERSON’S HANDS, or a garment on them: name an id marked `needsRefs` with a `refsMax`; person photo first, then up to three product/garment photos. It EDITS THE PHOTOGRAPH: the person is RE-POSED (stance and hands change; face, clothing, setting and light are kept), so it is the wrong tool when the rest must stay untouched. AN ANIMATED GIF OR AN SVG: format "gif" (a short looping animation, frames + frameMs) or "svg" (an editable vector) on gpt-image-2.6 / gpt-image-2.6-flare, from the prompt alone (no refImages). RAW MODEL ACCESS: ' + RAW_TOOL_NOTE + ' Seconds. Spends credits.',
     inputSchema: {
       prompt: z.string().optional().describe('REQUIRED on every model EXCEPT the pose rows below. the full image prompt — subject, composition, lighting, and any on-image ad text. ON A POSE MODEL (product-in-hand / try-on) THIS IS EXTRA DIRECTION AND IT IS OPTIONAL — leave it out and the pose is built for you. If you do write one, DESCRIBE THE POSE ("she holds the bottle upright in her right hand at chest height, label to camera"); do NOT phrase it as a swap ("replace the mug with the bottle"), which is REFUSED for free, because the product then comes out the size of whatever it replaced — a 30ml bottle rendered mug-sized in testing.'),
       refImages: z.array(z.string()).optional().describe('local file paths or URLs of product/logo references to composite in. ON THE POSE MODELS — any row hermoso_capabilities marks `needsRefs` with a `refsMax`, such as putting your product in someone’s hands or a virtual try-on — THE ORDER IS THE CONTRACT AND IT IS NOT A COMPOSITE: refImages[0] is the PERSON photo, and the rest (up to `refsMax` minus one) are the product or garment photos. Reversed, you get the product wearing the person. A 4th product is dropped and the reply says so. ' + LIKENESS_TERMS),
       useBrand: z.boolean().optional().describe('default true: with no refImages, the server hydrates the SAVED brand’s product/logo references so the output lands on-brand; pass false for a pure prompt-only render'),
       raw: z.boolean().optional().describe('RAW MODEL ACCESS: run the caller’s prompt on the named model with no Hermoso adjustments at all — the prompt reaches the provider byte-identical (no hex-to-colour-name rewrite, no prepended fidelity preamble) and NO saved-brand product photos are attached, so the model you name is the model that renders. Use it to drive the raw catalog; leave it off for an on-brand ad. Billing, the durable Library landing and per-model validation are unchanged.'),
       aspectRatio: z.string().optional().describe("e.g. '1:1', '9:16', '16:9', '4:5'. Each model draws its own list (hermoso_capabilities prints it per model, e.g. Nano Banana 2 goes to 1:8 and 8:1); a ratio the chosen model cannot draw is refused before anything is charged"),
-      model: z.string().optional().describe('image model id from hermoso_capabilities. A model whose `refs.mode` is "edit" there (gpt-image-2.5) takes your refImages on ITS OWN editor, up to its `refs.max`, instead of the default compositor'),
+      model: z.string().optional().describe('image model id from hermoso_capabilities. A model whose `refs.mode` is "edit" there (gpt-image-2.6, gpt-image-2.5) takes your refImages on ITS OWN editor, up to its `refs.max`, instead of the default compositor'),
       job: z.enum(['static_ad', 'product_photo', 'marketplace', 'thumbnail', 'character_sheet', 'vector']).optional().describe('what the picture is for. With no `model` named it renders on the engine judged best for that job (hermoso_capabilities `jobEngines.image` lists them): static_ad (the default when neither `model` nor `job` is given) = a finished image ad with its headline, copy and button on the picture; product_photo = a studio, lifestyle, flat-lay or spotlight photo of the real product; marketplace = a listing card; thumbnail = a video cover (make_thumbnail is the full thumbnail pipeline); character_sheet = a multi-view sheet of one person; vector = a logo, icon or flat illustration as an editable SVG (it takes no reference pictures, so the saved brand\'s photos stay off it). A named `model` always wins'),
+      format: z.enum(['png', 'gif', 'svg']).optional().describe('the file to make (default png). gif = an ANIMATED GIF, a short loop with no sound (describe the subject, the motion and the loop); svg = an editable VECTOR (logo, icon, flat illustration). Both run on gpt-image-2.6 (default) or gpt-image-2.6-flare and take no refImages, mask or markup; the saved brand\'s photos stay off them. hermoso_capabilities prints each one\'s credits under `formats`'),
+      frames: z.number().int().min(2).max(16).optional().describe('format gif only: frames in the loop, 2 to 16 (default 9)'),
+      frameMs: z.number().int().min(20).max(2000).optional().describe('format gif only: milliseconds per frame, 20 to 2000, rounded to 10 (default 200; 9 frames x 200 = a 1.8 s loop)'),
+      complexity: z.enum(['low', 'medium', 'high']).optional().describe('gpt-image-2.6 / 2.6-flare only: how much the model plans before drawing (default high, best for dense text and complex layouts; low suits a small focused change). No separate charge'),
       imageSize: z.string().optional().describe('pixel-size preset for models that support it: 1K/2K, and 4K on the models hermoso_capabilities lists with a 4K imageSize price (a 4K ask on any other model is refused, free) — omit for the default'),
       fixLabel: z.boolean().optional().describe('default true: when the saved brand\'s product photo rides in this render, the product\'s label on the finished image is READ and compared with the photo, and re-printed from the photo at close range ONLY if it came out wrong (a label that is already right costs only the check; a re-print costs more, and dryRun:true returns the up-to price). The reply says whether the label was checked, fixed or left as rendered (`labelPass`). Pass false when the user wants the packaging left exactly as generated: nothing is checked or re-printed.'),
       logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay: real logo file laid flat. in_scene: the scene leaves a blank patch on the object and the real file is printed onto it (perspective, light). Never drawn by the model. auto (default): from the prompt'),
-      mask: z.string().optional().describe('MASKED EDIT — change ONE region and keep the rest: a mask (path or URL, any size) for refImages[0]. TRANSPARENT = change, or on a mask with no transparency WHITE = change, black = keep; the reply says which it read. The mask guides rather than stencils, so the change can blend a little past its edge. Runs on gpt-image-2.5 (`refs.mask` in hermoso_capabilities): leave `model` empty or name it; another named model is refused, free. Needs refImages; keeps the source image\'s frame, so aspectRatio is not applied.'),
+      mask: z.string().optional().describe('MASKED EDIT — change ONE region and keep the rest: a mask (path or URL, any size) for refImages[0]. TRANSPARENT = change, or on a mask with no transparency WHITE = change, black = keep; the reply says which it read. The mask guides rather than stencils, so the change can blend a little past its edge. Runs on gpt-image-2.6 (`refs.mask` in hermoso_capabilities): leave `model` empty or name it; another named model is refused, free. Needs refImages; keeps the source image\'s frame, so aspectRatio is not applied.'),
     },
     outputSchema: {
       image: z.string().optional().describe('the served absolute URL of the finished image'),
       model: z.string().optional().describe('the product-facing label of the model that rendered it'),
       productCheck: z.any().optional().describe('present when the brand\'s product photo was attached: {verdict: match|mismatch|unclear|absent, wordmark, issues[]} — the render compared against the real product photo. mismatch/absent means the product in the image is NOT the brand\'s product; say so, never present it as done'),
       logoPlaced: z.any().optional().describe('how the real logo file went on: {applied, mode: in_scene|fix|overlay, object?, fellBack?, notALogo?, asked?}; notALogo = the saved logo is a photo, so nothing was added (ask for the logo file only when the logo was asked for; asked:false means nobody asked for one, so say nothing about it)'),
+      format: z.string().optional().describe('gif or svg when one was asked for'),
+      preview: z.string().optional().describe('an SVG\'s PNG preview, for places that cannot show a vector'),
+      frames: z.number().optional().describe('an animated GIF\'s frame count, read off the delivered file'),
       labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your ad image…', 'Ad image ready'),
-  }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel, logoPlacement, job }) => {
+  }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel, logoPlacement, job, format, frames, frameMs, complexity }) => {
     const refs = refImages?.length ? (await Promise.all(refImages.map(toRef))).filter(Boolean) : undefined;
     const maskRef = mask ? await toRef(mask) : undefined; // a local mask file travels the same way a local reference does
     // `raw === true` only — a raw render is opt-in and must be stated properly, so a truthy stray value never
@@ -22650,8 +22659,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // NO MODEL AND NO JOB = AN IMAGE AD (2026-11-03): this tool is what an agent reaches for to make an image ad, so an
     // unnamed render takes the static_ad job's engine (judged in the job-engine registry) rather than the catalog's
     // general first row. A masked edit keeps its own rule (the server routes a mask to the one engine that takes it).
-    if (!job && !model && !maskRef) job = 'static_ad';
-    const _imgBody = { prompt, refImages: refs, useBrand: maskRef ? false : useBrand !== false, aspectRatio, model, imageSize, ...(maskRef ? { mask: maskRef } : {}), ...(raw === true ? { raw: true } : {}), ...(fixLabel === false ? { fixLabel: false } : {}), ...(logoPlacement ? { logoPlacement } : {}), ...(job ? { job } : {}) }; // fixLabel:false only when stated: the label check is ON by default. job: the image job's engine when no model is named (server: lib/image-job-engines.mjs)
+    if (!job && !model && !maskRef && format !== 'gif' && format !== 'svg') job = 'static_ad'; // a GIF / SVG picks its own engine (GPT Image 2.6)
+    const _imgBody = { prompt, refImages: refs, useBrand: maskRef ? false : useBrand !== false, aspectRatio, model, imageSize, ...(maskRef ? { mask: maskRef } : {}), ...(raw === true ? { raw: true } : {}), ...(fixLabel === false ? { fixLabel: false } : {}), ...(logoPlacement ? { logoPlacement } : {}), ...(job ? { job } : {}), ...(format ? { format } : {}), ...(frames != null ? { frames } : {}), ...(frameMs != null ? { frameMs } : {}), ...(complexity ? { complexity } : {}) }; // fixLabel:false only when stated: the label check is ON by default. job: the image job's engine when no model is named (server: lib/image-job-engines.mjs)
     // A CALLER WITH A WAIT BUDGET GETS A QUEUED JOB (2026-09-21, R321). Only `/v1/tools/generate_image?wait=` sets
     // `waitMs`; every other caller renders inside the request exactly as before. The server does the same brand-photo
     // handling either way, then queues the ordinary image job; awaitRenderJob waits what the caller allowed and hands
@@ -22669,12 +22678,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const q = await apiPost('/api/generate/image', { ..._imgBody, queue: true });
       const r = await awaitRenderJob({ id: q.jobId });
       if (r.stillRendering) return { content: [{ type: 'text', text: `Image queued as job ${r.jobId}. It is rendering; read it with get_job.${q.productNote ? `\n${q.productNote}` : ''}` }], structuredContent: { jobId: r.jobId, stillRendering: true, ...(q.productNote ? { productNote: q.productNote } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
-      const img = await imageBlock(r.url);
+      const img = await imageBlock(r.raw?.preview ? abs(r.raw.preview) : r.url); // an SVG shows its PNG preview inline
       const _qNote = joinQueuedImageNote(q.productNote, r.raw); // the route's note (logo, lineup) + the worker's (crop, the product check); a logo the worker moved is said once, where it landed
-      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
+      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(r.raw?.format ? { format: r.raw.format } : {}), ...(r.raw?.preview ? { preview: abs(r.raw.preview) } : {}), ...(r.raw?.frames ? { frames: r.raw.frames, frameMs: r.raw.frameMs } : {}), ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
     }
     const d = await apiPost('/api/generate/image', _imgBody); // explicit boolean so the server's saved-brand hydration default is unambiguous
-    const img = await imageBlock(abs(d.image)); // show the actual creative inline in Claude, not just a URL
+    const img = await imageBlock(abs(d.preview || d.image)); // show the actual creative inline in Claude, not just a URL (an SVG shows its PNG preview: an agent's image block takes no vector)
     return { content: [{ type: 'text', text: `${_imgHead(d.productCheck)}${abs(d.image)}${d.model ? `  (${d.model})` : ''}${switchNote({ raw: d })}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
 
@@ -22699,6 +22708,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       removal: z.boolean().optional().describe('true when the edit REMOVES text, branding, a logo, a watermark, a person or an object, so the brand name and logo are not re-added'),
       logo: z.boolean().optional(),
       mask: z.string().optional().describe('optional mask image (URL or local path) marking the region to change: transparent = change, or white = change on an opaque mask'),
+      markup: z.string().optional().describe('MARKUP-GUIDED EDIT: drawn annotations (circles, arrows, scribbles) showing what to change, as a URL or local path: a transparent PNG of just the marks, or a copy of the same image with the marks drawn on it. Say the change in `instruction` ("make the circled vase blue"); the marks are not in the result. Runs on gpt-image-2.6 (or the editor named in `model`). Never with a mask'),
+      model: z.string().optional().describe('the editor, only when the user names one: gpt-image-2.6, gpt-image-2.6-flare (its own faster editor) or gpt-image-2.5. Omit for the default'),
+      complexity: z.enum(['low', 'medium', 'high']).optional().describe('gpt-image-2.6 editors only: how much it plans before drawing (default high; low suits a small focused change)'),
       dryRun: z.boolean().optional().describe('true = return what this edit usually costs in credits and render nothing'),
       fixLabel: z.boolean().optional().describe('false = leave the product label exactly as rendered: no product lookup, no label check, no re-print (default on when the ad shows the brand\u2019s saved product)'),
     },
@@ -22709,10 +22721,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       productNote: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ image, instruction, removal, logo, mask, dryRun, fixLabel }) => {
+  }, wrap(async ({ image, instruction, removal, logo, mask, markup, model, complexity, dryRun, fixLabel }) => {
     const src = await toRef(image);
     const maskRef = mask ? await toRef(mask) : undefined;
-    const fl = { ...(fixLabel === false ? { fixLabel: false } : {}), ...(logo === true && removal !== true ? { logo: true } : {}) }; // logo: the file is laid on, no repaint (chat review 2026-11-03)
+    const markupRef = markup ? await toRef(markup) : undefined; // a local markup file travels the same way a local mask does
+    const fl = { ...(fixLabel === false ? { fixLabel: false } : {}), ...(logo === true && removal !== true ? { logo: true } : {}), ...(markupRef ? { markup: markupRef } : {}), ...(model ? { model } : {}), ...(complexity ? { complexity } : {}) }; // logo: the file is laid on, no repaint (chat review 2026-11-03)
     if (dryRun) { const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), ...fl, dryRun: true }); const _eq = d && d.quote; return ok(quoteText(_eq, 'This image edit (a change to the existing image, not a new render)'), _eq && _eq.priceCredits > 0 ? { credits: _eq.priceCredits, holdCredits: _eq.holdCredits } : {}); }
     const d = await apiPost('/api/static/edit', { image: src, instruction, ...(removal === true ? { removal: true } : {}), ...(maskRef ? { mask: maskRef } : {}), ...fl });
     const img = await imageBlock(abs(d.image));
@@ -23209,7 +23222,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('post_edit', {
     title: 'Post-production edit',
-    description: "MECHANICAL post-production on an EXISTING video (URL): ordered primitives run by ffmpeg in seconds, ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, music (a bed UNDER the clip, its own sound kept and ducked under: omit track = a free library track picked by mood, no attribution; or track = an audio link: an upload_file URL, a find_sound or generate_sfx link, a video post's sound; track 'generate' composes it, paid, ONLY when the user asks; start/end, db, replace), voiceover (text spoken OVER it, its sound ducked; ~2.5 words/s; voice female|male; +~1 credit), watermark (brand logo), grain (anti-AI), text (timed words in a native look: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle; start/end), join (this video FOLLOWED BY clips[]: Library URLs, direct files or public post links, as one 1080x1920 video, loudness matched). Presets are shortcuts: text/watermark take any x/y, grain any amount, join any ffmpeg transition, a bridge any sound link. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound FROM THE HOOK ITSELF: its own audio carries across the cut, else one generated from its frames (up to 8 credits), else a neutral impact. {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: have our clip's host say the connecting line. matchCut = where our clip starts. ANY OTHER EDIT, op or bridge (whip, zoom, freeze, wipe, split screen, generated shot) is edit_timeline: free keyframes, any size. NEVER generate_video/render_ad for these.",
+    description: "MECHANICAL post-production on an EXISTING video (URL): ordered primitives run by ffmpeg in seconds, ~2 credits flat, NO AI model, as a NEW video. Ops: a branded end card (adds its seconds), trim, speed (0.5-2x), mute (whole or a window), audio_gain (-20..+6 dB), fade_out, music (a bed UNDER the clip, its own sound kept and ducked under: omit track = a free library track picked by mood, no attribution; or track = an audio link: an upload_file URL, a find_sound or generate_sfx link, a video post's sound; track 'generate' composes it, paid, ONLY when the user asks; start/end, db, replace), voiceover (text spoken OVER it, its sound ducked; ~2.5 words/s; voice female|male; +~1 credit), watermark (brand logo), grain (anti-AI), text (timed words in a native look: style 'tiktok-classic' default / 'clean-minimal' / 'note-style' or a textStyle; start/end, or at:{word} and until:{word} to time them to a spoken phrase, refused when it is never said), join (this video FOLLOWED BY clips[]: Library URLs, direct files or public post links, as one 1080x1920 video, loudness matched). Presets are shortcuts: text/watermark take any x/y, grain any amount, join any ffmpeg transition, a bridge any sound link. 'A viral hook, then our clip' = videoUrl: the hook's post link + [{op:'join', clips:[{url: ours}], bridge}], and it ALWAYS gets a bridge unless the user asks for a bare cut: {kind:'impact'} cuts the hook just before its payoff (found from the footage; cutAt overrides) and lands our clip on a punch-in and flash, with the payoff sound FROM THE HOOK ITSELF: its own audio carries across the cut, else one generated from its frames (up to 8 credits), else a neutral impact. {kind:'text', text, then?} only when the user asks for words over the cut. No voiceover bridge: have our clip's host say the connecting line. matchCut = where our clip starts. ANY OTHER EDIT, op or bridge (whip, zoom, freeze, wipe, split screen, generated shot) is edit_timeline: free keyframes, any size. NEVER generate_video/render_ad for these. Feedback maps to one named move, checked by reading the parameters back, never by re-rendering: quieter/louder (music db, audio_gain), faster/slower (speed; slower = zooms and pans at 0.7x), tighten (trim heads, tails, silences), retime (to a word anchor), recut (order, in-out points), regrade (timeline exposure/contrast/saturation keys).",
     inputSchema: {
       videoUrl: z.string().describe('the video to edit: a render / Library URL, a direct file, or a public post link'),
       ops: z.array(z.object({
@@ -23224,6 +23237,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         y: z.number().optional().describe('vertical centre for text or watermark: 0 to 1 of frame height, or pixels'),
         style: z.union([z.string(), z.object({}).passthrough()]).optional().describe('text: a look name or a textStyle'),
         textStyle: z.union([z.string(), z.object({}).passthrough()]).optional().describe('text op: a textStyle object or preset name, same as style'),
+        at: z.union([z.string(), z.object({ word: z.string().describe('the word or phrase as it is said'), occurrence: z.number().optional().describe('1 = first time said (default), 2 = second, -1 = last') })]).optional().describe('text, instead of start/end: the words appear as this spoken phrase starts (timed from the video\'s own words; refused if it is never said)'),
+        until: z.union([z.string(), z.object({ word: z.string().describe('the word or phrase as it is said'), occurrence: z.number().optional().describe('counted from the at phrase on') })]).optional().describe('text with at: the words leave as this phrase ends'),
+        duration: z.number().optional().describe('text with at and no until: seconds the words stay, 0.3-30 (default 2)'),
         clips: z.array(z.object({ url: z.string().describe('clip to join after the video: Library URL, direct file or public post link'), start: z.number().optional().describe('seconds into this clip to start from'), end: z.number().optional().describe('seconds into this clip to stop at'), match: z.any().optional().describe('seam match for this clip: auto (default), off, or a grade object'), reframe: z.any().optional().describe('shot change at this seam: auto, off, or a step from 1.1 to 1.5') })).optional().describe('join: the clips after this video'),
         reframe: z.any().optional().describe("join: shot change at a same-framing stitch, 'auto' | 'off' | step 1.1-1.5"),
         match: z.any().optional().describe("join: seam match, 'auto' default | 'off' | {grade,level,grain,blur,strength}"),
@@ -23371,7 +23387,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('fix_beat', {
     title: 'Fix a video beat',
-    description: "Surgically re-render ONE time window (1.5-8s) of an existing rendered video and splice it back on the VIDEO TRACK ONLY — the rest of the video and ALL audio stay byte-identical. Use when one beat/shot is broken ('the shot at 8 seconds glitches') and a full re-render would waste the parts that worked; bills only the replacement clip's seconds (~1/3 of a full render). Do NOT pick a window covering spoken dialogue (a video-only splice under speech breaks lip-sync) — pass speechWindows to enforce this. A FINISHED VIDEO-BLOCKS FILM (make_explainer's explainer or faceless channel; get_job says it is editable) is edited ONE BLOCK at a time instead: pass `job` (its job id) and `block` (1-based) or `atSeconds`, with `prompt` for a different shot and/or `line` for new narration words. Only that block is re-rendered and/or re-read; every other block, take, the music and the captions are the film's own and stay aligned. It is priced as that block alone and charged exactly what it quotes (dryRun). The original film is kept; a new film comes back, and it can be edited again.",
+    description: "Surgically re-render ONE time window (1.5-8s) of an existing rendered video and splice it back on the VIDEO TRACK ONLY — the rest of the video and ALL audio stay byte-identical. Use when one beat/shot is broken ('the shot at 8 seconds glitches') and a full re-render would waste the parts that worked; bills only the replacement clip's seconds (~1/3 of a full render). Do NOT pick a window covering spoken dialogue (a video-only splice under speech breaks lip-sync) — pass speechWindows to enforce this. A FINISHED VIDEO-BLOCKS FILM (make_explainer's explainer or faceless channel; get_job says it is editable) is edited ONE BLOCK at a time instead: pass `job` (its job id) and `block` (1-based) or `atSeconds`, with `prompt` for a different shot and/or `line` for new narration words. Only that block is re-rendered and/or re-read; every other block, take, the music and the captions are the film's own and stay aligned. It is priced as that block alone and charged exactly what it quotes (dryRun). The original film is kept; a new film comes back, and it can be edited again. Feedback maps to one named move, checked by reading the parameters back, never by re-rendering: quieter/louder (music db, audio_gain), faster/slower (speed; slower = zooms and pans at 0.7x), tighten (trim heads, tails, silences), retime (to a word anchor), recut (order, in-out points), regrade (timeline exposure/contrast/saturation keys).",
     inputSchema: {
       videoUrl: z.string().optional().describe('the served URL of the master video to fix (not needed with `job`)'),
       startSeconds: z.number().optional().describe('window start in seconds (not needed with `job`)'),
@@ -23445,7 +23461,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // upload or someone else's video had no way to get them. The look is the same textStyle vocabulary render_ad speaks.
   server.registerTool('add_subtitles', {
     title: 'Add subtitles to a video',
-    description: "Burn subtitles into ANY video and get the .srt too; nothing is cut or re-rendered. Set textStyle only when the user describes a look (default: white sentence case, thin outline, bottom). Timed per sentence, or auto:'words' for phrases on their spoken words. Or pass cues to burn your own lines exactly, untranscribed (reel-style phrases, *stage directions*). burn:false returns only the .srt. Takes a video file or URL, a YouTube/Vimeo-style page, or a TikTok / Reel / X post link. No speech is refused and refunded. Runs in the background and lands in the Library.",
+    description: "Burn subtitles into ANY video and get the .srt too; nothing is cut or re-rendered. Set textStyle only when the user describes a look (default: white sentence case, thin outline, bottom). Timed per sentence, or auto:'words' for phrases on their spoken words. Only when asked, textStyle 'highlight' (or a highlightColor) lights the word being said, timed word by word. Or pass cues to burn your own lines exactly, untranscribed (reel-style phrases, *stage directions*). burn:false returns only the .srt. Takes a video file or URL, a YouTube/Vimeo-style page, or a TikTok / Reel / X post link. No speech is refused and refunded. Runs in the background and lands in the Library.",
     inputSchema: {
       video: z.string().describe('the video to subtitle'),
       textStyle: TEXT_STYLE_Z.optional().describe('the look: words, a preset or fields; omit for the default'),
@@ -24414,7 +24430,7 @@ function memoryNoteVerdict(text) {
     title: 'List saved creators',
     description: 'List this workspace’s SAVED CREATORS — the reusable on-camera cast (AI creators made here, a person pulled from a social profile, a consented photo upload). Read-only, FREE. Each entry gives the name, the PORTRAIT URL, where the portrait came from and whether a real person’s likeness consent is on file, how many extra pose plates exist, and any chosen or cloned voice. TO PUT ONE IN A FINISHED AD, pass their id or name as render_ad’s `creator` — that casts them for the whole spot (and skips the character-portrait render, so it costs less than not casting anyone). THE PORTRAIT URL IS THE REUSE HANDLE for the raw lanes — pass it as generate_avatar’s `image` (a talking clip of them), generate_video’s `refImage` (they star in the scene), recast_motion’s `image` (they perform a reference clip’s motion), or generate_image’s `refImages`. CALL THIS BEFORE OFFERING TO GENERATE A NEW PERSON: re-casting somebody the workspace already has keeps the SAME face across every ad, while a fresh person costs credits and breaks that continuity. An empty answer means the workspace genuinely has no cast yet — say so and offer generate_avatar / save_creator, never invent a roster.',
     inputSchema: { limit: z.number().optional().describe('max creators to return (default 24)'), gender: z.enum(['female', 'male']).optional().describe('filter the PRESET creators by gender (the saved cast is never filtered)') },
-    outputSchema: { creators: z.array(z.any()).optional().describe('the saved cast — {id, name, image, source, consented, poses, voice, voiceClone, look}'), count: z.number().optional(), presets: z.array(z.any()).optional().describe('the PRESET AI creators anyone can cast free with no generation — {id, name, gender, age, image, look, refs}') },
+    outputSchema: { creators: z.array(z.any()).optional().describe('the saved cast — {id, name, image, source, consented, poses, voice, voiceClone, look}; a creator whose stored photos were deleted also carries imagesMissing: true and imagesNote, and cannot be cast until save_creator (same name, a new photo url) replaces the photo'), count: z.number().optional(), presets: z.array(z.any()).optional().describe('the PRESET AI creators anyone can cast free with no generation — {id, name, gender, age, image, look, refs}') },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiGet('/api/creators', { ...(a.limit ? { limit: Math.max(1, Math.min(200, Math.round(+a.limit) || 24)) } : {}), ...(a.gender ? { gender: a.gender } : {}) });
@@ -24465,6 +24481,24 @@ function memoryNoteVerdict(text) {
         await writeStore('heist.avatars.v1', _l);
         const q = r?.refQuality?.score != null ? ` (photo quality ${r.refQuality.score}/100)` : '';
         return ok(r?.lowQualityRef ? `Replaced “${low.name}”’s photo${q}, but this one is still too unclear to cast well — try a sharper, front-facing, well-lit photo, or save_creator(name: "${low.name}", useAnyway: true).` : `Replaced “${low.name}”’s photo${q} — renders now cast them from it.`, { ok: true, id: low.id, creator: { id: low.id, name: low.name, image: abs(low.image), source: low.source }, refQuality: r?.refQuality || null });
+      }
+      // PHOTOS DELETED (2026-11-05): a creator whose stored photos are gone (list_creators says imagesMissing) is REPLACED
+      // in place by a new photo under the same name, for the same reason as above: a twin row would make the name ambiguous
+      // and the cast would refuse both. The server says which rows are gone; a check that could not tell flags nothing.
+      if (image && !low) {
+        let gone = null;
+        try { gone = ((await apiGet('/api/creators', { limit: 200 }))?.creators || []).find(c => c && c.imagesMissing && String(c.name || '').trim().toLowerCase() === name.toLowerCase()) || null; } catch { gone = null; }
+        const row = gone ? _l.find(x => x && x.id === gone.id) : null;
+        if (row) {
+          if (!/^https?:\/\//i.test(image) && !image.startsWith('/generated/')) return { content: [{ type: 'text', text: 'The new photo must be a public https url — upload the file with upload_file first, then pass the url it returns.' }], isError: true };
+          const real = row.source === 'upload' || row.source === 'social';
+          const r = real ? await apiPost('/api/creator/ref', { image, name: row.name }) : null;
+          row.image = r?.image || image; row.poses = (Array.isArray(a.poses) ? a.poses : []).filter(p => typeof p === 'string' && p.trim()).slice(0, 4);
+          if (real) { row.refQuality = r?.refQuality || null; row.lowQualityRef = !!r?.lowQualityRef; delete row.refAccepted; await apiPost('/api/likeness/consent', { kind: 'face', via: 'api-implied', lane: 'save_creator', creatorId: row.id, source: row.source, image: row.image }); row.consentAt = Date.now(); row.consentVia = 'api-implied'; }
+          if (String(a.look || '').trim()) row.desc = String(a.look).trim().slice(0, 400);
+          await writeStore('heist.avatars.v1', _l);
+          return ok(`Replaced “${row.name}”’s deleted photo — renders now cast them from the new one.`, { ok: true, id: row.id, creator: { id: row.id, name: row.name, image: abs(row.image), source: row.source }, ...(r?.refQuality ? { refQuality: r.refQuality } : {}) });
+        }
       }
     }
     if (!name || !image) return { content: [{ type: 'text', text: 'A creator needs both a name and a portrait url.' }], isError: true };
@@ -26003,13 +26037,14 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('draft_brand', {
     title: 'Draft profile',
-    description: 'Fill in a profile (a business brand or a creator) from a website domain, a free-text description, or a social handle, into a {name, products, logo, …} object you can pass to plan_ad / generate. 0 credits. IMPORTANT: a domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com). Before spending any credits on research or renders, VERIFY the returned `name` (and `summary`) match the brand the user meant; if it looks wrong, re-draft with the correct domain or a description (pass save:false until confirmed) — this tool cannot ask the user, so the caller owns that check.',
+    description: 'Fill in a profile (a business brand or a creator) from a website domain, a free-text description, or a social handle, into a {name, products, logo, …} object you can pass to plan_ad / generate. IMPORTANT: a domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com). Before spending any credits on research or renders, VERIFY the returned `name` (and `summary`) match the brand the user meant; if it looks wrong, re-draft with the correct domain or a description (pass save:false until confirmed) — this tool cannot ask the user, so the caller owns that check.',
     inputSchema: {
       domain: z.string().optional().describe('a website to scrape, or a social link (profile, YouTube channel or one post) to draft from the account it names'),
       description: z.string().optional().describe('a free-text brand description (no website)'),
       socialHandle: z.string().optional().describe('a social handle (creators); needs platform, never guessed'),
       platform: z.string().optional().describe('socialHandle platform: instagram/tiktok/youtube/twitter/threads'),
       save: z.boolean().optional().describe('save onto the active profile (like Studio onboarding) so plan_ad/create use it automatically. Default: saves only when NO brand is saved yet; pass true to REPLACE the saved profile (the drafted fields overwrite the saved ones), false to never save'),
+      confirmed: z.boolean().optional().describe('user confirmed it is their brand: read + save site product photos (paid)'),
     },
     outputSchema: {
       name: z.string().optional().describe('the drafted brand name — VERIFY it matches the brand the user meant'),
@@ -26026,8 +26061,14 @@ function memoryNoteVerdict(text) {
     // field, which a user can only undo by re-entering what was there. The default path never overwrites (it saves
     // only into an empty workspace) — but the doc's rule is "even in only select modes", so the hint is honest.
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ save, ...a }) => {
-    const d = await apiPost('/api/brand/draft', a);
+  }, wrap(async ({ save, confirmed, ...a }) => {
+    // THE PHOTO REVIEW WAITS FOR THE USER'S YES (journey QA 2026-11-05, admin finding fi:2960317705eb): the web onboarding
+    // used to bill the Product-photo review before "Is this you?" was answered, so a "Not me" had already paid for photos
+    // of a brand nobody wanted. This tool cannot ask, and it read the photos in the SAME call that returns the name the
+    // caller is told to verify: the same premature charge. So the site photo read runs only on confirmed:true. A confirmed
+    // call asks the draft to `resume`, so a second call within 30 minutes is answered from the first draft, not run again.
+    const _photosConfirmed = confirmed === true;
+    const d = await apiPost('/api/brand/draft', _photosConfirmed && a.domain ? { ...a, resume: true } : a);
     const p = d.profile || d;
     // ALWAYS TRY THE WEBSITE (2026-07-28). /api/brand/draft returns the PROFILE only — it never fetched a single
     // product photo, so an MCP-onboarded brand was structurally photo-less even with a perfectly good domain, and every
@@ -26043,7 +26084,10 @@ function memoryNoteVerdict(text) {
     // A CREATOR'S SITE IS READ FOR PHOTOS ONLY WHEN THE DRAFT NAMED A PRODUCT (journey QA 2026-11-05, @cookingwithlynja): the
     // photo review is paid, and a handle draft's domain is usually a link-in-bio page. Same rule as the web (brandSellsProduct).
     const _creatorNoProduct = !!a.socialHandle && !(Array.isArray(p?.productNames) && p.productNames.some((x) => typeof x === 'string' && x.trim()));
-    if (p && p.domain && p.physical_product !== false && !_creatorNoProduct) {
+    const _photosHeld = !_photosConfirmed && !!(p && p.domain && p.physical_product !== false && !_creatorNoProduct); // would read photos, waiting for the yes
+    let _photosRead = false;
+    if (_photosConfirmed && p && p.domain && p.physical_product !== false && !_creatorNoProduct) {
+      _photosRead = true;
       try {
         const site = await apiGet('/api/site/images', { url: p.domain });
         const imgs = [...(site?.images || [])].filter(Boolean);
@@ -26065,7 +26109,18 @@ function memoryNoteVerdict(text) {
     if (save !== false) {
       try {
         const cur = save === true ? null : await apiGet('/api/brand/current').catch(() => null);
-        if (save === true || !cur?.hasBrand) {
+        const _host = (x) => String(x || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[/?#].*$/, '');
+        const _photoFields = ['productImages', 'product', 'productTitles', 'products', 'logo'].filter((f) => p[f] != null && !(Array.isArray(p[f]) && !p[f].length));
+        if (save !== true && _photosRead && cur?.hasBrand && cur.brand && _host(cur.brand.domain) && _host(cur.brand.domain) === _host(p.domain) && _photoFields.length) {
+          // The confirmed follow-up to a draft that was already saved here (the default save into an empty workspace):
+          // add the photos to that brand, stamping only the photo fields, so every other saved value stays as it is.
+          const _now = Date.now();
+          const _at = { ...(cur.brand._fieldAt || {}) }; const _add = {};
+          for (const f of _photoFields) { _add[f] = p[f]; _at[f] = _now; }
+          const put = await apiPut(`/api/store/${encodeURIComponent(await pk('heist.brand.v1'))}`, { value: JSON.stringify({ ...cur.brand, ..._add, _fieldAt: _at, updatedAt: _now }) });
+          saved = true;
+          if (Array.isArray(put?.keptNewer) && put.keptNewer.length) keptNewer = put.keptNewer;
+        } else if (save === true || !cur?.hasBrand) {
           // The SAME server-resolved namespace every other store write uses. Hand-rolling it from HEIST_PROFILE is
           // what made `create_brand` → `use_brand` → `draft_brand` overwrite the ACCOUNT'S DEFAULT BRAND while
           // leaving the new workspace empty — the sharpest edge of the whole defect, in the exact agency flow
@@ -26083,7 +26138,8 @@ function memoryNoteVerdict(text) {
         }
       } catch {} // saving is best-effort — the drafted profile is still returned either way
     }
-    return ok(`Drafted brand: ${p.name || '—'}${p.category ? ' · ' + p.category : ''}.${saved ? (keptNewer ? ` Saved as the workspace brand, EXCEPT ${keptNewer.join(', ')}: a newer edit to those is already stored and was kept.` : ' Saved as the workspace brand — plan_ad/create now use it automatically.') : ' Pass this object to plan_ad.'}`, p);
+    const _photoNote = _photosHeld ? ` Product photos NOT read yet: the website's photo review is paid, so it waits for the user's yes. Ask them whether ${p.name || 'this'} (${p.domain}) is their brand; if it is, call draft_brand again with domain "${p.domain}" and confirmed:true (the draft is reused, not billed again) to read and save the photos. If it is not, nothing was spent on photos.` : '';
+    return ok(`Drafted brand: ${p.name || '—'}${p.category ? ' · ' + p.category : ''}.${saved ? (keptNewer ? ` Saved as the workspace brand, EXCEPT ${keptNewer.join(', ')}: a newer edit to those is already stored and was kept.` : ' Saved as the workspace brand — plan_ad/create now use it automatically.') : ' Pass this object to plan_ad.'}${_photoNote}`, { ...p, ...(_photosHeld ? { photosHeld: true } : {}) });
   }));
 
   // ---------- assets ----------
@@ -26259,7 +26315,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('score_ad', {
     title: 'Score ad',
-    description: "Virality/performance prediction for a finished ad (image or video URL): overall score, per-dimension breakdown (scroll-stop, hook, clarity, brand/product, CTA, retention, goal fit), strengths, and the single biggest fix. Use BEFORE spending on distribution, or to rank variants.",
+    description: "Virality/performance prediction for a finished ad (image or video URL): overall score, per-dimension breakdown (scroll-stop, hook, clarity, brand/product, CTA, retention, goal fit, own: could another brand run it unchanged), strengths, and the single biggest fix. Use BEFORE spending on distribution, or to rank variants.",
     inputSchema: {
       url: z.string().describe('the ad asset URL (a /generated/ path or public URL)'),
       kind: z.enum(['image', 'video']).optional().describe("'image' (default) or 'video'"),
@@ -26278,6 +26334,32 @@ function memoryNoteVerdict(text) {
     if (!d) return ok('Could not score that ad.');
     const dims = (d.dimensions || []).map(x => `${x.name}: ${x.score}`).join(' · ');
     return ok(`Overall ${d.overall}/100 (${d.tier || ''})\n${dims}\nBiggest lever: ${d.top_fix || '—'}`, d);
+  }));
+
+  server.registerTool('check_video', {
+    title: 'Check a video',
+    description: "Check a finished video for named, mechanical issues, ONLY when the user asks (never after every render, and it never re-renders): loudness vs a target (default -14 LUFS) and true peak, black and frozen stretches, captions or text outside the platform-safe band, text running off the frame. Optional assertions about named elements: appearsBy {element, bySec}, before {a, b}, staysInFrame {element}, keepsMoving {maxStaticSec}. Each issue comes with a Fix line. The loudness, black and frozen checks are free; the on-screen text and element read is a small paid frame read (frames:false skips it).",
+    inputSchema: {
+      url: z.string().describe('the video: a /generated/ path, a public URL or a post link'),
+      frames: z.boolean().optional().describe('false skips the paid text and element read'),
+      loudnessTarget: z.number().optional().describe('integrated loudness target in LUFS, default -14'),
+      assertions: z.array(z.object({
+        kind: z.enum(['appearsBy', 'before', 'staysInFrame', 'keepsMoving']),
+        element: z.string().optional().describe('an element named in words, e.g. "the logo"'), a: z.string().optional(), b: z.string().optional(),
+        bySec: z.number().optional(), maxStaticSec: z.number().optional(),
+      })).max(12).optional().describe('what must hold, checked on sampled frames'),
+    },
+    outputSchema: {
+      ok: z.boolean().optional().describe('true when no error or warning was found'),
+      issues: z.array(z.any()).optional().describe('each {code, severity, at?, message, fix}'),
+      report: z.string().optional().describe('the issues as text, one Fix line each'),
+      creditsUsed: z.number().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  }, wrap(async ({ url, frames, loudnessTarget, assertions }) => {
+    const d = await apiPost('/api/video/check', { url, ...(frames === false ? { frames: false } : {}), ...(loudnessTarget != null ? { loudnessTarget } : {}), ...(assertions ? { assertions } : {}) });
+    if (!d) return ok('Could not check that video.');
+    return ok(`${d.report}${d.creditsUsed ? `\n(${d.creditsUsed} credit${d.creditsUsed === 1 ? '' : 's'} for the frame read)` : ''}`, { ok: d.ok, issues: d.issues, report: d.report, creditsUsed: d.creditsUsed || 0 });
   }));
 
   server.registerTool('reframe_video', {

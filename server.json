@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
-  "description": "AI marketing agent and AI ad generator: 1177 tools, usable alone. No model markup on Starter and up.",
-  "version": "0.1.523",
+  "description": "AI marketing agent and AI ad generator: 1178 tools, usable alone. No model markup on Starter and up.",
+  "version": "0.1.524",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.523",
+      "version": "0.1.524",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
