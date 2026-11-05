@@ -1,9 +1,71 @@
-# Hermoso: MCP, CLI & Skills
+# Hermoso: AI marketing agent and AI ad generator for Claude, ChatGPT and Cursor (MCP server, CLI and skills)
 
 **The AI marketing agent with an AI ad generator built in**, run from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
 scripts. Research the ads already winning in a market, generate image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
+
+## What it does
+
+- **Meta Ads MCP server.** Build, read and manage Facebook and Instagram campaigns, ad sets, ads, audiences and
+  insights from your agent, preview an ad per placement, and estimate reach before you spend. New campaigns are
+  created paused.
+- **Google Ads MCP.** Search and Performance Max campaigns, ad groups, keywords and keyword ideas, assets,
+  conversion actions, budgets and reports.
+- **TikTok Ads MCP**, and the same campaign tools for LinkedIn Ads, Reddit Ads, Pinterest Ads, Snapchat Ads,
+  Microsoft Advertising, X Ads, Apple Ads and ChatGPT Ads.
+- **AI ad generator API.** Image, video and UGC avatar ads with your real product, copy and CTA, from `render_ad`,
+  `generate_image` and `generate_video`, the CLI, or the REST API at `/v1`
+  ([OpenAPI](https://app.hermoso.ai/openapi.json)).
+- **Ad spy.** Search the Meta, Google and LinkedIn ad libraries and organic TikTok, Instagram, YouTube, Reddit and
+  Threads, and turn a competitor's longest-running ads into angles you can use.
+- **Posting.** Post and schedule to your own social channels, then read each post's results. The channel list
+  is under *What it connects to* below.
+
+## Set up in Claude, ChatGPT or Cursor
+
+**Claude (claude.ai, Claude Desktop):** Customize → Connectors → Add → *Add custom connector*, paste the URL
+below, choose **Sign in now** under Authentication, then Add and Connect.
+
+```text
+https://app.hermoso.ai/mcp
+```
+
+**Claude Code:**
+
+```bash
+claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
+```
+
+**ChatGPT:** turn on Developer mode once (Settings → Security and login), then Plugins → ＋ → Create app →
+Create MCP App. Paste `https://app.hermoso.ai/mcp` as the Server URL, choose OAuth, leave the advanced OAuth
+settings empty, and press Create.
+
+**Cursor:**
+
+```bash
+npx skills add hermoso-ai/hermoso -a cursor && npx -y hermoso auth login
+```
+
+Or add the MCP server to Cursor's `mcp.json` after `npx -y hermoso auth login`:
+
+```json
+{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso", "mcp"] } } }
+```
+
+Codex, Gemini CLI, Grok and the rest are in [Install in one command](#install-in-one-command).
+
+## Examples
+
+Ask in your own words. The agent picks the tools:
+
+- "Pull the longest-running Meta ads for allbirds.com and tell me the three angles they keep paying for."
+- "Make a 15-second UGC video ad for our product in 9:16, with a voiceover and captions."
+- "Make four static ads for the new collection, one per Instagram placement."
+- "Build a Meta Ads campaign for this video with the daily budget I give you, leave it paused, and show me the
+  preview."
+- "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
+- "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
 **1178 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
