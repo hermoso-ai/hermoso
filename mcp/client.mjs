@@ -270,6 +270,14 @@ export function isFrontDoorRefusal(status, contentType, { read = false } = {}) {
   return st === 429 || (read && (st === 502 || st === 503 || st === 504));
 }
 export const FRONT_DOOR_MESSAGE = 'Hermoso\u2019s server was briefly too busy to take the request and turned it away before the app saw it (HTTP 429). It was retried and the server was still busy. Nothing ran and nothing was charged: try again in a minute.';
+// THE SENTENCE NAMES THE STATUS THAT CAME BACK (2026-11-06, error 78e0378413c4): a read that kept getting a plain-text 504
+// was reported as "(HTTP 429)", so the board and the person both read a throttle that never happened. A 429 keeps the
+// sentence above; a 502/503/504 (retried on a read only) says it was a gateway error and that a read changed nothing.
+export function frontDoorMessage(status) {
+  const st = Number(status);
+  if (st === 429 || !(st >= 500)) return FRONT_DOOR_MESSAGE;
+  return `Hermoso\u2019s hosting gateway answered HTTP ${st} instead of the app, so no answer came back. It was retried and kept failing. It was a read, so nothing was changed and nothing was charged: try again in a minute.`;
+}
 // A REFUSAL THAT NEVER CAME FROM HERMOSO IS SAID TO BE ONE (2026-10-18). A paying customer's agent gateway got HTTP 429 on
 // every call for a day; the CLI printed FRONT_DOOR_MESSAGE ("Hermoso's server was briefly too busy"), so he and his
 // agent asked us to unblock his IP. Cloudflare's own logs held ZERO requests from that IP: the 429 was answered by
@@ -295,7 +303,7 @@ async function throughFrontDoor(send, { read }) {
     await new Promise((r) => setTimeout(r, ms));
     res = await send();
   }
-  if (isFrontDoorRefusal(res.status, res.headers?.get?.('content-type'), { read })) throw Object.assign(new Error(FRONT_DOOR_MESSAGE), { status: res.status, _frontDoor: true });
+  if (isFrontDoorRefusal(res.status, res.headers?.get?.('content-type'), { read })) throw Object.assign(new Error(frontDoorMessage(res.status)), { status: res.status, _frontDoor: true });
   return res;
 }
 

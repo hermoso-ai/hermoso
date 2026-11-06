@@ -377,9 +377,11 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // was the right instinct for a scope the SERVER changes silently, and the wrong one for a change the CLIENT
   // asked for and is told about.
   function scopeFor(req, res) {
-    const { groups, error, directory } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
+    const { groups, error, directory, app } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
     if (error) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: error }, id: null }); return false; }
-    return { groups, directory: directory || false }; // `directory` = the Claude Connectors Directory cage (see DIRECTORY_GROUPS in tools.mjs)
+    // `app` = one of the focused Hermoso apps (APP_SCOPE_TOKENS in tools.mjs); set ONLY by those tokens, so it is absent
+    // on every other connection and nothing below changes for them.
+    return app ? { groups, directory: directory || false, app } : { groups, directory: directory || false }; // `directory` = the Claude Connectors Directory cage (see DIRECTORY_GROUPS in tools.mjs)
   }
   // `?src=<surface>` on the published URL (registry / glama / smithery / cursor / readme …) — attribution only. It may
   // not change auth, scope or spend, and an unrecognisable value is simply dropped. The OAuth resource metadata is
@@ -412,7 +414,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
     // A widget host in full mode gets every group here too, so the anonymous roster and the signed-in one agree (see
     // chatgptRosterMode in tools.mjs: ChatGPT cannot reach an unlisted tool).
-    registerTools(server, { only: scope?.groups || anonDiscoveryGroups(widgetHost), directory: scope?.directory || false, widgetHost, hosted: true, ext: extAsked(req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups || anonDiscoveryGroups(widgetHost), directory: scope?.directory || false, app: scope?.app || null, widgetHost, hosted: true, ext: extAsked(req) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     // WHO PROBES US WITHOUT A TOKEN, BY NAME (2026-09-25). A host's add-connector dialog decides "sign-in needed or
     // not" from THIS answer: ChatGPT probes with an empty body and gets the 401; claude.ai's dialog sends a real
     // tokenless initialize (UA python-httpx) and our 200 made it pre-select "No sign-in". The UA alone cannot tell
@@ -527,7 +529,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
       const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req);
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, connectors, widgetHost, hosted: true, ext: extAsked(req), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, hosted: true, ext: extAsked(req), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),

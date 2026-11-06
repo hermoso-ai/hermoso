@@ -77,34 +77,43 @@ export function videoChoiceDraftCall(tool, d) {
   if (t === 'plan_ad' || t === 'clone_video') return `${t}({…the same arguments, format: 'video', draft: {model: '${m}', durationSeconds: ${s}}})`;
   return `${t || 'the same call'}({…the same arguments, model: '${m}', durationSeconds: ${s}})`;
 }
+// THE WALL SELLS CREDITS FIRST (owner 2026-11-06, fi:3d3bd64bedef: "Shouldnt it just tells them they can't afford it and
+// then try to upsell the plans/credits?"). The agent says plainly that the account does not have enough credits and offers
+// credits and plans; the image and the light draft stay listed LAST, for a user who asks for something cheaper themselves,
+// never as the agent's own pick. A video-plus-static ask is priced whole (`needCredits`, `alsoImage`) and neither half is made.
 export function videoChoiceHints(tool, choice, opts = {}) {
   const c = choice && typeof choice === 'object' ? choice : {}, o = c.options || {};
-  const out = [
-    { do: videoChoiceImageCall(tool), why: `the image version is ~${o.image?.credits ?? '?'} credits against a balance of ${c.balance ?? '?'}; the video needs ~${c.videoCredits ?? '?'}` },
-    opts.widgetHost
-      ? { do: `tell the user the video needs ${c.short ?? '?'} more credits than the account has; they manage credits in their Hermoso account at ${ACCOUNT_INFO_URL}`, why: 'this host does not offer purchases, so nothing is bought from here' }
-      : { do: 'buy_credits({})', why: `${c.short ?? '?'} credits short of the video; a pack or a plan covers it, then the same call plans the video` },
-  ];
+  const out = opts.widgetHost
+    ? [{ do: `tell the user they do not have enough credits: it needs ${c.short ?? '?'} more than the account has; they add credits or pick a plan in their Hermoso account at ${ACCOUNT_INFO_URL}`, why: 'this host does not offer purchases, so nothing is bought from here' }]
+    : [
+      { do: 'buy_credits({})', why: `${c.short ?? '?'} credits short; a pack covers it, then the same call makes it as asked` },
+      { do: 'upgrade_plan({})', why: 'a monthly plan (Starter, Pro, Studio) includes monthly credits and no markup on models' },
+    ];
   if (c.welcomeClaim && c.welcomeClaim.url) out.unshift(welcomeClaimHint(c.welcomeClaim));
-  if (o.draft && o.draft.model) out.push({ do: videoChoiceDraftCall(tool, o.draft), why: `a light draft on ${o.draft.label || o.draft.model} (${o.draft.durationSeconds}s) is ~${(Number(o.draft.credits) || 0) + (Number(o.draft.planCredits) || 0)} credits and fits the balance; render the premium version after topping up` });
+  out.push({ do: videoChoiceImageCall(tool), why: `only if the user asks for something cheaper instead: the image version is ~${o.image?.credits ?? '?'} credits against a balance of ${c.balance ?? '?'}` });
+  if (o.draft && o.draft.model) out.push({ do: videoChoiceDraftCall(tool, o.draft), why: `only if the user asks for something cheaper instead: a light draft on ${o.draft.label || o.draft.model} (${o.draft.durationSeconds}s) is ~${(Number(o.draft.credits) || 0) + (Number(o.draft.planCredits) || 0)} credits and fits the balance` });
   return out;
 }
 export function videoChoiceText(tool, choice, opts = {}) {
   const c = choice && typeof choice === 'object' ? choice : {}, o = c.options || {};
   const d = o.draft && o.draft.model ? o.draft : null;
+  const need = Number(c.needCredits) > 0 ? Number(c.needCredits) : (c.videoCredits ?? '?');
+  const what = c.alsoImage
+    ? `The ${c.seconds ? `${c.seconds}s ` : ''}video and the static together`
+    : `${c.seconds ? `A ${c.seconds}s video${c.lengthBasis === 'source' ? ' (the original’s length)' : ''}` : 'This video'}`;
   const lines = [
     // A clone names which length it priced (lengthBasis, 2026-10-07) and any post lookup reading that length cost.
-    `${c.seconds ? `A ${c.seconds}s video${c.lengthBasis === 'source' ? ' (the original’s length)' : ''}` : 'This video'} would cost about ${c.videoCredits ?? '?'} credits and the account has ${c.balance ?? '?'} (${c.short ?? '?'} short).${c.lengthBasis === 'estimate' && c.seconds ? ` That price ASSUMES ${c.seconds}s: the original’s length could not be read before planning, and the clone will match its real length, so say it is an estimate.` : ''} ${Number(c.lookupCredits) > 0 ? `Nothing was planned or rendered; reading the original’s length cost ${Math.round(Number(c.lookupCredits))} credit${Math.round(Number(c.lookupCredits)) === 1 ? '' : 's'} (the post lookup the clone reuses).` : 'Nothing was planned, rendered or charged.'} Tell the user and let them choose — never switch the format for them:`,
-    `  1. Make it as an image instead (~${o.image?.credits ?? '?'} credits): ${videoChoiceImageCall(tool)}.`,
+    `Not enough credits for this. ${what} would cost about ${need} credits and the account has ${c.balance ?? '?'} (${c.short ?? '?'} short).${c.lengthBasis === 'estimate' && c.seconds ? ` That price ASSUMES ${c.seconds}s: the original’s length could not be read before planning, and the clone will match its real length, so say it is an estimate.` : ''} ${Number(c.lookupCredits) > 0 ? `Nothing was planned or rendered; reading the original’s length cost ${Math.round(Number(c.lookupCredits))} credit${Math.round(Number(c.lookupCredits)) === 1 ? '' : 's'} (the post lookup the clone reuses).` : 'Nothing was planned, rendered or charged.'} Tell the user plainly they do not have enough credits for it and offer credits or a plan; never switch the format or make part of the ask for them:`,
     // A WIDGET HOST (ChatGPT) GETS NO PURCHASE ROUTE (2026-09-30): its plugin guidelines let a plugin explain that a
     // feature needs more credits and link an informational page, never a checkout. `o.topup.url` is a checkout link.
-    opts.widgetHost
-      ? `  2. The user can add credits in their Hermoso account (${ACCOUNT_INFO_URL}); then the same call makes the video as asked. Nothing can be bought from here.`
-      : `  2. Add credits: buy_credits({}) quotes a pack on a saved card or returns a checkout link${o.topup?.url ? ` (or ${o.topup.url})` : ''}; then repeat the same call and the video goes ahead as asked.`,
+    ...(opts.widgetHost
+      ? [`  1. The user can add credits or pick a plan in their Hermoso account (${ACCOUNT_INFO_URL}); then the same call makes it as asked. Nothing can be bought from here.`]
+      : [`  1. Add credits: buy_credits({}) quotes a pack on a saved card or returns a checkout link${o.topup?.url ? ` (or ${o.topup.url})` : ''}; then repeat the same call and it goes ahead as asked.`,
+        `  2. Or a monthly plan: upgrade_plan({}) lists them; Starter, Pro and Studio include monthly credits and no markup on models, so credits go further.`]),
   ];
   if (c.welcomeClaim && c.welcomeClaim.url) lines.splice(1, 0, `  First: ${welcomeClaimSentence(c.welcomeClaim)}`);
-  if (d) lines.push(`  3. Render the video anyway as a light draft on ${d.label || d.model} (${d.durationSeconds}s, ~${(Number(d.credits) || 0) + (Number(d.planCredits) || 0)} credits${d.audio === false ? '; SILENT: no voice, dialogue or music, so tell the user before they pick it for a spoken ad' : ''}): ${videoChoiceDraftCall(tool, d)}.${opts.widgetHost ? '' : ' Premium models once they top up.'}`);
-  else lines.push(`  (No light-model draft fits this balance, so there is no "render anyway" option here.)`);
+  lines.push(`  Only if the user asks for something cheaper instead: make it as an image (~${o.image?.credits ?? '?'} credits): ${videoChoiceImageCall(tool)}.`);
+  if (d) lines.push(`  Or, again only if they ask, render the video as a light draft on ${d.label || d.model} (${d.durationSeconds}s, ~${(Number(d.credits) || 0) + (Number(d.planCredits) || 0)} credits${d.audio === false ? '; SILENT: no voice, dialogue or music, so tell the user before they pick it for a spoken ad' : ''}): ${videoChoiceDraftCall(tool, d)}.`);
   return lines.join('\n');
 }
 
