@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hermoso-ai/hermoso-ads-manager",
+  "title": "Hermoso: Ads Manager",
+  "description": "AI marketing agent for paid ads: run campaigns on 11 ad networks and read your web analytics.",
+  "version": "1.0.0",
+  "websiteUrl": "https://hermoso.ai/mcp/",
+  "repository": {
+    "url": "https://github.com/hermoso-ai/hermoso",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp?tools=app-ads&src=registry"
+    }
+  ]
+}

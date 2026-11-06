@@ -1,0 +1,71 @@
+# Publishes the FOCUSED Hermoso apps in registry/*.json to the official MCP Registry.
+#
+# The full suite (server.json, io.github.hermoso-ai/hermoso) is published by publish-mcp.yml on a
+# v* tag, tied to an npm version. These three entries are REMOTE-ONLY: each points at a scoped
+# roster of the same hosted server (https://app.hermoso.ai/mcp?tools=app-ads | app-social |
+# app-create), so there is no npm package to guard and their version moves on its own.
+#
+# Same auth as publish-mcp.yml: GitHub OIDC proves the io.github.hermoso-ai/* namespace because the
+# job runs in this org. To republish an entry, bump its "version" in registry/<file>.json and push
+# to main; the registry refuses a version it already holds, so an unchanged file is skipped.
+
+name: Publish focused apps to MCP Registry
+
+on:
+  push:
+    branches: [main]
+    paths: ['registry/**', '.github/workflows/publish-mcp-scoped.yml']
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC authentication
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish each focused app whose version is new
+        run: |
+          set -uo pipefail
+          K='io.modelcontextprotocol.registry/official'
+          FAILED=0
+          for F in registry/*.json; do
+            NAME="$(jq -r '.name' "$F")"
+            V="$(jq -r '.version' "$F")"
+            echo "── $NAME @ $V ($F)"
+            curl -sfL "https://registry.modelcontextprotocol.io/v0.1/servers?search=$NAME" -o reg.json || echo '{"servers":[]}' > reg.json
+            HAVE="$(jq -r --arg n "$NAME" --arg v "$V" '[.servers[] | select(.server.name == $n and .server.version == $v)] | length' reg.json)"
+            if [ "$HAVE" != "0" ]; then
+              echo "  the registry already holds this version, nothing to do"
+              continue
+            fi
+            if ./mcp-publisher publish "$F"; then
+              echo "  published"
+            else
+              echo "::error::publish failed for $NAME @ $V"
+              FAILED=1
+            fi
+          done
+
+          # Report what the registry ACTUALLY stored, never what we asked it to store.
+          sleep 10
+          echo
+          echo "── read-back ─────────────────────────────────────────"
+          for F in registry/*.json; do
+            NAME="$(jq -r '.name' "$F")"
+            curl -sfL "https://registry.modelcontextprotocol.io/v0.1/servers?search=$NAME" -o reg.json || true
+            jq -r --arg n "$NAME" --arg k "$K" '[.servers[] | select(.server.name == $n)
+              | "  \(.server.name) \(.server.version) isLatest=\(._meta[$k].isLatest)"] | .[]' reg.json || true
+          done
+          exit $FAILED
