@@ -156,10 +156,19 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   // Unbounded, "one host holds too many streams" saturates the instance for every other caller.
   // The GET stream is optional in the spec (a server may answer 405 or close it at any time; clients reconnect),
   // and this server sends nothing on it but a one-shot tools/list_changed nudge. So: a stream lives at most
-  // MCP_GET_STREAM_MS (5 min, env-tunable) and the instance holds at most MCP_GET_STREAM_MAX of them at once —
+  // MCP_GET_STREAM_MS (30s, env-tunable — see below) and the instance holds at most MCP_GET_STREAM_MAX of them at once —
   // past that a GET is answered 503 + Retry-After, which costs the client a reconnect and costs tool calls nothing
   // (they are POSTs and never touch this counter). Pinned by tools/mcp-get-stream-cap-check.mjs.
-  const GET_STREAM_MS = Math.max(1000, Number(process.env.MCP_GET_STREAM_MS || 5 * 60e3));
+  // ── 30 SECONDS, NOT 5 MINUTES: AN OPEN STREAM IS WHAT KEPT PROD DOWN WHILE CLOUD RUN SWAPPED ITS ONE INSTANCE (2026-11-07) ──
+  // Cloud Run sometimes replaces the serving revision's single min instance. It stops routing to the old instance,
+  // then waits for that instance's in-flight requests to finish before it sends SIGTERM — and with maxScale=1 the
+  // replacement cannot start until the old one is gone. On 2026-11-07 the old instances' last requests were
+  // these streams, and the SIGTERMs (11:20:58, 11:21:56) landed on the second each stream hit its 300s cap. That
+  // was 385 refused requests and ~5 minutes of 429s. Clients reopen the stream within a few seconds once it ends
+  // (measured over 2h: copilot-cli and python-httpx reopen the GET in under 5s, they do not re-initialize), and
+  // nothing but a one-shot list_changed nudge 2.5s after initialize is ever sent on it, so a short life costs a
+  // reconnect and bounds that outage to ~30s plus a boot. docs/knowledge/platform-core.md has the measurement.
+  const GET_STREAM_MS = Math.max(1000, Number(process.env.MCP_GET_STREAM_MS || 30e3));
 const MCP_CALL_WALL_MS = Number(process.env.MCP_CALL_WALL_MS) || 10 * 60 * 1000; // a tools/call still open after this is ended, so a ghost cannot pin a deploy or a slot
 const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [body]; return msgs.map(m => m?.method === 'tools/call' ? String(m.params?.name || '?').slice(0, 60) : '').filter(Boolean).join(',') || '?'; };
   // A JSON-RPC id as the SDK's own Map sees it: 7 and "7" are different keys there, so they are different here.
