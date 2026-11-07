@@ -1,5 +1,6 @@
 {
   "flags": {
+    "AMAZON_ADS_API_APPROVED": false,
     "CANVA_APP_APPROVED": false,
     "WHOP_API_KEY": true
   }

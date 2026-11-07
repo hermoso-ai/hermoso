@@ -74,6 +74,7 @@ export const TOOL_PROVIDER_RULES = [
   [/_microsoft_ads_|^microsoft_ads_|_microsoft_merchant_/, 'microsoft_ads'],
   [/_apple_ads_|^apple_ads_/, 'apple_ads'],
   [/_openai_ads_|^openai_ads_/, 'openai_ads'],
+  [/_amazon_ads_|^amazon_ads_/, 'amazon_ads'], // Amazon Ads (2026-11-07): Sponsored Products through Login with Amazon
   [/applovin/, 'applovin_ads'],   // AppLovin Ads (2026-10-04) has no posting sibling, so the bare name is unambiguous
   // Google Ads owns Merchant Center + the Ads↔Analytics link (both are Google Ads API surfaces, not GA4 ones).
   [/_google_ads_|^google_ads_|_merchant_|^merchant_|^list_merchant_|link_google_ads_to_analytics/, 'google_ads'],
@@ -255,13 +256,18 @@ export const WHOP_DARK_TOOLS = Object.freeze(['post_to_whop', 'list_whop_destina
 // Whop they are lit PER CALLER: server.js flagsOnNow(connected, req) names them in `flagsOn` for a workspace that already
 // holds a Canva connection (ours and Canva's reviewer's), so an existing connection keeps its tools while the gate is shut.
 export const CANVA_DARK_TOOLS = Object.freeze(['save_to_canva', 'list_canva_designs', 'export_canva_design', 'list_canva_brand_templates', 'autofill_canva_template', 'list_canva_folder', 'create_canva_folder']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS]);
+// THE AMAZON ADS TOOLS SHIP DARK WITH AMAZON'S API-ACCESS APPROVAL (2026-11-07). The connector is built, but Amazon has not
+// approved Hermoso's Amazon Ads API access, so CONNECTOR_GATES.amazon_ads is shut (AMAZON_ADS_API_APPROVED unset) and these
+// are no capability for a customer yet: not counted, not documented, not on a roster. Lit PER CALLER exactly like Canva:
+// server.js flagsOnNow names them for a workspace already holding an Amazon Ads connection and for the gate's team pass.
+export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 'list_amazon_ads_campaigns', 'create_amazon_ads_campaign', 'create_amazon_ads_ad_group', 'add_amazon_ads_keywords', 'create_amazon_ads_product_ads', 'set_amazon_ads_status', 'set_amazon_ads_budget', 'update_amazon_ads_object', 'delete_amazon_ads_object', 'amazon_ads_report']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
 // docs reference read it through darkToolsUnder(); the per-caller roster still follows `flagsOn` from the server.
 // reangle_video has no entry: it follows its own REANGLE_VIDEO switch, which no production record carries.
-export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY']), ...CANVA_DARK_TOOLS.map((n) => [n, 'CANVA_APP_APPROVED'])]));
+export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY']), ...CANVA_DARK_TOOLS.map((n) => [n, 'CANVA_APP_APPROVED']), ...AMAZON_ADS_DARK_TOOLS.map((n) => [n, 'AMAZON_ADS_API_APPROVED'])]));
 export function darkToolsUnder(flags) {
   const f = flags && typeof flags === 'object' ? flags : {};
   return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));
