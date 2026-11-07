@@ -4,6 +4,7 @@
 // Spend tools hit routes guarded by gateSpend → requireAuth; locally the dev account always resolves (no auth
 // needed today), and the SAME guard becomes authoritative under real auth — so this honors no-anon-spend as-is.
 import { z } from 'zod';
+import { orderKeywordAds, pictureRows } from './ad-spy-keyword.mjs';
 import { absolutizeAssetUrl, publicOrigin } from './public-url.mjs';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, getJobSettled, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT, brandScope } from './client.mjs';
 import { readFile } from 'node:fs/promises';
@@ -2882,15 +2883,15 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('schedule_x_broadcast', { action: 'schedule' }, ['sourceId!', 'startAt!', 'manualPublish!', 'endAt', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(false, false), 'Schedule an X live broadcast', 'Use this when the brand wants to schedule an X live video broadcast. sourceId comes from list_x_stream_sources. manualPublish is required: true waits for start_x_broadcast; false makes X put the brand on air automatically at startAt and needs confirm:true.' + X_BILLED),
     splitOp('update_x_broadcast', { action: 'update' }, ['id!', 'startAt', 'endAt', 'manualPublish', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(true, true), 'Change a scheduled X broadcast', 'Use this when a scheduled X broadcast needs a new time, title or setting. Only the fields you pass change. Turning manualPublish off needs confirm:true.' + X_BILLED),
     splitOp('start_x_broadcast', { action: 'go_live' }, ['id!', 'confirm'], splitW(true, false), 'Go live on a scheduled X broadcast', 'Use this when a broadcast scheduled with manualPublish:true should go on air NOW, publicly, as the brand. Needs confirm:true after the user approved the exact broadcast and stream.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
-    splitOp('create_x_broadcast', { action: 'create' }, ['sourceId!'], splitW(false, false), 'Create an X broadcast on a stream source', 'Use this when the brand wants a broadcast without a schedule. It posts nothing until publish_x_broadcast, and X deletes it after 7 days if never published.' + X_BILLED),
-    splitOp('publish_x_broadcast', { action: 'publish' }, ['id!', 'title', 'locale', 'chatOption', 'skipPost', 'confirm'], splitW(true, false), 'Publish an X broadcast', 'Use this when a created X broadcast should go on air NOW, publicly, as the brand. X also posts it unless skipPost is true. Needs confirm:true.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
+    splitOp('create_x_broadcast', { action: 'create' }, ['sourceId!', 'title', 'locale', 'chatOption', 'skipPost', 'confirm'], splitW(true, false), 'Go live on an X stream source now', 'Use this when the brand wants to go on air NOW on X without a schedule. It is public at once: X announces it in a post unless skipPost is true, and ends it if no video reaches the source within 5 minutes. sourceId comes from list_x_stream_sources. Needs confirm:true.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
     splitOp('end_x_broadcast', { action: 'end' }, ['id!', 'confirm'], splitW(true, true), 'End an X broadcast', 'Use this when a running X broadcast should stop for everyone watching. Cannot be undone; needs confirm:true.' + X_BILLED, { confirm: 'must be true to end' }),
     splitOp('delete_x_broadcast', { action: 'delete' }, ['id!', 'confirm'], splitW(true, true), 'Delete an X broadcast', 'Use this when a broadcast and its replay should be removed. End a running one first. Needs confirm:true.' + X_BILLED, { confirm: 'must be true to delete' }),
     splitOp('cancel_x_broadcast', { action: 'cancel' }, ['id!', 'confirm'], splitW(true, true), 'Cancel a scheduled X broadcast', 'Use this when a scheduled X broadcast should be deleted. Cannot be undone; needs confirm:true.' + X_BILLED, { confirm: 'must be true to cancel' }),
   ],
   manage_x_stream_source: [
-    splitOp('list_x_stream_sources', { action: 'list' }, [], SPLIT_RO, 'List the X stream sources', 'Use this when you need the brand’s RTMP stream sources on X: id, stream key, RTMPS URL, region, whether video is arriving. Read-only.' + X_BILLED),
-    splitOp('get_x_stream_source', { action: 'get' }, ['id!'], SPLIT_RO, 'Read one X stream source', 'Use this when you need one stream source’s stream key, RTMPS URL, region and whether video is arriving. Read-only.' + X_BILLED),
+    splitOp('list_x_stream_sources', { action: 'list' }, [], SPLIT_RO, 'List the X stream sources', 'Use this when you need the brand’s RTMP stream sources on X: id, RTMPS URL, region, whether video is arriving. X leaves the stream key out; get_x_stream_key reads it. Read-only.' + X_BILLED),
+    splitOp('get_x_stream_source', { action: 'get' }, ['id!'], SPLIT_RO, 'Read one X stream source', 'Use this when you need one stream source’s RTMPS URL, region and whether video is arriving. Read-only.' + X_BILLED),
+    splitOp('get_x_stream_key', { action: 'stream_key' }, ['id!'], SPLIT_RO, 'Read an X stream source’s stream key', 'Use this when an encoder needs the stream key of one of the brand’s X stream sources. The key is a secret: put it in the encoder, never in a post. Read-only.' + X_BILLED),
     splitOp('get_x_ingest_region', { action: 'region' }, [], SPLIT_RO, 'Read the nearest X ingest region', 'Use this when you need the ingest region nearest X’s server, to pass when creating a stream source. Read-only.' + X_BILLED),
     splitOp('create_x_stream_source', { action: 'create' }, ['name!', 'region'], splitW(false, false), 'Create an X stream source', 'Use this when the brand needs a new RTMP ingest point for live video on X. The stream key is a secret, so never post it.' + X_BILLED),
     splitOp('rename_x_stream_source', { action: 'rename' }, ['id!', 'name!'], splitW(false, true), 'Rename an X stream source', 'Use this when a stream source needs a new label. The stream key does not change.' + X_BILLED),
@@ -3789,6 +3790,12 @@ export const holdReasonFor = (name, ctx) => {
   if (toolWithheldByServer(name, ctx.conn)) return 'unavailable'; // the server does not offer this capability right now (toolWithheldByServer)
   if (WITHHELD_FROM_WIDGET_HOSTS.has(name) && ctx.widgetHost) return 'host_policy';
   if (EXECUTOR_TOOLS.has(name) && ctx.widgetHost) return 'host_policy'; // OpenAI's generic-executor rule — see EXECUTOR_TOOLS (its own sentence below)
+  // A FOCUSED APP'S CAGE ANSWERS BEFORE THE CONNECTOR GATE (2026-11-07, measured live on ?tools=app-social): a tool that
+  // lives in ANOTHER app was answered "needs the meta connection, connect it" when the workspace lacked Meta, which sends
+  // the user to connect an account that still would not make the tool callable here. Where it lives is the answer;
+  // the home app gives the connect answer itself if it is still needed there.
+  if (ctx.app && ctx.directory === 'scoped' && (WITHHELD_FROM_DIRECTORY.has(name) || (DIRECTORY_BANNED_GROUPS.includes(ctx.groupOf[name]) && !APP_DIRECTORY_CREATE_ALLOW.has(name)))) return 'directory'; // the Claude cage answers for generation
+  if (ctx.app && toolHeldBackByApp(name, ctx.groupOf[name], ctx) && !(ctx.widgetHost && appWidgetUnlisted(name))) return 'app_scope'; // another focused app's tool (a name renamed again on the app stays callable)
   if (toolHeldBackByConnectors(name, ctx.conn)) {
     // NOT CONNECTED vs NOT OFFERED are different answers (2026-09-03). "Connect it under Settings ▸ Connectors" is
     // right for a provider with a tile and a dead end for one without (google_business: no tile until Google grants
@@ -3797,8 +3804,6 @@ export const holdReasonFor = (name, ctx) => {
     if (prov && ctx.conn?.offered instanceof Set && !ctx.conn.offered.has(prov)) return 'not_offered';
     return 'not_connected';
   }
-  if (ctx.app && ctx.directory === 'scoped' && (WITHHELD_FROM_DIRECTORY.has(name) || (DIRECTORY_BANNED_GROUPS.includes(ctx.groupOf[name]) && !APP_DIRECTORY_CREATE_ALLOW.has(name)))) return 'directory'; // the Claude cage answers for generation
-  if (ctx.app && toolHeldBackByApp(name, ctx.groupOf[name], ctx) && !(ctx.widgetHost && appWidgetUnlisted(name))) return 'app_scope'; // another focused app's tool (a name renamed again on the app stays callable)
   if (toolHeldBackByDirectory(name, ctx.groupOf[name], ctx)) return 'directory';
   return null;
 };
@@ -4837,6 +4842,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const rows = [];
     const tokenWeight = tokenWeightFor(ctx);
     const _offGroup = new Map(); // name → { grp, h } for tools the group filter excluded (see below)
+    // A JOB ANOTHER HERMOSO APP DOES IS NOT A JOB HERMOSO CANNOT DO (2026-11-07, measured in claude.ai on Hermoso Social):
+    // asked "what did my Meta ads spend this week", find_tools found nothing in the app and the model told the user
+    // "Hermoso can't tell you. Its catalog has no tool that reads ad spend" — while Ads Manager does exactly that. The
+    // cage still holds (another app's tool is never listed, described or callable here): such a tool is SCORED by the
+    // same ranking as everything else and kept aside, and when it scores at least as well as the best tool this app has
+    // AND either answers every word of the ask or clearly outranks (1.4x) that tool, the reply names the app it lives in.
+    // The bar keeps "AI video ad generate" on the Claude Social app from pointing at Ads Manager's video-upload tools. Only an app_scope hold counts — a Claude-directory generation tool has no app to point at.
+    const _otherAppRows = [];
     for (const [name, h] of Object.entries(ctx.handleOf)) {
       if (!h) continue;
       if (toolWithheldByServer(name, ctx.conn)) continue; // not offered right now: absent from search, like an unoffered provider
@@ -4848,14 +4861,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // `?tools=directory` returned generate_image, generate_video, generate_voice, render_ad and ~40 more, each marked
       // hold:'directory' WITH its description, so the connection reviewed as "no media generation" described the
       // generation lanes to anyone who searched. A caged tool is absent from search, like an unoffered provider.
-      if ((ctx.directory || ctx.app) && toolHeldBackByDirectory(name, grp, ctx)) continue; // a focused app searches only itself too
+      const _otherApp = !!(ctx.app && q && holdReasonFor(name, ctx) === 'app_scope');
+      if ((ctx.directory || ctx.app) && toolHeldBackByDirectory(name, grp, ctx) && !_otherApp) continue; // a focused app searches only itself too
       // A GROUP FILTER NARROWS, IT NEVER HIDES (2026-09-07). `find_tools({query:'tiktok_creator_info', group:'channels'})` reported a
       // dead end because the tool lives in channel_admin — the exact-name hit was thrown away by the filter, and the agent
       // was told we have no such tool. Off-group matches are kept aside; if the scoped search finds nothing, they are
       // returned WITH their real group so the caller learns which group to enable instead of giving up.
-      if (g && grp !== g) { if (!_offGroup.has(name)) _offGroup.set(name, { grp, h }); continue; }
+      if (g && grp !== g) { if (!_otherApp && !_offGroup.has(name)) _offGroup.set(name, { grp, h }); continue; }
       const desc = String(h.description || '');
-      let score = 0, _cov = 0, _nh = 0, _nd = 0; // words answered, NAME hits, and name hits that are the word itself rather than a synonym (the match count below)
+      let score = 0, _cov = 0, _nh = 0, _nd = 0, _nw = 0; // words answered, NAME hits, and name hits that are the word itself rather than a synonym (the match count below)
       if (q) {
         // A NAME-SHAPED ASK IS ALSO ITS WORDS (2026-09-12). Agents search the name they guess (list_meta_campaigns,
         // update_meta_ad, edit_meta): kept as one literal token it matched nothing and filed a dead end, while its parts
@@ -4897,8 +4911,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         if (!score) continue;
         if (words.length > 1) score += covered; // coverage: a tool that answers MORE of the words outranks one that answers one of them loudly
         if (words.length > 1 && nameHits === words.length) score += 2; // every word landed in the NAME: a phrase hit
-        _cov = covered; _nh = nameHits; _nd = directHits;
+        _cov = covered; _nh = nameHits; _nd = directHits; _nw = words.length;
       }
+      if (_otherApp) { _otherAppRows.push({ name, score, full: _cov >= _nw }); continue; } // scored, never shown (see _otherAppRows)
       const hold = toolHoldReason(name, ctx);
       const health = toolHealth(name);
       // A CALLER MAY ASK FOR ONLY THE WORKING ONES, AND NOTHING IS EVER HIDDEN UNLESS THEY DO. Monid hides an
@@ -4940,23 +4955,27 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE MOST VALUABLE ROW ON THE DEFECT BOARD: what a user asked for, in their agent's words, that our catalog could
     // not name. Unquoted and lowercased on purpose — the ledger collapses quoted strings to <q>, and one group per
     // distinct ask is exactly what we want to read.
-    if (!related && g && _offGroup.size) {
-      // Re-score the excluded tools by NAME only (the cheap, unambiguous half): an exact or token hit outside the
-      // asked-for group is an answer, not a dead end — "it exists, in channel_admin; enable that group".
-      const qw = String(q || '').toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
-      const off = [..._offGroup.entries()].filter(([name]) => qw.some((w) => name === w || name.includes(w))).slice(0, cap)
-        .map(([name, { grp, h }]) => `• ${name} [${grp}, not in the ${g} group] — ${String(h.description || '').replace(/\s+/g, ' ').slice(0, 200)}`);
-      if (off.length) return ok(`Nothing in the ${g} group matches, but these tools do — they live in another group (enable that group with enable_tools, then call the tool by name):\n${off.join('\n')}`, { query: q, group: g, offGroup: off.length });
-    }
-    // A query with no word of two or more characters ("a", "?") is a probe, not an ask the catalog failed to answer,
-    // so it answers "nothing found" without landing on the defect board.
-    if (!related && !quiet && /[a-z0-9]{2}/i.test(String(q || ''))) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
+    const _bestHere = rows.reduce((m, r) => Math.max(m, r.score === Number.MAX_SAFE_INTEGER ? 0 : r.score), 0);
+    const _oaFit = _otherAppRows.filter((r) => r.score >= _bestHere && (r.full || r.score >= 1.4 * _bestHere)).sort((x, y) => y.score - x.score);
+    const _homes = [...new Set(_oaFit.filter((r) => r.score >= 0.8 * _oaFit[0]?.score).slice(0, 3).map((r) => APP_HOME_TEXT(r.name, ctx)))];
+    if (!related && !quiet && !_homes.length && /[a-z0-9]{2}/i.test(String(q || ''))) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
     for (const r of top) r.params = compactParams(ctx.handleOf[r.name]);
     const lines = top.map((r) => `• ${r.name} [${r.group}${g && r.group !== g ? `, outside the ${g} group` : ''}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] —${r.description}\n    cost: ${r.cost.label} · health: ${healthLabel(r.health)}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
     const looser = top.length > total ? top.length - total : 0;
     const text = related
       ? `${total} tool(s) match${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}${total > cap ? ` (showing the top ${cap} — narrow the query)` : ''}${looser ? `${total ? '; the other' : ''} ${looser} shown ${looser === 1 ? 'is a looser match' : 'are looser matches'}, ranked below` : ''}. ${ctx.widgetHost ? 'Call any of them directly by name; one marked not_connected needs that connector first.' : 'Run any of them with call_tool({name, args}) — a tool that is "not in your list" still runs; one marked not_connected needs that connector first.'} COST is what the call spends (free means free on every plan); HEALTH is what this server has seen recently — "no recent calls" means we have not seen it run, not that it is broken, and a row marked FAILING or held is ranked last rather than hidden.\n${lines.join('\n')}`
       : `No tool matches${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}. Try a broader word (e.g. "lead", "campaign", "report") or a group: ${TOOL_GROUP_NAMES.join(', ')}.`;
+    const otherAppNote = _homes.length ? `\nALSO IN ANOTHER HERMOSO APP: tools that match this as well as or better than the ones above are in ${_homes.join('; ')} (same Hermoso account). This connection does not carry them. If none above does what the user asked, do not say Hermoso cannot do it: say that app does, and that it can be added alongside this one.` : '';
+    if (!related && g && _offGroup.size) {
+      // Re-score the excluded tools by NAME only (the cheap, unambiguous half): an exact or token hit outside the
+      // asked-for group is an answer, not a dead end — "it exists, in channel_admin; enable that group".
+      const qw = String(q || '').toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
+      const off = [..._offGroup.entries()].filter(([name]) => qw.some((w) => name === w || name.includes(w))).slice(0, cap)
+        .map(([name, { grp, h }]) => `• ${name} [${grp}, not in the ${g} group] — ${String(h.description || '').replace(/\s+/g, ' ').slice(0, 200)}`);
+      if (off.length) return ok(`Nothing in the ${g} group matches, but these tools do — they live in another group (enable that group with enable_tools, then call the tool by name):\n${off.join('\n')}${otherAppNote}`, { query: q, group: g, offGroup: off.length, ...(_homes.length ? { otherApps: _homes } : {}) });
+    }
+    // A query with no word of two or more characters ("a", "?") is a probe, not an ask the catalog failed to answer,
+    // so it answers "nothing found" without landing on the defect board.
     // THE NEXT STEP, NAMED. The text already ends "Run any of them with call_tool({name, args})"; this is the same
     // instruction with the actual name in it, plus the connect step when the best match is the one that is held.
     const best = top[0];
@@ -4967,7 +4986,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         : { do: ctx.widgetHost ? `${best.name}({ … })` : `call_tool({ name: '${best.name}', args: { … } })`, why: `${best.name} is the best match${best.inRoster ? '' : ' and is not in your list, which does not stop it running'}${best.cost?.free ? ' and it is free' : ''}` });
       if (best.health?.state === 'failing') hints.push({ do: `consider the next row, or tell the user ${best.name} is currently failing`, why: `${best.failures || best.health.failures} of its last ${best.health.calls} calls on this server failed` });
     }
-    return withHints({ content: [{ type: 'text', text }], structuredContent: { total, related, tools: top.map(({ score, _penalty, _cov, _nh, _nd, _exact, ...r }) => r) } }, hints);
+    return withHints({ content: [{ type: 'text', text: text + otherAppNote }], structuredContent: { total, related, tools: top.map(({ score, _penalty, _cov, _nh, _nd, _exact, ...r }) => r), ...(_homes.length ? { otherApps: _homes } : {}) } }, hints);
   };
   // "DID YOU MEAN" HAS TO DISCRIMINATE, AND THE OLD ONE DID NOT (2026-09-17, off the defect board). Not a `// ──`
   // banner on purpose: tools/docs-data.mjs turns every banner into a public docs section, and this note sits
@@ -8823,7 +8842,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // against developers.google.com/youtube/v3/docs/thumbnails/set, which lists it among the accepted scopes — so
   // there is no reconnect here.
   // The two limits worth telling the model about are the ones it cannot discover: a channel must be phone-VERIFIED
-  // to set custom thumbnails at all, and YouTube caps the file at 2MB (the server compresses over that).
+  // to set custom thumbnails at all, and YouTube caps the file at 50MB since 2026-09-14 (the server compresses over that).
   // ---------- YOUTUBE CHANNEL BRANDING (2026-08-19) ----------
   //            On `youtube.force-ssl`, which we already hold and must hold regardless (it is the only scope Google
   //            accepts for comments). Hermoso generated brand creative all day and could not apply any of it to the
@@ -8883,7 +8902,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_youtube_thumbnail', {
     title: 'Set the custom thumbnail on a YouTube video',
-    description: 'Set the CUSTOM THUMBNAIL on a video already on the connected channel, using a Hermoso image — a make_thumbnail render, a generated image, or a frame. The thumbnail is the single biggest lever on YouTube click-through and YouTube otherwise auto-picks a frame, so a published video without one is leaving reach on the table. It changes ONLY the thumbnail — video, title and privacy are untouched — but it is public and immediate, so show the user which image is going on which video and get a yes first. Custom thumbnails require a VERIFIED YouTube channel (a phone number at youtube.com/verify); without it YouTube refuses and the error says so. Images over YouTube’s 2MB cap are compressed automatically. The image must be Hermoso-HOSTED, which is not the same as Hermoso-GENERATED: the user’s own artwork works, put it through upload_file first and pass the URL that returns. An arbitrary external host is refused. 0 credits. Needs a connected YouTube channel.',
+    description: 'Set the CUSTOM THUMBNAIL on a video already on the connected channel, using a Hermoso image — a make_thumbnail render, a generated image, or a frame. The thumbnail is the single biggest lever on YouTube click-through and YouTube otherwise auto-picks a frame, so a published video without one is leaving reach on the table. It changes ONLY the thumbnail — video, title and privacy are untouched — but it is public and immediate, so show the user which image is going on which video and get a yes first. Custom thumbnails require a VERIFIED YouTube channel (a phone number at youtube.com/verify); without it YouTube refuses and the error says so. Works on Shorts too, once YouTube has finished processing the Short. Images up to YouTube’s 50MB cap go as they are; a larger one is compressed automatically. The image must be Hermoso-HOSTED, which is not the same as Hermoso-GENERATED: the user’s own artwork works, put it through upload_file first and pass the URL that returns. An arbitrary external host is refused. 0 credits. Needs a connected YouTube channel.',
     inputSchema: { ...MANAGE_BRAND, videoId: z.string().describe('the YouTube video id (what post_to_youtube returned)'), imageUrl: z.string().describe('a Hermoso-hosted image URL — a make_thumbnail / list_library render, OR any image of the user’s own passed through upload_file first. An arbitrary external host is refused.') },
     outputSchema: { ok: z.boolean().optional(), videoId: z.string().optional(), thumbnailUrl: z.string().nullable().optional(), bytes: z.number().optional(), url: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
@@ -9153,9 +9172,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('manage_x_broadcast', {
     title: 'Schedule, update, go live on or cancel an X broadcast',
-    description: "Schedule, update, go live on, or cancel an X LIVE VIDEO broadcast on the connected account. action 'schedule' needs sourceId (from manage_x_stream_source), startAt, and manualPublish, which is REQUIRED with no default: true = nothing airs until action 'go_live'; false = X puts the brand ON AIR automatically at startAt (needs confirm:true). 'update' changes only the fields you pass (Hermoso re-sends the rest, because X's update replaces the whole schedule). 'go_live' airs a manualPublish schedule NOW, publicly, as the brand (confirm:true). 'cancel' deletes a schedule and cannot be undone (confirm:true). X retired recurring broadcasts: schedule each occurrence on its own. WITHOUT A SCHEDULE: 'create' makes a broadcast on sourceId that posts nothing, 'publish' puts it on air (confirm:true; skipPost:true skips the announcing post), 'end' stops one for everyone (confirm:true), 'delete' removes one and its replay (confirm:true; end it first). X limits broadcasting by account (Premium or 1,000 followers) and says so. Confirm the exact broadcast, time and stream with the user before passing confirm:true; a refusal is free." + XB_SCOPE_NOTE,
+    description: "Schedule, update, go live on, or cancel an X LIVE VIDEO broadcast on the connected account. action 'schedule' needs sourceId (from manage_x_stream_source), startAt, and manualPublish, which is REQUIRED with no default: true = nothing airs until action 'go_live'; false = X puts the brand ON AIR automatically at startAt (needs confirm:true). 'update' changes only the fields you pass (Hermoso re-sends the rest, because X's update replaces the whole schedule). 'go_live' airs a manualPublish schedule NOW, publicly, as the brand (confirm:true). 'cancel' deletes a schedule and cannot be undone (confirm:true). X retired recurring broadcasts: schedule each occurrence on its own. WITHOUT A SCHEDULE: 'create' puts sourceId ON AIR NOW (confirm:true; X announces it in a post unless skipPost:true, and ends it if no video arrives within 5 minutes; X retired the separate 'publish' step), 'end' stops one for everyone (confirm:true), 'delete' removes one and its replay (confirm:true; end it first). X limits broadcasting by account (Premium or 1,000 followers) and says so. Confirm the exact broadcast, time and stream with the user before passing confirm:true; a refusal is free." + XB_SCOPE_NOTE,
     inputSchema: {
-      action: z.enum(['schedule', 'update', 'go_live', 'cancel', 'create', 'publish', 'end', 'delete']).describe('schedule, update, go_live, cancel, create, publish, end or delete'),
+      action: z.enum(['schedule', 'update', 'go_live', 'cancel', 'create', 'end', 'delete']).describe('schedule, update, go_live, cancel, create, end or delete'),
       id: z.string().optional().describe('broadcast id, for every action but schedule and create'),
       sourceId: z.string().optional().describe('stream source id from manage_x_stream_source (schedule, create)'),
       startAt: z.string().optional().describe('ISO 8601 or epoch ms'),
@@ -9165,14 +9184,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       availableForReplay: z.boolean().optional().describe('true = keep the broadcast available as a replay'), isLocked: z.boolean().optional().describe("true = lock the broadcast (X's isLocked flag)"),
       chatOption: z.string().optional().describe('X chat permission option (numeric string)'),
       thumbnailMediaId: z.string().optional().describe('pre-live slate media id'),
-      skipPost: z.boolean().optional().describe('publish: true skips the post X would make announcing it'),
+      skipPost: z.boolean().optional().describe('create: true skips the post X would make announcing it'),
       confirm: z.boolean().optional().describe('true only after the user approved this exact public or irreversible action'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/broadcasts/manage', a);
     if (d.action === 'cancel') return ok(d.deleted ? `Cancelled the scheduled broadcast ${d.id}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm cancelling ${d.id}.`, d);
-    if (d.action === 'create') return ok(`Created broadcast [${d.broadcast?.id}] on the source, not on air. ${d.note}${d.shareUrl ? ` ${d.shareUrl}` : ''} Cost ${d.costCredits ?? '?'} credits.`, d);
+    if (d.action === 'create') return ok(`On air: broadcast [${d.broadcast?.id}]. ${d.note}${d.shareUrl ? ` ${d.shareUrl}` : ''} Cost ${d.costCredits ?? '?'} credits.`, d);
     if (d.action === 'publish') return ok(`Broadcast ${d.id} published, state ${d.state || '?'}. Cost ${d.costCredits ?? '?'} credits.`, d);
     if (d.action === 'end') return ok(d.ended ? `Ended broadcast ${d.id}. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm ending ${d.id} (state ${d.state || '?'}).`, d);
     if (d.action === 'delete') return ok(d.deleted ? `Deleted broadcast ${d.id} and its replay. Cost ${d.costCredits ?? '?'} credits.` : `X did not confirm deleting ${d.id}.`, d);
@@ -9181,12 +9200,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('manage_x_stream_source', {
     title: 'Manage X stream sources',
-    description: "The connected X account's STREAM SOURCES, the RTMP ingest points a live broadcast plays from. action 'list' (default) and 'get' (id) show each source's id, stream key, RTMPS URL, region and whether video is arriving; 'create' (name, optional region) makes one; 'rename' (id, name); 'delete' (id, confirm:true: it kills the stream key); 'region' reads the nearest ingest region. Pass a source's id as sourceId to manage_x_broadcast. The stream key is a secret, so never post it." + XB_SCOPE_NOTE,
+    description: "The connected X account's STREAM SOURCES, the RTMP ingest points a live broadcast plays from. action 'list' (default) and 'get' (id) show each source's id (19 digits), RTMPS URL, region and whether video is arriving; 'stream_key' (id) reads its stream key, which X leaves out of the list; 'create' (name, optional region, the nearest one when omitted) makes one and returns its key; 'rename' (id, name); 'delete' (id, confirm:true: it kills the stream key); 'region' reads the nearest ingest region. Pass a source's id as sourceId to manage_x_broadcast. The stream key is a secret, so never post it." + XB_SCOPE_NOTE,
     inputSchema: {
-      action: z.enum(['list', 'get', 'create', 'rename', 'delete', 'region']).optional().describe("default 'list'"),
-      id: z.string().optional().describe('source id, for get, rename and delete'),
+      action: z.enum(['list', 'get', 'create', 'rename', 'delete', 'region', 'stream_key']).optional().describe("default 'list'"),
+      id: z.string().optional().describe('source id, for get, stream_key, rename and delete'),
       name: z.string().optional().describe('label, for create and rename'),
-      region: z.string().optional().describe("create only: 'atla' or 'pdxa', or an AWS region X maps onto one"),
+      region: z.string().optional().describe("create only: an ingest region such as us-east-1 or us-west-2; omitted = the nearest, from action 'region'"),
       confirm: z.boolean().optional().describe('true only after the user approved deleting this source'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -9891,9 +9910,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiGet('/api/meta/playables', a); return ok(d.note, d); }));
   server.registerTool('create_meta_ad', {
     title: 'Build a full Meta ad (campaign -> ad set -> ad, paused)',
-    description: 'Build a complete, ready-to-run Meta ad: campaign -> ad set (FULL targeting + budget + schedule + bidding) -> creative -> ad(s), ALL created PAUSED — it spends NOTHING until you activate the campaign with set_meta_campaign_status(confirm:true). This is the "create a campaign and put the ads on it" path. IMAGE, VIDEO (uploaded, transcoded and thumbnailed for you) and CAROUSEL (format:"carousel", 2–10 cards each with its own headline/description/link) all work. Targeting is the `targeting` object: geo down to cities with a radius, age, gender, interests, behaviours, custom audiences and lookalikes, languages, placements, devices and OS. For a conversion objective pass pixelId + conversionEvent and the ad set optimizes for that conversion. Schedule with startTime/endTime + dayparting; bid with bidStrategy + bidAmountUsd/minRoas; use lifetimeBudgetUsd (with endTime) for a fixed flight. Attach to an existing campaign with campaignId or an existing ad set with adSetId. Everything is READ BACK from Meta before you are told it exists — print the returned summary verbatim (it carries 24-hour Meta PREVIEW LINKS for the first ad — hand them to the user; preview_meta_ad renders any ad in any placement). Needs ads-management on the connected account. BOOST AN EXISTING POST: pass boostPostId — a post you have ALREADY published (numeric id, the <pageId>_<postId> form, or a permalink) — INSTEAD of any creative, and the ad promotes that post exactly as published, comments and all. Meta ignores creative overrides on an existing post, so message/headline/cta/link do NOT apply; targeting, budget, schedule, bidding and PAUSED-by-default all work identically. Find ids with list_meta_posts. AN INSTAGRAM POST NEEDS boostTarget:"instagram" — IG media ids and Facebook post ids are both bare digits, so Hermoso never guesses, and a Facebook boost given an IG media id is refused. Instagram eligibility is checked for free before anything is created (Meta refuses to boost a post carrying licensed music or an interactive element).',
+    description: 'Build a complete, ready-to-run Meta ad: campaign -> ad set (FULL targeting + budget + schedule + bidding) -> creative -> ad(s), ALL created PAUSED — it spends NOTHING until you activate the campaign with set_meta_campaign_status(confirm:true). This is the "create a campaign and put the ads on it" path. IMAGE, VIDEO (uploaded, transcoded and thumbnailed for you) and CAROUSEL (format:"carousel", 2–10 cards each with its own headline/description/link) all work. Targeting is the `targeting` object: geo down to cities with a radius, age, gender, interests, behaviours, custom audiences and lookalikes, languages, placements, devices and OS. For a conversion objective pass pixelId + conversionEvent and the ad set optimizes for that conversion. Schedule with startTime/endTime + dayparting; bid with bidStrategy + bidAmountUsd/minRoas; use lifetimeBudgetUsd (with endTime) for a fixed flight. Attach to an existing campaign with campaignId or an existing ad set with adSetId. Everything is READ BACK from Meta before you are told it exists — print the returned summary verbatim (it carries 24-hour Meta PREVIEW LINKS for the first ad — hand them to the user; preview_meta_ad renders any ad in any placement). Needs ads-management on the connected account. BOOST AN EXISTING POST: pass boostPostId — a post you have ALREADY published (numeric id, the <pageId>_<postId> form, or a permalink) — INSTEAD of any creative, and the ad promotes that post exactly as published, comments and all. The post keeps its own caption and media, so message/headline/description do NOT apply. AN INSTAGRAM BOOST TAKES A BUTTON: pass cta (e.g. SHOP_NOW, SIGN_UP) and link and the boosted post carries that button to that link; a FACEBOOK post boost takes no button and keeps the post as published. Anything not applied is named in the reply, and the reply reads back from Meta which post the ad promotes. Targeting, budget, schedule, bidding and PAUSED-by-default all work identically. Find ids with list_meta_posts. AN INSTAGRAM POST NEEDS boostTarget:"instagram" — IG media ids and Facebook post ids are both bare digits, so Hermoso never guesses, and a Facebook boost given an IG media id is refused. Instagram eligibility is checked for free before anything is created (Meta refuses to boost a post carrying licensed music or an interactive element).',
     inputSchema: {
-      boostPostId: z.string().optional().describe('Promote a post that ALREADY EXISTS instead of building a new ad from media. Accepts the numeric post id, <pageId>_<postId>, or a permalink (an Instagram post is its NUMERIC media id — an instagram.com link carries only a shortcode, which Meta cannot resolve). Cannot be combined with image/video inputs, and creative fields do not apply — a boost shows the post as published.'), boostTarget: z.enum(['facebook','instagram']).optional().describe("Which surface the boosted post lives on. Default facebook. REQUIRED for an Instagram post: an IG media id and a Facebook post id are both bare digits, so this is never inferred — Meta takes a different creative for each (object_story_id for a Page post; object_id + instagram_user_id + source_instagram_media_id for an IG post). list_meta_posts(target:'instagram') returns the ids."),
+      boostPostId: z.string().optional().describe('Promote a post that ALREADY EXISTS instead of building a new ad from media. Accepts the numeric post id, <pageId>_<postId>, or a permalink (an Instagram post is its NUMERIC media id — an instagram.com link carries only a shortcode, which Meta cannot resolve). Cannot be combined with image/video inputs. The post keeps its caption and media; an INSTAGRAM boost also takes cta + link (a button on the boosted post), a Facebook one takes neither.'), boostTarget: z.enum(['facebook','instagram']).optional().describe("Which surface the boosted post lives on. Default facebook. REQUIRED for an Instagram post: an IG media id and a Facebook post id are both bare digits, so this is never inferred — Meta takes a different creative for each (object_story_id for a Page post; object_id + instagram_user_id + source_instagram_media_id for an IG post). list_meta_posts(target:'instagram') returns the ids."),
+      partnershipAdCode: z.string().optional().describe("PARTNERSHIP AD FROM A CREATOR'S CODE: the ad code a creator shares for their own Instagram post (their post ▸ ⋯ ▸ Partnership label and ads ▸ Ad code). The ad promotes THEIR post as a partnership ad run by this brand — no media id needed. Use INSTEAD of boostPostId; cannot be combined with your own media, a catalog or carousel. An expired or unknown code is refused in plain words."),
+      partnershipAdFormat: z.enum(['both', 'single', 'auto']).optional().describe("Which identities a boosted partnership post shows (Meta's ad_format): both = creator AND brand (Meta's default), single = only the first identity, auto = Meta picks per impression (Instagram only). Only with partnershipAdCode or boostPostId."),
       adAccountId: z.string().describe('ad account id (act_… or digits — from list_meta_pages)'),
       format: z.enum(['auto', 'carousel']).optional().describe('auto = one ad per asset (image or video); carousel = ONE multi-card ad'),
       imageUrl: z.string().optional().describe('public https image URL for the ad creative'),
@@ -10496,7 +10517,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('meta_insights', {
     title: 'Meta ad performance metrics',
-    description: 'Pull performance INSIGHTS (spend, impressions, reach, clicks, CTR, CPC, CPM, conversions) for a connected ad account, or a specific campaign / ad set / ad. Pass adAccountId (for auth); optionally objectId to scope to one object and level to break the numbers down. BREAKDOWNS are what make the numbers actionable — a flat total says an ad cost $X, never WHO it worked on: pass breakdowns:"age,gender", "publisher_platform,platform_position" (which placement), "country" / "region" / "dma" (where), "impression_device" / "device_platform" (what they held). Comma-separated; "placement", "device" and "geo" are accepted as aliases; an unknown value is REJECTED, never silently ignored. THREE breakdowns need an ad-account OPT-IN from 2026-08-06 — impression_device, hourly_stats_aggregated_by_audience_time_zone and frequency_value: Meta returns NO ROWS (not an error) for an account that has not opted in, so they are always ATTEMPTED, and if nothing comes back the report is re-run WITHOUT them and `droppedBreakdowns` + a note name the missing dimension and say an account admin can enable it in Ads Manager. A dropped dimension is ABSENT, never zero — never present the remaining total as if it were still split by it. Date window: datePreset OR since+until (YYYY-MM-DD). datePreset is Meta\'s OWN enum — today, yesterday, last_3d, last_7d, last_14d, last_28d, last_30d, last_90d, this_week_mon_today, this_week_sun_today, last_week_mon_sun, last_week_sun_sat, this_month, last_month, this_quarter, last_quarter, this_year, last_year, maximum, data_maximum. THERE IS NO "lifetime": Meta disabled it in Graph API v10.0 and replaced it with "maximum" (the last 37 months); anything unrecognised is refused by name here rather than 400ing at Meta. Read-only.',
+    description: 'Pull performance INSIGHTS (spend, impressions, reach, clicks, CTR, CPC, CPM, conversions) for a connected ad account, or a specific campaign / ad set / ad. Pass adAccountId (for auth); optionally objectId to scope to one object and level to break the numbers down. BREAKDOWNS are what make the numbers actionable — a flat total says an ad cost $X, never WHO it worked on: pass breakdowns:"age,gender", "publisher_platform,platform_position" (which placement), "country" / "region" / "comscore_market" (where — US metro; Meta retired "dma" for it, and "dma" is sent as comscore_market), "impression_device" / "device_platform" (what they held). Comma-separated; "placement", "device" and "geo" are accepted as aliases; an unknown value is REJECTED, never silently ignored. THREE breakdowns need an ad-account OPT-IN from 2026-08-06 — impression_device, hourly_stats_aggregated_by_audience_time_zone and frequency_value: Meta returns NO ROWS (not an error) for an account that has not opted in, so they are always ATTEMPTED, and if nothing comes back the report is re-run WITHOUT them and `droppedBreakdowns` + a note name the missing dimension and say an account admin can enable it in Ads Manager. A dropped dimension is ABSENT, never zero — never present the remaining total as if it were still split by it. Date window: datePreset OR since+until (YYYY-MM-DD). datePreset is Meta\'s OWN enum — today, yesterday, last_3d, last_7d, last_14d, last_28d, last_30d, last_90d, this_week_mon_today, this_week_sun_today, last_week_mon_sun, last_week_sun_sat, this_month, last_month, this_quarter, last_quarter, this_year, last_year, maximum, data_maximum. THERE IS NO "lifetime": Meta disabled it in Graph API v10.0 and replaced it with "maximum" (the last 37 months); anything unrecognised is refused by name here rather than 400ing at Meta. Read-only.',
     inputSchema: {
       adAccountId: z.string().describe('ad account id (act_… or digits)'),
       objectId: z.string().optional().describe('a campaign / ad set / ad id to scope to (default: the whole account)'),
@@ -12129,6 +12150,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       merchantCenterId: z.string().optional().describe('makes this a RETAIL (Shopping-feed) Performance Max — the Merchant Center account whose products it advertises, from list_merchant_accounts. It advertises the WHOLE feed; partitioning by brand/category is not built and is refused by name'),
       feedLabel: z.string().optional().describe('optional, retail only: narrow to ONE Merchant Center feed by its feed label. Omit to use products from all feeds'),
       brandGuidelinesEnabled: z.boolean().optional().describe('default TRUE, matching Google’s own default since v21: businessName + logos are linked to the CAMPAIGN. Pass false only for the pre-v21 layout, where they sit on the asset group instead'),
+      imageExtraction: z.boolean().optional().describe('default FALSE: Google may NOT take images from your landing pages and serve them as ad creative. Sent explicitly, because Google switches image extraction ON by default for new Performance Max campaigns from 2026-12-04. Pass true to allow it; the reply reads the setting back from Google'),
       assetGroup: z.object({
         name: z.string().describe('asset group name'),
         finalUrls: z.array(z.string()).describe('the landing page(s) — at least one'),
@@ -17249,7 +17271,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       adAccountId: z.string().optional().describe('Pinterest ad account id, from list_pinterest_ads_campaigns'),
       name: z.string().describe('campaign name, ≤255 characters'),
-      objective: z.enum(['AWARENESS', 'CONSIDERATION', 'WEB_CONVERSION', 'CATALOG_SALES', 'VIDEO_COMPLETION', 'APP_INSTALL', 'SALES', 'LEADS', 'CTV_CONSIDERATION']).describe('Pinterest requires an objective and will not guess one'),
+      objective: z.enum(['AWARENESS', 'CONSIDERATION', 'WEB_CONVERSION', 'CATALOG_SALES', 'VIDEO_COMPLETION', 'APP_INSTALL', 'SALES', 'LEADS', 'CTV_CONSIDERATION']).describe('Pinterest requires an objective and will not guess one. CATALOG_SALES and WEB_CONVERSION are LEGACY: Pinterest disables creating them on 2027-02-01 — use SALES (with intendedPromotionType CATALOG for a shopping/catalog campaign) instead'),
       dailyBudget: z.number().optional().describe('daily cap in the ad account’s currency'),
       lifetimeBudget: z.number().optional().describe('lifetime cap instead of a daily one — Pinterest then requires endTime'),
       isPerformancePlus: z.boolean().optional().describe('Pinterest Performance+ on this campaign; with no lifetime budget Pinterest also requires isFlexibleDailyBudgets:true'),
@@ -19090,14 +19112,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       endDate: z.string().optional().describe('YYYY-MM-DD (UTC). Default is yesterday'),
       fields: z.array(z.string()).optional().describe('defaults to everything this authorization can read. Demographics are audience_ages, audience_genders, audience_countries, audience_cities'),
     },
-    outputSchema: { displayName: z.string().nullable().optional(), username: z.string().nullable().optional(), isBusinessAccount: z.boolean().nullable().optional(), followers: z.number().nullable().optional(), following: z.number().nullable().optional(), totalLikes: z.number().nullable().optional(), videos: z.number().nullable().optional(), metrics: z.array(z.any()).optional(), audience: z.any().optional(), days: z.number().optional(), note: z.string().optional() },
+    outputSchema: { displayName: z.string().nullable().optional(), username: z.string().nullable().optional(), isBusinessAccount: z.boolean().nullable().optional(), verifiedBusinessAccount: z.boolean().nullable().optional(), hasAdvancedAccess: z.boolean().nullable().optional(), followers: z.number().nullable().optional(), following: z.number().nullable().optional(), totalLikes: z.number().nullable().optional(), videos: z.number().nullable().optional(), metrics: z.array(z.any()).optional(), audience: z.any().optional(), days: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/tiktok-account/insights', a);
     const au = d.audience || {};
     const top = (rows, key) => (rows || []).slice(0, 4).map(r => `${r[key]} ${Math.round((r.percentage || 0) * 100)}%`).join(', ');
     return ok([
-      `${d.displayName || d.username || 'This account'}${d.username ? ` (@${d.username})` : ''}: ${d.followers ?? '?'} followers, ${d.videos ?? '?'} videos, ${d.totalLikes ?? '?'} total likes${d.isBusinessAccount === false ? ', a PERSONAL account' : d.isBusinessAccount === true ? ', a Business account' : ''}.`,
+      `${d.displayName || d.username || 'This account'}${d.username ? ` (@${d.username})` : ''}: ${d.followers ?? '?'} followers, ${d.videos ?? '?'} videos, ${d.totalLikes ?? '?'} total likes${d.verifiedBusinessAccount === true ? ', a Verified Business Account' : d.isBusinessAccount === true ? ', a Business account' : ''}${d.hasAdvancedAccess === true ? ' with Advanced Access' : ''}.`,
       d.days ? `${d.days} day(s) of daily metrics.` : '',
       au.ages && au.ages.length ? `Age: ${top(au.ages, 'age')}` : '',
       au.genders && au.genders.length ? `Gender: ${top(au.genders, 'gender')}` : '',
@@ -26098,8 +26120,12 @@ function memoryNoteVerdict(text) {
     // Every other client keeps both, byte for byte.
     const widget = hostRendersWidgets();
     const cards = adSpyCards(platform ? items.map((x) => (x && !x.platform ? { ...x, platform } : x)) : items);
-    const thumbs = items.map((x) => x && (x.thumb || x.image || x.cover || x.media)).filter((u) => typeof u === 'string' && /^https?:\/\//.test(u) && !/\.(mp4|webm|mov)([?#]|$)/i.test(u)).slice(0, 3);
-    const blocks = (await Promise.all(thumbs.map((u) => imageBlock(u).catch(() => null)))).filter(Boolean);
+    // EVERY ATTACHED PICTURE NAMES THE AD IT BELONGS TO (2026-11-07, "Liquid Death" test: the model said some previews
+    // showed another brand's cans). The blocks used to be the first three IMAGE-capable rows, bare, in a list that
+    // skipped video-only rows and silently dropped any fetch that failed — so picture 2 was routinely ad 5, and the
+    // model read it as ad 2. A caption block precedes each picture with its row number and advertiser.
+    const blocks = [];
+    for (const [r, blk] of await Promise.all(pictureRows(items).map(async (r) => [r, await imageBlock(r.url).catch(() => null)]))) if (blk) blocks.push({ type: 'text', text: r.caption }, blk);
     const links = widget ? [] : items.slice(0, 6).map((x, i) => (x && (x.media || x.image || x.cover)) ? `ad ${i + 1}: ${x.media || x.image || x.cover}` : null).filter(Boolean);
     const guide = items.length ? '' : '\n\nNo advertiser matched that name. Product LINES are usually advertised by their PARENT brand\u2019s page \u2014 resolve the parent company first (the product\u2019s website footer, or your web search) and retry with that companyName; also try `query` (keyword search across ALL advertisers\u2019 ad copy) and status \u201cALL\u201d (includes past ads). Never conclude a brand runs no ads from a single name miss.';
     const rows = widget ? stripAdMedia(items) : items;
@@ -26154,9 +26180,18 @@ function memoryNoteVerdict(text) {
       const asked = String(a.companyName).trim().toLowerCase();
       if (!pages.some(pg => pg.toLowerCase() === asked)) note = `\n\nNote: “${a.companyName}” resolved to the advertiser page${pages.length > 1 ? 's' : ''} ${pages.slice(0, 3).map(pg => `“${pg}”`).join(', ')}${pages.length > 3 ? ` (+${pages.length - 3} more)` : ''}. If that is not the brand you meant, pass pageId, or use pull_competitor_ads with the brand’s domain (it resolves the brand’s own page through its site).`;
     }
-    const ads = raw.slice(0, nAds(a.limit)).map((x) => {
+    // A KEYWORD SEARCH IS ACROSS ALL ADVERTISERS, NOT ONE BRAND'S ADS (2026-11-07). "Liquid Death" returned Garage Beer
+    // (which mentions it in its copy), Taylor Morrison, Ticketmaster and Resona beside the real Liquid Death rows, and
+    // the reply gave no way to tell them apart. Each row now says whether its advertiser page IS the searched name, the
+    // brand's own pages sort first, and the note says how many are other advertisers. Rows are never dropped: a
+    // collab or a reseller's ad can be exactly what the user wants.
+    const kwQuery = a.query || (note ? a.companyName : '');
+    const { ordered, otherCount } = kwQuery ? orderKeywordAds(raw, kwQuery) : { ordered: raw, otherCount: 0 };
+    if (otherCount) note += `\n\nNote: this is a KEYWORD search across ALL advertisers' ad copy — ${otherCount} of the ${raw.length} ads fetched were run by OTHER advertisers (rows with from_other_advertiser:true), not by “${kwQuery}”. Their pictures show THEIR creative; always attribute an ad to its page_name. For ${kwQuery}'s own ads use companyName/pageId.`;
+    const ads = ordered.slice(0, nAds(a.limit)).map((x) => {
       const s = x.snapshot || {};
       return qp({
+        from_other_advertiser: x.__other ? true : undefined,
         page_name: x.page_name, body: trunc(typeof s.body === 'string' ? s.body : s.body?.text), cta: s.cta_text, link: s.link_url,
         dates: adRunLine(x), // start -> end · days running, from epoch seconds too (the string fields alone left rows dateless)
         media: s.videos?.[0]?.video_sd_url || s.images?.[0]?.resized_image_url || s.cards?.[0]?.resized_image_url || s.cards?.[0]?.video_sd_url || s.videos?.[0]?.video_preview_image_url,
