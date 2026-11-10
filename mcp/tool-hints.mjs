@@ -161,10 +161,10 @@ export const CREDITS_LOW_NOTE = `The Hermoso account's credit balance is too low
 const UPSELL_SENTENCE_RE = /\s*(?:please\s+)?(?:upgrade(?:\s+your\s+plan)?\s+or\s+top\s+up|top\s+up|add\s+credits|buy\s+(?:more\s+)?credits|monthly\s+plans\s+have\s+no\s+markup\s+on\s+models)\b[^.!\n]*[.!]?/gi; // the monthly-plan upsell (2026-10-20) is a promotion too: a widget host (ChatGPT) never hears it
 // ── FREE CREDITS NOT CLAIMED YET (2026-10-25, ChatGPT funnel) ─────────────────────────────────────────────────────
 // An account whose welcome credits were never added (the one-time check that a person is behind it did not pass
-// silently at sign-in) reads 0 credits. Its fix is opening the app once, signed in, which is not a purchase, so it is
+// silently at sign-in) reads 0 credits. Its fix is opening a one-click link once (2026-11-10: signed for the account, no sign-in), which is not a purchase, so it is
 // said on every host, ChatGPT included. The server marks the refusal (meta.welcomeClaim = {credits, url}).
-export const welcomeClaimSentence = (w) => `This account has not received its ${Number(w?.credits) || 0} free credits yet. The user opens ${w?.url} once in a browser, signed in with the same account, and they arrive in a few seconds after a quick check that a person is there (no card).`;
-export const welcomeClaimHint = (w) => ({ do: `ask the user to open ${w?.url} once in a browser, signed in with the same account, to receive the ${Number(w?.credits) || 0} free credits; then run the same call again`, why: 'the account never received its free credits: they wait behind a one-time check that a person is behind the account, which runs in the browser' });
+export const welcomeClaimSentence = (w) => `This account has not received its ${Number(w?.credits) || 0} free credits yet. The user opens ${w?.url} once in a browser (one click, no sign-in and no card) and they arrive in a few seconds after a quick check that a person is there.`;
+export const welcomeClaimHint = (w) => ({ do: `ask the user to open ${w?.url} once in a browser (one click, no sign-in) to receive the ${Number(w?.credits) || 0} free credits; then run the same call again`, why: 'the account never received its free credits: they wait behind a one-time check that a person is behind the account, which runs in the browser' });
 export function neutralCreditsText(msg) {
   const base = String(msg ?? '').replace(UPSELL_SENTENCE_RE, '').replace(/[ \t]+$/gm, '').replace(/\s*[—–,:-]\s*$/gm, '.').trim();
   return `${base}${base ? '\n' : ''}${CREDITS_LOW_NOTE}`;

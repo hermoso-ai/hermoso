@@ -67,7 +67,7 @@ Ask in your own words. The agent picks the tools:
 - "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
 - "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
-**1182 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1195 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -78,7 +78,7 @@ website.
 
 **Most of it costs nothing.** Publishing and scheduling posts, building and managing paid campaigns, analytics
 and insights, comments and DMs, connectors, profiles and team seats cost **no credits on any plan**, with no
-per-post fee and no seat pricing. The Free plan includes 10 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($9.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 250+ free credits as the Free plan, monthly credits start on Starter, and Autopilot spends credits. Credits are spent only on running an AI model (image, video,
+per-post fee and no seat pricing. The Free plan includes 5 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($19.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 160 free credits as the Free plan, and monthly credits start on Starter. Credits are spent only on running an AI model (image, video,
 voice, text, planning, post-production) and on Ad Spy research, and posting an ad you already rendered is never a
 second charge. The one exception is X (Twitter), where posting and reads bill credits per call because X
 charges per API request (`hermoso_credits` prints the exact credits per X post).
@@ -102,8 +102,8 @@ just download it. Use the one piece you need, or all of it together.
 ## Install in one command
 
 This repo is a plugin marketplace, a Gemini CLI extension and a skills package at once, so a coding agent takes
-Hermoso in one line. Every install brings the same five skills (`hermoso-research`, `hermoso-generate`,
-`hermoso-ad-from-brand`, `hermoso-product-photoshoot`, `hermoso-marketing`), and the skills drive the `hermoso`
+Hermoso in one line. Every install brings the same six skills (`hermoso-research`, `hermoso-generate`,
+`hermoso-ad-from-brand`, `hermoso-product-photoshoot`, `hermoso-marketing`, `hermoso-edit-timeline`), and the skills drive the `hermoso`
 CLI through `npx`. No
 tool list is loaded into your session: a CLI command costs nothing until it runs, and it reaches every tool.
 The first time, your agent runs `npx -y hermoso auth login`, which opens a browser to sign in.
@@ -252,7 +252,7 @@ Connect, approve with your Hermoso account, and you are done: the full toolset w
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai). The free tier is included; plans and credits
    are the same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid
    plan with `POST /v1/signup` (above).
-2. **Install the plugin.** It adds the five Hermoso skills, which drive the `hermoso` CLI through `npx`:
+2. **Install the plugin.** It adds the six Hermoso skills, which drive the `hermoso` CLI through `npx`:
 
 ```bash
 claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
@@ -276,7 +276,7 @@ your browser (`--no-browser` prints the link on a headless machine). Measured ag
 
 Your agent now has the full studio **with your profile's context**: the brand details, products, logos and
 learned memory you set up in the web app apply automatically (`get_brand` shows what's saved; omit `brand` in
-`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits, at the same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics cost no credits on any plan (posting to X and reading X data are the one per-call exception, managing X ads is free). The Free plan includes 10 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($9.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 250+ free credits as the Free plan, monthly credits start on Starter, and Autopilot spends credits.
+`plan_ad`/`plan_variations` to use it). Renders bill your Hermoso credits, at the same prices as the Studio. Only AI model runs and Ad Spy research spend credits; publishing, scheduling, ads management and analytics cost no credits on any plan (posting to X and reading X data are the one per-call exception, managing X ads is free). The Free plan includes 5 posts a month on up to 3 platforms; every paid plan posts without a limit and runs autopilot. Basic ($19.99 a month) is unlimited posting and Autopilot with no monthly credits: it includes the same 160 free credits as the Free plan, and monthly credits start on Starter.
 
 ## 1. MCP server (stdio), optional in a coding agent
 
@@ -304,7 +304,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1182 tools cover
+### What the 1195 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -480,7 +480,7 @@ the package, so they need no key, no network and no sign-in.
 
 ## 3. Skills: what a coding agent installs
 
-`skills/` holds five installable skills:
+`skills/` holds six installable skills:
 
 | Skill | What it does |
 | --- | --- |
@@ -489,6 +489,7 @@ the package, so they need no key, no network and no sign-in.
 | `hermoso-ad-from-brand` | A brand or domain to one on-brand ad, concept and copy included |
 | `hermoso-product-photoshoot` | A real product photo composited into studio, lifestyle or hero scenes |
 | `hermoso-marketing` | The whole loop: research, create, publish and schedule, paid campaigns, measure |
+| `hermoso-edit-timeline` | The manual for composing any video edit or transition with `edit_timeline` |
 
 They are what every one-command install at the top of this page adds, in Claude Code, Codex, Gemini CLI and
 through `npx skills add`. From a clone, copying works too:

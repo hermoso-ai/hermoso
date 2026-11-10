@@ -460,7 +460,10 @@ export async function connectedProviders() {
     const shopifyStore = r?.shopifyStore === true ? true : r?.shopifyStore === false ? false : null;
     // flagsOn (2026-11-03): tools that ship dark and are switched ON on this server (roster-scope.mjs FLAGGED_OFF_TOOLS).
     const flagsOn = new Set((Array.isArray(r?.flagsOn) ? r.flagsOn : []).filter((n) => typeof n === 'string' && n));
-    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld, flagsOn, shopifyStore };
+    // brand (2026-11-08): which brand this connection resolved to, so a "not connected" refusal can name it and the
+    // switch. Absent on an older server or a session login; never invented.
+    const brand = r?.brand && typeof r.brand === 'object' && typeof r.brand.profileId === 'string' ? { profileId: r.brand.profileId, name: typeof r.brand.name === 'string' ? r.brand.name : null, shared: !!r.brand.shared, source: String(r.brand.source || '') } : null;
+    return { connected: new Set(list.filter((p) => typeof p === 'string' && p)), readOk: true, offered, gated, connectLink, withheld, flagsOn, shopifyStore, brand };
   } catch { return { connected: new Set(), readOk: false }; }
 }
 // Upload raw file BYTES to /api/upload (150MB, persists → returns {url,kind,bytes}). Overrides the JSON content-type so
