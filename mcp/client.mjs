@@ -124,6 +124,10 @@ function headers(extra = {}) {
   // reliable discriminator here. Forgeable, and harmlessly so: the worst a caller achieves is under-reporting
   // their own activity, which is why this decides bookkeeping and nothing else.
   if (ctx) h['x-hermoso-inproc'] = '1';
+  // A PRICE QUOTE AND THE AGENT'S STATED GOAL (2026-11-11, spend-guard.mjs): get_cost / expected_credits run the tool's own
+  // handler with every request marked as a quote (the server stops each spending point and prices it); `context` rides
+  // as one redacted, percent-encoded sentence the server puts on the ledger row of whatever the call bills.
+  { const st = toolCtx.getStore(); if (st?.quoteOnly) h['x-hermoso-quote'] = '1'; if (st?.contextHeader) h['x-hermoso-context'] = st.contextHeader; }
   if (process.env.EDGE_SECRET) h['x-edge-auth'] = process.env.EDGE_SECRET; // belt: in-process self-calls satisfy the edge shield even if the loopback exemption ever changes
   // THE SAME RULE FOR THE BEARER (2026-09-23). This read `ctx?.token || TOKEN`, so a hosted request whose ctx carried
   // no token would have been sent with the SERVER process's own HERMOSO_TOKEN — an operator credential standing in for
@@ -149,11 +153,23 @@ export function signInMessage(status, body, msg, isSignedOut = signedOut()) {
   return /^sign in to continue\.?$/i.test(String(msg || '').trim()) ? SIGN_IN_HINT : `${msg} ${SIGN_IN_HINT}`;
 }
 
+// A PRICE QUOTE'S STOP (2026-11-11, spend-guard.mjs): the server answers a request made in quote mode, at the point it would
+// have spent, with 409 {code:'quote_only', quote:{legs}}. The legs join the running call's tally and the call stops here;
+// wrap() turns the tally into the price. `_quoteStop` is never reported as an error.
+export const QUOTE_STOP_MESSAGE = 'Price quote only: nothing ran and nothing was charged.';
+export const quoteStopError = () => Object.assign(new Error(QUOTE_STOP_MESSAGE), { _quoteStop: true, status: 409, _viaApi: true });
+function quoteStopFrom(status, body) {
+  if (Number(status) !== 409 || body?.code !== 'quote_only') return;
+  const st = toolCtx.getStore();
+  if (st?.quoteOnly) for (const l of (Array.isArray(body?.quote?.legs) ? body.quote.legs : [])) (st.quoteLegs ||= []).push(l);
+  throw quoteStopError();
+}
 // unwrap the {data}|{error} envelope; throw a clean Error (with .status) on failure
 async function unwrap(res, { read = false } = {}) {
   let body = null;
   try { body = await res.json(); } catch (e) { if (read && isDeadline(e)) throw readDeadlineError(); } // a body cut off by the read deadline is not an empty answer
   if (!res.ok) {
+    quoteStopFrom(res.status, body); // a price quote that stopped at a spending point (throws; never data)
     const msg = signInMessage(res.status, body, (body && (body.error || body.message)) || `HTTP ${res.status}`);
     // `_viaApi` MARKS AN ERROR THAT ALREADY REACHED THE SERVER, so route() has already recorded it in the error
     // ledger with the tool name off x-hermoso-tool. wrap() reports ONLY the errors that lack this marker — a local
@@ -522,7 +538,7 @@ export async function apiUploadUrl(p, url, { fileName = '' } = {}) {
 // /api/explore/chat streams Server-Sent-Events; collect to the terminal `done` payload {reply, results, actions}.
 export async function apiSSE(p, body = {}) {
   const res = await fetchWrite(`${API_BASE}${withBrandScope(p)}`, { method: 'POST', headers: headers({ Accept: 'text/event-stream' }), body: JSON.stringify(body) });
-  if (!res.ok) { let e; try { e = (await res.json()).error; } catch {} throw Object.assign(new Error(e || `HTTP ${res.status}`), { status: res.status }); }
+  if (!res.ok) { let e, b = null; try { b = await res.json(); e = b?.error; } catch {} quoteStopFrom(res.status, b); throw Object.assign(new Error(e || `HTTP ${res.status}`), { status: res.status }); }
   // A server that answered with plain JSON (an older revision) is read as JSON, never as an empty stream.
   if (!/text\/event-stream/i.test(res.headers.get('content-type') || '')) { const j = await res.json(); return j && Object.prototype.hasOwnProperty.call(j, 'data') ? j.data : j; }
   const reader = res.body.getReader(); const dec = new TextDecoder();
@@ -549,7 +565,19 @@ export async function apiSSE(p, body = {}) {
 // Submit a render to the job queue and (optionally) poll it to completion. Returns the UNWRAPPED worker result
 // (the {image|video, model} object) on success — the job's `result` is itself a {data} envelope, so we peel it.
 export async function submitJob(type, input, { label = '' } = {}) {
-  return apiPost('/api/jobs', { type, input, label }); // → publicJob {id, status, ...}
+  const st = toolCtx.getStore();
+  // A PRICE QUOTE (get_cost / expected_credits): the same submit as a dry run, priced by the job's own hold, then the call
+  // stops: nothing is queued. The server forces the dry run in quote mode too; this keeps the tally exact.
+  if (st?.quoteOnly) {
+    const d = await apiPost('/api/jobs', { type, input, label, dryRun: true });
+    const q = d?.quote || null;
+    (st.quoteLegs ||= []).push({ credits: q && Number(q.credits) > 0 ? Number(q.credits) : null, ...(q && Number(q.priceCredits) > 0 ? { priceCredits: Number(q.priceCredits) } : {}), basis: q && Number(q.credits) > 0 ? 'hold' : 'actual', label: label || q?.label || type, ...(q && q.refused ? { refused: String(q.refused) } : {}) });
+    throw quoteStopError();
+  }
+  // A TOOL CALL WITH AN idempotency_key: each job it queues carries a key derived from it (one per submit in the call), so a
+  // retry of a lost answer collapses onto the same job, and the claim learns the job id (pendingText names it).
+  const idem = st?.idemKey ? { idempotencyKey: `${st.idemJobKey}.${(st.idemJobs = (st.idemJobs || 0) + 1)}`, toolIdemKey: st.idemKey } : {};
+  return apiPost('/api/jobs', { type, input, label, ...idem }); // → publicJob {id, status, ...}
 }
 export async function getJob(id) { return apiGet(`/api/jobs/${encodeURIComponent(id)}`); } // → publicJob
 // ONE READ THAT A ROLLOVER CANNOT TURN INTO "IT DOES NOT EXIST" (2026-10-19). get_job is a single read, and its 404

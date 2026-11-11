@@ -166,6 +166,16 @@ export const chatgptExtAsked = (v) => /^(1|true|on|yes)$/i.test(String(Array.isA
 // All three keys, in one predicate so the transport and the check cannot disagree about what "on" means.
 export const chatgptExtOn = ({ env = process.env, asked, widgetHost } = {}) =>
   !!widgetHost && String(env?.[CHATGPT_EXT_ENV] ?? '').trim() === '1' && chatgptExtAsked(asked);
+// THE PUBLISHED APP CANNOT ASK (2026-11-11). The all-in-one plugin's mcp.json URL is plain /mcp, and OpenAI does not
+// let an update change a published plugin's MCP URL ("To change an existing MCP server's URL, contact support",
+// developers.openai.com/plugins/deploy/submission.md, read 2026-11-11), so `?ext=1` can never reach it. This second
+// env stands in for the ask on an UNSCOPED connection only (no `?tools=` app scope, so the three focused apps are
+// untouched). It is still only a REQUEST: chatgptExtOn above keeps its other two keys (a widget host and
+// HERMOSO_CHATGPT_EXT=1), so with this env unset the roster is byte-identical. Turning it on adds NEW tools, which
+// OpenAI's continuous review checks before any user sees them; no reviewed tool changes.
+export const CHATGPT_EXT_PUBLISHED_ENV = 'HERMOSO_CHATGPT_EXT_PUBLISHED';
+export const chatgptExtRequested = ({ env = process.env, asked, app } = {}) =>
+  chatgptExtAsked(asked) || (!app && String(env?.[CHATGPT_EXT_PUBLISHED_ENV] ?? '').trim() === '1');
 
 // THE SIDEBAR ICON. The spec asks for a 20x20 monochrome SVG in currentColor. This is the bloom (four petals and a
 // centre, public/brand/bloom-mono-black.svg) redrawn in currentColor at the spec's stroke weight. A data: URI, so it

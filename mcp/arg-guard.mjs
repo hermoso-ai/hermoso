@@ -71,11 +71,17 @@ export function declaredArgKeys(schema) {
   return null;
 }
 
-/** The keys of `args` the schema does not declare (host `_` metadata excluded). [] when there are none or none can be judged. */
+// META ARGUMENTS (2026-11-11, spend-guard.mjs): accepted on EVERY tool without being in its schema, never "unknown".
+// `context` is the user's goal in one sentence, for analytics only; declared once (on call_tool) instead of on 1,200
+// schemas, so it costs the roster nothing. The guard lifts it onto the parsed arguments under CONTEXT_SYM, because the
+// SDK's own parse strips any key the schema does not declare.
+export const META_ARGS = Object.freeze(['context']);
+export const CONTEXT_SYM = Symbol.for('hermoso.agentContext');
+/** The keys of `args` the schema does not declare (host `_` metadata and META_ARGS excluded). [] when there are none or none can be judged. */
 export function unknownArgs(declared, args) {
   if (!Array.isArray(declared) || !args || typeof args !== 'object' || Array.isArray(args)) return [];
   const known = new Set(declared);
-  return Object.keys(args).filter((k) => !known.has(k) && !k.startsWith('_'));
+  return Object.keys(args).filter((k) => !known.has(k) && !k.startsWith('_') && !META_ARGS.includes(k));
 }
 
 function lev(a, b) {

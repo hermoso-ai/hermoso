@@ -13,7 +13,7 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 // The UTF-16 well-formedness law — see wellFormedServer() below for why it is applied here, and
 // ./well-formed.mjs for why that specifier is the only one that can work in a byte-identical twin.
 import { wellFormedValue, wellFormedString } from './well-formed.mjs';
-import { UNKNOWN_ARGS_SYM, UNKNOWN_ARGS_DETAIL_SYM, UNKNOWN_ARGS_REFUSED_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote, unknownArgsDetail } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
+import { CONTEXT_SYM, UNKNOWN_ARGS_SYM, UNKNOWN_ARGS_DETAIL_SYM, UNKNOWN_ARGS_REFUSED_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote, unknownArgsDetail } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
 // WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
 // re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
 // twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
@@ -31,6 +31,8 @@ function metaAlternativeNote(name) { return metaAlternativeNoteOf(canonicalToolN
 // WHAT A TOOL COSTS AND WHETHER IT IS WORKING — the two facts find_tools puts on every row beside the parameters.
 // Same twin-safe specifier rule as the two imports above: no lib/, no repo, no relative escape.
 import { toolCostClass, costLabel, costKindOf, creditRangeFrom } from './tool-cost.mjs';
+// PRICE FIRST, BUY ONCE (2026-11-11): get_cost / expected_credits / idempotency_key on every paying tool, `context` on all.
+import { spendTool, SPEND_ARG_TEXT, CONTEXT_ARG_TEXT, takeSpendMeta, argsHash, jobKeyRoot, redactContext, contextHeaderValue, quoteFromLegs, quoteText as spendQuoteText, expectedMismatchText, priceMatches } from './spend-guard.mjs';
 import { recordToolOutcome, toolHealth, healthLabel, healthPenalty } from './tool-health.mjs';
 // THE NEXT STEP, NAMED. The prose we already write stays; this is the same advice as an addressable field.
 import { withHints, hintsOf, videoChoiceText, videoChoiceHints, neutralCreditsText, creditsLowHints, welcomeClaimHint, finishedRenderKind, withWidgetResultNote } from './tool-hints.mjs';
@@ -668,6 +670,104 @@ export async function withWeekPlanNote(tool, r, post = apiPost, brand = '') {
     return withHints(out, [...hintsOf(r), { do: 'ask the user the question in this reply', why: d.kind === 'finished' ? 'their planned week has gone out' : 'they just connected their first channel' }]);
   } catch { return r; }
 }
+// ── PRICE FIRST, BUY ONCE (2026-11-11, spend-guard.mjs) ─────────────────────────────────────────────────────────
+// Which registered tools take the three call controls: filled at the ONE registration seam (buildTools' proxy) from
+// the group marker each tool was written under, so the next tool inherits it with nothing to remember.
+const SPEND_TOOL_NAMES = new Set();
+const SPEND_ARGS = Object.freeze({
+  get_cost: z.boolean().optional().describe(SPEND_ARG_TEXT.get_cost),
+  expected_credits: z.number().optional().describe(SPEND_ARG_TEXT.expected_credits),
+  idempotency_key: z.string().optional().describe(SPEND_ARG_TEXT.idempotency_key), // ≤128 chars, checked in takeSpendMeta (a refusal, not a schema bound: fewer roster bytes)
+});
+export const withSpendArgs = (name, def, group) => {
+  if (!spendTool(name, group)) return def;
+  SPEND_TOOL_NAMES.add(name);
+  const s = def && def.inputSchema;
+  if (!s || typeof s !== 'object' || s instanceof z.ZodType) return def;
+  const add = Object.fromEntries(Object.entries(SPEND_ARGS).filter(([k]) => !Object.prototype.hasOwnProperty.call(s, k)));
+  return Object.keys(add).length ? { ...def, inputSchema: { ...s, ...add } } : def;
+};
+export const isSpendToolName = (n) => SPEND_TOOL_NAMES.has(String(n || ''));
+// get_instructions({topic:'paid-calls'}): the one place the controls are explained at length, so the schemas stay short.
+export const PAID_CALLS_GUIDE = [
+  'PAID CALLS: every tool that spends credits takes three optional controls. With none of them the call runs exactly as before.',
+  '• get_cost: true: the call runs its own pricing and stops where it would spend. Nothing runs, nothing is queued and nothing is charged; the answer is the price in credits (and, for a render, what it sets aside while it runs). A step billed at its actual cost (an AI writing step, an ad-data lookup) has no fixed price, and the answer says so.',
+  '• expected_credits: N: run the call only at that price. The server prices it again first; if the live price differs (or has no fixed figure) the call is refused, unbilled, with the new price. Ask the user before resending at a new price.',
+  '• idempotency_key: a string up to 128 characters you choose ONCE per purchase and resend UNCHANGED on every retry of it (a timeout, a dropped connection, an error you are unsure of). For 24 hours the same key returns the ORIGINAL result instead of running and billing again; while the first call still runs it names the job to poll; the same key with different arguments is refused. Never invent a new key for a retry: a new key buys it a second time. A first call that failed having charged nothing frees its key, so the corrected retry runs.',
+  'The flow: get_cost → tell the user the price → on their yes, call with expected_credits (the quoted number) and an idempotency_key.',
+  'call_tool also takes `revision` (from find_tools): a tool that changed since is refused unrun with its current parameters, so rebuild the arguments and call again.',
+  '`context` (any tool, or on call_tool): the user\'s underlying goal in one short sentence, for analytics only. Never names, contact details or URLs; it is redacted anyway and never used to generate anything.',
+].join('\n');
+// `context` from wherever it arrived (a declared arg, or the META carrier the arg guard / call_tool / v1 put on the
+// parsed arguments), removed from what the handler sees, redacted.
+export function takeAgentContext(args) {
+  if (!args || typeof args !== 'object') return { args, text: '' };
+  const raw = typeof args.context === 'string' ? args.context : (typeof args[CONTEXT_SYM] === 'string' ? args[CONTEXT_SYM] : '');
+  if (!raw) return { args, text: '' };
+  return { args: withoutArgKeys(args, ['context']), text: redactContext(raw) };
+}
+// A copy of the arguments without `keys`, keeping the non-enumerable markers (the arg guard's notes) the layers read.
+export function withoutArgKeys(args, keys) {
+  if (!args || typeof args !== 'object' || !keys.some((k) => Object.prototype.hasOwnProperty.call(args, k))) return args;
+  const c = { ...args };
+  for (const k of keys) delete c[k];
+  for (const sym of Object.getOwnPropertySymbols(args)) { try { Object.defineProperty(c, sym, { value: args[sym], enumerable: false, configurable: true }); } catch {} }
+  return c;
+}
+const spendRefusal = (text, data = {}) => ({ content: [{ type: 'text', text }], structuredContent: data, isError: true });
+// THE PRICE: the tool's own handler, every request it makes marked as a quote (client.mjs), each spending point stopped
+// and priced by the server. Whatever the handler returns after a stop is discarded; only the tally is the answer.
+async function quoteToolRun(tool, args, extra, st, fn) {
+  const qs = { tool, quoteOnly: true, quoteLegs: [], ...(st.account ? { account: st.account } : {}), ...(st.contextHeader ? { contextHeader: st.contextHeader } : {}) };
+  let r = null, err = null;
+  try { r = await toolCtx.run(qs, () => fn(args, extra)); } catch (e) { err = e; }
+  if (!qs.quoteLegs.length) {
+    if (err && !err._quoteStop) throw err; // refused before any spend (bad arguments, not connected…): the real call's own answer
+    if (r && r.isError) return { refusedResult: r };
+  }
+  return { quote: quoteFromLegs(qs.quoteLegs) };
+}
+export async function spendPreflight(tool, sm, args, extra, st, fn) {
+  if (sm.badKey) return spendRefusal('idempotency_key must be 1 to 128 printable characters. Nothing ran and nothing was charged.', { error: 'invalid_idempotency_key' });
+  if (Number.isNaN(sm.expected)) return spendRefusal('expected_credits must be a number (the credits get_cost quoted). Nothing ran and nothing was charged.', { error: 'invalid_expected_credits' });
+  if (!sm.getCost && sm.expected == null) return null;
+  const { quote: q, refusedResult } = await quoteToolRun(tool, args, extra, st, fn);
+  if (refusedResult) return refusedResult;
+  if (sm.getCost) return ok(spendQuoteText(tool, q), { getCost: true, credits: q.credits, ...(q.holdCredits ? { holdCredits: q.holdCredits } : {}), quote: q });
+  if (!priceMatches(sm.expected, q)) return spendRefusal(expectedMismatchText(tool, sm.expected, q), { error: 'price_changed', expected: sm.expected, credits: q.credits, quote: q });
+  return null; // the live price is the expected one: run it
+}
+// THE KEY: claimed on the server (scoped to the caller's account) before the handler runs; a replay, a still-running
+// first call or a reused key with other arguments answers here and nothing runs.
+export async function claimToolKey(tool, key, args, st) {
+  const hash = argsHash(tool, args);
+  let d;
+  try { d = await toolCtx.run({ tool }, () => apiPost('/api/tool-idempotency/claim', { tool, key, hash })); }
+  catch (e) { return { answer: spendRefusal(`The idempotency_key could not be checked (${String(e?.message || e).slice(0, 160)}), so nothing ran and nothing was charged. Call again with the same key.`, { error: 'idempotency_unavailable' }) }; }
+  if (d?.state === 'replay') {
+    const r = d.result && typeof d.result === 'object' ? d.result : { content: [] };
+    const content = [{ type: 'text', text: d.text }, ...(Array.isArray(r.content) ? r.content : [])];
+    return { answer: { ...r, content, structuredContent: { ...(r.structuredContent || {}), idempotentReplay: true, idempotencyKey: key } } };
+  }
+  if (d?.state === 'pending') return { answer: { content: [{ type: 'text', text: d.text }], structuredContent: { idempotencyPending: true, idempotencyKey: key, ...(Array.isArray(d.jobIds) && d.jobIds.length ? { jobId: d.jobIds[d.jobIds.length - 1], jobIds: d.jobIds } : {}) } } };
+  if (d?.state === 'conflict') return { answer: spendRefusal(d.text, { error: 'idempotency_key_reused', idempotencyKey: key }) };
+  if (d?.state !== 'claimed') return { answer: spendRefusal('The idempotency_key could not be claimed, so nothing ran and nothing was charged. Call again with the same key.', { error: 'idempotency_unavailable' }) };
+  st.idemKey = key; st.idemJobKey = jobKeyRoot(key, tool);
+  return { tool, key, hash };
+}
+// A finished call is SETTLED under its key (a retry gets this answer); a call that failed having charged nothing is
+// offered for RELEASE, and the server releases it only when no job it queued is still running or was charged (so the
+// corrected retry really runs). One that charged and then failed keeps its answer: the key bought it.
+export async function finishToolKey(claim, st, r, err) {
+  const charged = Math.round(((st.apiCharged || 0) + (st.jobCharged || 0)) * 10) / 10;
+  const failed = !!err || !!r?.isError;
+  try {
+    if (!failed || charged > 0) {
+      const result = r || { content: [{ type: 'text', text: `The first call with this key failed after it started: ${String(err?.message || err).slice(0, 400)}` }], isError: true };
+      await toolCtx.run({ tool: claim.tool }, () => apiPost('/api/tool-idempotency/settle', { tool: claim.tool, key: claim.key, hash: claim.hash, result, charged }));
+    } else await toolCtx.run({ tool: claim.tool }, () => apiPost('/api/tool-idempotency/release', { tool: claim.tool, key: claim.key, hash: claim.hash }));
+  } catch { /* bookkeeping: the answer below is the call's own, and an unsettled claim ages out as stale */ }
+}
 const wrap = (fn) => {
   // A NAMED closure, so registerTools' proxy can stamp the tool name onto the very function it registers and this
   // body can read it back. Reading a name off `fn` instead would be wrong: `fn` is the inner handler and the thing
@@ -690,7 +790,21 @@ const wrap = (fn) => {
       if (isRemote() && _tool !== 'upload_file') { const _lm = findClientLocalMedia(args, { served: null }); if (_lm) throw clientLocalMediaError(_lm); }
       const _st = { tool: _tool };
       if (typeof args?.account === 'string' && args.account.trim() && accountScopedTool(_tool)) _st.account = args.account.trim(); // see MULTI_ACCOUNT_CHANNELS
-      const r = await toolCtx.run(_st, () => fn(args, extra));
+      // PRICE FIRST, BUY ONCE (spend-guard.mjs): the call controls never reach the handler; with none of them sent this
+      // is exactly the call it always was. `context` is lifted off every tool's arguments and rides as a header.
+      { const _cx = takeAgentContext(args); args = _cx.args; if (_cx.text) _st.contextHeader = contextHeaderValue(_cx.text); }
+      const _sm = isSpendToolName(_tool) ? takeSpendMeta(args) : null;
+      if (_sm) {
+        args = withoutArgKeys(args, ['get_cost', 'expected_credits', 'idempotency_key']);
+        const _early = await spendPreflight(_tool, _sm, args, extra, _st, fn);
+        if (_early) { try { recordToolOutcome(_tool, { ok: !_early.isError, ms: Date.now() - _t0 }); } catch {} return _early; }
+      }
+      const _claim = _sm?.key ? await claimToolKey(_tool, _sm.key, args, _st) : null;
+      if (_claim?.answer) return _claim.answer;
+      let r;
+      try { r = await toolCtx.run(_st, () => fn(args, extra)); }
+      catch (e) { if (_claim) await finishToolKey(_claim, _st, null, e); throw e; }
+      if (_claim) await finishToolKey(_claim, _st, r, null);
       try { recordToolOutcome(_tool, { ok: !r?.isError, ms: Date.now() - _t0 }); } catch {}
       // the charge, once, on every paid reply that did not already say it (chargeNote above)
       try {
@@ -2219,6 +2333,16 @@ export const INBOX_SOURCES = [
   // conversation id in its PATH, so `:id` is filled in by reply_to_inbox_item; that route sends to the customer only
   // with confirm:true, which reply_to_inbox_item passes because its own contract is "the user already said yes".
   { source: 'intercom',        provider: 'intercom',        read: '/api/intercom/conversations',   reply: '/api/intercom/conversations/:id/reply', kind: 'support', label: 'Intercom conversation', query: { view: 'open' } },
+  // TIKTOK AND LINKEDIN COMMENTS, added 2026-11-11 (connector gap audit C1/G1). Both channels had working per-post
+  // readers and repliers (list/reply_to_tiktok_comment, list/reply_to_linkedin_comment) and NEITHER was a source here,
+  // so the inbox that calls itself unified could not see the busiest comment stream a TikTok-first brand has. Both
+  // vendors read comments PER POST, so each declares `needs` like YouTube does — with its OWN argument rather than
+  // sharing `videoId`, because a YouTube id handed to TikTok (or the reverse) would read as a broken channel.
+  // EACH REPLY NEEDS TWO IDS, so the native id carries both, joined by `|` (a character neither vendor's ids use):
+  // TikTok wants the post id beside the comment id, LinkedIn wants the post urn beside the comment urn
+  // (`parentComment`). normalizeInboxItem builds it from the read route's own answer; reply_to_inbox_item splits it.
+  { source: 'tiktok',          provider: 'tiktok_ads',      read: '/api/tiktok-account/comments',  reply: '/api/tiktok-account/comment-reply', kind: 'comment', label: 'TikTok comment',  needs: { arg: 'tiktokVideoId', param: 'videoId', from: 'list_tiktok_videos' } },
+  { source: 'linkedin',        provider: 'linkedin',        read: '/api/linkedin/comments',        reply: '/api/linkedin/comment',             kind: 'comment', label: 'LinkedIn comment', needs: { arg: 'linkedinPostUrn', param: 'postUrn', from: 'list_published_posts (the urn post_to_linkedin_page returned)' } },
 ];
 
 export const INBOX_SOURCE_NAMES = INBOX_SOURCES.map((s) => s.source);
@@ -2338,7 +2462,10 @@ export function normalizeInboxItem(source, row = {}) {
   // the author line, which is exactly the leak the Bluesky assertion already watches for. Skipping non-primitives
   // means a key can be listed once and read on whichever vendor actually spells it that way.
   const pick = (...keys) => { for (const k of keys) { const v = k.split('.').reduce((o, p) => (o == null ? o : o[p]), row); if (v != null && typeof v !== 'object' && String(v).trim()) return String(v).trim(); } return ''; };
-  const nativeId = pick('id', 'commentId', 'name', 'reviewId', 'tweet_id', 'messageId', 'eventId');
+  // A TWO-PART NATIVE ID for the sources whose reply needs the post too (TikTok, LinkedIn): `<post>|<comment>`.
+  // The read loop puts the envelope's post id on each row when the row lacks it, so both parts come from the vendor.
+  const twoPart = source === 'tiktok' ? [pick('videoId'), pick('commentId')] : source === 'linkedin' ? [pick('postUrn'), pick('commentUrn')] : null;
+  const nativeId = twoPart ? (twoPart[0] && twoPart[1] ? `${twoPart[0]}|${twoPart[1]}` : '') : pick('id', 'commentId', 'name', 'reviewId', 'tweet_id', 'messageId', 'eventId');
   // A REVIEW WITH A STAR RATING AND NO WORDS IS STILL AN ITEM. Google reviews are frequently rating-only, and
   // dropping them would hide the thing a brand most wants to answer. So text OR a rating is enough to keep it.
   // AND A DM WITH NO WORDS IS STILL AN ITEM (2026-10-25): a story mention, a shared reel, a photo or content Meta
@@ -2363,10 +2490,11 @@ export function normalizeInboxItem(source, row = {}) {
     // `from` and `sender*` are the DM spellings: Meta's conversation route hands back `from` as a display string
     // (its `from.name` sibling is the COMMENT shape) and Bluesky's hands back a handle, falling back to the DID
     // when the profile is not in the payload. A DID is ugly and it is still the truth about who wrote.
-    author: pick('author', 'from.name', 'username', 'reviewer.displayName', 'authorDisplayName', 'snippet.authorDisplayName', 'from', 'sender', 'senderHandle', 'senderDid', ...(source === 'intercom' ? ['customer.name', 'customer.email'] : [])) || 'unknown',
+    author: pick('author', 'from.name', 'username', 'reviewer.displayName', 'authorDisplayName', 'snippet.authorDisplayName', 'from', 'sender', 'senderHandle', 'senderDid', ...(source === 'intercom' ? ['customer.name', 'customer.email'] : []), ...(source === 'tiktok' ? ['displayName'] : []), ...(source === 'linkedin' ? ['actor'] : [])) || 'unknown',
     text: text || icText,
     rating: rating == null ? undefined : rating,
-    at: (source === 'intercom' ? pick('updatedAt', 'createdAt') : pick('created_time', 'createdAt', 'timestamp', 'createTime', 'created_utc', 'publishedAt', 'snippet.publishedAt', 'at', 'sentAt')) || '',
+    // TikTok stamps `create_time` in UNIX SECONDS, which Date.parse cannot read, so it is converted here rather than sorted last.
+    at: (source === 'tiktok' && Number(row.createTime) > 0 ? new Date(Number(row.createTime) * 1000).toISOString() : '') || (source === 'intercom' ? pick('updatedAt', 'createdAt') : pick('created_time', 'createdAt', 'timestamp', 'createTime', 'created_utc', 'publishedAt', 'snippet.publishedAt', 'at', 'sentAt')) || '',
     permalink: pick('permalink', 'permalink_url', 'url', 'link') || '',
     // A MESSAGE THE BRAND ITSELF SENT NEEDS NO REPLY. `inbound === false` / `fromMe === true` is the DM way of
     // saying what `reviewReply.comment` says on a review, and without it `unansweredOnly` would put the brand's
@@ -2374,7 +2502,9 @@ export function normalizeInboxItem(source, row = {}) {
     answered: row.answered === true || !!pick('reviewReply.comment') || row.hasReplied === true
       || row.inbound === false || row.fromMe === true
       // Intercom's waiting_since is set while the CUSTOMER waits on the team and cleared once a teammate replies.
-      || (source === 'intercom' && !row.waitingSince),
+      || (source === 'intercom' && !row.waitingSince)
+      // A comment the BRAND wrote is not waiting for the brand: TikTok marks its own as `owner`, LinkedIn's actor is the Page.
+      || (source === 'tiktok' && row.ownerComment === true) || (source === 'linkedin' && row.isOurs === true),
     canReply: !!src.reply,
     ...(row.messageId || row.eventId ? { messageId: String(row.messageId || row.eventId) } : {}),
     // WHAT THE DM IS (Meta's read routes, 2026-10-25): its kind, the sentence to read out, the media / story /
@@ -2780,6 +2910,7 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   create_reddit_ads_lead_form: 'Reddit retired onsite lead forms, so there is nothing it can create',
   save_location: 'a place is saved from the Hermoso app (the location picker) or the CLI; here list_elements reads the saved places and any @name in a prompt uses one',
   delete_location: 'a place is removed in the Hermoso app (the location picker) or the CLI; here list_elements reads the saved places',
+  get_instructions: 'every tool description on this host is already the full one (SLIM_TOOL_DESCRIPTIONS is never applied here), so there is nothing to fetch',
 });
 export const WITHHELD_FROM_WIDGET_HOSTS = new Set(['buy_credits', 'upgrade_plan', 'set_auto_reload', 'billing_status', 'connect_connector', 'x_post_insights', 'x_post_insights_historical', 'fetch_social_data', 'remix_static', ...WIDGET_MONEY_MOVEMENT_TOOLS, ...Object.keys(WIDGET_WITHHELD_WHY)]);
 // remix_static is clone_static under its old name (kept for callers that cached it); on ChatGPT two tools for one
@@ -3685,11 +3816,48 @@ export async function ingestFileParam(tool, args, upload = apiUploadUrl) {
   rest[target] = u;
   return rest;
 }
+// ── THE HEAVIEST DESCRIPTIONS, SLIMMED; THE FULL TEXT ON DEMAND (2026-11-11) ──────────────────────────────────────────
+// Sixteen of the longest descriptions in the default roster (measured on the registry stub, 2026-11-11) were each
+// ~1.7-2.2K characters, re-sent on every turn by every host that does not defer schemas. Each is replaced HERE, per host,
+// by a subset of its own sentences, copied verbatim (the gates that prevent real mistakes stay: who is in frame, the
+// publish confirm, what spends credits, the never-guess-the-account rules), plus a one-line pointer. The ORIGINAL text is
+// unchanged at its registration and served whole by get_instructions({topic:'<tool>'}), so no rule is lost, only moved.
+// NEVER ON A WIDGET HOST (ChatGPT): its descriptions are OpenAI's reviewed snapshot, and a pointer to a tool it does not
+// list is exactly the wording OpenAI's scan holds (chatgpt-tool-scan-holds), so ChatGPT keeps every full description.
+export const SLIM_TOOL_DESCRIPTIONS = Object.freeze({
+  make_thumbnail: 'Render a click-driving YOUTUBE / Shorts / Instagram THUMBNAIL or video cover through the full production pipeline (concept, casting, scene, render, tweaks, text), not a bare image prompt. Use it for any "thumbnail", "video cover" or MrBeast-style packaging ask INSTEAD of generate_image. Default: 4 variants at 1K (YouTube shows 1280x720 at most), each billed; 2K or 4K only when the user asks. dryRun:true prices it free. The headline overlay is free. WHO IS IN FRAME — never assume or silently substitute a stranger. A framework with a person and no face photo is refused (nothing charged): ask the user once — themselves (a face photo, identity-locked), a generated person (`castGenericPerson:true`), or a people-free framework. TEXT — default is a CLEAN render with the headline TYPESET over it (free, legible, correctly spelled): pass `headline`. `bakeText:true` only on an explicit ask for words painted INTO the image. ALWAYS check the returned postRenderCheck against the image before presenting it.',
+  schedule_post: 'Use this to schedule a social media post for later, on one channel or several. Costs no credits (X alone bills per call: hermoso_credits). FREE PLAN: 5 posts a month on up to 3 channels (a post counts once; UTC month); paid plans are unlimited. Over it the post is refused and nothing is queued: relay the refusal as written, never retry or split the post. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order, never just slide 1. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT (“just queue it”). Hermoso never guesses the account: Pinterest needs `boardId` (list_pinterest_boards), else refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages), else it goes to the person’s own profile. Several Facebook Pages need `pageId` (list_meta_pages): none named is refused at scheduling with the Pages listed, so ask the user which. Resolve these FIRST; let the user pick. Posts GO LIVE PUBLICLY by default.',
+  post_to_x: 'Use this when the user wants to post to X (Twitter) now. Publish to the user’s connected X (Twitter) account — a single post, a post with an image or video render attached, a reply to an existing post, or a whole THREAD (pass `thread` as an array and each part is posted as a reply to the one before). This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Text is NEVER truncated. Write altText whenever you attach a render. COSTS CREDITS at X’s per-post price, every post in a thread billed: a post that contains a link (any web address, and every quote post) is X’s link rate, far higher than one without (hermoso_credits gives both figures). When the user asks what a post will cost, call this with dryRun:true: it posts NOTHING and returns that exact post’s costCredits. THIS TOOL POSTS ORGANICALLY — it does not create an ad campaign. Needs X connected (Settings > Connectors > X).',
+  clip_video: 'Cut ONE long video into several RANKED, ready-to-post short clips (podcast, webinar, interview, talk, long ad cut -> Reels/Shorts/TikTok). Transcribes with timestamps, picks the strongest SELF-CONTAINED moments, then cuts + reframes each with ffmpeg — no video model renders anything, so it is fast and cheap. NOT supported: TikTok / Instagram / Facebook links, and anything age-restricted, private, members-only, geo-blocked or still LIVE — those fail fast with the real reason and are fully refunded, so ask for a direct file or an upload rather than retrying. SUBTITLES ARE BURNED IN BY DEFAULT (white sentence case timed by the spoken words, thin black outline, bottom safe band, no box) because short-form is watched on mute; captions:false for clean footage. TIMING IS APPROXIMATE (per-sentence, not word-level); never promise frame-accurate sync.',
+  post_to_bluesky: 'Use this when the user wants to post to Bluesky. Publishing costs no credits. Publish a post to Bluesky as the connected account. Text up to 300 characters — Bluesky ALSO caps a post at 3000 UTF-8 bytes, so an emoji-heavy post can be under 300 characters and still be refused; Hermoso checks both and says which limit. Bluesky requires a CONFIRMED EMAIL on the account before it will process any video — if it is unconfirmed you get a refusal saying so, and reconnecting will not help. Returns the post\'s public bsky.app URL. Connect at Settings > Connectors > Bluesky.',
+  make_explainer: 'AI HOST EPISODE: format \'host_episode\' = one presenter talking to camera, the camera changing every piece (frontal, three-quarter, close), the same host and set throughout, native voice, 16:9. It returns a 480p DRAFT; HD (720p) is a SEPARATE call with `fromDraft` (quote it with dryRun, run it only when the user asks). Otherwise: turn a TOPIC into a finished narrated explainer video, in one of TWO LANES (`lane`). BURNED ON-SCREEN TEXT IS OFF BY DEFAULT; the film ships clean unless the user asks; `captions:true` adds held key points and `subtitles:true` adds subtitles timed to the narration. Takes SEVERAL minutes — one image render per frame; NOT for a short product ad: use render_ad, generate_video or make_template_ad.',
+  multiply_ad: 'MULTIPLY a winning video ad into N variants: each gets a NEW character, outfit, location and/or objects while the cut, the camera motion, the pacing and the ORIGINAL AUDIO stay exactly as they were, and any burned-in captions are removed. ONE JOB PER VARIANT: get_job each until done; never describe a variant before its URL arrives. COST: quoteOnly:true returns the exact credits free: state that first. A paid planning read (planCredits) runs next, then each variant bills perVariantCredits. dryRun:true pays for that read; pass its `plan` back to render without paying again. No ad: list_winning_ads. New words: rewrite_ad_line.',
+  set_post_refill: 'Turn AUTOPILOT POSTING (autoposting, the posting refill) on, change it or pause it. Available on paid plans: on the Free plan switching it on is refused, so relay that and do not retry. PASS ONLY WHAT CHANGES. It always makes NEW posts (a fresh image, carousel or video for each) and never re-posts the Library. Ask the user for anything missing (goal, mode, channels) rather than guessing. `mode` picks what happens to each batch: "review" (the default) keeps the fresh posts as drafts until a human approves them (run_post_refill approve), "auto" schedules them straight away. `enabled:false` is the PAUSE — it removes the recurring job outright, and posts already queued are left alone (cancel those with cancel_scheduled).',
+  post_to_linkedin_page: 'Use this when the user wants to post to a LinkedIn company Page. Publishing costs no credits. This is a DIFFERENT thing from post_to_linkedin, which publishes to the person’s own profile: pick the one the user actually asked for and never substitute. organizationId comes from list_linkedin_pages; omit it only when the account administers exactly one Page. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. LinkedIn does NOT allow the image, video, captions or thumbnail of a published post to be swapped afterwards, so get all of that right first (the copy can still be edited with manage_linkedin_post).',
+  post_to_telegram: 'Use this when the user wants to post to a Telegram channel or group. Publishing costs no credits. Publish to a Telegram channel, group or chat as the brand\'s own bot. WHICH CHAT IS ALWAYS REQUIRED AND IS NEVER GUESSED: pass chatId as the public channel\'s @username (e.g. @yourchannel) or its numeric id (a group is negative; a supergroup or channel starts with -100). THE BOT MUST BE IN THE CHAT — an administrator with Post Messages for a channel, an unrestricted member for a group; if it is not, Telegram refuses and the error says to add it rather than to reconnect. 0 credits. Connect at Settings > Connectors > Telegram.',
+  generate_image: 'Use this when the user asks for an image ad, ad creative, product photo or social post graphic for their business or product, or an ANIMATED GIF (format gif) or SVG file (format svg). It renders a finished image on a real image model, on their saved brand (product photos, logo), and returns a URL ready to post. For a video, use render_ad. The saved brand’s product photo is used automatically (see get_brand / list_product_photos), so never ask the user to upload it again. MULTI-BRAND: hydration uses the SAVED brand; for a different brand (a fresh draft_brand) pass its own productImages/logo as refImages with useBrand:false, or the wrong product lands in the shot. model = a catalog id from hermoso_capabilities (omit for the default). Seconds. Spends credits.',
+  make_motion_film: 'MOTION GRAPHICS and ANIMATED VIDEO in one call: kinetic typography (animated text), a logo animation or intro, a product launch film, an animated social cut. Pick it for \'animated video\', \'motion graphics\', \'kinetic text\', \'text animation\', \'logo animation\', \'logo intro\', \'animated explainer\' asks. STEPS: without confirm it is a FREE quote that gives both prices (length, the music\'s tempo; the spec in structuredContent): say both; preview:true is a 1-credit contact sheet of the still version; confirm:true renders. Only the user\'s or the brand\'s words appear: never invent a claim, number or review.',
+  post_to_youtube: 'Use this when the user wants to upload a video or Short to YouTube. Publishing costs no credits. Publish a finished video to the brand’s connected YouTube channel. Pass a Hermoso render URL (or an upload_file url for a local/external file). PUBLISHES PUBLICLY BY DEFAULT: a plain "post this to YouTube" puts it ON the channel (confirm the title with the user, as for any publish) and notifies subscribers as YouTube does. Pass the privacy the user states instead: "unlisted" (link-only) or "private" (eyes-only). A video meant to run as a YouTube/Google AD should go up "unlisted" — private videos CANNOT be used as ads. Never choose unlisted for music on your own. Needs a connected YouTube channel (Settings > Connectors > YouTube).',
+  hook_variants: 'HOOK MULTIPLIER: give ONE finished video ad N NEW OPENING HOOKS, N complete versions to A/B test. Pass the video\'s FILE URL (a render, job result, list_library or upload_file). 1-5 versions, default 3. COST: quoteOnly:true returns the exact credits free: state that first. A paid planning read (planCredits) runs next, then each planned version bills like fix_beat for the hook\'s seconds. dryRun:true pays for that read; pass its `plan` back to render exactly those. Returns ONE JOB PER VERSION; call get_job on each until done, never describe a version before its URL arrives.',
+  post_x_article: 'Publish a long-form ARTICLE to the user’s connected X (Twitter) account — X’s own long-form format, which is a different thing from a long POST. THE HARD LIMIT TO PLAN AROUND: X allows only about 10 Article DRAFTS and 5 Article PUBLISHES per account per DAY, it publishes that cap nowhere, and it counts a FAILED attempt against them — so never iterate on an article by republishing it, and use `publish: false` to save a draft for the user to read in X’s own composer when they want to review before it goes out. This PUBLISHES immediately and PUBLICLY: show the user the full text and get an explicit yes first, because a published Article can NEVER be edited (X’s own rule — edit_x_post will refuse it) and the only remedy is to delete and republish, which costs another of the five. Costs credits (X bills per API request, and this is three of them). Needs X connected (Settings > Connectors > X).',
+  render_ad: 'Use this when the user asks for a video ad, Reel, TikTok ad, UGC video or commercial for their business or product It renders a finished ad on a real video model, on their brand (real product photos, brand voice), as an mp4 ready to post: timed shots, clean speech, text set in post, no music, captions or end card unless asked. Pass plan_ad’s full output as `creative` (plan_ad turns a one-line ask into the concept). Most models cap a clip at 15s and the longest at 30s: dryRun:true shows the act split free, before spending. The brand’s saved product photo (get_brand / list_product_photos) is the real product in the shots, with no upload needed. CAST A SAVED CREATOR with `creator` (list_creators) so the same person stars in every ad; otherwise each render casts a new face. The user’s own pictures (creative.inserts, or `inserts`) are laid in full screen at their seconds. An app shown on a device screen with no real screens to lay there returns needsAppScreens, nothing charged: ask, then pass screenChoice or screens. 1–3 min; poll get_job while it renders. Spends credits.',
+});
+export const slimPointer = (name) => ` Full rules: get_instructions({topic:'${name}'}).`;
+const _slimmed = new WeakMap();
+// The canonical (full) description of each slimmed tool, recorded the first time the def passes through, for get_instructions.
+export const FULL_TOOL_DESCRIPTIONS = new Map();
+function slimDef(name, def) {
+  if (!def || typeof def !== 'object' || !Object.prototype.hasOwnProperty.call(SLIM_TOOL_DESCRIPTIONS, name)) return def;
+  if (typeof def.description === 'string') FULL_TOOL_DESCRIPTIONS.set(name, def.description); // the latest canon's (a stdio and a hosted canon can differ)
+  let o = _slimmed.get(def);
+  if (!o) { o = { ...def, description: SLIM_TOOL_DESCRIPTIONS[name] + slimPointer(name) }; _slimmed.set(def, o); }
+  return o;
+}
 const _widgetDescribed = new WeakMap();
 export function defForHost(name, def, widgetHost) {
   if (widgetHost) def = withFileParam(name, def);
   explicitHints(def);
-  let out = widgetHost ? renamedForWidgetHost(stripOutputSchema(def), name) : stripOutputSchema(def);
+  let out = widgetHost ? renamedForWidgetHost(stripOutputSchema(def), name) : slimDef(name, stripOutputSchema(def));
   if (widgetHost && out && Object.prototype.hasOwnProperty.call(WIDGET_HOST_DESCRIPTIONS, name)) {
     let o = _widgetDescribed.get(out); if (!o) { o = { ...out, description: WIDGET_HOST_DESCRIPTIONS[name] }; _widgetDescribed.set(out, o); } out = o;
   }
@@ -4402,6 +4570,8 @@ export function guardUnknownArgs(server) {
       }
     }
     const out = await orig.call(this, tool, args, toolName);
+    // `context` (a META argument, arg-guard.mjs): the parse above stripped it unless the tool declares it; carried here.
+    if (out && typeof out === 'object' && typeof args?.context === 'string' && args.context && !Object.prototype.hasOwnProperty.call(out, 'context')) { try { Object.defineProperty(out, CONTEXT_SYM, { value: args.context, enumerable: false, configurable: true }); } catch {} }
     if (unknown.length && mode !== 'off' && out && typeof out === 'object') { try { Object.defineProperty(out, UNKNOWN_ARGS_SYM, { value: unknownArgsNote(toolName, unknown, declared), enumerable: false, configurable: true }); Object.defineProperty(out, UNKNOWN_ARGS_DETAIL_SYM, { value: unknownArgsDetail(unknown, declared), enumerable: false, configurable: true }); } catch {} }
     return out;
   };
@@ -4581,6 +4751,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         try { if (handler) handler._hermosoTool = name; } catch {}
         try { noteBrandKeys(name, def); } catch {} // which arg names the Hermoso brand, for the after-reply notes
         def = withAccountArg(name, def); // a multi-account channel's tool names WHICH account (see MULTI_ACCOUNT_CHANNELS)
+        def = withSpendArgs(name, def, group); // a paying tool takes get_cost / expected_credits / idempotency_key (spend-guard.mjs)
         // TITLE IS MIRRORED INTO `annotations`, and it is deliberately a DUPLICATE rather than a move.
         // The MCP spec ranks the TOP-LEVEL `title` above `annotations.title`, and the SDK emits it top-level, so
         // that is the correct home and it stays. But Anthropic's directory requirements list `title` AMONG the
@@ -4712,6 +4883,18 @@ function buildTools(rawServer, opts = {}, sink = null) {
         return [k, `${req.has(k) ? 'REQUIRED ' : ''}${t}${en}${v.description ? ' — ' + String(v.description).replace(/\s+/g, ' ').slice(0, 220) : ''}`.trim()];
       }));
     } catch { return {}; }
+  };
+  // A TOOL'S REVISION (2026-11-11): 10 hex characters of its description plus its argument schema, so a call_tool that
+  // names an older revision is refused with the current shape (see makeCallToolHandler). Cached per handle.
+  const _revCache = new WeakMap();
+  const toolRevision = (h) => {
+    if (!h) return '';
+    if (_revCache.has(h)) return _revCache.get(h);
+    let js = '';
+    try { js = h.inputSchema ? JSON.stringify(z.toJSONSchema(h.inputSchema)) : ''; } catch { js = ''; }
+    const rev = createHash('sha256').update(String(h.description || '') + '\n' + js).digest('hex').slice(0, 10);
+    try { _revCache.set(h, rev); } catch {}
+    return rev;
   };
   // ── QUERY SELF-HEAL (2026-09-03) ───────────────────────────────────────────────────────────────────────────────
   // The ledger's `no_match` dead ends are what users ask for IN THEIR OWN WORDS, and the first real one was a user
@@ -5014,8 +5197,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _oaFit = _otherAppRows.filter((r) => r.score >= _bestHere && (r.full || r.score >= 1.4 * _bestHere)).sort((x, y) => y.score - x.score);
     const _homes = [...new Set(_oaFit.filter((r) => r.score >= 0.8 * _oaFit[0]?.score).slice(0, 3).map((r) => APP_HOME_TEXT(r.name, ctx)))];
     if (!related && !quiet && !_homes.length && /[a-z0-9]{2}/i.test(String(q || ''))) reportDeadEnd('no_match', 'find_tools', `find_tools found nothing for: ${(q || '(empty)').replace(/["'`]/g, '').slice(0, 80)}${g ? ' in group ' + g : ''}`, { query: q, group: g });
-    for (const r of top) r.params = compactParams(ctx.handleOf[r.name]);
-    const lines = top.map((r) => `• ${r.name} [${r.group}${g && r.group !== g ? `, outside the ${g} group` : ''}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] —${r.description}\n    cost: ${r.cost.label} · health: ${healthLabel(r.health)}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
+    for (const r of top) { r.params = compactParams(ctx.handleOf[r.name]); r.revision = toolRevision(ctx.handleOf[r.name]); }
+    const lines = top.map((r) => `• ${r.name} [${r.group}${g && r.group !== g ? `, outside the ${g} group` : ''}${r.inRoster ? '' : ', not in your list'}${r.hold ? ', ' + r.hold : ''}] —${r.description}\n    cost: ${r.cost.label} · health: ${healthLabel(r.health)} · revision: ${r.revision}\n    params: ${Object.entries(r.params).map(([k, v]) => `${k}: ${v}`).join(' | ') || '(none)'}`);
     const looser = top.length > total ? top.length - total : 0;
     const text = related
       ? `${total} tool(s) match${q ? ` "${q}"` : ''}${g ? ` in ${g}` : ''}${total > cap ? ` (showing the top ${cap} — narrow the query)` : ''}${looser ? `${total ? '; the other' : ''} ${looser} shown ${looser === 1 ? 'is a looser match' : 'are looser matches'}, ranked below` : ''}. ${ctx.widgetHost ? 'Call any of them directly by name; one marked not_connected needs that connector first.' : 'Run any of them with call_tool({name, args}) — a tool that is "not in your list" still runs; one marked not_connected needs that connector first.'} COST is what the call spends (free means free on every plan); HEALTH is what this server has seen recently — "no recent calls" means we have not seen it run, not that it is broken, and a row marked FAILING or held is ranked last rather than hidden.\n${lines.join('\n')}`
@@ -5079,9 +5262,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const bare = raw.replace(/^mcp__[A-Za-z0-9_-]*?__(?=[a-z])/, '').replace(/^hermoso[:./]/i, '');
     return handleOf[bare] ? bare : raw;
   };
-  const makeCallToolHandler = (ctx) => async ({ name, args } = {}, extra) => {
+  const makeCallToolHandler = (ctx) => async ({ name, args, revision, context } = {}, extra) => {
     const n = bareToolName(String(name || '').trim(), ctx.handleOf);
     const h = ctx.handleOf[n];
+    // `context` may ride on call_tool itself or inside args (a META argument, arg-guard.mjs); it is never an argument of the tool.
+    const _ctxText = typeof context === 'string' && context ? context : (args && typeof args === 'object' && typeof args.context === 'string' ? args.context : '');
+    if (args && typeof args === 'object' && Object.prototype.hasOwnProperty.call(args, 'context')) { args = { ...args }; delete args.context; }
     // A RETIRED NAME ANSWERS THE SAME SENTENCE HERE AS IT DOES ON A DIRECT CALL (2026-09-17). LEGACY_TOOL_NAMES was
     // built for `tools/call` from a host holding an old snapshot and wired ONLY into installHeldToolCalls — so an
     // agent that reached the same name through call_tool got "does not exist" plus the six wrong suggestions above,
@@ -5117,6 +5303,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // A WIDGET HOST RUNS ONLY WHAT IT LISTS (2026-09-30, OpenAI's generic-executor rule — see EXECUTOR_TOOLS). Reached
     // only by a host still holding call_tool from an older scan; a tool this session does not list is refused by name.
     if (ctx.widgetHost && h.enabled === false) return { content: [{ type: 'text', text: `${n} is not in your Hermoso tool list on this host, so call_tool will not run it. Use the tools in your list.` }], isError: true };
+    // A STALE SCHEMA IS REFUSED, NOT HALF-RUN (2026-11-11, a describe → invoke revision handshake):
+    // find_tools gives each tool a `revision`; a call that names an old one gets the CURRENT parameters and revision
+    // back and runs nothing, so the agent re-reads instead of sending arguments the tool no longer means.
+    if (typeof revision === 'string' && revision.trim() && revision.trim() !== toolRevision(h)) {
+      const params = Object.entries(compactParams(h)).map(([k, v]) => `${k}: ${v}`).join(' | ');
+      return { content: [{ type: 'text', text: `${n} has changed since revision ${revision.trim()}: nothing was run. Current revision ${toolRevision(h)}. Current params: ${params || '(none)'}. Rebuild the arguments from these and call again with revision "${toolRevision(h)}".` }], structuredContent: { error: 'stale_revision', name: n, revision: toolRevision(h), params: compactParams(h) }, isError: true };
+    }
     let input = args && typeof args === 'object' ? args : {};
     const extraKeys = undeclaredArgs(h, input);
     if (extraKeys.length) {
@@ -5136,8 +5329,23 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // rename in the dependency shows up here as a loud "not a function" rather than a silently skipped call.
     const fn = h.handler || h.callback;
     if (typeof fn !== 'function') return { content: [{ type: 'text', text: `${n} is registered but has no runnable handler on this server build.` }], isError: true };
+    if (_ctxText && input && typeof input === 'object') { try { Object.defineProperty(input, CONTEXT_SYM, { value: _ctxText, enumerable: false, configurable: true }); } catch {} }
     return h.inputSchema ? await fn(input, extra) : await fn(extra);
   };
+  // THE FULL TEXT, ON DEMAND (2026-11-11): see SLIM_TOOL_DESCRIPTIONS. A slimmed tool's whole original description, any
+  // tool's canonical description, or the guide to the paid-call controls. Free, read-only, no request leaves this process.
+  server.registerTool('get_instructions', {
+    title: 'Read a tool\'s full instructions',
+    description: 'Return the FULL instructions for a Hermoso tool whose description ends "Full rules: get_instructions(…)", or for any tool by name, or topic "paid-calls" for get_cost, expected_credits, idempotency_key, revision and context. Read it before a call that depends on rules the short description leaves out. Free.',
+    inputSchema: { topic: z.string().describe('a tool name (e.g. make_thumbnail) or "paid-calls"') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const t = String(a.topic || '').trim().replace(/^mcp__[A-Za-z0-9_-]*?__(?=[a-z])/, '');
+    if (/^(paid[-_ ]?calls?|get_cost|expected_credits|idempotency(_key)?|costs?|revision|context)$/i.test(t)) return ok(PAID_CALLS_GUIDE, { topic: 'paid-calls' });
+    const full = FULL_TOOL_DESCRIPTIONS.get(t) || (Array.isArray(TOOL_CANON) ? TOOL_CANON.find((e) => e.name === t)?.def?.description : '') || '';
+    if (full) return ok(`${t} — full instructions:\n${full}`, { topic: t, slimmed: Object.prototype.hasOwnProperty.call(SLIM_TOOL_DESCRIPTIONS, t) });
+    return { content: [{ type: 'text', text: `No instructions for "${t}". Pass a tool name exactly as listed (find_tools finds one) or "paid-calls". Slimmed tools: ${Object.keys(SLIM_TOOL_DESCRIPTIONS).join(', ')}.` }], isError: true };
+  }));
   server.registerTool('find_tools', {
     title: 'Find a Hermoso tool by name or task',
     description: 'Search EVERY Hermoso tool — your starting list is deliberately short, and everything else in the product is here — by name, task or group. Each row gives the tool\'s PARAMETERS in one line, its CREDIT COST (free means free on every plan; a tool that runs a model quotes the live per-model figure) and its recent HEALTH on this server (failure rate and typical duration, or "no recent calls", which means unseen and not broken). Use it the moment the user asks for something you do not see a tool for (a campaign, an ad set, a lead form, a click-to-WhatsApp ad, a report, keywords, audiences): a tool missing from your list is NEVER proof the feature is missing. Then run the tool with call_tool. A tool that is failing or needs a connector this workspace has not made is ranked last and marked, never hidden — pass onlyHealthy:true if you want those left out. Free, read-only.',
@@ -5155,6 +5363,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       name: z.string().describe('the tool name exactly as find_tools returned it, e.g. create_meta_lead_form'),
       args: z.record(z.any()).optional().describe('the tool\'s arguments as an object, exactly as its own schema takes them'),
+      revision: z.string().optional().describe('the revision find_tools gave for this tool; a changed tool is refused unrun, with its current params'),
+      context: z.string().optional().describe(CONTEXT_ARG_TEXT + '; every tool also accepts it directly'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, sessionBound(makeCallToolHandler, ctx));
@@ -5683,7 +5893,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_inbox', {
     title: 'One inbox for comments, replies, mentions, reviews and DMs',
     description: "EVERYTHING PEOPLE SAID TO THIS BRAND, across every connected channel, in one list: Facebook and "
-      + "Instagram comments, Threads replies and mentions, YouTube comments, Google Business reviews, "
+      + "Instagram comments, Threads replies and mentions, YouTube comments, TikTok comments, LinkedIn Page comments, Google Business reviews, "
       + "Bluesky replies and mentions, and X mentions — plus DIRECT MESSAGES on Meta (Messenger and Instagram "
       + "Direct), Instagram, Bluesky, X and Telegram. Support tickets too: the open conversations in the brand's Intercom inbox. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
@@ -5691,12 +5901,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
       + "Messenger and Instagram DMs need no argument; each has a messageKind (text, story_mention, story_reply, share, "
       + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky and X DMs need "
-      + "conversationId (list_bluesky_convos / list_x_dms). FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
+      + "conversationId (list_bluesky_convos / list_x_dms). TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
       + "and every other source only re-reads what the per-channel tools already read.",
     inputSchema: {
       sources: z.array(z.string()).optional().describe(`Limit to these sources: ${INBOX_SOURCE_NAMES.join(', ')}. Omit for every connected channel.`),
       postId: z.string().optional().describe('Restrict Facebook/Instagram to one post or media id (Meta reads comments per post).'),
       videoId: z.string().optional().describe('Restrict YouTube to one video.'),
+      tiktokVideoId: z.string().optional().describe('Include the comments on this TikTok post (its id, from list_tiktok_videos). TikTok reads comments per post.'),
+      linkedinPostUrn: z.string().optional().describe('Include the comments on this LinkedIn Page post (its urn, as post_to_linkedin_page returned). LinkedIn reads comments per post.'),
       // DECLARED BECAUSE A SOURCE ASKS FOR IT. Before 2026-08-25 `meta_dm` declared `needs.arg: conversationId`
       // and this schema did not carry it, so the note telling a caller to pass it named an argument the tool
       // refused — and the handler quietly read `postId` for anything that was not `videoId`. The check now
@@ -5712,7 +5924,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       notes: z.array(z.string()).describe('sources that could not be read, and why — never silently dropped'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-  }, wrap(async ({ sources, postId, videoId, conversationId, pageId, limit, unansweredOnly }) => {
+  }, wrap(async ({ sources, postId, videoId, tiktokVideoId, linkedinPostUrn, conversationId, pageId, limit, unansweredOnly }) => {
     const want = Array.isArray(sources) && sources.length
       ? sources.map((x) => String(x).trim().toLowerCase())
       : INBOX_SOURCE_NAMES;
@@ -5724,9 +5936,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // argument that was not `videoId` collapsed onto `postId` — which meant a source declaring a THIRD argument
     // silently read the wrong caller's id and could never be satisfied by the note it printed. A map cannot do
     // that: an arg this tool does not accept is simply absent, and absent is what produces the helpful note.
-    const argValues = { postId, videoId, conversationId };
+    const argValues = { postId, videoId, tiktokVideoId, linkedinPostUrn, conversationId };
     for (const src of INBOX_SOURCES.filter((x) => want.includes(x.source))) {
-      const q = { limit: per };
+      const q = src.source === 'tiktok' ? { maxCount: per } : { limit: per }; // TikTok's page size is max_count
       if (src.needs) {
         // These sources read PER POST (or, for a DM, per conversation), so without an id there is nothing to ask
         // for. Saying so is very different from letting the vendor 400 and filing it as "could not be read": one
@@ -5760,7 +5972,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // conversation, so folding them would collapse every chat into one — keying the fold on `kind` would do
         // exactly that. The trigger is therefore the field the fold consumes, not the category.
         const use = src.dmReplyId ? foldConversationRows(rows, d?.[src.dmReplyId]) : rows;
-        for (const r of use) { const it = normalizeInboxItem(src.source, src.dmReplyId && typeof d?.conversationId === 'string' && !r.conversationId ? { ...r, conversationId: d.conversationId } : r); if (it) items.push(it); }
+        // The per-post comment sources carry their post on the ENVELOPE; it is the first half of their two-part id.
+        const withPost = (r) => (src.source === 'tiktok' && !r.videoId && d?.videoId ? { ...r, videoId: d.videoId } : src.source === 'linkedin' && !r.postUrn && d?.postUrn ? { ...r, postUrn: d.postUrn } : r);
+        for (const r0 of use) { const r = withPost(r0); const it = normalizeInboxItem(src.source, src.dmReplyId && typeof d?.conversationId === 'string' && !r.conversationId ? { ...r, conversationId: d.conversationId } : r); if (it) items.push(it); }
       } catch (e) {
         // AN ID THAT DOES NOT RESOLVE ENDS THE CALL AS AN ERROR (2026-10-26, customer report: an unconnected pageId
         // answered "0 items"). The caller named a Page; reading nothing from it is not a quiet inbox, it is a wrong id.
@@ -5803,6 +6017,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     else if (t.source === 'threads' || t.source === 'threads_mention') payload.replyToId = t.nativeId;
     else if (t.source === 'youtube') payload.parentId = t.nativeId;
     else if (t.source === 'google_business') payload.reviewName = t.nativeId;
+    // TWO-PART ids (see normalizeInboxItem): TikTok wants the post beside the comment, LinkedIn the post urn beside the
+    // comment urn it replies under. A malformed id is refused here rather than sent with half of what the vendor needs.
+    else if (t.source === 'tiktok' || t.source === 'linkedin') {
+      const cut = String(t.nativeId).lastIndexOf('|');
+      const post = cut > 0 ? t.nativeId.slice(0, cut) : '', cmt = cut > 0 ? t.nativeId.slice(cut + 1) : '';
+      if (!post || !cmt) return { content: [{ type: 'text', text: `"${String(id).slice(0, 80)}" is missing its post or comment half. Re-read list_inbox for a current id.` }], isError: true };
+      if (t.source === 'tiktok') { payload.videoId = post; payload.commentId = cmt; } else { payload.postUrn = post; payload.parentComment = cmt; }
+    }
     // Bluesky's native id is the post's AT-URI. The route resolves the two strong refs (root AND parent, each a
     // uri+cid pair) from it with one getPosts call — carrying four values on the wire would mean four ways for a
     // caller to detach a reply from its thread, and the cid is a content hash nobody but the server can keep fresh.
@@ -9918,7 +10140,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     locales: z.array(z.number()).optional().describe('Meta language ids from find_meta_audiences(type:"adlocale")'),
     publisherPlatforms: z.array(z.enum(['facebook', 'instagram', 'audience_network', 'messenger', 'threads'])).optional().describe('placement platforms: facebook, instagram, audience_network, messenger or threads'),
     facebookPositions: z.array(z.string()).optional().describe('feed, story, facebook_reels, marketplace, search, instream_video, right_hand_column, …'),
-    instagramPositions: z.array(z.string()).optional().describe('stream, story, reels, explore, profile_feed, …'),
+    instagramPositions: z.array(z.string()).optional().describe('stream, story, reels, profile_feed, profile_reels, ig_search, explore_home. "explore_home" needs "stream" beside it; the old "explore" placement is retired by Meta and refused'),
     messengerPositions: z.array(z.string()).optional().describe('Messenger placements, e.g. sponsored_messages'), audienceNetworkPositions: z.array(z.string()).optional().describe('Audience Network placement names, as Meta defines them'),
     threadsPositions: z.array(z.enum(['threads_stream'])).optional().describe('Threads feed. Threads needs "instagram" in publisherPlatforms too (and "stream" if you list instagramPositions); the ad runs under the Threads profile linked to the Instagram account, found automatically'),
     devicePlatforms: z.array(z.enum(['mobile', 'desktop'])).optional().describe('mobile or desktop'), userOs: z.array(z.enum(['iOS', 'Android'])).optional().describe('iOS or Android'),
@@ -23552,6 +23774,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       frames: z.number().int().min(2).max(16).optional().describe('format gif only: frames in the loop, 2 to 16 (default 9)'),
       frameMs: z.number().int().min(20).max(2000).optional().describe('format gif only: milliseconds per frame, 20 to 2000, rounded to 10 (default 200; 9 frames x 200 = a 1.8 s loop)'),
       complexity: z.enum(['low', 'medium', 'high']).optional().describe('only with model gpt-image-2.6 / 2.6-flare (the default refuses it), when the user asks: how much it plans before drawing (default high). No separate charge'),
+      background: z.enum(['transparent']).optional().describe('transparent = a PNG with NO background (alpha channel): a cut-out product, icon, sticker or logo to place on anything. Runs on gpt-image-2.6 (default) or gpt-image-2.6-flare, drawn from the prompt alone (no refImages, mask or markup; the saved brand\'s photos stay off it), priced like a plain image of that size. The reply\'s `background` says what the file really has. To cut the background out of a photo the user already has, point them to the Remove background tool in the Hermoso app'),
       imageSize: z.string().optional().describe('pixel-size preset for models that support it: 1K/2K, and 4K on the models hermoso_capabilities lists with a 4K imageSize price (a 4K ask on any other model is refused, free) — omit for the default'),
       fixLabel: z.boolean().optional().describe('default true: when the saved brand\'s product photo rides in this render, the product\'s label on the finished image is READ and compared with the photo, and re-printed from the photo at close range ONLY if it came out wrong (a label that is already right costs only the check; a re-print costs more, and dryRun:true returns the up-to price). The reply says whether the label was checked, fixed or left as rendered (`labelPass`). Pass false when the user wants the packaging left exactly as generated: nothing is checked or re-printed.'),
       logoPlacement: z.enum(['auto', 'overlay', 'in_scene', 'none']).optional().describe('overlay: real logo file laid flat. in_scene: the scene leaves a blank patch on the object and the real file is printed onto it (perspective, light). Never drawn by the model. auto (default): from the prompt'),
@@ -23563,13 +23786,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
       productCheck: z.any().optional().describe('present when the brand\'s product photo was attached: {verdict: match|mismatch|unclear|absent, wordmark, issues[]} — the render compared against the real product photo. mismatch/absent means the product in the image is NOT the brand\'s product; say so, never present it as done'),
       logoPlaced: z.any().optional().describe('how the real logo file went on: {applied, mode: in_scene|fix|overlay, object?, fellBack?, notALogo?, asked?}; notALogo = the saved logo is a photo, so nothing was added (ask for the logo file only when the logo was asked for; asked:false means nobody asked for one, so say nothing about it)'),
       format: z.string().optional().describe('gif or svg when one was asked for'),
+      background: z.string().optional().describe('transparent or opaque, read off the delivered file, when a transparent background was asked for'),
       preview: z.string().optional().describe('an SVG\'s PNG preview, for places that cannot show a vector'),
       frames: z.number().optional().describe('an animated GIF\'s frame count, read off the delivered file'),
       labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your ad image…', 'Ad image ready'),
-  }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel, logoPlacement, job, format, frames, frameMs, complexity }) => {
+  }, wrap(async ({ prompt, refImages, useBrand, aspectRatio, model, imageSize, raw, mask, fixLabel, logoPlacement, job, format, frames, frameMs, complexity, background }) => {
     const refs = refImages?.length ? (await Promise.all(refImages.map(toRef))).filter(Boolean) : undefined;
     const maskRef = mask ? await toRef(mask) : undefined; // a local mask file travels the same way a local reference does
     // `raw === true` only — a raw render is opt-in and must be stated properly, so a truthy stray value never
@@ -23579,8 +23803,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // NO MODEL AND NO JOB = AN IMAGE AD (2026-11-03): this tool is what an agent reaches for to make an image ad, so an
     // unnamed render takes the static_ad job's engine (judged in the job-engine registry) rather than the catalog's
     // general first row. A masked edit keeps its own rule (the server routes a mask to the one engine that takes it).
-    if (!job && !model && !maskRef && format !== 'gif' && format !== 'svg') job = 'static_ad'; // a GIF / SVG picks its own engine (GPT Image 2.6)
-    const _imgBody = { prompt, refImages: refs, useBrand: maskRef ? false : useBrand !== false, aspectRatio, model, imageSize, ...(maskRef ? { mask: maskRef } : {}), ...(raw === true ? { raw: true } : {}), ...(fixLabel === false ? { fixLabel: false } : {}), ...(logoPlacement ? { logoPlacement } : {}), ...(job ? { job } : {}), ...(format ? { format } : {}), ...(frames != null ? { frames } : {}), ...(frameMs != null ? { frameMs } : {}), ...(complexity ? { complexity } : {}) }; // fixLabel:false only when stated: the label check is ON by default. job: the image job's engine when no model is named (server: lib/image-job-engines.mjs)
+    if (!job && !model && !maskRef && format !== 'gif' && format !== 'svg' && background !== 'transparent') job = 'static_ad'; // a GIF / SVG / transparent PNG picks its own engine (GPT Image 2.6)
+    const _imgBody = { prompt, refImages: refs, useBrand: maskRef ? false : useBrand !== false, aspectRatio, model, imageSize, ...(maskRef ? { mask: maskRef } : {}), ...(raw === true ? { raw: true } : {}), ...(fixLabel === false ? { fixLabel: false } : {}), ...(logoPlacement ? { logoPlacement } : {}), ...(job ? { job } : {}), ...(format ? { format } : {}), ...(frames != null ? { frames } : {}), ...(frameMs != null ? { frameMs } : {}), ...(complexity ? { complexity } : {}), ...(background ? { background } : {}) }; // fixLabel:false only when stated: the label check is ON by default. job: the image job's engine when no model is named (server: lib/image-job-engines.mjs)
     // A CALLER WITH A WAIT BUDGET GETS A QUEUED JOB (2026-09-21, R321). Only `/v1/tools/generate_image?wait=` sets
     // `waitMs`; every other caller renders inside the request exactly as before. The server does the same brand-photo
     // handling either way, then queues the ordinary image job; awaitRenderJob waits what the caller allowed and hands
@@ -27289,8 +27513,9 @@ function memoryNoteVerdict(text) {
     return ok(`${d?.message || ''}${items ? '\n' + items : ''}${kept ? '\n' + kept : ''}${nf}`, { deleted: !!d?.deleted, needsConfirm: !!d?.needsConfirm });
   }));
 
-  // THE PUBLIC GALLERY (2026-11-10, lib/gallery.mjs): opt-in per item, reviewed by the Hermoso team before it is public,
-  // withdrawable at once. Held on demand (ON_DEMAND_TOOLS); each reply names the next tool.
+  // THE PUBLIC GALLERY (v2 2026-11-11, lib/gallery.mjs): one Publish action, no form. Title, format and niche are read off
+  // the creation; the brand name shows. Reviewed by the Hermoso team before it is public, unpublished at once. Held on
+  // demand (ON_DEMAND_TOOLS); each reply names the next tool.
   const galleryUrlOf = async (id, url) => {
     if (url) return String(url);
     const m = /^L(\d+)$/i.exec(String(id || '').trim()); if (!m) return '';
@@ -27298,25 +27523,20 @@ function memoryNoteVerdict(text) {
     return (Array.isArray(list) ? list.filter((x) => x && x.url) : [])[Number(m[1])]?.url || '';
   };
   server.registerTool('submit_to_gallery', {
-    title: 'Submit to the Hermoso gallery',
-    description: "Submit ONE image or video this brand made in Hermoso to the public Hermoso gallery. Only when the user asks. They must confirm they have the rights to it, including any people and logos in it (rights:true); their brand name shows only with showBrand:true. Nothing is public until the Hermoso team approves it. preview:true returns what would be public and saves nothing. Free.",
+    title: 'Publish to the Hermoso gallery',
+    description: "Publish ONE image or video this brand made in Hermoso to the public Hermoso gallery, only when the user asks for that item. Nothing to fill in: the title, format and niche come from how it was made, and the brand name is shown. Nothing is public until the Hermoso team approves it; withdraw_from_gallery unpublishes it any time. Uploaded files are refused. preview:true returns what would be public and saves nothing. Free.",
     inputSchema: {
       id: z.string().optional().describe('Library id (L0…) from list_library'),
       url: z.string().optional().describe('or the file link'),
-      rights: z.boolean().optional().describe('true only after the user confirmed the rights'),
-      showBrand: z.boolean().optional().describe('show the brand name (default false)'),
-      title: z.string().optional(),
-      format: z.enum(['ugc_video', 'product_video', 'talking_avatar', 'motion', 'product_photo', 'static_ad', 'carousel', 'other']).optional(),
-      niche: z.enum(['beauty', 'fashion', 'food', 'fitness', 'health', 'tech', 'home', 'pets', 'finance', 'education', 'travel', 'local', 'other']).optional(),
       preview: z.boolean().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, wrap(async ({ id, url, rights, showBrand, title, format, niche, preview }) => {
+  }, wrap(async ({ id, url, preview }) => {
     const u = await galleryUrlOf(id, url);
-    if (!u) return ok('Pass a Library id (L0… from list_library) or the file link. Nothing was submitted.', { submitted: false });
-    const d = await apiPost('/api/gallery/submit', { url: u, rights: rights === true, showBrand: showBrand === true, ...(title ? { title } : {}), ...(format ? { format } : {}), ...(niche ? { niche } : {}), ...(preview ? { preview: true } : {}) });
-    if (d?.preview) { const p = d.public || {}; return ok(`Would be public:\n  Title: ${p.title}\n  Brand: ${p.brandShown || 'hidden'}\n${(p.recipe || []).map((r) => `  ${r.k}: ${r.v}`).join('\n')}\nNothing was saved. Ask the user to confirm the rights, then call again with rights:true.`, { preview: true, public: p }); }
-    return ok(`${d?.message || 'Submitted.'} Status: ${d?.status}${d?.publicUrl ? ` · ${d.publicUrl}` : ''} (id ${d?.id}). list_gallery_submissions shows it; withdraw_from_gallery takes it down.`, { submitted: true, id: d?.id, status: d?.status, publicUrl: d?.publicUrl || null });
+    if (!u) return ok('Pass a Library id (L0… from list_library) or the file link. Nothing was published.', { submitted: false });
+    const d = await apiPost('/api/gallery/submit', { url: u, via: 'agent', ...(preview ? { preview: true } : {}) });
+    if (d?.preview) { const p = d.public || {}; return ok(`Would be public:\n  Title: ${p.title}\n  Brand: ${p.brandShown || 'none on the brand'}\n${(p.recipe || []).map((r) => `  ${r.k}: ${r.v}`).join('\n')}\nNothing was saved. Call again without preview to publish it.`, { preview: true, public: p }); }
+    return ok(`${d?.message || 'Sent for review.'} Status: ${d?.status}${d?.publicUrl ? ` · ${d.publicUrl}` : ''} (id ${d?.id}). list_gallery_submissions shows it; withdraw_from_gallery unpublishes it.`, { submitted: true, id: d?.id, status: d?.status, publicUrl: d?.publicUrl || null });
   }));
   server.registerTool('list_gallery_submissions', {
     title: 'List gallery submissions',
@@ -27327,17 +27547,17 @@ function memoryNoteVerdict(text) {
     const d = await apiGet('/api/gallery/mine', all ? { all: '1' } : {});
     const rows = d?.submissions || [];
     if (!rows.length) return ok('Nothing from this brand is in the gallery or waiting for review. submit_to_gallery adds one when the user asks.', { submissions: [] });
-    return ok(rows.map((r) => `${r.id} · ${r.status}${r.publicUrl ? ` · ${r.publicUrl}` : ''} · ${r.title} · ${abs(r.url)}`).join('\n') + '\nwithdraw_from_gallery takes one down.', { submissions: rows });
+    return ok(rows.map((r) => `${r.id} · ${r.status}${r.publicUrl ? ` · ${r.publicUrl}` : ''} · ${r.title} · ${abs(r.url)}`).join('\n') + '\nwithdraw_from_gallery unpublishes one.', { submissions: rows });
   }));
   server.registerTool('withdraw_from_gallery', {
     title: 'Withdraw from the gallery',
-    description: 'Take a submission off the public Hermoso gallery at once (its page stops working), whether pending or approved. Pass the submission id from list_gallery_submissions, or the file link. Free.',
+    description: 'Unpublish: take an item off the public Hermoso gallery at once (its page stops working), whether pending or approved. Pass the submission id from list_gallery_submissions, or the file link. Free.',
     inputSchema: { id: z.string().optional().describe('submission id (g_…)'), url: z.string().optional().describe('or the file link') },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ id, url }) => {
     if (!id && !url) return ok('Pass the submission id (list_gallery_submissions) or the file link. Nothing was changed.', { withdrawn: [] });
     const d = await apiPost('/api/gallery/withdraw', { ...(id ? { id } : {}), ...(url ? { url } : {}) });
-    return ok(d?.message || 'Withdrawn.', { withdrawn: d?.withdrawn || [] });
+    return ok(d?.message || 'Unpublished.', { withdrawn: d?.withdrawn || [] });
   }));
 
   server.registerTool('fetch_asset', {
