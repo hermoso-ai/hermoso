@@ -67,7 +67,7 @@ Ask in your own words. The agent picks the tools:
 - "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
 - "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
-**1195 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1198 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -304,7 +304,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1195 tools cover
+### What the 1198 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic

@@ -3061,7 +3061,7 @@ export const widgetHostHides = (name, widgetHost) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'list_winning_ads']); // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it
+export const ON_DEMAND_TOOLS = new Set(['submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'list_winning_ads']); // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -6671,7 +6671,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       verifiedAccount: z.boolean().optional().describe('true = verified accounts only'), hasPortfolio: z.boolean().optional().describe('true = creators with a portfolio only'), hasPublicContactEmail: z.boolean().optional().describe('true = creators with a public contact email only'),
       featuredInPaidAds: z.boolean().optional().describe('true = creators featured in paid ads only'), excludeMessagedCreators: z.boolean().optional().describe('true = hide creators this brand has already messaged'),
       limit: z.number().optional().describe('1 to 50'), cursor: z.string().optional().describe('next page: the cursor value from the previous reply'),
-      pageId: z.string().optional().describe("Facebook Page id linked to the brand's Instagram; from list_meta_pages"), account: z.string().optional().describe('direct Instagram account (@handle or id) when several are connected; from list_connector_accounts'),
+      pageId: z.string().optional().describe("Facebook Page id linked to the brand's Instagram; from list_meta_pages; if omitted, the Page that can search is used"), account: z.string().optional().describe('direct Instagram account (@handle or id) when several are connected; from list_connector_accounts'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
@@ -27287,6 +27287,57 @@ function memoryNoteVerdict(text) {
     const kept = (d?.files || []).filter((f) => !f.fileDeleted).map((f) => `  ${f.id}: ${f.note}`).join('\n');
     const nf = (d?.notFound || []).length ? `\nNot in this brand's Library: ${d.notFound.join(', ')}` : '';
     return ok(`${d?.message || ''}${items ? '\n' + items : ''}${kept ? '\n' + kept : ''}${nf}`, { deleted: !!d?.deleted, needsConfirm: !!d?.needsConfirm });
+  }));
+
+  // THE PUBLIC GALLERY (2026-11-10, lib/gallery.mjs): opt-in per item, reviewed by the Hermoso team before it is public,
+  // withdrawable at once. Held on demand (ON_DEMAND_TOOLS); each reply names the next tool.
+  const galleryUrlOf = async (id, url) => {
+    if (url) return String(url);
+    const m = /^L(\d+)$/i.exec(String(id || '').trim()); if (!m) return '';
+    const list = await readStore('heist.assets.v1');
+    return (Array.isArray(list) ? list.filter((x) => x && x.url) : [])[Number(m[1])]?.url || '';
+  };
+  server.registerTool('submit_to_gallery', {
+    title: 'Submit to the Hermoso gallery',
+    description: "Submit ONE image or video this brand made in Hermoso to the public Hermoso gallery. Only when the user asks. They must confirm they have the rights to it, including any people and logos in it (rights:true); their brand name shows only with showBrand:true. Nothing is public until the Hermoso team approves it. preview:true returns what would be public and saves nothing. Free.",
+    inputSchema: {
+      id: z.string().optional().describe('Library id (L0…) from list_library'),
+      url: z.string().optional().describe('or the file link'),
+      rights: z.boolean().optional().describe('true only after the user confirmed the rights'),
+      showBrand: z.boolean().optional().describe('show the brand name (default false)'),
+      title: z.string().optional(),
+      format: z.enum(['ugc_video', 'product_video', 'talking_avatar', 'motion', 'product_photo', 'static_ad', 'carousel', 'other']).optional(),
+      niche: z.enum(['beauty', 'fashion', 'food', 'fitness', 'health', 'tech', 'home', 'pets', 'finance', 'education', 'travel', 'local', 'other']).optional(),
+      preview: z.boolean().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ id, url, rights, showBrand, title, format, niche, preview }) => {
+    const u = await galleryUrlOf(id, url);
+    if (!u) return ok('Pass a Library id (L0… from list_library) or the file link. Nothing was submitted.', { submitted: false });
+    const d = await apiPost('/api/gallery/submit', { url: u, rights: rights === true, showBrand: showBrand === true, ...(title ? { title } : {}), ...(format ? { format } : {}), ...(niche ? { niche } : {}), ...(preview ? { preview: true } : {}) });
+    if (d?.preview) { const p = d.public || {}; return ok(`Would be public:\n  Title: ${p.title}\n  Brand: ${p.brandShown || 'hidden'}\n${(p.recipe || []).map((r) => `  ${r.k}: ${r.v}`).join('\n')}\nNothing was saved. Ask the user to confirm the rights, then call again with rights:true.`, { preview: true, public: p }); }
+    return ok(`${d?.message || 'Submitted.'} Status: ${d?.status}${d?.publicUrl ? ` · ${d.publicUrl}` : ''} (id ${d?.id}). list_gallery_submissions shows it; withdraw_from_gallery takes it down.`, { submitted: true, id: d?.id, status: d?.status, publicUrl: d?.publicUrl || null });
+  }));
+  server.registerTool('list_gallery_submissions', {
+    title: 'List gallery submissions',
+    description: "This brand's submissions to the public Hermoso gallery: each one's id, status (pending review, approved with its public page, rejected) and file. Free.",
+    inputSchema: { all: z.boolean().optional().describe('include withdrawn ones') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async ({ all }) => {
+    const d = await apiGet('/api/gallery/mine', all ? { all: '1' } : {});
+    const rows = d?.submissions || [];
+    if (!rows.length) return ok('Nothing from this brand is in the gallery or waiting for review. submit_to_gallery adds one when the user asks.', { submissions: [] });
+    return ok(rows.map((r) => `${r.id} · ${r.status}${r.publicUrl ? ` · ${r.publicUrl}` : ''} · ${r.title} · ${abs(r.url)}`).join('\n') + '\nwithdraw_from_gallery takes one down.', { submissions: rows });
+  }));
+  server.registerTool('withdraw_from_gallery', {
+    title: 'Withdraw from the gallery',
+    description: 'Take a submission off the public Hermoso gallery at once (its page stops working), whether pending or approved. Pass the submission id from list_gallery_submissions, or the file link. Free.',
+    inputSchema: { id: z.string().optional().describe('submission id (g_…)'), url: z.string().optional().describe('or the file link') },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ id, url }) => {
+    if (!id && !url) return ok('Pass the submission id (list_gallery_submissions) or the file link. Nothing was changed.', { withdrawn: [] });
+    const d = await apiPost('/api/gallery/withdraw', { ...(id ? { id } : {}), ...(url ? { url } : {}) });
+    return ok(d?.message || 'Withdrawn.', { withdrawn: d?.withdrawn || [] });
   }));
 
   server.registerTool('fetch_asset', {
