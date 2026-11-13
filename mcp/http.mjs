@@ -177,7 +177,36 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   const rpcCancelledIdKeys = (body) => (Array.isArray(body) ? body : [body]).filter((m) => m && m.method === 'notifications/cancelled' && m.params && m.params.requestId !== undefined && m.params.requestId !== null).map((m) => rpcIdKey(m.params.requestId));
   const GET_STREAM_MAX = Math.max(1, Number(process.env.MCP_GET_STREAM_MAX || 64));
   let openGetStreams = 0;
-  const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS });
+  // ── A STOPPING OR RETIRED INSTANCE HANDS ITS STREAMS BACK, IT DOES NOT LET THEM BREAK (2026-11-13) ──────────────────
+  // On SIGTERM, and when this revision has lost the traffic (server.js, lib/pump-handover.mjs retiredVerdict), every open
+  // GET stream is ended CLEANLY with an SSE `retry:` field first, the spec's own reconnection hint, so the client reopens
+  // it at once and the reopen lands on the serving revision (a stream cut by process exit reads as a network error, and
+  // some clients back off). While draining, a new GET stream is answered 503 + Retry-After (it is optional, the spec lets a
+  // server refuse it) and POSTs are untouched: a tool call in flight is never cut by this, and a session id this instance
+  // holds keeps working until its own idle expiry. A session the client reopens elsewhere gets the 404 → re-initialize
+  // path below, which is how every deploy already ends a session. undrain() reverses it (a rollback brings the traffic back).
+  const openGetResponses = new Set();
+  let draining = '';
+  const RECONNECT_HINT_MS = 1000;
+  function drain(why = 'draining') {
+    if (!draining) console.error(`[mcp-remote] draining (${why}): ending ${openGetResponses.size} notification stream(s) with a reconnect hint`);
+    draining = String(why || 'draining');
+    let ended = 0;
+    for (const res of [...openGetResponses]) {
+      try {
+        if (!res.writableEnded && !res.destroyed) {
+          // An open 200 on a GET here IS the SDK's SSE stream (its headers go through writeHead, so getHeader cannot see them;
+          // any refusal it answers is JSON and already ended). Events are written whole, so a field between them is valid SSE.
+          if (res.headersSent && res.statusCode === 200) res.write(`retry: ${RECONNECT_HINT_MS}\n\n`);
+          res.end(); ended++;
+        }
+      } catch {}
+      openGetResponses.delete(res);
+    }
+    return { ended, sessions: sessions.size };
+  }
+  function undrain() { if (draining) console.error(`[mcp-remote] no longer draining (was: ${draining})`); draining = ''; }
+  const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS, draining: draining || null });
   // THE 401 IS THE ONLY THING A STUCK AGENT EVER READS, so it carries the way out (2026-09-04). It used to be the
   // three words `Authentication required`, and that is exactly how far a real user got: a Cursor-based client
   // (Grok Bot) registered fine, listed all 160 tools, and then every call 401'd while its own consent card never
@@ -488,13 +517,18 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
     // The stream cap, BEFORE any session work: a burst of reconnects must be refused at the door, not after allocating.
     if (req.method === 'GET') {
+      if (draining) {
+        res.set('Retry-After', '1');
+        return res.status(503).json({ error: 'This instance is handing over to a new one: reopen the stream (it reconnects to the new instance). Tool calls (POST) are unaffected.' });
+      }
       if (openGetStreams >= GET_STREAM_MAX) {
         res.set('Retry-After', '30');
         return res.status(503).json({ error: `This instance already holds ${openGetStreams} open notification streams — retry the stream in 30s. Tool calls (POST) are unaffected.` });
       }
       openGetStreams++;
       const t = setTimeout(() => { try { res.end(); } catch {} }, GET_STREAM_MS); if (t && typeof t.unref === 'function') t.unref();
-      res.once('close', () => { openGetStreams = Math.max(0, openGetStreams - 1); clearTimeout(t); });
+      openGetResponses.add(res);
+      res.once('close', () => { openGetStreams = Math.max(0, openGetStreams - 1); clearTimeout(t); openGetResponses.delete(res); });
     }
 
     const sid = req.headers['mcp-session-id'];
@@ -686,6 +720,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);
   app.locals.mcpStreamStats = streamStats; // for the check and the admin read; the return value stays `true` as every caller asserts
+  app.locals.mcpDrain = drain; app.locals.mcpUndrain = undrain; // server.js: on SIGTERM and while this revision is retired
   return true;
 }
 

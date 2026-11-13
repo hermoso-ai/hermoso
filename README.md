@@ -22,28 +22,52 @@ campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a 
 - **Posting.** Post and schedule to your own social channels, then read each post's results. The channel list
   is under *What it connects to* below.
 
-## Set up in Claude, ChatGPT or Cursor
+## Set up in ChatGPT, Claude, Grok Bot or a coding agent
+
+**ChatGPT:** one click. **[Add to ChatGPT](https://chatgpt.com/plugins/plugin_asdk_app_6abde87d08048191b2ee7cda76721749)** opens Hermoso in ChatGPT's app
+directory. Press Add and sign in with your Hermoso account, no key needed. Then, in a new ChatGPT chat:
+`@Hermoso set up my brand from my website and make my first ad`
 
 **Claude (claude.ai, Claude Desktop):** one click. **[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Hermoso&connectorUrl=https%3A%2F%2Fapp.hermoso.ai%2Fmcp%3Fsrc%3Dreadme)**
 opens Claude's *Add custom connector* dialog with Hermoso already filled in. Press Continue, choose **Sign in now**
 if Claude asks about Authentication, then sign in with your Hermoso account.
 
-By hand: Customize → Connectors → Add → *Add custom connector*, paste the URL below, choose **Sign in now** under
+**Grok Bot:** it cannot open the Hermoso sign-in page, so it signs in with a key. **[Create a key](https://app.hermoso.ai/?tab=api-keys)**,
+then **[add the Hermoso Marketing Bot](https://x.ai/bot/THQqogUKuhn1whWU0hrmb)** and paste the key when it asks.
+
+**Claude Code, Cursor, Codex and other coding agents:** one prompt. Paste this into a new chat and the agent installs
+Hermoso, opens the sign-in and makes your first ad (this is Claude Code's install line; each agent's own is in the app
+under MCP & CLI, and in [Install in one command](#install-in-one-command)):
+
+```text
+Set up Hermoso for me. It is an AI marketing tool (hermoso.ai) that researches ads, makes image and video ads and posts to my social accounts.
+1. Install it by running: claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
+   If the new skills only load after a restart, tell me, and use npx meanwhile.
+2. Sign me in by running: npx -y hermoso auth login
+   It opens my browser and I will approve the connection there. If this machine has no browser, ask me for a Hermoso API key and run npx -y hermoso auth login --token <key> instead.
+3. Once I am signed in, do one small task to show it works: tell me my Hermoso credit balance and which profile is saved.
+4. Then set up my brand from my website and make my first ad.
+```
+
+<details>
+<summary>Set it up by hand</summary>
+
+**Claude by hand:** Customize → Connectors → Add → *Add custom connector*, paste the URL below, choose **Sign in now** under
 Authentication, then Add and Connect. On a Team or Enterprise plan an Owner adds it for the organization first.
 
 ```text
 https://app.hermoso.ai/mcp
 ```
 
+**ChatGPT by hand:** turn on Developer mode once (Settings → Security and login), then Plugins → ＋ → Create app →
+Create MCP App. Paste `https://app.hermoso.ai/mcp` as the Server URL, choose OAuth, leave the advanced OAuth
+settings empty, and press Create.
+
 **Claude Code:**
 
 ```bash
 claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
 ```
-
-**ChatGPT:** turn on Developer mode once (Settings → Security and login), then Plugins → ＋ → Create app →
-Create MCP App. Paste `https://app.hermoso.ai/mcp` as the Server URL, choose OAuth, leave the advanced OAuth
-settings empty, and press Create.
 
 **Cursor:**
 
@@ -56,6 +80,8 @@ Or add the MCP server to Cursor's `mcp.json` after `npx -y hermoso auth login`:
 ```json
 { "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso", "mcp"] } } }
 ```
+
+</details>
 
 Codex, Gemini CLI, Grok and the rest are in [Install in one command](#install-in-one-command).
 
@@ -71,7 +97,7 @@ Ask in your own words. The agent picks the tools:
 - "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
 - "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
-**1231 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1233 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -311,7 +337,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1231 tools cover
+### What the 1233 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
