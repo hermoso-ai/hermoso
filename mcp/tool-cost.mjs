@@ -46,6 +46,9 @@ export const CREATE_FREE_READS = Object.freeze([
   // The product catalog (2026-10-06): a store read or write, and a product page read with curl and parsed locally (no
   // model; POST /api/products answers creditsUsed: 0). Each says "Free" / "0 credits" in its own description.
   'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product',
+  // Story films (2026-11-11): the catalog, one card's recipe and starting a run (the outline) are store reads and writes;
+  // each says "Free" in its own description. advance_story_film runs the paid stages and stays a model tool.
+  'list_story_cards', 'get_story_card', 'start_story_film',
 ]);
 // Reads inside `research`. `find_competitors` says "0 credits" in its own description (it is the discovery model,
 // billed to us, not a paid ad-data call); the watch tools only write and read a stored preference — the weekly

@@ -24,8 +24,12 @@ campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a 
 
 ## Set up in Claude, ChatGPT or Cursor
 
-**Claude (claude.ai, Claude Desktop):** Customize → Connectors → Add → *Add custom connector*, paste the URL
-below, choose **Sign in now** under Authentication, then Add and Connect.
+**Claude (claude.ai, Claude Desktop):** one click. **[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Hermoso&connectorUrl=https%3A%2F%2Fapp.hermoso.ai%2Fmcp%3Fsrc%3Dreadme)**
+opens Claude's *Add custom connector* dialog with Hermoso already filled in. Press Continue, choose **Sign in now**
+if Claude asks about Authentication, then sign in with your Hermoso account.
+
+By hand: Customize → Connectors → Add → *Add custom connector*, paste the URL below, choose **Sign in now** under
+Authentication, then Add and Connect. On a Team or Enterprise plan an Owner adds it for the organization first.
 
 ```text
 https://app.hermoso.ai/mcp
@@ -67,7 +71,7 @@ Ask in your own words. The agent picks the tools:
 - "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
 - "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
-**1199 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1231 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -242,7 +246,10 @@ the routes.
 
 ## Instant: the hosted Claude.ai connector
 
-Paste **`https://app.hermoso.ai/mcp?src=readme`** into Claude → Customize → Connectors → Add → *Add custom connector*,
+**[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Hermoso&connectorUrl=https%3A%2F%2Fapp.hermoso.ai%2Fmcp%3Fsrc%3Dreadme)** opens Claude with the connector already filled in: press Continue, sign in with your
+Hermoso account, and you are done.
+
+By hand: paste **`https://app.hermoso.ai/mcp?src=readme`** into Claude → Customize → Connectors → Add → *Add custom connector*,
 press Continue, choose **Sign in now** under Authentication (Claude's detector pre-selects "No sign-in" because our
 discovery handshake is open, and with that your first request comes back "Authentication required"), press Add and
 Connect, approve with your Hermoso account, and you are done: the full toolset with your saved brand context, billed to your plan.
@@ -304,7 +311,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1199 tools cover
+### What the 1231 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic

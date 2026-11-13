@@ -16,7 +16,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups, widgetHostScope, withFirstRunLine, firstRunOffers } from './tools.mjs';
 import { chatgptExtRequested } from './openai-extensions.mjs';
 import { mcpCtx, connectedProviders } from './client.mjs';
 
@@ -408,6 +408,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // A widget host (ChatGPT, whose plugin scanner reads this anonymous roster) gets its own instructions — see
     // MCP_INSTRUCTIONS_WIDGET. The SAME host decision as the roster below, so the two can never disagree.
     const widgetHost = isWidgetHost(clientInfoOf(req.body), req);
+    scope = widgetHostScope(scope, widgetHost); // the URL our app handed ChatGPT users is the plain URL there (LEGACY_WIDGET_CONNECT_GROUPS)
     const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
     // as on the session path because OpenAI's own tool scanner reads this anonymous discovery roster — gating
@@ -457,7 +458,18 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // doing anything"). Only a tools/call is somebody doing something, so only a tools/call stamps. Auth itself is
     // unchanged in both branches: this decides bookkeeping, never access.
     const didWork = methodsOf(req.body).includes('tools/call');
-    const user = token ? await verifyBearer(token, { stamp: didWork }).catch(() => null) : null;
+    // A KEY STORE THAT COULD NOT BE READ IS NOT A REJECTED KEY (2026-11-11). During the database restart at 22:41 a
+    // Codex session's valid hmk_ key was answered with the 401 challenge, logged as "bearer token rejected"; a 401 tells
+    // the client to drop its credential and sign in again, for an outage of a few seconds. verifyBearer answers null for
+    // an unknown or revoked key and THROWS when the lookup itself fails, so a throw is a 503 the client retries. Same rule
+    // as the refresh path in mcp/oauth.mjs ("a failed read is not a revocation").
+    let storeDown = false;
+    const user = token ? await verifyBearer(token, { stamp: didWork }).catch(() => { storeDown = true; return null; }) : null;
+    if (storeDown) {
+      connectEvent(req, { step: 'mcp-auth', ok: false, reason: 'key store read failed', detail: `${token.slice(0, 4)}… (${token.length} chars) on ${req.method}` });
+      res.setHeader('Retry-After', '5');
+      return res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Hermoso is briefly unavailable. Please retry in a few seconds; your connection is fine.' }, id: null });
+    }
     if (!user && token) connectEvent(req, { step: 'mcp-auth', ok: false, reason: 'bearer token rejected', detail: `${token.slice(0, 4)}… (${token.length} chars) on ${req.method}` });
     if (!user) {
       // No valid bearer: allow ONLY the read-only discovery handshake (POST), fail CLOSED for everything else.
@@ -520,8 +532,12 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // Only an `initialize` may mint a session. Anything else naming no session at all is the SDK's own 400 —
       // answered here so we never build a server whose only job would be to reject the request.
       if (!init) return needSession(res);
-      const scope = scopeFor(req, res);
-      if (scope === false) return; // unknown group — already answered 400, and nothing was allocated
+      const scope0 = scopeFor(req, res);
+      if (scope0 === false) return; // unknown group — already answered 400, and nothing was allocated
+      // On ChatGPT the URL our own app handed out (seven named groups, no ads or analytics) is read as the plain URL:
+      // a widget host has no executor, so a group it does not list is a feature it does not have. See
+      // LEGACY_WIDGET_CONNECT_GROUPS in tools.mjs. The same host decision as `widgetHost` below.
+      const scope = widgetHostScope(scope0, isWidgetHost(entry?.client || clientInfoOf(req.body), req));
       sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
       // ── WHAT THIS CALLER CAN ACTUALLY USE (2026-08-26) ────────────────────────────────────────────────────────
       // One free store read, on the ONE request per session that mints the roster, so the tools we advertise are
@@ -539,7 +555,20 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
       const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req);
-      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
+      // AN ACCOUNT THAT HAS MADE NOTHING YET, ON EVERY HOST (2026-10-19 for ChatGPT; every host since 2026-11-12). Read once
+      // per session, bounded so a slow read can never hold the connect: null (no guidance) is the answer to every failure.
+      // Read BEFORE the server is built, because it changes what initialize says: a fresh account's `instructions` open with
+      // one line saying how to start (withFirstRunLine in tools.mjs), which a host reads before the user types anything. The
+      // first successful tool reply of the session then carries the same next ask (firstRunNote), for hosts that ignore
+      // instructions. `offer` is what this session's own instructions can name, so a focused app or the directory cage is
+      // never told to offer a tool it does not list.
+      const baseInstructions = instructionsFor(scope, { widgetHost });
+      let firstRun = null;
+      if (typeof firstRunFor === 'function' && user.accountId) {
+        try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
+      }
+      firstRun = firstRun && typeof firstRun === 'object' && firstRun.fresh === true ? { ...firstRun, offer: firstRunOffers(baseInstructions) } : null;
+      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: withFirstRunLine(baseInstructions, firstRun) });
       registerTools(server, { only: scope.groups, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, hosted: true, ext: extAsked(req, scope), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
@@ -550,15 +579,9 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
       // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
-      // A CHATGPT ACCOUNT THAT HAS MADE NOTHING YET (2026-10-19). Read once per session, ChatGPT hosts only, bounded so a slow
-      // read can never hold the connect: null (no note) is the answer to every failure. The first successful tool reply of
-      // the session then offers one concrete next ask (firstRunNote in tools.mjs). Most ChatGPT signups since the
-      // 10-15 publish had made nothing, and a live "make me a video ad" chat on a connected account never called us.
-      let firstRun = null;
-      if (widgetHost && typeof firstRunFor === 'function' && user.accountId) {
-        try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
-      }
-      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun: firstRun && typeof firstRun === 'object' ? firstRun : null };
+      // The fresh-account read (firstRun) happened above, before the server was built; the session keeps it so the first
+      // successful tool reply can carry the same next ask.
+      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun };
       if (typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
       // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
       // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
