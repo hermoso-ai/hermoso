@@ -599,7 +599,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       const baseInstructions = instructionsFor(scope, { widgetHost });
       let firstRun = null;
       if (typeof firstRunFor === 'function' && user.accountId) {
-        try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
+        try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId, brandKey: user.brandKey === true })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
       }
       firstRun = firstRun && typeof firstRun === 'object' && firstRun.fresh === true ? { ...firstRun, offer: firstRunOffers(baseInstructions) } : null;
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: withFirstRunLine(baseInstructions, firstRun) });

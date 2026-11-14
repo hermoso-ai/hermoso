@@ -6650,6 +6650,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // ZERO BRANDS IS A REAL STATE (2026-10-01): the owner may delete their last brand. Say so, and say how to make one,
     // rather than printing an empty list under a heading that implies there should be something in it.
     if (!(d.brands || []).length) return ok(`This account has no profiles yet (the last one was deleted, or none was ever made). create_brand makes one, and draft_brand fills it in from a website, a description or a social handle.${sharedTxt}`, { ...d, sharedWorkspaces: shared });
+    // A KEY LIMITED TO ONE BRAND lists that brand and says so (the server filters the roster and sends the sentence),
+    // so an agent does not go looking for profiles it was never given.
+    if (d.limited && d.limited.sentence) return ok(`${d.limited.sentence} It is the only profile this connection can see or act on:\n${lines}${sharedTxt}`, { ...d, sharedWorkspaces: shared });
     return ok(`Profiles on this account:\n${lines}\n\nSwitch with use_brand.${sharedTxt}`, { ...d, sharedWorkspaces: shared });
   }));
 
@@ -6699,6 +6702,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return ok(`Now acting on ${sh.name || 'that shared profile'}${sh.ownerName ? ` (${sh.ownerName}'s profile)` : ''} (profile ${sh.profileUuid}). Its brand details, memory, Library and CONNECTED ACCOUNTS are what every tool sees from here; switch back by naming one of your own profiles.`,
         { ok: true, brand: { id: sh.profileUuid, name: sh.name || null, ownerAccountId: sh.ownerAccountId, role: sh.role || 'member' }, shared: true });
     }
+    // A key limited to one brand cannot switch, and says so in the server's own sentence instead of "no such profile".
+    if (d.limited && d.limited.sentence) return { content: [{ type: 'text', text: `${d.limited.sentence} It cannot switch to another brand.` }], isError: true };
     const own = (d.brands || []).map(b => `• ${b.name} (id: ${b.id})`).join('\n');
     const shr = shared.map(w => `• ${w.name || 'Shared profile'}${w.ownerName ? ` — ${w.ownerName}` : ''} (id: ${w.profileUuid}, shared with you)`).join('\n');
     if (!own && !shr) return { content: [{ type: 'text', text: `No profile matching "${brand}": this account has no profiles yet. create_brand makes one.` }], isError: true }; // zero brands is a real state (2026-10-01)
