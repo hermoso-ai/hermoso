@@ -108,17 +108,35 @@ export function quoteFromLegs(legs) {
   const sum = L.reduce((t, l) => t + (Number(l.priceCredits) > 0 ? Number(l.priceCredits) : Number(l.credits) > 0 ? Number(l.credits) : 0), 0);
   const hold = L.reduce((t, l) => t + (Number(l.credits) > 0 ? Number(l.credits) : 0), 0);
   if (!L.length) return { credits: 0, legs: L, free: true };
-  return { credits: unpriced.length ? null : round1(sum), ...(hold > sum + 1e-9 && !unpriced.length ? { holdCredits: round1(hold) } : {}), ...(L.some((l) => l.basis === 'estimate') ? { estimate: true } : {}), legs: L, ...(unpriced.length ? { unpriced: unpriced.map((l) => l.label || 'a step') } : {}) };
+  const also = [...new Set(L.flatMap((l) => (Array.isArray(l.alsoBilled) ? l.alsoBilled : [])))];
+  return { credits: unpriced.length ? null : round1(sum), ...(hold > sum + 1e-9 && !unpriced.length ? { holdCredits: round1(hold) } : {}), ...(L.some((l) => l.basis === 'estimate') ? { estimate: true } : {}), legs: L, ...(unpriced.length ? { unpriced: [...new Set(unpriced.map((l) => l.label || 'a step'))] } : {}), ...(also.length ? { alsoBilled: also } : {}) };
+}
+/**
+ * The legs of ONE job's dry-run quote (2026-11-13). When the server itemised the job (`parts`: a storyboard's image paints,
+ * a cast portrait, an opening frame, the clip itself), each part is its own named leg; otherwise the job is one leg, as
+ * before. The parts are used only when they add up to the job's own figure, so the total is always the dry run's.
+ * `alsoBilled` names the small reads the job bills on top at their actual cost (the storyboard check, the product photo
+ * read): said in the answer, never a number that is not known.
+ */
+export function jobQuoteLegs(q, { label = '', type = '' } = {}) {
+  const credits = q && Number(q.credits) > 0 ? Number(q.credits) : null;
+  const also = q && Array.isArray(q.alsoBilled) ? q.alsoBilled.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 6) : [];
+  const one = { credits, ...(q && Number(q.priceCredits) > 0 ? { priceCredits: Number(q.priceCredits) } : {}), basis: credits != null ? 'hold' : 'actual', label: label || q?.label || type, ...(q && q.refused ? { refused: String(q.refused) } : {}), ...(also.length ? { alsoBilled: also } : {}) };
+  const parts = credits != null && !(Number(q.priceCredits) > 0) && Array.isArray(q.parts) ? q.parts.filter((x) => x && Number(x.credits) > 0 && String(x.label || '').trim()) : [];
+  if (!parts.length || Math.abs(parts.reduce((t, x) => t + Number(x.credits), 0) - credits) > 0.05) return [one];
+  return parts.map((x, i) => ({ credits: Number(x.credits), basis: 'hold', label: String(x.label).trim().slice(0, 90), ...(i === parts.length - 1 && also.length ? { alsoBilled: also } : {}) }));
 }
 const legLine = (l) => `${l.label || 'a step'}: ${Number(l.priceCredits) > 0 ? `${l.priceCredits}` : Number(l.credits) > 0 ? `${l.credits}` : 'its actual cost'}`;
+const alsoLine = (q) => (Array.isArray(q.alsoBilled) && q.alsoBilled.length ? ` Billed on top at their actual cost, a small read each: ${q.alsoBilled.join(', ')}.` : '');
 export function quoteText(tool, q) {
   if (q.refused) return `NO PRICE (nothing ran, nothing was charged): ${tool} would not start: ${q.refused}`;
   if (q.free) return `PRICE (nothing ran, nothing was charged): ${tool} with these arguments spends no credits.`;
   if (q.credits == null) {
     const known = q.legs.filter((l) => Number(l.credits) > 0);
-    return `NO FIXED PRICE (nothing ran, nothing was charged): ${tool} is billed at the actual cost of ${q.unpriced.join(' and ')}, which is not known before it runs.${known.length ? ` The priced part is ${known.map(legLine).join(', ')} credits.` : ''} expected_credits cannot bind this call; run it without it.`;
+    const knownSum = round1(known.reduce((t, l) => t + (Number(l.priceCredits) > 0 ? Number(l.priceCredits) : Number(l.credits)), 0));
+    return `NO FIXED PRICE (nothing ran, nothing was charged): ${tool} is billed at the actual cost of ${q.unpriced.join(' and ')}, which is not known before it runs.${known.length ? ` The priced part is ${knownSum} credits: ${known.map(legLine).join('; ')}.` : ''}${alsoLine(q)} expected_credits cannot bind this call; run it without it.`;
   }
-  return `PRICE (nothing ran, nothing was charged): ${tool} costs ${q.estimate ? 'about ' : ''}${q.credits} credits${q.holdCredits ? ` (it sets aside up to ${q.holdCredits} while it runs; the final charge is its actual cost)` : q.estimate ? ' (its own entry estimate; the final charge is the actual cost of the run)' : ''}.${q.legs.length > 1 ? ` Steps: ${q.legs.map(legLine).join('; ')}.` : ''} To run it at this price, call again without get_cost, with expected_credits: ${q.credits} and an idempotency_key.`;
+  return `PRICE (nothing ran, nothing was charged): ${tool} costs ${q.estimate ? 'about ' : ''}${q.credits} credits${q.holdCredits ? ` (it sets aside up to ${q.holdCredits} while it runs; the final charge is its actual cost)` : q.estimate ? ' (its own entry estimate; the final charge is the actual cost of the run)' : ''}.${q.legs.length > 1 ? ` Steps: ${q.legs.map(legLine).join('; ')}.` : ''}${alsoLine(q)} To run it at this price, call again without get_cost, with expected_credits: ${q.credits} and an idempotency_key.`;
 }
 export function expectedMismatchText(tool, expected, q) {
   if (q.credits == null) return `Refused, nothing ran and nothing was charged: expected_credits was ${expected}, but ${tool} has no fixed price here (${q.refused || `billed at the actual cost of ${(q.unpriced || []).join(' and ') || 'its model steps'}`}). Run it without expected_credits, or ask the user first.`;

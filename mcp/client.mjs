@@ -7,6 +7,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { jobQuoteLegs } from './spend-guard.mjs'; // a quoted job as named legs (get_cost)
 
 // Remote-connector identity: mcp/http.mjs wraps each request in mcpCtx.run({ token }) so every /api call a tool
 // makes carries THAT caller's bearer (bills their account). stdio keeps using the env token — ctx is simply unset.
@@ -575,7 +576,7 @@ export async function submitJob(type, input, { label = '' } = {}) {
   if (st?.quoteOnly) {
     const d = await apiPost('/api/jobs', { type, input, label, dryRun: true });
     const q = d?.quote || null;
-    (st.quoteLegs ||= []).push({ credits: q && Number(q.credits) > 0 ? Number(q.credits) : null, ...(q && Number(q.priceCredits) > 0 ? { priceCredits: Number(q.priceCredits) } : {}), basis: q && Number(q.credits) > 0 ? 'hold' : 'actual', label: label || q?.label || type, ...(q && q.refused ? { refused: String(q.refused) } : {}) });
+    for (const leg of jobQuoteLegs(q, { label, type })) (st.quoteLegs ||= []).push(leg); // the job's named parts when the server itemised it (a storyboard's paints, a portrait, the clip), else the job as one leg
     throw quoteStopError();
   }
   // A TOOL CALL WITH AN idempotency_key: each job it queues carries a key derived from it (one per submit in the call), so a
