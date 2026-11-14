@@ -46,7 +46,7 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 ### 3. Publish and schedule
 - A week of posts: `plan_week` drafts 5 posts with new images, captions and times for the active brand, on any plan. Without `confirm` it gives the price and spends nothing. `get_job` reads the drafts, the user changes what they like in plain words, and `run_post_refill` schedules them after they agree. On TikTok these land as drafts in the creator's inbox to finish there.
 - Ten channels: `post_to_meta` (Facebook, Instagram, Threads), `post_to_tiktok`, `post_to_youtube`, `post_to_x`, `post_to_linkedin`, `post_to_pinterest`, `post_to_bluesky`, `post_to_telegram`. `schedule_post` queues one for later and `list_scheduled` shows the queue.
-- `hermoso call list_connectors` says what is actually connected. A channel with no connection is not a missing feature: tell the user to connect it in the app under Settings, Connectors.
+- `hermoso call list_connectors` says what is actually connected. A channel with no connection is not a missing feature: tell the user to connect it in the app under Connectors.
 - Show the exact caption and the exact target account before publishing, and get a yes. Never rewrite or truncate what the user wrote: a channel that cannot take it refuses and says so.
 
 ### 4. Paid campaigns

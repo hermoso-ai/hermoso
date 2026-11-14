@@ -1,6 +1,6 @@
 // ── HINTS: THE NEXT STEP, NAMED (2026-09-17) ───────────────────────────────────────────────────────────────────
 //
-// This product already tells an agent what to do next, constantly and well — "connect it under Settings ▸
+// This product already tells an agent what to do next, constantly and well — "connect it under
 // Connectors, then call again", "run buy_credits to top up", "call find_tools then call_tool", "reconnect with
 // ?tools=all". Every one of those is a SENTENCE inside a wall of other sentences, so reading it is a parsing job
 // an agent may or may not do. Monid rides a `Hints` block on its responses — server-suggested next command,

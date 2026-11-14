@@ -230,7 +230,7 @@ export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(na
 // The Shopify tools (list_shopify_products, publish_to_shopify_product, the marketing-activity tools) work only for an
 // account created by installing Hermoso from the Shopify App Store: the store is derived server-side from the verified
 // account and there is no "connect Shopify" tile. So they cannot ride TOOL_PROVIDER_RULES — every provider there must
-// be a CONNECTOR_INFO key (property 3), and "connect it under Settings ▸ Connectors" would be a dead end. Instead the
+// be a CONNECTOR_INFO key (property 3), and "connect it under Connectors" would be a dead end. Instead the
 // same /api/connectors/providers read answers `shopifyStore`: true (this account has a live store), false (it does not,
 // or Shopify is off on this deployment), or absent when the server could not tell. ONLY a definite false holds them
 // back — an unreadable answer keeps them, like every other read of this set (property 1). Held, they are answered by

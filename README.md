@@ -25,8 +25,9 @@ campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a 
 ## Set up in ChatGPT, Claude, Grok Bot or a coding agent
 
 **ChatGPT:** one click. **[Add to ChatGPT](https://chatgpt.com/plugins/plugin_asdk_app_6abde87d08048191b2ee7cda76721749)** opens Hermoso in ChatGPT's app
-directory. Press Add and sign in with your Hermoso account, no key needed. Then, in a new ChatGPT chat:
-`@Hermoso set up my brand from my website and make my first ad`
+directory. Press Install plugin and sign in with your Hermoso account, no key needed. Then
+**[open a new ChatGPT chat with your first message typed](https://chatgpt.com/?q=Hermoso%2C%20set%20up%20my%20brand%20from%20my%20website%20and%20make%20my%20first%20ad)**, or paste it yourself:
+`Hermoso, set up my brand from my website and make my first ad`
 
 **Claude (claude.ai, Claude Desktop):** one click. **[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Hermoso&connectorUrl=https%3A%2F%2Fapp.hermoso.ai%2Fmcp%3Fsrc%3Dreadme)**
 opens Claude's *Add custom connector* dialog with Hermoso already filled in. Press Continue, choose **Sign in now**
