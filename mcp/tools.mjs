@@ -674,7 +674,13 @@ export function noteBrandOf(tool, args) {
   for (const k of HERMOSO_BRAND_KEYS.get(tool) || []) { const v = args?.[k]; if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120); }
   return '';
 }
-export async function withConnectPrompt(tool, r, post = apiPost, brand = '') {
+// …AND AT MOST ONE NEXT STEP, WHICHEVER IT IS (2026-11-14, lib/agent-nudge.mjs). `nudge: 1` tells the server this twin reads
+// `next` off the answer: the one step it chose for this account (save a brand first, then connect a channel), with the
+// sentence to say, each offered at most once in seven days and never once done. The server words the text, the step and
+// the hint, so a step added later needs no new twin; a server that predates this answers the connect prompt as before.
+// `raw` marks a call on the raw model lane, which gets no note of ours about a brand; `asked` says this session's
+// first-run note already asked for their website, so the same session is not asked twice.
+export async function withConnectPrompt(tool, r, post = apiPost, brand = '', opts = {}) {
   try {
     const kind = finishedRenderKind(tool, r);
     if (!kind) return r;
@@ -683,10 +689,16 @@ export async function withConnectPrompt(tool, r, post = apiPost, brand = '') {
     const sc = r.structuredContent || {};
     const job = String(sc.jobId || sc.id || '').slice(0, 80);
     const client = store ? String(store.client || '') : 'hermoso';
-    const d = await Promise.race([Promise.resolve(post('/api/mcp/connect-prompt', { tool, kind, job, client, ...(brand ? { brand } : {}) })).catch(() => null), new Promise((res) => { const t = setTimeout(() => res(null), CONNECT_PROMPT_WAIT_MS); if (t && typeof t.unref === 'function') t.unref(); })]);
+    const d = await Promise.race([Promise.resolve(post('/api/mcp/connect-prompt', { tool, kind, job, client, nudge: 1, ...(opts && opts.raw ? { raw: true } : {}), ...(opts && opts.asked ? { asked: true } : {}), ...(brand ? { brand } : {}) })).catch(() => null), new Promise((res) => { const t = setTimeout(() => res(null), CONNECT_PROMPT_WAIT_MS); if (t && typeof t.unref === 'function') t.unref(); })]);
     if (!d || d.show !== true || typeof d.text !== 'string' || !d.text) return r;
-    const out = { ...r, content: [...r.content, { type: 'text', text: d.text }], structuredContent: { ...sc, connectPrompt: { channels: Array.isArray(d.channels) ? d.channels : [] } } };
-    return withHints(out, [...hintsOf(r), { do: 'offer to post this; hand the user one of the connect links in this reply', why: 'no publishing channel is connected, and connecting needs a browser sign-in on the platform' }]);
+    const next = d.next && typeof d.next === 'object' && typeof d.next.step === 'string' && d.next.step ? d.next : null;
+    const hint = d.hint && typeof d.hint === 'object' && typeof d.hint.do === 'string' && d.hint.do ? d.hint : null;
+    if (next && next.step !== 'connect_channel') {
+      const out = { ...r, content: [...r.content, { type: 'text', text: d.text }], structuredContent: { ...sc, next } };
+      return hint ? withHints(out, [...hintsOf(r), hint]) : out;
+    }
+    const out = { ...r, content: [...r.content, { type: 'text', text: d.text }], structuredContent: { ...sc, connectPrompt: { channels: Array.isArray(d.channels) ? d.channels : [] }, ...(next ? { next } : {}) } };
+    return withHints(out, [...hintsOf(r), hint || { do: 'offer to post this; hand the user one of the connect links in this reply', why: 'no publishing channel is connected, and connecting needs a browser sign-in on the platform' }]);
   } catch { return r; }
 }
 // THE WEEK-PLAN NOTE (2026-11-02, lib/week-plan.mjs): the offer after a first connection, and "your week is finished". The
@@ -699,6 +711,7 @@ const WEEK_PLAN_NOTE_SKIP = new Set(['plan_week', 'get_job', 'list_jobs']);
 export async function withWeekPlanNote(tool, r, post = apiPost, brand = '') {
   try {
     if (!r || r.isError || !Array.isArray(r.content) || WEEK_PLAN_NOTE_SKIP.has(tool)) return r;
+    if (r.structuredContent && r.structuredContent.next && typeof r.structuredContent.next.step === 'string') return r; // one next step a reply (a paging cursor called `next` is not one): this note is not asked for, so it is not spent, and the next reply carries it
     const store = mcpCtx.getStore();
     if (store && (store.connectPromptQuiet || (store.remote && store.client === undefined))) return r;
     const client = store ? String(store.client || '') : 'hermoso';
@@ -872,6 +885,7 @@ const wrap = (fn) => {
           _fr.said = true;
           const _n = ((_st.apiCharged || 0) + (_st.jobCharged || 0)) > 0 ? null : firstRunNote(_tool, _fr, r);
           if (_n) {
+            if (/draft_brand/.test(String(_n.hint?.do || ''))) _fr.brandAsked = true; // this session has asked for their website: its next finished creation does not ask again (withConnectPrompt `asked`)
             const _last = [...r.content].reverse().find((b) => b && b.type === 'text' && typeof b.text === 'string');
             if (_last) _last.text += `\n\n${_n.text}`; else r.content.push({ type: 'text', text: _n.text });
             return noPitchOnWidget(withHints(r, [_n.hint]));
@@ -879,7 +893,7 @@ const wrap = (fn) => {
         }
       } catch {}
       const _noteBrand = noteBrandOf(_tool, args); // the brand this call acted on, so both notes are about it
-      return noPitchOnWidget(await withWeekPlanNote(_tool, await withConnectPrompt(_tool, withWidgetResultNote(_tool, r, hostRendersWidgets()), apiPost, _noteBrand), apiPost, _noteBrand));
+      return noPitchOnWidget(await withWeekPlanNote(_tool, await withConnectPrompt(_tool, withWidgetResultNote(_tool, r, hostRendersWidgets()), apiPost, _noteBrand, { raw: args?.raw === true, asked: mcpCtx.getStore()?.firstRun?.brandAsked === true }), apiPost, _noteBrand));
     }
     catch (e) {
       try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {}

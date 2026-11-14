@@ -133,8 +133,9 @@ just download it. Use the one piece you need, or all of it together.
 ## Install in one command
 
 This repo is a plugin marketplace, a Gemini CLI extension and a skills package at once, so a coding agent takes
-Hermoso in one line. Every install brings the same six skills (`hermoso-research`, `hermoso-generate`,
-`hermoso-ad-from-brand`, `hermoso-product-photoshoot`, `hermoso-marketing`, `hermoso-edit-timeline`), and the skills drive the `hermoso`
+Hermoso in one line. Every install brings the same seven skills (`hermoso-research`, `hermoso-generate`,
+`hermoso-ad-from-brand`, `hermoso-product-photoshoot`, `hermoso-marketing`, `hermoso-edit-timeline`,
+`hermoso-launch-app`), and the skills drive the `hermoso`
 CLI through `npx`. No
 tool list is loaded into your session: a CLI command costs nothing until it runs, and it reaches every tool.
 The first time, your agent runs `npx -y hermoso auth login`, which opens a browser to sign in.
@@ -286,7 +287,7 @@ Connect, approve with your Hermoso account, and you are done: the full toolset w
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai). The free tier is included; plans and credits
    are the same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid
    plan with `POST /v1/signup` (above).
-2. **Install the plugin.** It adds the six Hermoso skills, which drive the `hermoso` CLI through `npx`:
+2. **Install the plugin.** It adds the seven Hermoso skills, which drive the `hermoso` CLI through `npx`:
 
 ```bash
 claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
@@ -514,7 +515,7 @@ the package, so they need no key, no network and no sign-in.
 
 ## 3. Skills: what a coding agent installs
 
-`skills/` holds six installable skills:
+`skills/` holds seven installable skills:
 
 | Skill | What it does |
 | --- | --- |
@@ -524,6 +525,7 @@ the package, so they need no key, no network and no sign-in.
 | `hermoso-product-photoshoot` | A real product photo composited into studio, lifestyle or hero scenes |
 | `hermoso-marketing` | The whole loop: research, create, publish and schedule, paid campaigns, measure |
 | `hermoso-edit-timeline` | The manual for composing any video edit or transition with `edit_timeline` |
+| `hermoso-launch-app` | Launch and market an app or site you just built: brand, launch ads, a week of scheduled posts |
 
 They are what every one-command install at the top of this page adds, in Claude Code, Codex, Gemini CLI and
 through `npx skills add`. From a clone, copying works too:
