@@ -435,7 +435,7 @@ export const MCP_INSTRUCTIONS_WIDGET = [
   "Hermoso runs a brand's marketing: research competitors' ads, make image and video ads, post to their accounts, run paid campaigns, read results. Each area works on its own.",
   'Asked to make something, make it; render tools pick a sound default model (hermoso_capabilities lists models and costs).',
   '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
-  '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, remake_video_for_brand; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in background; poll get_job.',
+  '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in background; poll get_job.',
   "• FILES & SCHEDULING: upload_file turns a file into a URL; schedule_post queues a post; list_scheduled shows the queue; list_connectors shows what is connected; list_library lists past creations.",
   '• PUBLISH: post_to_* (post_to_meta, post_to_tiktok...) post now; list_inbox and reply_to_inbox_item answer comments and messages.',
   '• PAID ADS (Meta, Google, LinkedIn, TikTok, Reddit, Snapchat, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
@@ -3059,7 +3059,9 @@ const executorLike = (name) => EXECUTOR_TOOLS.has(name) || WIDGET_GENERIC_PROXIE
 //      After publication OpenAI rescans daily, so a tool ChatGPT should have is added to its list by name instead.
 //   2. "Tool names should be … specific, and descriptive of what the tool actually does." The scan found `clone_video`
 //      unclear. Renaming it everywhere would break every agent that calls it, so a widget host lists the SAME tool
-//      (same definition, same handler) as `remake_video_for_brand`, and `clone_video` stays the name everywhere else.
+//      (same definition, same handler) as `plan_video_remake`, and `clone_video` stays the name everywhere else.
+//      (It was `remake_video_for_brand` until the 2026-11-14 scan read that name as promising a finished video, which
+//      the tool does not make: it plans one. The old name stays registered, unlisted and callable: WIDGET_HOST_RETIRED_NAMES.)
 //      A direct call to `clone_video` from a widget host still answers (an older scan holds that name).
 //   3. ANNOTATIONS FOLLOW THE DOC'S DEFINITIONS (developers.openai.com/plugins/deploy/app-review.md). openWorldHint is TRUE
 //      on every generation and post-production tool: each sends the caller's prompt or media to an independently
@@ -3069,9 +3071,13 @@ const executorLike = (name) => EXECUTOR_TOOLS.has(name) || WIDGET_GENERIC_PROXIE
 //      caller's own credits is metering, not a change to the environment the tool acts on, so a research read that
 //      bills stays read-only. destructiveHint is TRUE on draft_brand: save:true replaces the saved brand profile.
 export const EXECUTOR_TOOLS = new Set(['find_tools', 'call_tool', 'enable_tools']);
-export const WIDGET_HOST_RENAMES = Object.freeze({ clone_video: 'remake_video_for_brand', click_to_ad: 'plan_video_ad_from_product_link', delete_openai_ads_object: 'archive_openai_ads_object', make_from_preset: 'plan_video_from_preset', make_short: 'plan_short_video' }); // make_from_preset + make_short (2026-11-09 scan, "name appears promotional, exaggerated, or inconsistent with its behavior"): both PLAN and render nothing, render_ad makes the video // delete_openai_ads_object (2026-11-03 scan, "name … inconsistent with its behavior"): OpenAI has no delete, the tool ARCHIVES // click_to_ad: the scan (2026-10-27) read the name as promotional / not what it does — it PLANS the ad, render_ad makes it
+export const WIDGET_HOST_RENAMES = Object.freeze({ clone_video: 'plan_video_remake', click_to_ad: 'plan_video_ad_from_product_link', delete_openai_ads_object: 'archive_openai_ads_object', make_from_preset: 'plan_video_from_preset', make_short: 'plan_short_video' }); // make_from_preset + make_short (2026-11-09 scan, "name appears promotional, exaggerated, or inconsistent with its behavior"): both PLAN and render nothing, render_ad makes the video // delete_openai_ads_object (2026-11-03 scan, "name … inconsistent with its behavior"): OpenAI has no delete, the tool ARCHIVES // click_to_ad: the scan (2026-10-27) read the name as promotional / not what it does — it PLANS the ad, render_ad makes it
 export const WIDGET_HOST_ALIAS_OF = Object.freeze(Object.fromEntries(Object.entries(WIDGET_HOST_RENAMES).map(([from, to]) => [to, from])));
-export const WIDGET_HOST_ALIAS_TITLES = Object.freeze({ remake_video_for_brand: 'Remake a video for your brand', plan_video_ad_from_product_link: 'Plan a video ad from a product link', archive_openai_ads_object: 'Archive a ChatGPT Ads campaign, ad group or ad', plan_video_from_preset: 'Plan a video from a saved preset', plan_short_video: 'Plan a short video from a format' });
+// A WIDGET-HOST NAME THAT WAS REPLACED, and the canonical tool it still runs. ChatGPT keeps the roster it last published
+// until a scan publishes the new one, so the old name stays registered on every widget host, never listed, and a call to
+// it runs the same handler.
+export const WIDGET_HOST_RETIRED_NAMES = Object.freeze({ remake_video_for_brand: 'clone_video' });
+export const WIDGET_HOST_ALIAS_TITLES = Object.freeze({ plan_video_remake: 'Plan a video remake for your brand', plan_video_ad_from_product_link: 'Plan a video ad from a product link', archive_openai_ads_object: 'Archive a ChatGPT Ads campaign, ad group or ad', plan_video_from_preset: 'Plan a video from a saved preset', plan_short_video: 'Plan a short video from a format' });
 // ── ONE OPERATION, ONE TOOL, ON A WIDGET HOST (2026-10-18) ─────────────────────────────────────────────────────
 // OpenAI's daily scan HELD 18 tools that take an `action` enum and do different things per value: "This tool appears
 // to execute operations that are not individually exposed. Please expose each model-callable operation upfront as a
@@ -3319,7 +3325,7 @@ export const WIDGET_SPLIT_OF = Object.freeze(Object.fromEntries(Object.entries(W
 // Every name a widget host is never LISTED, whatever its scope. Pure, so the checks run it.
 // `app` (optional) is the focused app of the session: a tool that app offers (WIDGET_APP_OFFERS) is not hidden there.
 export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
-  ? ((WITHHELD_FROM_WIDGET_HOSTS.has(name) && !widgetAppOffers(name, app)) || EXECUTOR_TOOLS.has(name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RENAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_SPLITS, name))
+  ? ((WITHHELD_FROM_WIDGET_HOSTS.has(name) && !widgetAppOffers(name, app)) || EXECUTOR_TOOLS.has(name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RENAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RETIRED_NAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_SPLITS, name))
   : (Object.prototype.hasOwnProperty.call(WIDGET_HOST_ALIAS_OF, name) || Object.prototype.hasOwnProperty.call(WIDGET_SPLIT_OF, name)));
 // HELD OUT OF THE DEFAULT LIST ON SIZE, ALWAYS CALLABLE (2026-09-24): the open edit primitive carries a full
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
@@ -3755,16 +3761,13 @@ const APP_ADS_ALSO = /_post_ad_authorization$|^tiktok_spark_recommendations$/;
 // Manager, and the read-only post-performance tools written in `create` stay reachable in Social (they generate
 // nothing; DIRECTORY_BANNED_GROUPS would otherwise hold them by group alone).
 export const APP_DIRECTORY_CREATE_ALLOW = new Set([...APP_SOCIAL_FROM_CREATE].filter((n) => n !== 'plan_week').concat(['list_library', 'fetch_asset', 'get_job', 'list_skills', 'get_skill']));
-// ON THE CHATGPT APPS ONE WIDGET-HOST NAME IS RENAMED AGAIN (2026-11-06 scan: remake_video_for_brand "appears promotional,
-// exaggerated, or inconsistent with its behavior"). It PLANS a remake and renders nothing, so on a ChatGPT app it is
-// listed as plan_video_remake with a factual description; the unscoped ChatGPT roster and every other host keep their
-// names (click_to_ad -> plan_video_ad_from_product_link is the precedent).
-export const APP_WIDGET_RENAMES = Object.freeze({ remake_video_for_brand: 'plan_video_remake' });
-export const APP_WIDGET_ALIAS_OF = Object.freeze({ plan_video_remake: 'clone_video' });
-const APP_WIDGET_TITLES = Object.freeze({ plan_video_remake: 'Plan a video remake for your brand' });
-const APP_WIDGET_DESCRIPTIONS = Object.freeze({
-  plan_video_remake: "Plans a new video ad for this brand modelled on a video the user links to: a TikTok, Instagram Reel, Facebook video or reel, X post, or a direct video file URL. YouTube does not let us download videos, so a YouTube link is refused up front and nothing is charged; the user downloads it themselves and uploads the file (upload_file). It reads the video first (frames across the clip plus a transcript of the voiceover, on-screen text and cut map), then writes a storyboard that keeps its hook, structure, cuts and pacing while using this brand's product, cast, setting and words, not the original's words, face or brand. The plan matches the original's length (up to 120s) unless durationSeconds is given. It renders nothing: render_ad turns the returned plan into the video. Uses credits for the plan plus about 2 credits to read the link. The reply says what was read; when a platform does not hand over the footage, the plan rests on the captions and thumbnail only. For a local file, use upload_file first and pass the URL.",
-});
+// ON THE CHATGPT APPS A WIDGET-HOST NAME CAN BE RENAMED AGAIN (APP_WIDGET_RENAMES; empty today). The one it held,
+// remake_video_for_brand -> plan_video_remake (2026-11-06 scan), became the widget-host name on every ChatGPT roster after
+// the 2026-11-14 scan flagged the all-in-one app's name too (WIDGET_HOST_RENAMES, WIDGET_HOST_DESCRIPTIONS).
+export const APP_WIDGET_RENAMES = Object.freeze({});
+export const APP_WIDGET_ALIAS_OF = Object.freeze({});
+const APP_WIDGET_TITLES = Object.freeze({});
+const APP_WIDGET_DESCRIPTIONS = Object.freeze({});
 // OPENAI'S FIRST SCAN OF THE TWO NEW APPS (2026-11-06) gave stated reasons on tools ChatGPT had never listed before. On a
 // ChatGPT app (widget host) only: the hint OpenAI read as wrong is corrected, a sentence that compares us with other
 // products is dropped, and the three bulk tools that take an operations list ("operations that are not individually
@@ -3806,7 +3809,7 @@ export const APP_DESC_LEADS = Object.freeze({
 });
 export const APP_WIDGET_UNLISTED = new Set(['microsoft_ads_bulk_download', 'microsoft_ads_bulk_upload', 'pinterest_ads_bulk']);
 const appWidgetUnlisted = (name) => Object.prototype.hasOwnProperty.call(APP_WIDGET_RENAMES, name) || APP_WIDGET_UNLISTED.has(name);
-const appBaseName = (name) => APP_WIDGET_ALIAS_OF[name] || WIDGET_HOST_ALIAS_OF[name] || WIDGET_SPLIT_OF[name] || name;
+const appBaseName = (name) => APP_WIDGET_ALIAS_OF[name] || WIDGET_HOST_ALIAS_OF[name] || WIDGET_HOST_RETIRED_NAMES[name] || WIDGET_SPLIT_OF[name] || name;
 export function appScopeHas(app, name, group, directory = false) {
   if (!app) return true;
   const n = appBaseName(name);
@@ -3948,6 +3951,9 @@ export function stripOutputSchema(def) {
 // unclear. Every other host keeps the longer text, which carries real operating detail; ChatGPT gets the same behaviour
 // described plainly. Each override is a complete description: what the tool does, its inputs, its cost.
 export const WIDGET_HOST_DESCRIPTIONS = Object.freeze({
+  // 2026-11-14 scan (all-in-one app): "name appears promotional, exaggerated, or inconsistent with its behavior". It plans and
+  // renders nothing, so the name and the first words both say so.
+  plan_video_remake: "Plans a new video ad for this brand modelled on a video the user links to: a TikTok, Instagram Reel, Facebook video or reel, X post, or a direct video file URL. YouTube does not let us download videos, so a YouTube link is refused up front and nothing is charged; the user downloads it themselves and uploads the file (upload_file). It reads the video first (frames across the clip plus a transcript of the voiceover, on-screen text and cut map), then writes a storyboard that keeps its hook, structure, cuts and pacing while using this brand's product, cast, setting and words, not the original's words, face or brand. The plan matches the original's length (up to 120s) unless durationSeconds is given. It renders nothing: render_ad turns the returned plan into the video. Uses credits for the plan plus about 2 credits to read the link. The reply says what was read; when a platform does not hand over the footage, the plan rests on the captions and thumbnail only. For a local file, use upload_file first and pass the URL.",
   search_console_performance: "Google Search Console's performance report for the brand's site: the search queries people used, with impressions, clicks, click-through rate and average position, by query, page, country, device, search appearance, date or hour. startDate and endDate are required, as YYYY-MM-DD (Pacific time). Rows are the top ones Google returns; anonymised queries are withheld, so per-query clicks will not add up to the site total; the default 'final' data lags 2 to 3 days and 'all' adds fresh partial data. Up to 16 months of history. Read-only, 0 credits.",
   list_linkedin_events: "The events a LinkedIn company Page organizes: name, link, start and end times, online or in person, visibility and state. Only Pages shared with this profile can be read. It needs LinkedIn's Events permission; if a connection made before that permission was enabled is refused, the user reconnects LinkedIn once. Read-only, 0 credits. Needs LinkedIn connected.",
   edit_timeline: "Render one edited video from a timeline the caller describes: segments placed on an output timeline (later segments are drawn on top, and overlapping segments form the transition), each with keyframed position, scale, rotation, speed and opacity, plus optional HTML overlays and masks. Sources are a videoUrl, a Library or render URL, a direct file, or a public TikTok, Reel, Facebook or X post link (not YouTube: YouTube does not let us download videos, so a YouTube link is refused up front and nothing is charged; the user downloads it themselves and uploads the file (upload_file).); in and out are source seconds. Audio per segment: gain, mute, and J-cut or L-cut timing. video_frames shows exact frames for free, to find a cut point before the edit. Costs the flat post_edit price (about 2 credits); a 'generate' segment, which renders a new transition shot with a video model, costs more and is used only when the user asks for one.",
@@ -4085,7 +4091,7 @@ const widgetProxyHit = (d) => WIDGET_PROXY_REFS.some(([re]) => { re.lastIndex = 
 // definition goes back through OpenAI's scan review: remake_video_for_brand's live text names make_short, and renaming
 // that one word to plan_short_video put it back in review, where it was held ("name appears promotional"). Its text
 // stays byte-identical to the published one; the make_short handler still answers that name.
-export const WIDGET_RENAME_KEEP = Object.freeze({ remake_video_for_brand: Object.freeze(['make_short']) });
+export const WIDGET_RENAME_KEEP = Object.freeze({}); // remake_video_for_brand's entry went with its name (2026-11-14): plan_video_remake carries its own WIDGET_HOST_DESCRIPTIONS text
 function renamedForWidgetHost(def, name) {
   const keep = (name && WIDGET_RENAME_KEEP[name]) || null;
   const d = def && typeof def.description === 'string' ? def.description : '';
@@ -4609,6 +4615,15 @@ function registerWidgetHostAliases(rawServer, ctx, opts) {
     const h = rawServer.registerTool(to, defForApp(defForHost(to, def, true), ctx.app, ctx.directory, to, true), src.handler);
     ctx.handleOf[to] = h; ctx.groupOf[to] = ctx.groupOf[from]; ctx.srcOf[to] = { def, handler: src.handler };
     applyToolGates(h, to, ctx.groupOf[to], ctx, opts);
+  }
+  for (const [old, from] of Object.entries(WIDGET_HOST_RETIRED_NAMES)) {
+    const src = ctx.srcOf[from];
+    if (!src || !src.def || typeof src.handler !== 'function' || ctx.handleOf[old]) continue;
+    const to = WIDGET_HOST_RENAMES[from]; const title = (to && WIDGET_HOST_ALIAS_TITLES[to]) || src.def.title;
+    const def = { ...src.def, title, ...(src.def.annotations ? { annotations: { ...src.def.annotations, title } } : {}) };
+    const h = rawServer.registerTool(old, defForApp(defForHost(old, def, true), ctx.app, ctx.directory, old, true), src.handler);
+    ctx.handleOf[old] = h; ctx.groupOf[old] = ctx.groupOf[from]; ctx.srcOf[old] = { def, handler: src.handler };
+    applyToolGates(h, old, ctx.groupOf[old], ctx, opts); // widgetHostHides keeps it unlisted; a direct call runs it
   }
   if (!ctx.app) return;
   // A ChatGPT app renames once more (APP_WIDGET_RENAMES); the name it replaces stays registered and callable but unlisted.
@@ -6203,7 +6218,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().describe('The reply, exactly as it should appear publicly.'),
     },
     outputSchema: { ok: z.boolean(), source: z.string().optional(), id: z.string().optional(), note: z.string() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ id, text }) => {
     const body = String(text || '').trim();
     if (!body) return { content: [{ type: 'text', text: 'Nothing to post — pass the reply text.' }], isError: true };
@@ -21513,7 +21528,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       maxBudget: z.number().nullable().optional().describe("no rule may raise a budget above this, account currency; null = no cap"),
       confirm: z.boolean().optional().describe("required when this LOOSENS a cap (tightening never needs it)"),
     },
-    annotations: {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true},
+    annotations: {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true},
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/rules/limits', a);
     return ok(adRuleText(d), d);
@@ -21651,7 +21666,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       maxBudget: z.number().nullable().optional().describe("no rule may raise a budget above this, account currency; null = no cap"),
       confirm: z.boolean().optional().describe("required when this LOOSENS a cap (tightening never needs it)"),
     },
-    annotations: {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
+    annotations: {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/rules/limits', a);
     return ok(adRuleText(d), d);
@@ -25667,7 +25682,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       creative: z.object({}).passthrough().optional().describe('an edited screenplay (the creative this tool returned, changed) to use instead'),
       lengthSeconds: z.number().optional().describe('re-outline at this length (throws away the screenplay and boards)'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const id = encodeURIComponent(a.runId);
     let d = (a.creative || +a.lengthSeconds > 0) ? await apiPost(`/api/story/runs/${id}/edit`, { ...(a.creative ? { creative: a.creative } : {}), ...(+a.lengthSeconds > 0 ? { lengthSeconds: +a.lengthSeconds } : {}) }) : await apiGet(`/api/story/runs/${id}`);
