@@ -15785,7 +15785,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const amzPlacements = z.record(z.number()).optional().describe('bid increase per placement in whole percent 0-900, keys PLACEMENT_TOP, PLACEMENT_REST_OF_SEARCH, PLACEMENT_PRODUCT_PAGE, SITE_AMAZON_BUSINESS');
   server.registerTool('list_amazon_ads_profiles', {
     title: 'List Amazon Ads profiles',
-    description: 'The Amazon Ads advertiser profiles shared with this brand (ticked under Manage accounts), one per advertiser per marketplace across North America, Europe and the Far East: profileId, marketplace, currency, seller or vendor, account name. Only these are usable. Every other Amazon Ads tool takes amazonProfileId. Read-only, free.',
+    description: 'The Amazon Ads advertiser profiles shared with this brand (ticked under Manage accounts, or call list_connector_accounts with provider amazon_ads, then set_connector_accounts), one per advertiser per marketplace across North America, Europe and the Far East: profileId, marketplace, currency, seller or vendor, account name. Only these are usable. Every other Amazon Ads tool takes amazonProfileId. Read-only, free.',
     inputSchema: {},
     outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), profiles: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
