@@ -1,6 +1,6 @@
 ---
 name: hermoso-edit-timeline
-description: The full manual for the edit_timeline tool: segments, keyframes, overlays and masks, sources, audio, viral-hook plus product edits, linking two clips, seam matching, transition recipes (whip pan, zoom through, push, spin, speed ramp, freeze, wipes, split screen), the on-request seam review and follow-up edits. Load it before composing any edit_timeline call.
+description: The full manual for the edit_timeline tool, covering segments, keyframes, overlays and masks, sources, audio, viral-hook plus product edits, linking two clips, seam matching, transition recipes (whip pan, zoom through, push, spin, speed ramp, freeze, wipes, split screen), the on-request seam review and follow-up edits. Load it before composing any edit_timeline call.
 homepage: https://app.hermoso.ai
 ---
 
