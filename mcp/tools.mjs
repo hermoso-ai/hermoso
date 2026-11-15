@@ -258,6 +258,12 @@ export const KEY_CONNECTORS = {
   discord: { label: 'Discord', route: 'discord', fields: { webhookUrl: 's', announceWebhookUrl: 's' }, how: 'NO fields = the one-click link that adds the Hermoso bot; or a channel webhook URL (Server Settings ▸ Integrations ▸ Webhooks ▸ New Webhook) per channel: webhookUrl for ALERTS, announceWebhookUrl for the channel post_to_discord and scheduled Discord posts go to — pass one per call' },
   webhook: { label: 'Webhook', route: 'webhook', fields: { webhookUrl: 'rs' }, how: 'a public https:// URL that should receive a JSON POST for each render (a Zapier, Make or n8n catch hook)' },
 };
+// HELD, NOT OFFERED (2026-11-15): a connector whose CONNECTOR_GATES entry is shut in production stays in the table (the
+// route exists and our own team can still connect through it) but is left out of what connect_connector TELLS an agent,
+// so no description offers a channel a customer cannot connect. WeChat: CONNECTOR_GATES.wechat, WECHAT_ENABLED unset
+// (mcp/roster-scope.mjs WECHAT_DARK_TOOLS). Take the id out of this list in the same commit that opens the gate.
+export const KEY_CONNECTORS_HELD = Object.freeze(['wechat']);
+const KEY_CONNECTORS_OFFERED = Object.entries(KEY_CONNECTORS).filter(([id]) => !KEY_CONNECTORS_HELD.includes(id));
 
 // X ADS: THE ENTRY BELOW USED TO BE A DENIAL, AND IT WAS FALSE (fixed 2026-08-10). It read "X ADS ARE NOT
 // AVAILABLE: … Hermoso cannot create or manage X ad campaigns, so say that plainly instead of offering it" — an
@@ -5797,7 +5803,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await apiPost('/api/wordpress/post', a);
-    return ok(r.note || `WordPress: ${r.status} — ${r.url || ''}`, r);
+    return ok(r.note || `WordPress: ${r.status}.${r.url ? ` ${r.url}` : ''}`, r);
   }));
 
   server.registerTool('update_wordpress_post', {
@@ -5816,7 +5822,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     const { brand, ...rest } = a;
     const d = await apiPost('/api/wordpress/update', bodyBrand(a, rest));
-    return ok(`Updated “${d.title}” (post ${d.id}, ${d.status})${d.url ? ` — ${d.url}` : ''}.${d.note ? ` ${d.note}` : ''}`, d);
+    return ok(`Updated “${d.title}” (post ${d.id}, ${d.status}).${d.url ? ` ${d.url}` : ''}${d.note ? ` ${d.note}` : ''}`, d);
   }));
 
   server.registerTool('delete_wordpress_post', {
@@ -5847,7 +5853,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/wordpress/posts', queryBrand(a, { status: a.status, search: a.search, page: a.page, perPage: a.perPage }));
-    const rows = (d.posts || []).map((p) => `• ${p.id} · ${p.status} · “${p.title}”${p.url ? ` — ${p.url}` : ''}`);
+    const rows = (d.posts || []).map((p) => `• ${p.id} · ${p.status} · “${p.title}”${p.url ? ` · ${p.url}` : ''}`);
     return ok(`${d.total} post(s) on ${d.siteName || d.site} (page ${d.page} of ${d.pages}):\n${rows.join('\n') || '(none)'}`, d);
   }));
 
@@ -5859,7 +5865,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet(`/api/wordpress/posts/${encodeURIComponent(String(a.postId))}`, queryBrand(a, {}));
-    return ok(`Post ${d.id} · ${d.status}${d.public ? ' (public)' : ' (not public)'} · “${d.title}”${d.url ? ` — ${d.url}` : ''}`, d);
+    return ok(`Post ${d.id} · ${d.status}${d.public ? ' (public)' : ' (not public)'} · “${d.title}”${d.url ? ` · ${d.url}` : ''}`, d);
   }));
 
   server.registerTool('list_wordpress_terms', {
@@ -6320,7 +6326,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/slack/members', queryBrand(a, Object.fromEntries(Object.entries({ slackWorkspace: a.slackWorkspace, query: a.query, limit: a.limit }).filter(([, v]) => v != null && v !== ''))));
-    return ok(`${d.count} of ${d.total} member(s) in ${d.workspace}:\n${(d.members || []).map((m) => `• ${m.realName || m.displayName || m.name}${m.name ? ` (@${m.name})` : ''} ${m.id}${m.title ? ` — ${m.title}` : ''}${m.guest ? ' [guest]' : ''}`).join('\n') || '(none)'}${d.note ? `\n${d.note}` : ''}`, d);
+    return ok(`${d.count} of ${d.total} member(s) in ${d.workspace}:\n${(d.members || []).map((m) => `• ${m.realName || m.displayName || m.name}${m.name ? ` (@${m.name})` : ''} ${m.id}${m.title ? ` · ${m.title}` : ''}${m.guest ? ' [guest]' : ''}`).join('\n') || '(none)'}${d.note ? `\n${d.note}` : ''}`, d);
   }));
   server.registerTool('send_slack_dm', {
     title: 'Send a Slack direct message',
@@ -6635,14 +6641,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "EVERYTHING PEOPLE SAID TO THIS BRAND, across every connected channel, in one list: Facebook and "
       + "Instagram comments, Threads replies and mentions, YouTube comments, TikTok comments, LinkedIn Page comments, Google Business reviews, "
       + "Bluesky replies and mentions, and X mentions — plus DIRECT MESSAGES on Meta (Messenger and Instagram "
-      + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp, LINE and WeChat. Support tickets too: the open conversations in the brand's Intercom inbox. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
+      + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp and LINE. Support tickets too: the open conversations in the brand's Intercom inbox. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
       + "skipped silently; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
       + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
       + "Messenger and Instagram DMs need no argument; each has a messageKind (text, story_mention, story_reply, share, "
       + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky and X DMs need "
       + "conversationId (list_bluesky_convos / list_x_dms). WhatsApp needs no argument: Hermoso keeps the last 48 hours of each WhatsApp conversation "
-      + "(WhatsApp has no message history to read back), and each item carries windowOpen, its last few messages (recent) and whether a free reply is still allowed. LINE and WeChat need no argument either (kept 7 days and 72 hours); a WeChat item carries repliesLeft, because WeChat allows 5 replies in the 48 hours after a person's last message. TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
+      + "(WhatsApp has no message history to read back), and each item carries windowOpen, its last few messages (recent) and whether a free reply is still allowed. LINE needs no argument either (kept 7 days). TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
       + "and every other source only re-reads what the per-channel tools already read.",
     inputSchema: {
       sources: z.array(z.string()).optional().describe(`Limit to these sources: ${INBOX_SOURCE_NAMES.join(', ')}. Omit for every connected channel.`),
@@ -6741,10 +6747,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Answer an inbox item BY ITS COMPOSITE ID — the `id` list_inbox returned, e.g. 'facebook:123_456' "
       + "or 'google_business:accounts/1/locations/2/reviews/3'. Routes to the right channel for you; you do not need "
       + "to know which reply tool a platform uses. The reply is posted as the brand — PUBLIC on every comment, reply, "
-      + "mention and review, and PRIVATE on the DM sources, WhatsApp, LINE, WeChat and Intercom (it goes to the customer from the brand's support inbox) — so show the user the "
+      + "mention and review, and PRIVATE on the DM sources, WhatsApp, LINE and Intercom (it goes to the customer from the brand's support inbox) — so show the user the "
       + "exact wording and get their go-ahead first either way. X is the one exception and says so: a reply there is a new post, "
       + "so it goes through post_to_x with replyTo. A WhatsApp reply goes out only while the 24-hour window is open (windowOpen on the item); "
-      + "after that WhatsApp accepts only an approved template, so the reply is refused for free and send_whatsapp_message with `template` is the way. A WeChat reply goes out only while repliesLeft is above zero; a LINE reply is free inside a minute of their message and uses the account's LINE quota after it.",
+      + "after that WhatsApp accepts only an approved template, so the reply is refused for free and send_whatsapp_message with `template` is the way. A LINE reply is free inside a minute of their message and uses the account's LINE quota after it.",
     inputSchema: {
       id: z.string().describe("The composite id from list_inbox — '<source>:<platform id>'. A bare platform id is refused: replying to the wrong network as the brand cannot be taken back."),
       text: z.string().describe('The reply, exactly as it should appear publicly.'),
@@ -15828,7 +15834,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       replyTo: z.string().optional().describe('id of an email Hermoso sent or of a reply it noticed, to answer in that thread'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  }, wrap(async (a) => { const d = await apiPost('/api/email/send', a); return ok(d.note, d); }));
+  }, wrap(async (a) => { const d = await apiPost('/api/email/send', a); return ok(d.agentNote ? `${d.note} ${d.agentNote}` : d.note, d); })); // the ids and the replyTo hint ride in agentNote (server.js emSentAgentNote)
   server.registerTool('add_email_leads', {
     title: 'Add leads to the email list',
     description: 'Add people to the brand\'s lead list for email: leads [{ email, name or first_name / last_name, company, any other column }], or spreadsheetId (+ range) to read them from a Google Sheet whose first row names the columns (needs Google Drive connected). De-duplicated by email: an address already on the list is updated, and one marked unsubscribed, bounced or do not contact stays that way. Extra columns become merge fields ({{column_name}}). Up to 500 a call. Sends nothing. Free.',
@@ -28122,9 +28128,9 @@ function memoryNoteVerdict(text) {
   const keyConnectRedact = (text, secrets) => { let t = String(text ?? ''); for (const s of secrets) if (s && s.length >= 4) t = t.split(s).join('[redacted]'); return t; };
   server.registerTool('connect_connector', {
     title: 'Connect a paste-a-key account',
-    description: `Connect an account that links with a KEY rather than a sign-in screen, from here, with no browser: ${Object.values(KEY_CONNECTORS).map(s => s.label).join(', ')}. Pass provider and fields in that provider's own field names (listed below, * = required). The key is checked live with the provider before anything is saved, exactly as the app's Connectors page checks it, and the reply is read back from the saved connection. OFFER BOTH WAYS AND LET THE USER CHOOSE: a key pasted into this chat stays in this conversation's history, while pasting it in the app (Connectors, or the one-click link https://app.hermoso.ai/?connect=<provider>) keeps it out of the chat. Hermoso never repeats a submitted key back. An account that connects through the provider's own sign-in screen (OAuth) cannot be connected here: this answers with the link to hand the user instead. Apple Ads with no key material first generates a signing key pair and returns the public key to register with Apple plus a setupToken to send back. Fields: ${Object.entries(KEY_CONNECTORS).map(([id, s]) => `${id} {${keyConnectFieldList(s)}}`).join(' · ')}.`,
+    description: `Connect an account that links with a KEY rather than a sign-in screen, from here, with no browser: ${KEY_CONNECTORS_OFFERED.map(([, s]) => s.label).join(', ')}. Pass provider and fields in that provider's own field names (listed below, * = required). The key is checked live with the provider before anything is saved, exactly as the app's Connectors page checks it, and the reply is read back from the saved connection. OFFER BOTH WAYS AND LET THE USER CHOOSE: a key pasted into this chat stays in this conversation's history, while pasting it in the app (Connectors, or the one-click link https://app.hermoso.ai/?connect=<provider>) keeps it out of the chat. Hermoso never repeats a submitted key back. An account that connects through the provider's own sign-in screen (OAuth) cannot be connected here: this answers with the link to hand the user instead. Apple Ads with no key material first generates a signing key pair and returns the public key to register with Apple plus a setupToken to send back. Fields: ${KEY_CONNECTORS_OFFERED.map(([id, s]) => `${id} {${keyConnectFieldList(s)}}`).join(' · ')}.`,
     inputSchema: {
-      provider: z.string().describe(`the connector id: ${Object.keys(KEY_CONNECTORS).join(', ')}`),
+      provider: z.string().describe(`the connector id: ${KEY_CONNECTORS_OFFERED.map(([id]) => id).join(', ')}`),
       fields: z.record(z.string()).optional().describe('that provider\'s own field names and values, e.g. {"apiKey":"…"}; the names for each provider are in the description'),
     },
     outputSchema: { ok: z.boolean().optional(), provider: z.string().optional(), connected: z.boolean().optional(), label: z.string().nullable().optional(), status: z.string().nullable().optional(), warning: z.string().optional(), step: z.string().optional(), publicKey: z.string().optional(), setupToken: z.string().optional(), expiresInHours: z.number().optional() },

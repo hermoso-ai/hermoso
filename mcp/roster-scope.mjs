@@ -283,15 +283,21 @@ export const CANVA_DARK_TOOLS = Object.freeze(['save_to_canva', 'list_canva_desi
 // server.js flagsOnNow names them for a workspace already holding an Amazon Ads connection and for the gate's team pass.
 export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 'list_amazon_ads_campaigns', 'create_amazon_ads_campaign', 'create_amazon_ads_ad_group', 'add_amazon_ads_keywords', 'create_amazon_ads_product_ads', 'set_amazon_ads_status', 'set_amazon_ads_budget', 'update_amazon_ads_object', 'delete_amazon_ads_object', 'amazon_ads_report']);
 // THE EMAIL TOOLS SHIP DARK WITH THE TWO MAILBOX CONNECTORS (2026-11-15). Email from the customer's own mailbox is
-// built, but neither mailbox kind can be connected by a customer yet: CONNECTOR_GATES.gmail waits on Google verifying
-// the gmail.send scope and CONNECTOR_GATES.outlook on the mail permissions being added to the Microsoft app. Fifteen
-// tools with no mailbox to send from are no capability, so they are not counted, not documented and not on a roster.
+// built. CONNECTOR_GATES.gmail waits on Google verifying the gmail.send scope; CONNECTOR_GATES.outlook OPENED in production
+// on 2026-11-15 (OUTLOOK_MAIL_ENABLED=1, after a live send, a real reply and a real bounce were each watched), so the
+// fifteen tools are counted and documented (DARK_TOOL_GATE_FLAG below). While no gate is open they are not.
 // Lit PER CALLER like Canva and Amazon Ads: server.js flagsOnNow names them when EITHER gate is open, for a workspace
 // that already holds a Gmail or Outlook connection, and for the gates' team pass. They are tied to NO single provider
 // in TOOL_PROVIDER_RULES on purpose: one tool serves both mailbox kinds, and the lead list is useful before a mailbox
 // is connected.
 export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS]);
+// THE WECHAT TOOLS SHIP DARK WITH THE WECHAT CONNECTOR (2026-11-15, owner: "okay I guess we can skip wechat for now").
+// CONNECTOR_GATES.wechat is shut (WECHAT_ENABLED unset) because WeChat refuses every call from an address that is not on
+// the Service Account's IP whitelist and this deployment sends from a shared, changing pool. Three tools for a channel
+// nobody can connect are no capability: not counted, not documented, not on a roster. Lit PER CALLER like Canva: server.js
+// flagsOnNow names them when the gate is open, for a workspace already holding a WeChat connection, and for the team pass.
+export const WECHAT_DARK_TOOLS = Object.freeze(['read_wechat_inbox', 'send_wechat_message', 'wechat_account']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
@@ -301,7 +307,7 @@ export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DAR
   // The email tools are counted and documented once OUTLOOK mail is on in production: Outlook is the mailbox kind that does
   // everything and needs no outside approval, so it is the one that goes live first. If Gmail is ever verified first,
   // point this at GMAIL_SEND_VERIFIED (the per-caller roster already lights them on either gate).
-  ...EMAIL_DARK_TOOLS.map((n) => [n, 'OUTLOOK_MAIL_ENABLED'])]));
+  ...EMAIL_DARK_TOOLS.map((n) => [n, 'OUTLOOK_MAIL_ENABLED']), ...WECHAT_DARK_TOOLS.map((n) => [n, 'WECHAT_ENABLED'])]));
 export function darkToolsUnder(flags) {
   const f = flags && typeof flags === 'object' ? flags : {};
   return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));
