@@ -1279,7 +1279,7 @@ export const neutralNote = (t) => {
 // tomorrow, would have shown as "1 render in progress"). Mirrors server.js JOB_TYPES_HIDDEN_FROM_V1 by each type's PUBLIC
 // name (the one /api/jobs returns, lib/job-types.mjs publicJobType), and the check fails if that list gains a type this
 // one lacks. A job queued for LATER is not in progress either.
-export const PANEL_HIDDEN_JOB_TYPES = Object.freeze(['shopifykeepalive', 'shopredact', 'latelanding', 'storysweep', 'ttpublicurl', 'whatsappcoexsync', 'purge', 'agentidle', 'welcomewait', 'agentsetupmail', 'uploadretention', 'miniappretention', 'connectordrift', 'modelwatch', 'faceassetsweep', 'searchvis', 'mcpcanary', 'welcomeads', 'lifecycleedu', 'connhealth', 'chargednothing', 'badoutcome', 'reviewask', 'emailfeedback', 'weeklyposts', 'winback']);
+export const PANEL_HIDDEN_JOB_TYPES = Object.freeze(['shopifykeepalive', 'shopredact', 'latelanding', 'storysweep', 'ttpublicurl', 'whatsappcoexsync', 'purge', 'agentidle', 'welcomewait', 'agentsetupmail', 'uploadretention', 'miniappretention', 'connectordrift', 'modelwatch', 'faceassetsweep', 'searchvis', 'mcpcanary', 'welcomeads', 'lifecycleedu', 'connhealth', 'chargednothing', 'badoutcome', 'reviewask', 'emailfeedback', 'weeklyposts', 'winback', 'commentpoll']);
 const ageText = (h) => (h == null || !Number.isFinite(+h) ? '' : +h < 1 ? 'just now' : +h < 48 ? `${Math.round(+h)}h ago` : `${Math.round(+h / 24)}d ago`);
 const VIDEO_RE = /\.(mp4|webm|mov|m4v)([?#]|$)/i;
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -1292,7 +1292,7 @@ const PROVIDER_INFO = {
   tiktok: ['TikTok', 'channels'], youtube: ['YouTube', 'channels'], linkedin: ['LinkedIn', 'channels'], x: ['X', 'channels'],
   pinterest: ['Pinterest', 'channels'], bluesky: ['Bluesky', 'channels'], telegram: ['Telegram', 'channels'],
   google_business: ['Google Business Profile', 'channels'], whatsapp: ['WhatsApp', 'channels'],
-  wordpress: ['WordPress', 'channels'], discord: ['Discord', 'channels'], slack: ['Slack', 'channels'], whop: ['Whop', 'channels'],
+  wordpress: ['WordPress', 'channels'], discord: ['Discord', 'channels'], slack: ['Slack', 'channels'], whop: ['Whop', 'channels'], webflow: ['Webflow', 'channels'], wix: ['Wix', 'channels'],
   google_ads: ['Google Ads', 'ads'], tiktok_ads: ['TikTok Ads', 'ads'], linkedin_ads: ['LinkedIn Ads', 'ads'], microsoft_ads: ['Microsoft Advertising', 'ads'],
   reddit_ads: ['Reddit Ads', 'ads'], pinterest_ads: ['Pinterest Ads', 'ads'], snapchat_ads: ['Snapchat Ads', 'ads'], x_ads: ['X Ads', 'ads'],
   openai_ads: ['ChatGPT Ads', 'ads'], apple_ads: ['Apple Ads', 'ads'], applovin_ads: ['AppLovin Ads', 'ads'],
@@ -1309,8 +1309,8 @@ export const providerInfo = (p) => {
 // The publishing channels a connector carries, for the "post here by default" settings. The ids are schedule_post's.
 // WordPress, Discord, Slack and Whop publish through their own connector rows (lib/channel-registry.mjs). A gated
 // connector (Whop while WHOP_API_KEY is unset) is not in the server's connector list, so it never surfaces here.
-const CHANNELS_OF = { meta: ['facebook', 'instagram'], instagram: ['instagram'], threads: ['threads'], tiktok: ['tiktok'], youtube: ['youtube'], linkedin: ['linkedin'], x: ['x'], pinterest: ['pinterest'], google_business: ['google_business'], bluesky: ['bluesky'], telegram: ['telegram'], wordpress: ['wordpress'], discord: ['discord'], slack: ['slack'], whop: ['whop'] };
-const CHANNEL_LABEL = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest', google_business: 'Google Business Profile', bluesky: 'Bluesky', telegram: 'Telegram', wordpress: 'WordPress', discord: 'Discord', slack: 'Slack', whop: 'Whop' };
+const CHANNELS_OF = { meta: ['facebook', 'instagram'], instagram: ['instagram'], threads: ['threads'], tiktok: ['tiktok'], youtube: ['youtube'], linkedin: ['linkedin'], x: ['x'], pinterest: ['pinterest'], google_business: ['google_business'], bluesky: ['bluesky'], telegram: ['telegram'], wordpress: ['wordpress'], discord: ['discord'], slack: ['slack'], whop: ['whop'], webflow: ['webflow'], wix: ['wix'] };
+const CHANNEL_LABEL = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest', google_business: 'Google Business Profile', bluesky: 'Bluesky', telegram: 'Telegram', wordpress: 'WordPress', discord: 'Discord', slack: 'Slack', whop: 'Whop', webflow: 'Webflow', wix: 'Wix' };
 export const ALL_CHANNELS = Object.freeze(Object.keys(CHANNEL_LABEL));
 
 // THE HOME SCREEN'S CARD FOR AN ACCOUNT WITH NOTHING TO POST TO (2026-11-02): the first channels on offer, in the server's

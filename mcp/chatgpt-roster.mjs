@@ -46,8 +46,13 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'amazon_ads', // long tail
   'applovin_ads', // long tail
   'canva', // long tail
+  'line', // long tail
   'notion', // long tail
+  'shopify_blog', // long tail
   'vercel', // long tail
+  'webflow', // long tail
+  'wechat', // long tail
   'whop', // long tail
+  'wix', // long tail
 ]);
 export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-03T20:25:36.816Z" });

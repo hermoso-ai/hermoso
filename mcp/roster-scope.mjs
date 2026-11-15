@@ -82,6 +82,9 @@ export const TOOL_PROVIDER_RULES = [
   //    see [[linkedin-connector-live]]), so both families gate on the single `linkedin` provider. ──
   [/linkedin/, 'linkedin'],
   // ── Meta: ads management AND FB/IG posting are one connector ([[meta-integration]]). Threads is separate. ──
+  // A DISCORD thread is not the Threads network: it must be named before the `_thread$` rule below, or the two Discord
+  // thread tools would be offered to a brand with Threads connected and hidden from one with Discord (2026-11-15).
+  [/_discord_thread$/, 'discord'],
   [/^threads_|_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
   [/_meta_|^meta_|_meta$|instagram|whatsapp|messenger/, 'meta'], // messenger: Page marketing messages ride the Meta connector (2026-09-07)
   // ── analytics / measurement, each its own connection ──
@@ -117,9 +120,23 @@ export const TOOL_PROVIDER_RULES = [
   [/onedrive/, 'microsoft_onedrive'],
   [/bluesky/, 'bluesky'],
   [/telegram/, 'telegram'],
+  // LINE and WeChat (2026-11-15): two messaging channels, each its own paste-a-credential connection. The LINE rule names
+  // its tools' shapes rather than the bare word: `line` alone is also in rewrite_ad_line and the X Ads line-item tools.
+  [/^line_|_line_(message|inbox|broadcast)\b/, 'line'],
+  [/wechat/, 'wechat'],
   // WordPress, Discord and Slack publishing (2026-11-03): the brand's OWN site and webhooks. Discord/Slack posting rides the
   // same connector row as their alerts (a second, announcement webhook), so the provider is the bare name.
   [/wordpress/, 'wordpress'],
+  // Webflow and Wix blog publishing (2026-11-15): the brand's OWN site, offered only to a workspace that connected it.
+  // (The Shopify blog tools carry `shopify` in their names, so they ride SHOPIFY_STORE_TOOL_RE below: an account type.)
+  [/webflow/, 'webflow'],
+  [/wix/, 'wix'],
+  // THE SHOPIFY BLOG IS A FAMILY OF ITS OWN (2026-11-15), not core: it needs no connector row (the store IS the account,
+  // see SHOPIFY_STORE_TOOL_RE below, which still answers first for an account with no store), but counted as core it sat on
+  // every roster and, on ChatGPT, against the reviewed list's cap, where six tools pushed a whole ranked family off it.
+  // The server names `shopify_blog` among the live providers exactly when the account has a store (or it could not tell:
+  // only a definite "no store" holds a Shopify tool), so the connector gate offers these to a merchant and nobody else.
+  [/^(post_to_shopify_blog|update_shopify_article|delete_shopify_article|list_shopify_articles|get_shopify_article|list_shopify_blogs)$/, 'shopify_blog'],
   [/discord/, 'discord'],
   [/slack/, 'slack'],
   // Whop (2026-11-03): the brand's OWN whop, offered only to a workspace whose whop installed Hermoso.
@@ -132,7 +149,7 @@ export const TOOL_PROVIDER_RULES = [
   // tools/tiktok-roster-gate-check.mjs derives each tool's credential from server.js and fails when this disagrees.
   [/^(post_to_tiktok|tiktok_post_status|tiktok_creator_info|tiktok_account|list_tiktok_videos)$/, 'tiktok'],
   [/tiktok/, 'tiktok_ads'],
-  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^hide_x_reply$|_x_broadcast|_x_stream_source|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
+  [/^post_to_x$|^delete_x_post$|^edit_x_post$|^post_x_article$|^send_x_dm$|^list_x_dms$|^search_x$|^list_x_blocks$|^hide_x_reply$|^repost_on_x$|^bookmark_x_post$|^follow_x_account$|^repost_on_x$|^bookmark_x_post$|^follow_x_account$|_x_broadcast|_x_stream_source|_x_chat|^x_chat_settings$|^x_(mentions|post|account|trends|user|search_counts|follows)/, 'x'],
   [/pinterest/, 'pinterest'],
   [/reddit/, 'reddit'],
   [/snapchat/, 'snapchat'],
@@ -146,6 +163,10 @@ export const TOOL_PROVIDER_RULES = [
 // any roster, not listed by find_tools, not offered by the Studio agent and not counted. The ADS connectors are live
 // and are NOT in this set (`reddit_ads`, `snapchat_ads`). Never remove an entry from this set.
 export const UNOFFERED_PROVIDERS = new Set(['reddit', 'snapchat']);
+// A tool family reached through the ACCOUNT, never through a connector row (2026-11-15): `shopify_blog` is the store Hermoso
+// was installed on. It has no CONNECTOR_INFO row on purpose (that row would tell every other account to go and connect it);
+// the server names it among the live providers for a merchant (GET /api/connectors/providers, the Studio chat route).
+export const ACCOUNT_PROVIDERS = Object.freeze(['shopify_blog']);
 export function toolUnoffered(name) { const p = toolProvider(name); return !!p && UNOFFERED_PROVIDERS.has(p); }
 
 // ── WHICH TOOLS TAKE `account` (2026-10-29, customer bug fb_f6f7b0371d42) ─────────────────────────────────────────────
@@ -155,7 +176,7 @@ export function toolUnoffered(name) { const p = toolProvider(name); return !!p &
 // the Studio agent's schema and executor) asks THIS function, so the answer cannot differ between them.
 // The set mirrors lib/multi-account.mjs MULTI_ACCOUNT_PROVIDERS, which the npm package cannot import;
 // tools/multi-account-arg-check.mjs fails when the two differ, and DERIVES the tool split below from server.js.
-export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'pinterest', 'instagram']));
+export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'pinterest', 'instagram', 'gmail', 'outlook'])); // gmail + outlook (2026-11-15): several mailboxes per brand; the email tools name theirs with `mailbox`, not `account`, and map to no provider here
 // Filed under a multi-account channel, but routed through a connection that holds ONE grant per brand, so `account`
 // would do nothing there: these two Pinterest reads ride the ad-account (pinterest_ads) row. (The TikTok Business and
 // Ads tools are no longer filed under 'tiktok' at all — only the five posting tools are — so they need no entry.)
@@ -261,13 +282,26 @@ export const CANVA_DARK_TOOLS = Object.freeze(['save_to_canva', 'list_canva_desi
 // are no capability for a customer yet: not counted, not documented, not on a roster. Lit PER CALLER exactly like Canva:
 // server.js flagsOnNow names them for a workspace already holding an Amazon Ads connection and for the gate's team pass.
 export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 'list_amazon_ads_campaigns', 'create_amazon_ads_campaign', 'create_amazon_ads_ad_group', 'add_amazon_ads_keywords', 'create_amazon_ads_product_ads', 'set_amazon_ads_status', 'set_amazon_ads_budget', 'update_amazon_ads_object', 'delete_amazon_ads_object', 'amazon_ads_report']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS]);
+// THE EMAIL TOOLS SHIP DARK WITH THE TWO MAILBOX CONNECTORS (2026-11-15). Email from the customer's own mailbox is
+// built, but neither mailbox kind can be connected by a customer yet: CONNECTOR_GATES.gmail waits on Google verifying
+// the gmail.send scope and CONNECTOR_GATES.outlook on the mail permissions being added to the Microsoft app. Fifteen
+// tools with no mailbox to send from are no capability, so they are not counted, not documented and not on a roster.
+// Lit PER CALLER like Canva and Amazon Ads: server.js flagsOnNow names them when EITHER gate is open, for a workspace
+// that already holds a Gmail or Outlook connection, and for the gates' team pass. They are tied to NO single provider
+// in TOOL_PROVIDER_RULES on purpose: one tool serves both mailbox kinds, and the lead list is useful before a mailbox
+// is connected.
+export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
 // docs reference read it through darkToolsUnder(); the per-caller roster still follows `flagsOn` from the server.
 // reangle_video has no entry: it follows its own REANGLE_VIDEO switch, which no production record carries.
-export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY']), ...CANVA_DARK_TOOLS.map((n) => [n, 'CANVA_APP_APPROVED']), ...AMAZON_ADS_DARK_TOOLS.map((n) => [n, 'AMAZON_ADS_API_APPROVED'])]));
+export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DARK_TOOLS.map((n) => [n, 'WHOP_API_KEY']), ...CANVA_DARK_TOOLS.map((n) => [n, 'CANVA_APP_APPROVED']), ...AMAZON_ADS_DARK_TOOLS.map((n) => [n, 'AMAZON_ADS_API_APPROVED']),
+  // The email tools are counted and documented once OUTLOOK mail is on in production: Outlook is the mailbox kind that does
+  // everything and needs no outside approval, so it is the one that goes live first. If Gmail is ever verified first,
+  // point this at GMAIL_SEND_VERIFIED (the per-caller roster already lights them on either gate).
+  ...EMAIL_DARK_TOOLS.map((n) => [n, 'OUTLOOK_MAIL_ENABLED'])]));
 export function darkToolsUnder(flags) {
   const f = flags && typeof flags === 'object' ? flags : {};
   return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));

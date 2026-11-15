@@ -2,6 +2,7 @@
   "flags": {
     "AMAZON_ADS_API_APPROVED": false,
     "CANVA_APP_APPROVED": false,
+    "OUTLOOK_MAIL_ENABLED": false,
     "WHOP_API_KEY": true
   }
 }
