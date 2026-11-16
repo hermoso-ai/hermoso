@@ -8251,16 +8251,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // 24-hour window has closed, for free.
   server.registerTool('read_whatsapp_inbox', {
     title: 'Read and answer WhatsApp messages',
-    description: 'The WhatsApp messages people sent to the brand’s WhatsApp Business numbers, and its answers to them. With no argument: every conversation from the last 48 hours, newest first, each with who wrote, the last thing they said, whether the brand has answered, and whether the 24-hour reply window is still open. With conversationId: that whole conversation, oldest first, with the delivery status of each reply. WHY ONLY 48 HOURS: WhatsApp has no message history an app can read, so Hermoso keeps what arrives for 48 hours (long enough to answer inside the window) and then deletes it; older messages are in the WhatsApp Business app or WhatsApp Manager. TO REPLY: pass conversationId and reply. It goes out ONLY while the window is open (the person wrote in the last 24 hours) and is refused for free otherwise, because WhatsApp then accepts only an approved template (send_whatsapp_message with template). A reply reaches a real phone: show the user the exact words and get a yes first. Free, 0 credits. Needs WhatsApp connected.',
+    description: 'The WhatsApp messages people sent to the brand’s WhatsApp Business numbers, and its answers to them. With no argument: every conversation from the last 48 hours, newest first, each with who wrote, the last thing they said, whether the brand has answered, and whether the 24-hour reply window is still open. With conversationId: that whole conversation, oldest first, with the delivery status of each reply. With messageId (a wamid. id a send or broadcast row returned): its latest delivery report (sent, delivered, read, or failed with WhatsApp’s reason); never call a message delivered unless this says so. WHY ONLY 48 HOURS: WhatsApp has no message history an app can read, so Hermoso keeps what arrives for 48 hours (long enough to answer inside the window) and then deletes it; older messages are in the WhatsApp Business app or WhatsApp Manager. TO REPLY: pass conversationId and reply. It goes out ONLY while the window is open (the person wrote in the last 24 hours) and is refused for free otherwise, because WhatsApp then accepts only an approved template (send_whatsapp_message with template). A reply reaches a real phone: show the user the exact words and get a yes first. Free, 0 credits. Needs WhatsApp connected.',
     inputSchema: {
       conversationId: z.string().optional().describe('one conversation’s id from this tool or from list_inbox (the part after "whatsapp:"): the phone number id and the person, joined by |'),
+      messageId: z.string().optional().describe('a sent message id (wamid.…): its delivery report'),
       phoneNumberId: z.string().optional().describe('only the conversations on this number (from list_whatsapp_accounts)'),
       reply: z.string().optional().describe('send this text as the reply to conversationId. Only while the 24-hour window is open; the user must have approved the exact words'),
       interactive: z.record(z.any()).optional().describe('reply with buttons, a list, a link button, a location request or a form instead of text: same shape as send_whatsapp_message interactive'),
       media: z.record(z.any()).optional().describe('reply with an image, video, audio or document instead of text: same shape as send_whatsapp_message media'),
       limit: z.number().optional().describe('how many conversations (1–200, default 50)'),
     },
-    outputSchema: { count: z.number().optional(), conversations: z.array(z.any()).optional(), messages: z.array(z.any()).optional(), windowOpen: z.boolean().nullable().optional(), windowNote: z.string().optional(), keepNote: z.string().optional(), ok: z.boolean().optional(), messageId: z.string().optional(), note: z.string().optional() },
+    outputSchema: { count: z.number().optional(), conversations: z.array(z.any()).optional(), messages: z.array(z.any()).optional(), windowOpen: z.boolean().nullable().optional(), windowNote: z.string().optional(), keepNote: z.string().optional(), ok: z.boolean().optional(), messageId: z.string().optional(), status: z.string().nullable().optional(), delivered: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if ((a.reply != null && String(a.reply).trim()) || a.interactive || a.media) {
@@ -8268,9 +8269,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const d = await apiPost('/api/whatsapp/inbox/reply', { id: a.conversationId, text: a.reply, interactive: a.interactive, media: a.media });
       return ok(`${d.note || 'Sent.'}${d.windowClosesAt ? `\nThe reply window stays open until ${d.windowClosesAt}.` : ''}`, d);
     }
+    if (a.messageId && !a.conversationId) {
+      const d = await apiGet('/api/whatsapp/message-status', { messageId: a.messageId, phoneNumberId: a.phoneNumberId });
+      return ok(d.note || 'No delivery report yet.', d);
+    }
     if (a.conversationId) {
       const d = await apiGet('/api/whatsapp/inbox/thread', { id: a.conversationId });
-      const lines = (d.messages || []).map((m) => `${m.at} ${m.from === 'customer' ? d.who : m.from === 'business_app' ? 'You (WhatsApp Business app)' : 'You'}: ${JSON.stringify(String(m.text || '').slice(0, 300))}${m.choiceId ? ` [chose ${m.choiceId}]` : ''}${m.location ? ` [at ${m.location.latitude}, ${m.location.longitude}]` : ''}${m.status ? ` [${m.status}]` : ''}`);
+      const lines = (d.messages || []).map((m) => `${m.at} ${m.from === 'customer' ? d.who : m.from === 'business_app' ? 'You (WhatsApp Business app)' : 'You'}: ${JSON.stringify(String(m.text || '').slice(0, 300))}${m.choiceId ? ` [chose ${m.choiceId}]` : ''}${m.location ? ` [at ${m.location.latitude}, ${m.location.longitude}]` : ''}${m.status ? ` [${m.status}${m.error ? `: ${m.error}` : ''}]` : ''} · id ${m.id}`);
       return ok(`WhatsApp with ${d.who} (conversationId ${d.id}):\n${lines.join('\n') || '(no messages in the last 48 hours)'}\n\n${d.windowNote || ''}\n${d.keepNote || ''}`.trim(), d);
     }
     const d = await apiGet('/api/whatsapp/inbox', { phoneNumberId: a.phoneNumberId, limit: a.limit });
@@ -11724,7 +11729,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('instagram_mentions', {
     title: 'Instagram posts and comments that @mention the brand',
-    description: 'Posts and comments by OTHER accounts that @mention the brand’s Instagram account. action "list" shows the ones Meta has told Hermoso about recently, with the words, who wrote it and the post link; action "reply" posts a PUBLIC comment as the brand under that mention (mediaId, and commentId for a comment mention) and is confirm-gated. Meta keeps no list to read back, only live notifications: Story mentions arrive as DMs instead, private accounts send nothing, and an account connected directly through Instagram gets its mentions inside comment notifications. Also in list_inbox as source instagram_mention. 0 credits.',
+    description: 'Posts and comments by OTHER accounts that @mention the brand’s Instagram account. action "list" shows the ones Meta has told Hermoso about recently, with the words, who wrote it and the post link; action "reply" posts a PUBLIC comment as the brand under that mention (mediaId, and commentId for a comment mention) and is confirm-gated. Meta keeps no list to read back, only live notifications: Story mentions arrive as DMs instead, private accounts send nothing, and an account connected ONLY directly through Instagram gets its mentions inside comment notifications (one also linked to a Facebook Page is read through the Page). Also in list_inbox as source instagram_mention. 0 credits.',
     inputSchema: {
       action: z.enum(['list', 'reply']).describe('read, or reply to one'),
       mediaId: z.string().optional().describe('reply: the post the mention is on'),
@@ -11735,12 +11740,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Facebook Page id; omit when only one Page is connected'),
       confirm: z.boolean().optional().describe('reply: true only after the user agreed to the wording'),
     },
-    outputSchema: { count: z.number().optional(), mentions: z.array(z.any()).optional(), account: z.string().optional(), needsConfirm: z.boolean().optional(), posted: z.boolean().optional(), id: z.string().optional(), note: z.string().optional(), summary: z.string().optional() },
+    outputSchema: { count: z.number().optional(), mentions: z.array(z.any()).optional(), account: z.string().optional(), readVia: z.string().optional(), needsConfirm: z.boolean().optional(), posted: z.boolean().optional(), id: z.string().optional(), note: z.string().optional(), summary: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.action === 'reply') return metaAsk(await apiPost('/api/instagram/mentions/reply', a));
     const d = await apiGet('/api/instagram/mentions', a);
-    return ok(d.count ? `${d.count} mention(s) of ${d.account}:\n${(d.mentions || []).map((m) => `• ${m.summary}${m.permalink ? ` ${m.permalink}` : ''} · mediaId ${m.mediaId}${m.commentId ? ` commentId ${m.commentId}` : ''}`).join('\n')}` : (d.note || 'No mentions.'), d);
+    return ok((d.count ? `${d.count} mention(s) of ${d.account}:\n${(d.mentions || []).map((m) => `• ${m.summary}${m.permalink ? ` ${m.permalink}` : ''} · mediaId ${m.mediaId}${m.commentId ? ` commentId ${m.commentId}` : ''}`).join('\n')}` : (d.note || 'No mentions.')) + (d.readVia ? `\n${d.readVia}` : ''), d);
   }));
   // ── META PAGE WEBHOOKS (2026-08-24, item ⑤). Being TOLD instead of asking. Every rule lives in
   //    lib/meta-webhooks.mjs and is applied by the routes, so there is no second copy here to drift.
