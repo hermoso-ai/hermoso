@@ -25085,18 +25085,18 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('ads'); // back to ads management
   server.registerTool('delete_meta_object', {
     title: 'Delete a Meta campaign / ad set / ad',
-    description: 'PERMANENTLY delete a campaign, ad set, or ad. Pass objectId (from list_meta_ads) + adAccountId. DELETING A CAMPAIGN ALSO DELETES EVERY AD SET AND AD UNDER IT, and deleting an ad set deletes its ads — one id, the whole tree. Call it WITHOUT confirm first: it reports what the object is, its name, and how many children go with it. Show the user that, get an unambiguous yes, then call again with confirm:true plus confirmChildren set to the number it reported (only needed when there is at least one child). To stop delivery without deleting anything, use update_meta_object(status:"PAUSED") instead — that is reversible and this is not.',
+    description: 'PERMANENTLY delete a campaign, ad set, or ad. Pass objectId (from list_meta_ads) + adAccountId. DELETING A CAMPAIGN ALSO DELETES EVERY AD SET AND AD UNDER IT, and deleting an ad set deletes its ads: Meta itself leaves them behind, so Hermoso deletes each ad, then each ad set, then the object, and reads every one back (deletedAds / deletedAdSets / verified say exactly what went). An ad creative that ads still use cannot be deleted until those ads are; the refusal names them (usedBy). Call it WITHOUT confirm first: it reports what the object is, its name, and how many children go with it. Show the user that, get an unambiguous yes, then call again with confirm:true plus confirmChildren set to the number it reported (only needed when there is at least one child). To stop delivery without deleting anything, use update_meta_object(status:"PAUSED") instead — that is reversible and this is not.',
     inputSchema: {
       objectId: z.string().describe('the campaign / ad set / ad id to delete'),
       adAccountId: z.string().describe('ad account id (for auth + scope)'),
       confirm: z.boolean().optional().describe('REQUIRED true — deletion is permanent'),
       confirmChildren: z.number().optional().describe('the number of child ad sets + ads this delete also destroys, as reported by the unconfirmed call — required whenever that is above zero'),
     },
-    outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), deleted: z.boolean().optional(), blastRadius: z.any().optional() },
+    outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), deleted: z.boolean().optional(), verified: z.boolean().optional(), partial: z.boolean().optional(), deletedAds: z.array(z.string()).optional(), deletedAdSets: z.array(z.string()).optional(), notConfirmed: z.array(z.string()).optional(), failed: z.any().optional(), note: z.string().optional(), blastRadius: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/object/delete', a);
-    return ok(`Deleted ${a.objectId}.`, d);
+    return ok(d?.note || `Deleted ${a.objectId}.`, d);
   }));
   // → `channels` (2026-08-20). Edits or deletes an ORGANIC post — the one post_to_meta published, which is
   // `channels`. It is last in the ads span only because it was written there; nothing about it touches ad spend.
