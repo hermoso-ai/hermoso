@@ -8912,6 +8912,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         ...(r.error ? { error: String(r.error).slice(0, 300) } : {}),
         ...(Array.isArray(r.waitingForReconnect) && r.waitingForReconnect.length ? { waitingForReconnect: r.waitingForReconnect.map((w) => ({ channel: w.channel, provider: w.provider, label: w.label, ...(w.reason ? { reason: String(w.reason).slice(0, 200) } : {}), steps: w.steps })) } : {}),
         ...(r.holdNote ? { holdNote: String(r.holdNote).slice(0, 400) } : {}),
+        ...(r.postingHeld ? { postingHeld: { channel: r.postingHeld.channel, ...(r.postingHeld.who ? { who: r.postingHeld.who } : {}), note: String(r.postingHeld.note || '').slice(0, 300) } } : {}),
       };
     };
     const qAll = (d.scheduled || []).filter(hasCh), hAll = (d.history || []).filter(hasCh);
@@ -8933,7 +8934,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const waitProv = new Set(waitQ.flatMap((r) => r.waitingForReconnect.map((w) => w.provider)));
     const waitNotes = waitQ.length ? await brokenConnectorNotes((i) => waitProv.has(i.provider)) : [];
     const waitLine = waitQ.length ? ` ⚠ ${waitQ.length} queued post${waitQ.length === 1 ? '' : 's'} cannot go out until the user reconnects ${[...new Set(waitQ.flatMap((r) => r.waitingForReconnect.map((w) => w.label)))].join(' and ')}: ${waitQ.slice(0, 3).map((r) => `${r.id} at ${r.at}`).join(', ')}.${waitNotes.length ? ' ' + waitNotes.map((i) => i.agentNote).join(' ') : ''}` : '';
-    return ok(`${want ? `${want}: ` : ''}${q} post${q === 1 ? '' : 's'} queued, ${h} already fired.${waitLine}${d.posting?.line ? ` Posting: ${d.posting.line}` : ''}${badLine}${arts.length ? ` X Article${arts.length === 1 ? '' : 's'} queued: ${arts.slice(0, 5).map(r => `${r.id} "${r.xArticle.title}" at ${r.at}`).join('; ')}.` : ''}${partial ? ` Showing the next ${qShow.length} queued and the last ${hShow.length} fired; pass upcoming or fired for more, or id for one post in full.` : ''}`,
+    // A HELD INSTAGRAM ACCOUNT IS SAID TOO (2026-11-16): the user has to check Instagram and press Resume (instagram_posting_hold).
+    const igHeldLine = Array.isArray(d.postingHolds) && d.postingHolds.length ? ` ⚠ Instagram posting is held for ${d.postingHolds.map((x) => x.who || x.account).join(', ')}: Meta restricted the account for suspected spam, so its scheduled Instagram posts wait. Resume with instagram_posting_hold once the account holder has checked Account Status in the Instagram app.` : '';
+    return ok(`${want ? `${want}: ` : ''}${q} post${q === 1 ? '' : 's'} queued, ${h} already fired.${waitLine}${igHeldLine}${d.posting?.line ? ` Posting: ${d.posting.line}` : ''}${badLine}${arts.length ? ` X Article${arts.length === 1 ? '' : 's'} queued: ${arts.slice(0, 5).map(r => `${r.id} "${r.xArticle.title}" at ${r.at}`).join('; ')}.` : ''}${partial ? ` Showing the next ${qShow.length} queued and the last ${hShow.length} fired; pass upcoming or fired for more, or id for one post in full.` : ''}`,
       { ...rest, scheduled: qShow.map(brief), history: hShow.map(brief), queuedTotal: q, firedTotal: h });
   }));
   // RESCHEDULE. `PATCH /api/schedule/:id` has existed since drag-to-reschedule shipped and NO agent surface wrapped
@@ -9129,6 +9132,23 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const { id, ...rest } = a;
     const d = await apiPost(`/api/schedule/${encodeURIComponent(id)}/retry`, rest);
     return ok(d.note || `Re-queued ${id} as ${d.id}.`, d);
+  }));
+  // INSTAGRAM'S SPAM RESTRICTION (2026-11-16, lib/ig-spam-hold.mjs): two 4/2207051 refusals in a row hold that account's
+  // scheduled Instagram posts. This reads the hold and lifts it; the web banner and the Studio agent call the same routes.
+  server.registerTool('instagram_posting_hold', {
+    title: 'See or resume a held Instagram account',
+    description: 'See or lift the HOLD on an Instagram account\'s scheduled posts. When Meta refuses two posts in a row from an Instagram account with its spam restriction (code 4/2207051, "We restrict certain activity to protect our community"), Hermoso holds that account\'s scheduled Instagram posts instead of sending them into the restriction: they stay queued and nothing is posted. action:"status" (default) says whether posting is held, since when, and how many posts wait. action:"resume" lifts the hold and releases the waiting posts (ones whose time passed go out 30 minutes apart). Resume only after the user says the account holder has checked Account Status in the Instagram app. Reconnecting Instagram or a successful Instagram post also lifts it. Free.',
+    inputSchema: {
+      brand: z.string().optional().describe('WHICH PROFILE — id or exact name from list_brands; needed when it is not the profile this connection is pinned to.'),
+      action: z.enum(['status', 'resume']).optional().describe('status (default) or resume'),
+      account: z.string().optional().describe('resume one held account: its Instagram id or @handle (default: every held account on this brand)'),
+    },
+    outputSchema: { held: z.boolean().optional(), holds: z.array(z.object({ account: z.string(), who: z.string().optional(), since: z.string(), refusals: z.number(), postsWaiting: z.number(), why: z.string() }).passthrough()).optional(), resumed: z.array(z.object({ account: z.string(), who: z.string().optional() }).passthrough()).optional(), released: z.array(z.object({ id: z.string(), at: z.string() }).passthrough()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    if (a.action === 'resume') { const d = await apiPost('/api/instagram/posting-hold/resume', { ...(a.account ? { account: a.account } : {}) }); return ok(d.note || 'Instagram posting is resumed.', d); }
+    const d = await apiGet('/api/instagram/posting-hold');
+    return ok(d.held ? `${d.note} Held: ${(d.holds || []).map((h) => `${h.who || h.account} since ${h.since}, ${h.postsWaiting} post${h.postsWaiting === 1 ? '' : 's'} waiting`).join('; ')}. Resume with action:"resume" once the user confirms the account holder checked Account Status.` : (d.note || 'Instagram posting is not held.'), d);
   }));
   server.registerTool('duplicate_scheduled', {
     title: 'Duplicate a scheduled post',
