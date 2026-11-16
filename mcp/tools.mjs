@@ -2760,7 +2760,7 @@ export const TOOL_GROUP_NAMES = ['core', ...Object.keys(TOOL_GROUPS)];
 // joined it (on-demand), on top of the create tools added since 09-24 that had used up the 1.3× tolerance.
 // ALL RE-MEASURED 2026-11-09 (tools/tool-group-truth-check.mjs §8): create had reached 1.37× its row (62200 → 85100) after
 // the 2026-11-08 on-demand create tools (make_short, the video presets, rewrite_ad_line, list_winning_ads …).
-export const TOOL_GROUP_TOKENS = { core: 4800, research: 9500, create: 85100, channels: 59000, channel_admin: 115600, analytics: 68800, files: 17800, workspace: 10900, ads: 368300 };
+export const TOOL_GROUP_TOKENS = { core: 4800, research: 9500, create: 85100, channels: 59000, channel_admin: 159500, analytics: 68800, files: 17800, workspace: 10900, ads: 368300 };
 
 // THE DEFAULT ROSTER IS EVERYTHING EXCEPT `ads` AND `analytics`. Paid-campaign management across every ad platform
 // is ~236K tokens on its own — more than everything else put together — because each platform carries a full
