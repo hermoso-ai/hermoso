@@ -6213,7 +6213,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const r = await apiPost('/api/discord/post', a);
-    return ok(r.note || `Posted to Discord${r.url ? ` — ${r.url}` : ''}`, r);
+    return ok(r.note || `Posted to Discord${r.url ? `: ${r.url}` : ''}`, r);
   }));
 
   server.registerTool('edit_discord_message', {
@@ -6224,7 +6224,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/discord/edit', bodyBrand(a, { messageId: a.messageId, channel: a.channel, text: a.text }));
-    return ok(`Edited the Discord announcement ${d.messageId}${d.url ? ` — ${d.url}` : ''}.`, d);
+    return ok(`Edited the Discord announcement ${d.messageId}${d.url ? `: ${d.url}` : ''}.`, d);
   }));
 
   server.registerTool('delete_discord_message', {
@@ -6240,13 +6240,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('get_discord_message', {
     title: 'Read a Discord announcement',
-    description: "Read back a Discord message Hermoso posted: its text, link and REACTIONS — the only engagement Discord exposes (there is no view count). Free.",
+    description: "Read back a Discord message: text, embeds, poll or poll result, what kind it is, who posted it, link and REACTIONS (Discord has no view count). Free.",
     inputSchema: { ...MANAGE_BRAND, messageId: z.string(), channel: z.string().optional() },
-    outputSchema: { messageId: z.string().optional(), content: z.string().optional(), url: z.string().nullable().optional(), reactions: z.array(z.any()).optional(), reactionCount: z.number().nullable().optional(), note: z.string().optional() },
+    outputSchema: { messageId: z.string().optional(), kind: z.string().optional(), content: z.string().optional(), embeds: z.array(z.any()).optional(), postedBy: z.string().optional(), url: z.string().nullable().optional(), reactions: z.array(z.any()).optional(), reactionCount: z.number().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/discord/message', queryBrand(a, { messageId: a.messageId, ...(a.channel ? { channel: a.channel } : {}) }));
-    return ok(`Discord message ${d.messageId}: ${d.reactionCount} reaction(s)${(d.reactions || []).length ? ` (${d.reactions.map((r) => `${r.emoji} ${r.count}`).join(', ')})` : ''}.${d.url ? ` ${d.url}` : ''}`, d);
+    const _emb = (d.embeds || []).filter((e) => e && e.type !== 'poll_result').map((e, i) => `\nEmbed ${i + 1}${e.title ? `: “${e.title}”` : ''}${e.url ? ` (${e.url})` : ''}${e.description ? `. ${e.description}` : ''}${(e.fields || []).length ? `. Fields: ${e.fields.map((f) => `${f.name}: ${f.value}`).join('; ')}` : ''}${e.footer ? `. Footer: ${e.footer}` : ''}`).join('');
+    const _pr = d.pollResult ? `\nPoll result: ${d.pollResult.winner ? `“${d.pollResult.winner}” won with ${d.pollResult.winnerVotes ?? '?'} of ${d.pollResult.totalVotes ?? '?'} votes` : `${d.pollResult.totalVotes ?? 'no'} votes`}.` : '';
+    return ok(`Discord message ${d.messageId}${d.what && d.kind !== 'text' ? `: ${d.what}` : ''}. ${d.reactionCount} reaction(s)${(d.reactions || []).length ? ` (${d.reactions.map((r) => `${r.emoji} ${r.count}`).join(', ')})` : ''}.${d.url ? ` ${d.url}` : ''}${d.content ? `\nText: “${d.content}”` : ''}${_emb}${_pr}${d.note ? `\n${d.note}` : ''}`, d);
   }));
 
   server.registerTool('post_to_slack', {
@@ -6276,7 +6278,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // ── THE HERMOSO SLACK + DISCORD APPS (2026-11-03) — channels, the default channel, history, edit/delete/read, Slack's scheduler
   const chatChannelsText = (p, d) => {
     const all = (p === 'slack' ? d.workspaces : d.servers) || []; const where = (p === 'slack' ? d.workspace : d.server) || {};
-    return `${all.length} ${p === 'slack' ? 'workspace' : 'server'}(s) with the Hermoso app: ${all.map((w) => `${w.name} (${w.id})${w.isDefault ? ' [default]' : ''}`).join(', ')}.\nChannels in ${where.name}:\n${(d.channels || []).map((c) => `• #${c.name} (${c.id})${c.private ? ' · private' : ''}${c.kind && c.kind !== 'text' ? ` · ${c.kind}` : ''}${c.isDefault ? ' · DEFAULT' : ''}`).join('\n') || '(none)'}${d.defaultChannel ? '' : `\nNo default channel yet — ask the user which one, then set_${p}_channel.`}`;
+    return `${all.length} ${p === 'slack' ? 'workspace' : 'server'}(s) with the Hermoso app: ${all.map((w) => `${w.name} (${w.id})${w.isDefault ? ' [default]' : ''}`).join(', ')}.\nChannels in ${where.name}:\n${(d.channels || []).map((c) => `• #${c.name} (${c.id})${c.private ? ' · private' : ''}${c.kind && c.kind !== 'text' ? ` · ${c.kind}` : ''}${c.isDefault ? ' · DEFAULT' : ''}`).join('\n') || '(none)'}${d.defaultChannel ? '' : `\nNo default channel yet: ask the user which one, then set_${p}_channel.`}`;
   };
   const chatHistoryText = (d) => `${d.count} recent message(s) in #${d.channelName || d.channel}:\n${(d.messages || []).map((m) => `• ${m.at} ${m.fromHermoso ? 'Hermoso' : (m.author || m.user || '?')}: ${m.contentHidden ? '[text withheld by Discord]' : String(m.text).replace(/\s+/g, ' ').slice(0, 400)}${m.files ? ` [${m.files.length} file(s)]` : ''}`).join('\n') || '(none)'}${d.note ? `\n${d.note}` : ''}`;
   // ONE definition per platform, registered under LITERAL names (tools/mcp-parity.mjs scans the source for them).
@@ -6404,7 +6406,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { ...MANAGE_BRAND, ...DISCORD_SERVER_ARG },
     outputSchema: { server: z.string().optional(), roles: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, wrap(async (a) => { const d = await apiGet('/api/discord/roles', queryBrand(a, a.discordServer ? { discordServer: a.discordServer } : {})); return ok(`${d.note}\n${(d.roles || []).map((r) => `• ${r.name} (${r.id})${r.everyone ? ' · everyone' : ''}${r.members != null ? ` · ${r.members} member(s)` : ''}${r.managed ? ' · managed by an app' : ''}${r.assignable === false && !r.everyone ? ' · above the Hermoso role' : ''}${r.elevated ? ` · ${r.elevated.join(', ')}` : ''}`).join('\n')}`, d); }));
+  }, wrap(async (a) => { const d = await apiGet('/api/discord/roles', queryBrand(a, a.discordServer ? { discordServer: a.discordServer } : {})); return ok(`${d.note}\n${(d.roles || []).map((r) => `• ${r.name} (${r.id})${r.everyone ? ' · everyone' : ''}${r.members != null ? ` · ${r.members} member(s)` : ''}${r.managed ? ' · managed by an app' : ''}${r.hermoso ? ' · the Hermoso role itself' : ((r.aboveHermoso ?? (r.assignable === false && !r.everyone && !r.managed)) ? ' · above the Hermoso role' : '')}${r.elevated ? ` · ${r.elevated.join(', ')}` : ''}`).join('\n')}`, d); }));
   const discordRoleFields = { name: z.string().optional().describe('the role name, up to 100 characters'), color: z.union([z.string(), z.number()]).optional().describe('a hex color like #5865F2, or a whole number'), hoist: z.boolean().optional().describe('show its members as their own group in the member list'), mentionable: z.boolean().optional().describe('let anyone @mention the role'), permissions: z.union([z.array(z.string()), z.string()]).optional().describe('what the role may do, as Discord permission names (e.g. ["VIEW_CHANNEL","SEND_MESSAGES"]) or a bitfield string. The bot can only grant permissions it has itself') };
   server.registerTool('create_discord_role', {
     title: 'Create a Discord role',
@@ -6523,7 +6525,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { ...MANAGE_BRAND, messageId: z.string(), text: z.string(), slackWorkspace: z.string().optional() },
     outputSchema: { edited: z.boolean().optional(), messageId: z.string().optional(), url: z.string().nullable().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, wrap(async (a) => { const d = await apiPost('/api/slack/edit', bodyBrand(a, { messageId: a.messageId, text: a.text, slackWorkspace: a.slackWorkspace })); return ok(`Edited the Slack message ${d.messageId}${d.url ? ` — ${d.url}` : ''}.`, d); }));
+  }, wrap(async (a) => { const d = await apiPost('/api/slack/edit', bodyBrand(a, { messageId: a.messageId, text: a.text, slackWorkspace: a.slackWorkspace })); return ok(`Edited the Slack message ${d.messageId}${d.url ? `: ${d.url}` : ''}.`, d); }));
   server.registerTool('delete_slack_message', {
     title: 'Delete a Slack message',
     description: 'PERMANENTLY delete a Slack message the Hermoso app posted. Call it WITHOUT confirm first: nothing is deleted and you get a sentence quoting the message to show the user. Free.',
@@ -28289,14 +28291,21 @@ function memoryNoteVerdict(text) {
     outputSchema: { ok: z.boolean().optional(), provider: z.string().optional(), disconnected: z.boolean().optional(), revokesAtProvider: z.string().nullable().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const provider = String(a.provider || '').trim().toLowerCase();
-    if (!provider) return { content: [{ type: 'text', text: 'Name the provider to disconnect (see list_connectors).' }], isError: true };
+    const _asked = String(a.provider || '').trim().toLowerCase();
+    if (!_asked) return { content: [{ type: 'text', text: 'Name the provider to disconnect (see list_connectors).' }], isError: true };
     const _cd = await apiGet('/api/connectors');
     const live = (_cd.connectors || []).filter(c => c && c.status !== 'revoked');
-    const hit = live.find(c => c.provider === provider);
+    // THE NAME A PERSON SAYS IS NOT ALWAYS THE ROW'S ID (2026-11-15: "slack" answered "Nothing connected" while the Slack
+    // app was connected as slack_app). An exact id always wins; otherwise the one row that IS that channel under another
+    // id is used, and the confirm below names the real id before anything is removed.
+    const _alias = { slack: ['slack_app'], discord: ['discord_app'], wordpress: ['wordpress_com'], twitter: ['x'], facebook: ['meta'], fb: ['meta'] };
+    const hit = live.find(c => c.provider === _asked) || ((_alias[_asked] || []).map(p => live.find(c => c.provider === p)).find(Boolean)) || null;
+    const provider = hit ? hit.provider : _asked;
+    const _also = hit && hit.provider === _asked ? (_alias[_asked] || []).filter(p => live.some(c => c.provider === p)) : [];
+    const _alsoNote = _also.length ? ` ${_also.map(p => `"${p}"`).join(' and ')} is a separate connection and stays connected; disconnect it with provider "${_also[0]}".` : '';
     const _isKey = Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, provider);
     const _link = ((typeof _cd.connectLink === 'string' && _cd.connectLink.includes('{provider}')) ? _cd.connectLink : 'https://app.hermoso.ai/?connect={provider}').replace('{provider}', provider);
-    if (!hit) return { content: [{ type: 'text', text: `Nothing connected for "${provider}". Connected: ${live.map(c => c.provider).join(', ') || '(none)'}.` }], isError: true };
+    if (!hit) { const _near = live.map(c => c.provider).filter(p => p.startsWith(`${_asked}_`) || _asked.startsWith(`${p}_`)); return { content: [{ type: 'text', text: `Nothing connected for "${_asked}".${_near.length ? ` Did you mean ${_near.map(p => `"${p}"`).join(' or ')}?` : ''} Connected: ${live.map(c => c.provider).join(', ') || '(none)'}.` }], isError: true }; }
     // agentLabel, never accountLabel — the confirm sentence is model-visible text like any other (2026-08-04).
     // THE REVOKE CLAIM IS THE SERVER'S, AND SINCE 2026-08-13 IT IS THE SAME FOR EVERY PROVIDER: a disconnect
     // removes THIS BRAND'S row and calls nothing at the provider. That is not a limitation to apologise for, it is
@@ -28305,13 +28314,15 @@ function memoryNoteVerdict(text) {
     // disconnectClaim() and names where the user can really revoke us. It is printed UNCONDITIONALLY on both the
     // confirm prompt and the result, because "this is brand-scoped" is a capability limit that stays true forever
     // rather than a per-provider quirk — the connector-card rule about desc-vs-setup copy, applied to an agent.
-    if (a.confirm !== true) return ok(`This disconnects ${hit.provider}${hit.agentLabel ? ` (${hit.agentLabel})` : ''} from this workspace: the stored credentials are deleted and every ${hit.provider} tool stops working until ${_isKey ? `it is connected again (connect_connector with the key, or ${_link} in a browser)` : `someone reconnects it IN A BROWSER (${_link}) — I can't do that step`}. ${hit.removalNote || ''} Already-published posts and running campaigns are untouched. Confirm with the user, then call again with confirm:true.`, { ok: false, provider, revokesAtProvider: hit.revokesAtProvider || null });
+    if (a.confirm !== true) return ok(`This disconnects ${hit.provider}${hit.agentLabel ? ` (${hit.agentLabel})` : ''} from this workspace: the stored credentials are deleted and every ${hit.provider} tool stops working until ${_isKey ? `it is connected again (connect_connector with the key, or ${_link} in a browser)` : `someone reconnects it IN A BROWSER (${_link}) — I can't do that step`}. ${hit.removalNote || ''} Already-published posts and running campaigns are untouched.${_alsoNote} Confirm with the user, then call again with confirm:true.`, { ok: false, provider, revokesAtProvider: hit.revokesAtProvider || null });
     // Straight through the app's own disconnect route → Connectors.remove(). The shared-grant guard that used to
     // matter here (all seven google_* connectors ride ONE OAuth client id, so a naive revoke killed the siblings)
     // is moot now that nothing revokes — the hazard is closed rather than guarded.
-    const _one = await apiPost(`/api/connectors/${encodeURIComponent(provider)}/disconnect`, a.account ? { account: String(a.account) } : {});
+    // One Slack workspace / Discord server off the brand (`account`) is the slack / discord route's own branch, so that name is kept.
+    const _route = a.account && (_asked === 'slack' || _asked === 'discord') ? _asked : provider;
+    const _one = await apiPost(`/api/connectors/${encodeURIComponent(_route)}/disconnect`, a.account ? { account: String(a.account) } : {});
     if (_one?.data?.removedAccount) return ok(`Removed ${provider} account ${_one.data.removedAccount} from this brand — ${_one.data.remaining} account(s) remain connected.`, { ok: true, provider, disconnected: false, removedAccount: _one.data.removedAccount, remaining: _one.data.remaining });
-    return ok(`Disconnected ${provider}${hit.agentLabel ? ` (${hit.agentLabel})` : ''} from this brand.${hit.removalNote ? ` ${hit.removalNote}` : ''} ${_isKey ? 'Reconnect it with connect_connector, or in the app under Connectors.' : `Reconnect from the app: Connectors ▸ ${provider}, or hand the user ${_link}.`}`, { ok: true, provider, disconnected: true, revokesAtProvider: hit.revokesAtProvider || null });
+    return ok(`Disconnected ${provider}${hit.agentLabel ? ` (${hit.agentLabel})` : ''} from this brand.${hit.removalNote ? ` ${hit.removalNote}` : ''}${_alsoNote} ${_isKey ? 'Reconnect it with connect_connector, or in the app under Connectors.' : `Reconnect from the app: Connectors ▸ ${provider}, or hand the user ${_link}.`}`, { ok: true, provider, disconnected: true, revokesAtProvider: hit.revokesAtProvider || null });
   }));
   // ── CONNECT A PASTE-A-KEY ACCOUNT FROM HERE (2026-09-12) ─────────────────────────────────────────────────────────────
   // The why and the derived set are at KEY_CONNECTORS. The key goes to the SAME route the app's paste box uses, so the
@@ -28357,7 +28368,7 @@ function memoryNoteVerdict(text) {
     if ((provider === 'slack' || provider === 'discord') && !Object.keys(given).length) {
       let url = `https://app.hermoso.ai/?connect=${provider}`;
       try { const tpl = (await apiGet('/api/connectors')).connectLink; if (typeof tpl === 'string' && tpl.includes('{provider}')) url = tpl.replace('{provider}', provider); } catch {}
-      return ok(`Adding the Hermoso ${spec.label} app needs ${spec.label}'s own permission screen, in your human's browser. Hand them this one-click link: ${url} — it opens Hermoso${url.includes('&brand=') ? ' on this brand' : ''} and starts "Add to ${spec.label}"${provider === 'discord' ? ' (they pick the server in Discord\u2019s own picker)' : ''}. Then call list_${provider}_channels and ask them which channel posts should go to (set_${provider}_channel).`, { ok: true, provider, connected: false, step: 'install', url });
+      return ok(`Adding the Hermoso ${spec.label} app needs ${spec.label}'s own permission screen, in your human's browser. Hand them this one-click link: ${url}. It opens Hermoso${url.includes('&brand=') ? ' on this brand' : ''} and starts "Add to ${spec.label}"${provider === 'discord' ? ' (they pick the server in Discord\u2019s own picker)' : ''}. Then call list_${provider}_channels and ask them which channel posts should go to (set_${provider}_channel).`, { ok: true, provider, connected: false, step: 'install', url });
     }
     const unknown = Object.keys(given).filter(n => !Object.prototype.hasOwnProperty.call(spec.fields, n));
     if (unknown.length) return refuse(`${spec.label} does not take ${unknown.map(n => `"${n}"`).join(', ')}, so nothing was sent. Its fields are ${keyConnectFieldList(spec)} (* = required): ${spec.how}.`);
