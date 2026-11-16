@@ -11181,7 +11181,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_business_categories', {
     title: 'Google Business categories for a country',
-    description: 'Google\u2019s CATEGORY vocabulary for a country \u2014 the primary category is a required field on a Business Profile and one of the strongest LOCAL RANKING signals, and Google accepts only its own stable ids (`categories/gcid:coffee_shop`), never a display name. So this is the lookup you run BEFORE setting a category, and `filter` searches display names (\u201cpizza\u201d, \u201cdentist\u201d). regionCode is REQUIRED because Google\u2019s list genuinely differs by country \u2014 there is no worldwide answer. view:\"FULL\" additionally returns the service types and the attributes valid for each category, which is how you join this to list_business_attributes. Read-only, 0 credits. Needs Google Business Profile connected.',
+    description: 'Google\u2019s CATEGORY vocabulary for a country \u2014 the primary category is a required field on a Business Profile and one of the strongest LOCAL RANKING signals, and Google accepts only its own stable ids (`categories/gcid:coffee_shop`), never a display name. So this is the lookup you run BEFORE setting a category, and `filter` searches the START of display names (\u201cpizza\u201d, or Google\u2019s `displayName=pizza`). regionCode is REQUIRED because Google\u2019s list genuinely differs by country \u2014 there is no worldwide answer. view:\"FULL\" additionally returns the service types and the attributes valid for each category, which is how you join this to list_business_attributes. Read-only, 0 credits. Needs Google Business Profile connected.',
     inputSchema: {
       regionCode: z.string().describe('ISO 3166-1 alpha-2 country code \u2014 US, GB, CA, AU'),
       languageCode: z.string().optional().describe('BCP 47, default en'),
@@ -11196,17 +11196,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('list_business_attributes', {
     title: 'Google Business attributes available for a listing',
-    description: 'The ATTRIBUTES a Business Profile can set \u2014 accessibility, amenities, service options, payment types \u2014 with the valid values for each. These are what local searchers FILTER on, so a listing with none set is invisible to those filters. Scope it exactly ONE of three ways and no more: locationName (`locations/123`) for what THAT listing may set, categoryName (`categories/gcid:\u2026`, from list_business_categories) for a category, or regionCode for a country. Passing more than one is refused by name, because Google silently ignores the ones it does not use and would answer about a different scope than you asked for. Read-only, 0 credits. Needs Google Business Profile connected.',
+    description: 'The ATTRIBUTES a Business Profile can set \u2014 accessibility, amenities, service options, payment types \u2014 with the valid values for each. These are what local searchers FILTER on, so a listing with none set is invisible to those filters. Scope it ONE of three ways: locationName (`locations/123`) alone for what THAT listing may set; categoryName (`categories/gcid:\u2026`, from list_business_categories) for a category, where regionCode and languageCode are filled from the brand\u2019s listing if left out (the reply says so); or regionCode with showAll:true for a country. locationName with the others is refused by name. Read-only, 0 credits. Needs Google Business Profile connected.',
     inputSchema: {
       locationName: z.string().optional().describe('locations/{id} \u2014 from list_business_locations'),
       categoryName: z.string().optional().describe('categories/gcid:\u2026 \u2014 from list_business_categories'),
-      regionCode: z.string().optional().describe('ISO 3166-1 alpha-2 country code'),
-      languageCode: z.string().optional().describe('BCP 47 language code; default en'), showAll: z.boolean().optional().describe("true = send Google's showAll flag for the full attribute list"), pageSize: z.number().optional().describe('attributes per page; default 200'), pageToken: z.string().optional().describe('next page token from the previous reply'),
+      regionCode: z.string().optional().describe('ISO 3166-1 alpha-2 country code; with categoryName, defaults to the listing\u2019s'),
+      languageCode: z.string().optional().describe('BCP 47 language code; defaults to the listing\u2019s'), locationId: z.string().optional().describe('which listing to borrow regionCode/languageCode from when several are shared'), showAll: z.boolean().optional().describe("true = send Google's showAll flag for the full attribute list"), pageSize: z.number().optional().describe('attributes per page; default 200'), pageToken: z.string().optional().describe('next page token from the previous reply'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/business/attributes', a);
-    return ok(`${d.count} attribute(s) for ${JSON.stringify(d.scope)}:\n` + (d.attributes || []).slice(0, 20).map((x) => `\u2022 ${x.displayName}${x.group ? ` (${x.group})` : ''} \u2014 ${x.id}${x.deprecated ? ' [DEPRECATED]' : ''}`).join('\n'), d);
+    return ok(`${d.count} attribute(s) for ${JSON.stringify(d.scope)}:\n` + (d.attributes || []).slice(0, 20).map((x) => `\u2022 ${x.displayName}${x.group ? ` (${x.group})` : ''} \u2014 ${x.id}${x.deprecated ? ' [DEPRECATED]' : ''}`).join('\n') + (d.note ? `\n\n${d.note}` : ''), d);
   }));
   server.registerTool('business_google_updated', {
     title: 'Edits Google is proposing to a listing',
