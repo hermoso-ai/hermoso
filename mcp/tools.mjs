@@ -12381,6 +12381,117 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/shopify/marketing-activity/delete', a); return ok(d.note, d); }));
 
+  // SHOPIFY ▸ DISCOUNT CODES (2026-11-15, lib/shopify-discounts.mjs) — the store's own codes, for a "use code X" ad or
+  // email. `channels` like the other store writes: it changes what the merchant's live checkout accepts. No `shop`
+  // parameter, for the reason above. Create and disable are confirm-gated: the unconfirmed call is a free preview.
+  server.group('channels');
+  server.registerTool('create_shopify_discount_code', {
+    title: 'Create a Shopify discount code',
+    description: "Create a discount code customers type at checkout on the merchant's Shopify store, for every product: percentOff (20 = 20% off) OR amountOff (a fixed amount in the store's currency), with an optional minimum purchase (minSubtotal OR minQuantity, not both), startsAt (default now), endsAt, usageLimit (total uses) and oncePerCustomer. THE CODE WORKS AT THE LIVE CHECKOUT AND EVERY USE IS MONEY OFF THE STORE'S SALES, so without confirm:true NOTHING is created and the reply describes exactly the code that would be: show the user, get a yes, then call again with confirm:true. The reply after creating is Shopify's own copy of the code, read back. Nothing the user wrote is changed: an impossible value (a code with a space, 0% or over 100%, an end date in the past) is refused with the reason. The first time, the store may need to approve Hermoso's discount permission: the reply says how. Only works for accounts created by installing Hermoso from the Shopify App Store. Free.",
+    inputSchema: {
+      code: z.string().describe('what customers type at checkout, e.g. SUMMER20 (no spaces)'),
+      title: z.string().optional().describe('the name shown in Shopify admin; defaults to the code'),
+      percentOff: z.number().optional().describe('percent off, more than 0 and at most 100 (20 = 20% off). Pass this OR amountOff.'),
+      amountOff: z.number().optional().describe("a fixed amount off, in the store's currency (10 = 10.00 off). Pass this OR percentOff."),
+      appliesOnEachItem: z.boolean().optional().describe('amountOff only: true takes the amount off EACH item; false (default) splits it across the order'),
+      minSubtotal: z.number().optional().describe("minimum order subtotal in the store's currency. Pass this OR minQuantity, not both."),
+      minQuantity: z.number().optional().describe('minimum number of items in the cart. Pass this OR minSubtotal, not both.'),
+      startsAt: z.string().optional().describe('ISO date or date-time the code starts working; default now'),
+      endsAt: z.string().optional().describe('ISO date or date-time it stops working; leave out for no end date'),
+      usageLimit: z.number().optional().describe('how many times the code can be used in total; leave out for no limit'),
+      oncePerCustomer: z.boolean().optional().describe('true = each customer can use it once'),
+      confirm: z.boolean().optional().describe('true to create it; without it nothing is created and the reply describes the code'),
+    },
+    outputSchema: { shop: z.string().optional(), needsConfirm: z.boolean().optional(), created: z.boolean().optional(), verified: z.boolean().optional(), id: z.string().optional(), discount: z.any().optional(), plan: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/discount', a); return ok(d.note, d); }));
+  server.registerTool('list_shopify_discount_codes', {
+    title: 'List Shopify discount codes',
+    description: "The discount codes on the merchant's Shopify store, newest first: the code, what it takes off, the minimum purchase, start and end, the use limit, how many times it has been used (Shopify updates that count in the background, so it can lag a few minutes) and its status (ACTIVE, SCHEDULED or EXPIRED). Filter by status (active, scheduled, expired) or search the title. Pass cursor for more. This is where the id for disable_shopify_discount_code comes from. Read-only, free. Only works for accounts created by installing Hermoso from the Shopify App Store.",
+    inputSchema: {
+      status: z.enum(['active', 'scheduled', 'expired']).optional().describe('only codes with this status'),
+      search: z.string().optional().describe('match the discount title'),
+      limit: z.number().optional().describe('1 to 50, default 25'),
+      cursor: z.string().optional().describe('pageInfo.endCursor from the previous reply'),
+    },
+    outputSchema: { shop: z.string().optional(), count: z.number().optional(), codes: z.array(z.any()).optional(), pageInfo: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/shopify/discounts', a);
+    const rows = (d.codes || []).map((x) => `• ${x.code || x.title} · ${x.status}${x.summary ? ` · ${x.summary}` : ''}${x.usageCount != null ? ` · used ${x.usageCount}${x.usageLimit ? `/${x.usageLimit}` : ''}` : ''}${x.endsAt ? ` · ends ${x.endsAt}` : ''} (${x.id})`);
+    return ok([d.note, ...rows].join('\n'), d);
+  }));
+  server.registerTool('disable_shopify_discount_code', {
+    title: 'Disable a Shopify discount code',
+    description: "Stop a discount code working at checkout on the merchant's Shopify store, by id (from list_shopify_discount_codes) or by the code itself. Shopify keeps the code and it can be switched back on in Shopify admin under Discounts, but every customer holding it loses it at once, so without confirm:true NOTHING changes and the reply names the code and what it does: show the user, get a yes, then call again with confirm:true. The answer is the status read back from Shopify (EXPIRED means it no longer works). Only works for accounts created by installing Hermoso from the Shopify App Store. Free.",
+    inputSchema: {
+      id: z.string().optional().describe('gid://shopify/DiscountCodeNode/… from list_shopify_discount_codes; use this or code'),
+      code: z.string().optional().describe('the code text customers type, e.g. SUMMER20; use this or id'),
+      confirm: z.boolean().optional().describe('true to disable it; without it nothing changes and the reply names the code'),
+    },
+    outputSchema: { shop: z.string().optional(), needsConfirm: z.boolean().optional(), disabled: z.boolean().optional(), verified: z.boolean().nullable().optional(), alreadyInactive: z.boolean().optional(), discount: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/discount/disable', a); return ok(d.note, d); }));
+
+  // SHOPIFY ▸ ORDERS, SALES REPORT, PAST BUYERS (2026-11-15, lib/shopify-orders.mjs) — read live from the merchant's own
+  // store. No `shop` parameter, for the reason above. Orders and customers are protected customer data: when Shopify has
+  // not approved names and emails for the app yet, the reply says so in words and a missing name is never an empty one.
+  const fmtMoneyRow = (m) => (m ? ` · ${m.amount} ${m.currency}` : '');
+  server.registerTool('list_shopify_orders', {
+    title: 'List Shopify orders',
+    description: "The merchant's Shopify orders, newest first: order number, date, total, payment and fulfilment status, discount codes used, where the buyer came from (Shopify's last visit before the order: its source and UTM tags) and the buyer's name and email. Default the last 30 days; pass days OR from/to (Shopify lets apps read the last 60 days of orders, and an older start is refused with that rule). Filter by status, financialStatus or discountCode. Pass id for ONE order in full: its items, first and last visit, landing page and days to convert. If Shopify has not approved access to customer names and emails for this app yet, the reply says so: a missing name or email is then not an empty one. Read-only, free.",
+    inputSchema: {
+      id: z.string().optional().describe('one order in full: gid://shopify/Order/… or its number, from a previous list'),
+      days: z.number().optional().describe('the last N days (use this OR from/to)'),
+      from: z.string().optional().describe('start date, e.g. 2026-10-01 (default 30 days ago)'),
+      to: z.string().optional().describe('end date, e.g. 2026-10-31 (default now)'),
+      status: z.enum(['open', 'closed', 'cancelled', 'not_closed']).optional().describe('order status'),
+      financialStatus: z.enum(['paid', 'pending', 'authorized', 'partially_paid', 'partially_refunded', 'refunded', 'voided', 'expired']).optional().describe('payment status'),
+      discountCode: z.string().optional().describe('only orders that used this code'),
+      includeTest: z.boolean().optional().describe('false to leave out test orders (default: listed, marked as test)'),
+      limit: z.number().optional().describe('1 to 50, default 25'),
+      cursor: z.string().optional().describe('pageInfo.endCursor from the previous reply'),
+    },
+    outputSchema: { shop: z.string().optional(), from: z.string().optional(), to: z.string().optional(), count: z.number().optional(), orders: z.array(z.any()).optional(), order: z.any().optional(), pageInfo: z.any().optional(), withheld: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/shopify/orders', a);
+    if (d.order) {
+      const o = d.order;
+      const lines = (o.lineItems || []).map((l) => `• ${l.quantity} × ${l.title}${l.variant ? ` (${l.variant})` : ''}${fmtMoneyRow(l.total)}`);
+      const lv = o.attribution?.lastVisit;
+      return ok([d.note, ...lines, lv ? `Last visit: ${lv.source || 'unknown'}${lv.utm?.campaign ? ` · utm_campaign=${lv.utm.campaign}` : ''}${lv.landingPage ? ` · ${lv.landingPage}` : ''}` : '', o.buyer?.withheld ? '' : `Buyer: ${o.buyer?.name || 'no name'}${o.buyer?.email ? ` <${o.buyer.email}>` : ''}`].filter(Boolean).join('\n'), d);
+    }
+    const rows = (d.orders || []).map((o) => `• ${o.name} · ${String(o.createdAt || '').slice(0, 10)}${fmtMoneyRow(o.total)} · ${String(o.financialStatus || '').toLowerCase()}${o.cancelled ? ' · cancelled' : ''}${o.test ? ' · test' : ''}${o.discountCodes?.length ? ` · code ${o.discountCodes.join(', ')}` : ''}${o.attribution?.lastVisit?.utm?.campaign ? ` · utm_campaign=${o.attribution.lastVisit.utm.campaign}` : ''}${!o.buyer?.withheld && o.buyer?.email ? ` · ${o.buyer.email}` : ''} (${o.id})`);
+    return ok([d.note, ...rows].join('\n'), d);
+  }));
+  server.registerTool('shopify_sales_report', {
+    title: 'Shopify sales report',
+    description: "Sales on the merchant's Shopify store over a period (default the last 30 days; Shopify lets apps read the last 60): orders and sales after returns, cancelled and test orders counted apart, then broken down by DISCOUNT CODE, by UTM source, medium and campaign and by Shopify's own traffic source, using Shopify's last visit before each order. It also shows the part that came from HERMOSO: orders that used a discount code Hermoso created on the store or arrived through a campaign Hermoso recorded in Shopify > Marketing; add codes or campaigns to credit others you know are yours. Recent orders Shopify has not attributed yet are counted and named. Read-only, free.",
+    inputSchema: {
+      days: z.number().optional().describe('the last N days (use this OR from/to)'),
+      from: z.string().optional().describe('start date, e.g. 2026-10-01'),
+      to: z.string().optional().describe('end date, e.g. 2026-10-31'),
+      codes: z.array(z.string()).optional().describe('more discount codes to count as Hermoso’s'),
+      campaigns: z.array(z.string()).optional().describe('more utm_campaign values to count as Hermoso’s'),
+      includeTest: z.boolean().optional().describe('true to count test orders too'),
+    },
+    outputSchema: { shop: z.string().optional(), from: z.string().optional(), to: z.string().optional(), complete: z.boolean().optional(), ordersRead: z.number().optional(), totals: z.any().optional(), byDiscountCode: z.array(z.any()).optional(), byUtmSource: z.array(z.any()).optional(), byUtmMedium: z.array(z.any()).optional(), byUtmCampaign: z.array(z.any()).optional(), byShopifySource: z.array(z.any()).optional(), attribution: z.any().optional(), hermoso: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/shopify/sales-report', a); return ok(d.note, d); }));
+  server.registerTool('import_shopify_buyers_to_email_leads', {
+    title: 'Add past Shopify buyers to the email leads',
+    description: "Add the merchant's past Shopify buyers to this brand's email lead list so an email sequence can win them back: name, email, number of orders, total spent and last order date (usable as {{orders_count}}, {{total_spent}}, {{last_order_date}} in a sequence). ONLY buyers who agreed to marketing email in Shopify are added; the reply says how many were skipped and why (never agreed, unsubscribed, not confirmed yet, no email). An address already on the list that unsubscribed stays unsubscribed. since = only buyers who ordered on or after that date. dryRun:true shows what would happen and adds nothing. NOTHING IS EMAILED: enrol them in a sequence for that. Up to 500 buyers a call; pass cursor for the next ones. Free.",
+    inputSchema: {
+      since: z.string().optional().describe('only buyers who ordered on or after this date, e.g. 2026-01-01'),
+      limit: z.number().optional().describe('buyers to read this call, 1 to 500 (default 500)'),
+      cursor: z.string().optional().describe('nextCursor from the previous reply'),
+      dryRun: z.boolean().optional().describe('true to see the counts and skips without adding anyone'),
+    },
+    outputSchema: { shop: z.string().optional(), dryRun: z.boolean().optional(), read: z.number().optional(), added: z.number().optional(), updated: z.number().optional(), wouldAdd: z.number().optional(), skipped: z.array(z.any()).optional(), skippedNoConsent: z.number().optional(), nextCursor: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/buyers/import', a); return ok(d.note, d); }));
+
   server.group('ads'); // back to Merchant Center — the product feed Shopping ads and retail PMax serve
   server.registerTool('merchant_report', {
     title: 'Merchant Center competitive visibility, best sellers and price benchmarks',
@@ -12844,7 +12955,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // real account on 2026-08-05, not merely read: date filter required, LIMIT required and capped at 10k, 30 days.
   server.registerTool('google_ads_change_history', {
     title: 'What changed on a Google Ads account, and when',
-    description: 'WHAT CHANGED ON THE ACCOUNT, AND WHEN — the answer to "performance fell off a cliff on Tuesday, what happened?", and the Google twin of reddit_ads_history. source:"change_event" (default) is FIELD-LEVEL over the last 30 days: the change time, who made it, from which client (web UI, API, scripts, bulk upload, automated rule), whether it was a CREATE / UPDATE / REMOVE, and exactly which fields moved — with detail:true it also carries the old and new resource snapshots. source:"change_status" reaches 90 days and is the ONLY one that catches GOOGLE ADS EDITOR and criterion-level edits: Google documents change_event as NEVER returning Editor changes, so an Editor-managed account looks completely untouched there. CHECK BOTH BEFORE TELLING ANYONE NOTHING CHANGED. An unknown source is refused by name; the 30/90-day windows and Google\u2019s own 10,000-row cap are enforced here with the reason instead of surfacing as an unreadable Google error, and a change takes up to three minutes to appear. Neither resource carries any metric or segment, so this says what changed, never what it cost. Read-only, 0 credits.',
+    description: 'WHAT CHANGED ON THE ACCOUNT, AND WHEN — the answer to "performance fell off a cliff on Tuesday, what happened?". source:"change_event" (default) is FIELD-LEVEL over the last 30 days: the change time, who made it, from which client (web UI, API, scripts, bulk upload, automated rule), whether it was a CREATE / UPDATE / REMOVE, and exactly which fields moved — with detail:true it also carries the old and new resource snapshots. source:"change_status" reaches 90 days and is the ONLY one that catches GOOGLE ADS EDITOR and criterion-level edits: Google documents change_event as NEVER returning Editor changes, so an Editor-managed account looks completely untouched there. CHECK BOTH BEFORE TELLING ANYONE NOTHING CHANGED. An unknown source is refused by name; the 30/90-day windows and Google\u2019s own 10,000-row cap are enforced here with the reason instead of surfacing as an unreadable Google error, and a change takes up to three minutes to appear. Neither resource carries any metric or segment, so this says what changed, never what it cost. Read-only, 0 credits.',
     inputSchema: {
       customerId: z.string().optional().describe('10-digit account id \u2014 omit to use the brand\u2019s selected default account'),
       source: z.enum(['change_event', 'change_status']).optional().describe('default change_event (30 days, field-level). change_status is 90 days and is the only one that sees Google Ads Editor.'),
@@ -14239,6 +14350,63 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/tag-manager/publish', a);
     return ok(`${d.summary}${d.rolledBackTo ? `\nPrevious live version: ${d.rolledBackTo} — publish that path again to undo this.` : ''}${d.workspace?.workspaceId ? `\nNew draft workspace: ${d.workspace.workspaceId}` : ''}\n${d.note}`, d);
   }));
+
+  // ---------- TRACKING TAGS (2026-11-15, lib/tracking-tags.mjs) — "put my pixels on my site" ----------
+  //            One family over whichever site connection the brand has: Tag Manager (any pixel, staged then published
+  //            through the gate above), Wix (its own marketing tags), and for Webflow, WordPress and Shopify, which give a
+  //            third party no API path, the code and where to paste it. No tool takes a raw site credential or a site id:
+  //            the connection is the brand's own. Every write is confirm-gated and read back from the LIVE PAGE.
+  const ttPlatformEnum = z.enum(['meta', 'tiktok', 'google', 'linkedin', 'reddit', 'pinterest', 'x', 'snapchat']);
+  server.registerTool('install_tracking_tag', {
+    title: 'Install a pixel on the website',
+    description: "PUT A PIXEL ON THE BRAND'S WEBSITE: a Meta Pixel, TikTok Pixel, Google tag, LinkedIn Insight Tag, Reddit Pixel, Pinterest Tag, X Pixel or Snap Pixel. It goes through the site connection the brand has. GOOGLE TAG MANAGER (any pixel): a Custom HTML tag with the platform's base code on every page, staged as a draft, and live only with publish:true, through the same confirmation publish_tag_manager_container asks for (a container already live needs confirmPublicId). WIX (Meta, TikTok, Google Ads AW-, Google Analytics G-): a Wix marketing tag, live at once; Wix keeps one per type, so replacing a different pixel needs replaceExisting set to the one being replaced. WEBFLOW, WORDPRESS, SHOPIFY or no site connection: those give an app no way to add code, so the reply is the base code and exactly where to paste it. THE PIXEL ID IS NEVER INVENTED: leave pixelId out and the brand's only pixel on its connected ad account is used (several are listed for you to pick); a given id is checked against that account when it is connected, and refused if it is not the brand's. The code is the platform's own: Meta and Pinterest from the connected account or their published base code, the Google tag from Google's published snippet; for TikTok, LinkedIn, Reddit, X and Snap pass snippet, the base code copied from the platform's events manager (it must contain the id). WITHOUT confirm:true NOTHING IS WRITTEN: the reply says exactly what would change; show the user, get a yes, call again with confirm:true. After a change reaches the site, Hermoso reads the live page (url, default the brand's website) and verify.found says whether the pixel is there: true, false, or null when the page could not be read (never report null as missing). A Tag Manager publish can take a few minutes to reach visitors. Free.",
+    inputSchema: {
+      platform: ttPlatformEnum.describe('which pixel: meta, tiktok, google, linkedin, reddit, pinterest, x or snapchat'),
+      pixelId: z.string().optional().describe("the pixel's id (Meta pixel id, TikTok pixel code, G-/AW-/GT- id, LinkedIn partner id, …). Leave out to use the brand's only pixel on its connected ad account."),
+      snippet: z.string().optional().describe("the platform's base code, copied from its events manager. Required for TikTok, LinkedIn, Reddit, X and Snap through Tag Manager or a manual install; it must contain pixelId."),
+      site: z.enum(['google_tag_manager', 'wix', 'webflow', 'wordpress', 'shopify', 'manual']).optional().describe('which site connection to use; leave out to use the one the brand has (asked when it has both Tag Manager and Wix)'),
+      containerPath: z.string().optional().describe('Tag Manager only: accounts/<id>/containers/<id> from list_tag_manager_containers, when several are shared with the brand'),
+      gtmWorkspace: z.string().optional().describe('Tag Manager only: workspace id or name; default the Default Workspace'),
+      adAccountId: z.string().optional().describe('the ad account (or TikTok advertiser) to read the pixel from, when the brand has several'),
+      url: z.string().optional().describe("the page to check afterwards; default the brand's website"),
+      publish: z.boolean().optional().describe('Tag Manager only: also publish the container so the tag goes live'),
+      confirmPublicId: z.string().optional().describe("Tag Manager only, with publish: the container's GTM-XXXXXXX id, required when it already has a live version"),
+      replaceExisting: z.string().optional().describe("Wix only: the id of the site's current pixel of this type, typed back, when installing a different one replaces it"),
+      confirm: z.boolean().optional().describe('true to make the change; without it nothing is written and the reply says what would change'),
+    },
+    outputSchema: { platform: z.string().optional(), pixelId: z.string().optional(), pixelChecked: z.boolean().optional(), site: z.string().optional(), needsConfirm: z.boolean().optional(), installed: z.boolean().optional(), published: z.boolean().nullable().optional(), snippet: z.string().optional(), steps: z.string().optional(), verify: z.record(z.any()).nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/tracking-tags/install', a);
+    return ok(d.site === 'manual' && d.snippet ? `${d.note}\n\n${d.snippet}` : d.note, d);
+  }));
+  server.registerTool('list_tracking_tags', {
+    title: 'Which pixels are on the website',
+    description: "WHICH PIXELS ARE ON THE WEBSITE RIGHT NOW, read from the live page (url, default the brand's website) the way a browser loads it: every Meta, TikTok, Google, LinkedIn, Reddit, Pinterest, X and Snap pixel and every Tag Manager container Hermoso recognises there, with its id. Also the tags Hermoso installed through Tag Manager (live or only staged) and the site's Wix marketing tags, when those are connected. Use it to check a pixel someone pasted by hand, or to answer \"is my pixel installed\". page.read false means the page could not be read, which is not the same as no pixels. Read-only, free.",
+    inputSchema: {
+      url: z.string().optional().describe("the page to read; default the brand's website"),
+      containerPath: z.string().optional().describe('Tag Manager: which shared container to list, when several are shared'),
+      gtmWorkspace: z.string().optional().describe('Tag Manager workspace id or name'),
+    },
+    outputSchema: { url: z.string().nullable().optional(), page: z.record(z.any()).optional(), gtm: z.record(z.any()).nullable().optional(), wix: z.record(z.any()).nullable().optional(), sites: z.record(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/tracking-tags', a); return ok(d.note, d); }));
+  server.registerTool('remove_tracking_tag', {
+    title: 'Remove a pixel from the website',
+    description: "TAKE A PIXEL OFF THE BRAND'S WEBSITE. Tag Manager: deletes the tag Hermoso installed for that pixel (only Hermoso's own, never somebody else's), as a draft, live only with publish:true through the usual publish confirmation. Wix: removes the site's marketing tag of that type only when it IS this pixel. Other sites: says where to delete the code by hand. The site stops sending that platform data once it is gone, so WITHOUT confirm:true NOTHING CHANGES and the reply names exactly what would be removed: show the user, get a yes, then call again with confirm:true. Free.",
+    inputSchema: {
+      platform: ttPlatformEnum.describe('which pixel'),
+      pixelId: z.string().describe('the id of the pixel to remove (list_tracking_tags shows them)'),
+      site: z.enum(['google_tag_manager', 'wix', 'webflow', 'wordpress', 'shopify', 'manual']).optional().describe('which site connection; default the one the brand has'),
+      containerPath: z.string().optional().describe('Tag Manager only: the container, when several are shared'),
+      gtmWorkspace: z.string().optional().describe('Tag Manager only: workspace id or name'),
+      publish: z.boolean().optional().describe('Tag Manager only: also publish so the removal goes live'),
+      confirmPublicId: z.string().optional().describe("Tag Manager only, with publish: the container's GTM-XXXXXXX id"),
+      confirm: z.boolean().optional().describe('true to remove; without it nothing changes'),
+    },
+    outputSchema: { platform: z.string().optional(), pixelId: z.string().optional(), site: z.string().optional(), needsConfirm: z.boolean().optional(), removed: z.boolean().optional(), notFound: z.boolean().optional(), published: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/tracking-tags/remove', a); return ok(d.note, d); }));
 
   // ---------- SEARCH-ENGINE WEBMASTER SURFACES: Search Console · Bing Webmaster · IndexNow (2026-08-18) ----------
   //            NOT a second analytics dashboard, and reading them as one is how the useful half gets ignored. GA4
