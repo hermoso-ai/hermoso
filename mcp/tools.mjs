@@ -2524,6 +2524,60 @@ const BY_SOURCE = new Map(INBOX_SOURCES.map((s) => [s.source, s]));
  */
 export const INBOX_NEEDS_ARGS = [...new Set(INBOX_SOURCES.filter((s) => s.needs).map((s) => s.needs.arg))];
 
+// ── READ AT ONCE, AND ONLY WHAT IS CONNECTED (2026-11-16) ─────────────────────────────────────────────────────────
+// list_inbox used to read its ~25 sources ONE AFTER ANOTHER, and every channel the brand never connected still made a
+// call that answered 401 and wrote a row to the error ledger (~150 rows across 6 accounts in 14 days, none of them a
+// defect). Measured on Cloud Run 2026-11-02..16: a fan-out of 15-18 reads spanned 14-52 seconds while the server spent
+// 10-11 of them working, and one Bluesky read took 110 seconds and held every source after it.
+// Now: ONE read of what is connected (/api/connectors/providers, the same read the MCP roster gate uses; no vendor
+// call), a source with no connection that could serve it is not called at all and is named in ONE line of the reply,
+// and the rest are read INBOX_READ_CONCURRENCY at a time, each against its own deadline, so one slow or failing channel
+// costs only its own line. A failed connector read reads everything, as before ([[failed-read-is-not-empty]]).
+export const INBOX_READ_CONCURRENCY = 6;
+export const INBOX_SOURCE_TIMEOUT_MS = Number(process.env.HERMOSO_INBOX_SOURCE_TIMEOUT_MS) > 0 ? Number(process.env.HERMOSO_INBOX_SOURCE_TIMEOUT_MS) : 30000;
+// A SOURCE THAT BILLS PER READ IS WAITED FOR to the read's own deadline: stopping waiting would not stop the charge,
+// and the reader would pay for an answer it never saw. X mentions bill per item returned, X DMs per new event.
+export const INBOX_WAIT_FOR_PROVIDERS = new Set(['x']);
+// A CONNECTION OTHER THAN `provider` THAT ALSO SERVES A SOURCE, so the skip never hides a channel that works. Each is
+// the route's own fallback: an Instagram Login account serves the Instagram reads (mcp/roster-scope.mjs
+// INSTAGRAM_LOGIN_TOOLS), the Page-linked Instagram inbox rides the Meta login, a WhatsApp number set up through
+// Embedded Signup is its own row (isWhatsAppTool), the TikTok account grant can sit on the posting row
+// (TIKTOK_ACCOUNT_GRANT_TOOLS), and the email source reads every connected mailbox. When in doubt a source is READ:
+// a wasted 401 is noise, a skipped channel that had messages is a lost customer.
+export const INBOX_ALSO_SERVED_BY = Object.freeze({
+  facebook: ['instagram'], instagram: ['instagram'], instagram_dm: ['meta'], instagram_mention: ['instagram'],
+  meta_webhook: ['instagram', 'whatsapp'], whatsapp: ['meta'], tiktok: ['tiktok'], email: ['gmail'],
+});
+export const inboxSourceProviders = (src) => [src.provider, ...(INBOX_ALSO_SERVED_BY[src.source] || [])];
+/** Split the asked-for sources into those to read and those no connection can serve. `conn` is connectedProviders(). */
+export function inboxPlanReads(srcs, conn) {
+  const list = Array.isArray(srcs) ? srcs : [];
+  if (!conn || conn.readOk !== true || !(conn.connected instanceof Set)) return { read: list.slice(), skipped: [] };
+  const read = [], skipped = [];
+  for (const s of list) (inboxSourceProviders(s).some((p) => conn.connected.has(p)) ? read : skipped).push(s);
+  return { read, skipped };
+}
+/** One short line naming the connectors that were not read, by the id ?connect=<id> takes. A connector this caller is
+ *  not offered (held, gated) is named nowhere, the rule the docs reference follows too. */
+export function inboxNotConnectedLine(skipped, conn) {
+  const offered = conn && conn.offered instanceof Set ? conn.offered : null;
+  const names = [...new Set((skipped || []).map((s) => s.provider))].filter((p) => !offered || offered.has(p));
+  return names.length ? `Not connected, not read: ${names.join(', ')}.` : '';
+}
+/** Run fn over list, at most `limit` at a time; results keep the list's order. */
+export async function inboxMapBounded(list, limit, fn) {
+  const out = new Array(list.length); let next = 0;
+  const lane = async () => { while (next < list.length) { const i = next++; out[i] = await fn(list[i], i); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, list.length)) }, lane));
+  return out;
+}
+/** Resolve with p, or reject once ms pass. The read itself is not cancelled; its answer is simply not waited for. */
+export function inboxWithDeadline(p, ms) {
+  let t;
+  const late = new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error(`it did not answer within ${Math.round(ms / 1000)} seconds, so it was not waited for`), { _inboxDeadline: true })), ms); });
+  return Promise.race([p, late]).finally(() => clearTimeout(t));
+}
+
 /**
  * Was this row written BY the other person? Two vendors, two spellings, one question — Meta stamps `inbound`
  * and Bluesky stamps `fromMe`, and both are always booleans on the routes that produce them. A row carrying
@@ -6816,7 +6870,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "Bluesky replies and mentions, and X mentions — plus DIRECT MESSAGES on Meta (Messenger and Instagram "
       + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp, LINE, Slack and Discord. Discord messages that mention the Hermoso bot or reply to it, and replies to the brand's Outlook email. Support tickets too: the open conversations in the brand's Intercom inbox. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
-      + "skipped silently; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
+      + "skipped and named; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
       + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
       + "Messenger and Instagram DMs need no argument; each has a messageKind (text, story_mention, story_reply, share, "
       + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky DMs need "
@@ -6860,7 +6914,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // silently read the wrong caller's id and could never be satisfied by the note it printed. A map cannot do
     // that: an arg this tool does not accept is simply absent, and absent is what produces the helpful note.
     const argValues = { postId, videoId, tiktokVideoId, linkedinPostUrn, discordMember, conversationId };
-    for (const src of INBOX_SOURCES.filter((x) => want.includes(x.source))) {
+    // WHAT IS CONNECTED, read once before any source is called (see INBOX_READ_CONCURRENCY): an unconnected source is
+    // never called, so it never answers 401 and never writes a ledger row. A failed read skips nothing.
+    let conn = null;
+    try { conn = await connectedProviders(); } catch { conn = null; }
+    const plan = inboxPlanReads(INBOX_SOURCES.filter((x) => want.includes(x.source)), conn);
+    // EACH SOURCE IS READ ON ITS OWN and reports into its own slot; the slots are then taken in table order, so the
+    // notes read the same whichever source answered first, and the items are sorted newest first below as before.
+    const readOne = async (src) => {
+      const items = [], notes = [];
       const q = src.source === 'tiktok' ? { maxCount: per } : { limit: per }; // TikTok's page size is max_count
       if (src.needs) {
         // These sources read PER POST (or, for a DM, per conversation), so without an id there is nothing to ask
@@ -6869,7 +6931,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         const given = argValues[src.needs.arg];
         // A SOURCE THAT CAN ALSO READ ACCOUNT-WIDE (`readAll`) DOES, rather than printing the note: the Meta and
         // Instagram DM inboxes list every waiting conversation in one call per surface (2026-10-25).
-        if (!given && !src.readAll) { notes.push(`${src.label}s are read per ${src.kind === 'dm' ? 'conversation' : 'post'} — pass ${src.needs.arg} (from ${src.needs.from}) to include them.`); continue; }
+        if (!given && !src.readAll) { notes.push(`${src.label}s are read per ${src.kind === 'dm' ? 'conversation' : 'post'} — pass ${src.needs.arg} (from ${src.needs.from}) to include them.`); return { items, notes }; }
         if (given) q[src.needs.param] = given;
       }
       const whole = !!(src.readAll && src.needs && !argValues[src.needs.arg]);
@@ -6878,7 +6940,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // resolver, which refuses to guess between several. Without pageId the DM inbox reads every Page itself.
       if (pageId && (src.provider === 'meta' || src.provider === 'instagram')) q.pageId = String(pageId).trim();
       try {
-        const d = await apiGet(whole ? src.readAll : src.read, q);
+        const call = apiGet(whole ? src.readAll : src.read, q);
+        const d = await (INBOX_WAIT_FOR_PROVIDERS.has(src.provider) ? call : inboxWithDeadline(call, INBOX_SOURCE_TIMEOUT_MS));
         const rows = Array.isArray(d) ? d : (d.comments || d.replies || d.mentions || d.reviews || d.messages || d.events || d.items || d.conversations || d.data || []);
         // A SOURCE THAT READ ONLY PART OF ITSELF SAYS SO (2026-10-26, customer report: Instagram DMs at limit >= 32 came
         // back as 0 items and NO note, because the DM inbox route reported its failure in `unreadable` + `note` and this
@@ -6886,7 +6949,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // branches, so a short list is never mistaken for a quiet inbox.
         const short = inboxShortNote(src, d);
         if (short) notes.push(short);
-        if (whole) { for (const r of rows) { const it = normalizeInboxItem(src.source, r); if (it) items.push(it); } continue; } // already one row per conversation
+        if (whole) { for (const r of rows) { const it = normalizeInboxItem(src.source, r); if (it) items.push(it); } return { items, notes }; } // already one row per conversation
         // A DM FOLDS TO ONE ITEM AND CARRIES THE ID YOU ANSWER TO — see foldConversationRows. Deriving this from
         // `kind` rather than naming the two sources means a third DM channel inherits it by declaring its kind.
         // FOLDED ONLY WHERE THE REPLY TARGET IS ON THE ENVELOPE. `dmReplyId` is precisely the declaration "this
@@ -6903,22 +6966,26 @@ function buildTools(rawServer, opts = {}, sink = null) {
       } catch (e) {
         // AN ID THAT DOES NOT RESOLVE ENDS THE CALL AS AN ERROR (2026-10-26, customer report: an unconnected pageId
         // answered "0 items"). The caller named a Page; reading nothing from it is not a quiet inbox, it is a wrong id.
-        if (e?.apiCode === 'meta_page_not_connected') return { content: [{ type: 'text', text: String(e.message) }], isError: true };
+        if (e?.apiCode === 'meta_page_not_connected') return { items, notes, fatal: String(e.message) };
         // NAMED, never swallowed. A connector that is simply not linked is not worth a line; anything else is.
         const msg = String(e?.message || e);
         // …BUT AN EXPIRED OR REVOKED GRANT IS A CONNECTED CHANNEL THAT CANNOT READ (2026-11-11, measured on the TikTok
         // source: the account grant had expired, the route answered 401 "has expired … Re-authorize", and the inbox read as
         // quiet). That is the third connector state, so it gets a line naming the fix rather than silence.
-        if ((e?.status === 401 || /not connected/i.test(msg)) && /expired|revoked|re-?authori[sz]e|reconnect/i.test(msg) && !/not connected/i.test(msg)) { notes.push(`${src.label}s could not be read: ${msg.slice(0, 220)}`); continue; }
-        if (e?.status === 401 || /not connected/i.test(msg)) continue;
+        if ((e?.status === 401 || /not connected/i.test(msg)) && /expired|revoked|re-?authori[sz]e|reconnect/i.test(msg) && !/not connected/i.test(msg)) { notes.push(`${src.label}s could not be read: ${msg.slice(0, 220)}`); return { items, notes }; }
+        if (e?.status === 401 || /not connected/i.test(msg)) return { items, notes };
         notes.push(`${src.label}s could not be read: ${msg.slice(0, 140)}`);
       }
-    }
+      return { items, notes };
+    };
+    const results = await inboxMapBounded(plan.read, INBOX_READ_CONCURRENCY, (src) => readOne(src).catch((e) => ({ items: [], notes: [`${src.label}s could not be read: ${String(e?.message || e).slice(0, 140)}`] })));
+    for (const r of results) { if (r.fatal) return { content: [{ type: 'text', text: r.fatal }], isError: true }; items.push(...r.items); notes.push(...r.notes); }
+    const skippedLine = inboxNotConnectedLine(plan.skipped, conn);
     const out = sortInbox(items.filter((i) => (!unansweredOnly || !i.answered) && inboxAccountMatches(i.account, account)));
     // The receiving account is spelled out on a line only where the brand has more than one on that source (token-lean).
     const multi = new Set(Object.entries(out.reduce((m, i) => { if (i.account) (m[i.source] ||= new Set()).add(i.account.id); return m; }, {})).filter(([, v]) => v.size > 1).map(([k]) => k));
     const head = out.length ? out.map((i) => inboxLine(i) + (multi.has(i.source) ? ` · to ${i.account.label}` : '')).join('\n') : (account ? `Nothing waiting on "${String(account).slice(0, 80)}".` : 'Nothing waiting.');
-    const tail = notes.length ? `\n\n${notes.map((n) => `⚠ ${n}`).join('\n')}` : '';
+    const tail = (notes.length ? `\n\n${notes.map((n) => `⚠ ${n}`).join('\n')}` : '') + (skippedLine ? `\n\n${skippedLine}` : '');
     return ok(`${out.length} item(s) waiting.\n${head}${tail}`, { items: out, count: out.length, notes });
   }));
 
