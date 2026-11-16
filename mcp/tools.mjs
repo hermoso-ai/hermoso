@@ -13,7 +13,8 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 // The UTF-16 well-formedness law — see wellFormedServer() below for why it is applied here, and
 // ./well-formed.mjs for why that specifier is the only one that can work in a byte-identical twin.
 import { wellFormedValue, wellFormedString } from './well-formed.mjs';
-import { CONTEXT_SYM, UNKNOWN_ARGS_SYM, UNKNOWN_ARGS_DETAIL_SYM, UNKNOWN_ARGS_REFUSED_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote, unknownArgsDetail } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
+import { makeRepeatMemo, repeatRefusalKey, repeatRefusalText, isMemoRefusal } from './repeat-refusal.mjs'; // the same 404 twice is not asked a third time (2026-11-16)
+import { CONTEXT_SYM, UNKNOWN_ARGS_SYM, UNKNOWN_ARGS_DETAIL_SYM, UNKNOWN_ARGS_REFUSED_SYM, argGuardMode, argGuardRefuses, declaredArgKeys, didYouMean, unknownArgs, unknownArgsNote, unknownArgsDetail, argRenames, applyArgRenames, RENAMED_ARGS_SYM, renamedArgsNote, callBrandPlan, brandArgIsProfile, CALL_BRAND_SYM } from './arg-guard.mjs'; // an undeclared argument is named back, never silently stripped (2026-10-26)
 // WHICH CONNECTOR A TOOL NEEDS — the same table and the same decision the Studio chat applies (lib/studio-roster.mjs
 // re-exports every symbol from here). `./roster-scope.mjs` is the only specifier that resolves in a byte-identical
 // twin, for the same reason ./well-formed.mjs is. See applyToolGates() for the seam and roster-scope.mjs for the law.
@@ -842,12 +843,18 @@ async function brokenConnectorNotes(pick = null) {
     return (Array.isArray(a?.issues) ? a.issues : []).filter((i) => i && i.state === 'reconnect' && typeof i.agentNote === 'string' && i.agentNote && (!pick || pick(i)));
   } catch { return []; }
 }
+const REPEAT_REFUSALS = makeRepeatMemo(); // one per process; keys carry a hash of the caller's credential, never the credential
 const wrap = (fn) => {
   // A NAMED closure, so registerTools' proxy can stamp the tool name onto the very function it registers and this
   // body can read it back. Reading a name off `fn` instead would be wrong: `fn` is the inner handler and the thing
   // that gets registered (and therefore tagged) is what wrap RETURNS.
   const outer = async (args, extra) => {
     const _tool = outer._hermosoTool || '';
+    // A BRAND NAMED ON A TOOL THAT DOES NOT DECLARE ONE (2026-11-16, mcp/arg-guard.mjs callBrandPlan): the whole call runs in
+    // the client's brandScope, so every request it makes carries `?brandId=` and the server's belt resolves, refuses or
+    // scope-checks it exactly as it does for the tools that declare `brand`. Re-entered once, inside the scope.
+    const _cb = args && typeof args === 'object' && typeof args[CALL_BRAND_SYM] === 'string' ? args[CALL_BRAND_SYM] : '';
+    if (_cb && brandScope.getStore()?.brand !== _cb) return brandScope.run({ brand: _cb }, () => outer(args, extra));
     // ── HEALTH IS MEASURED HERE, AT THE SEAM THE ERROR LEDGER ALREADY USES (2026-09-17) ───────────────────────
     // find_tools reports each tool's recent failure rate and typical duration, and neither can come from the
     // error ledger: it records failures only, with no successes and no clock, and reading it would be an HTTP
@@ -855,6 +862,7 @@ const wrap = (fn) => {
     // here, and `reportToolError` two lines down is what feeds the ledger. `isError` counts as a failure
     // because that is what the caller experienced, whoever authored the refusal.
     const _t0 = Date.now();
+    let _rk = ''; // the repeat-refusal memo key (mcp/repeat-refusal.mjs), set once the arguments are final
     try {
       // A FILE ON THE CALLER'S SIDE IS REFUSED BEFORE ANY CALL (2026-11-05, fp bf206cd60b30): on a hosted connector a
       // "/mnt/data/…", file://, sandbox:/ or C:\ path in a media-named argument can never be read, so the agent is told to
@@ -867,6 +875,10 @@ const wrap = (fn) => {
       // PRICE FIRST, BUY ONCE (spend-guard.mjs): the call controls never reach the handler; with none of them sent this
       // is exactly the call it always was. `context` is lifted off every tool's arguments and rides as a header.
       { const _cx = takeAgentContext(args); args = _cx.args; if (_cx.text) _st.contextHeader = contextHeaderValue(_cx.text); }
+      // THE SAME "NOT FOUND" TWICE IS NOT ASKED A THIRD TIME (2026-11-16, mcp/repeat-refusal.mjs): same caller, brand, tool and
+      // arguments within ten minutes is answered here, said as such, and costs the user's platform rate limits nothing.
+      { const _mc = mcpCtx.getStore(); _rk = repeatRefusalKey({ who: _mc?.token || 'local', brand: brandScope.getStore()?.brand || _mc?.profile || '', tool: _tool, args }); }
+      { const _rp = REPEAT_REFUSALS.check(_rk); if (_rp) { try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {} return { content: [{ type: 'text', text: repeatRefusalText(_tool, _rp) }], isError: true, _meta: { 'hermoso.ai/error': { status: 404, repeated: _rp.n - 1 } } }; } }
       const _sm = isSpendToolName(_tool) ? takeSpendMeta(args) : null;
       if (_sm) {
         args = withoutArgKeys(args, ['get_cost', 'expected_credits', 'idempotency_key']);
@@ -879,6 +891,7 @@ const wrap = (fn) => {
       try { r = await toolCtx.run(_st, () => fn(args, extra)); }
       catch (e) { if (_claim) await finishToolKey(_claim, _st, null, e); throw e; }
       if (_claim) await finishToolKey(_claim, _st, r, null);
+      if (!r?.isError) REPEAT_REFUSALS.clear(_rk);
       try { recordToolOutcome(_tool, { ok: !r?.isError, ms: Date.now() - _t0 }); } catch {}
       // the charge, once, on every paid reply that did not already say it (chargeNote above)
       try {
@@ -902,11 +915,12 @@ const wrap = (fn) => {
           }
         }
       } catch {}
-      const _noteBrand = noteBrandOf(_tool, args); // the brand this call acted on, so both notes are about it
+      const _noteBrand = noteBrandOf(_tool, args) || _cb; // the brand this call acted on, so both notes are about it
       return noPitchOnWidget(await withWeekPlanNote(_tool, await withConnectPrompt(_tool, withWidgetResultNote(_tool, r, hostRendersWidgets()), apiPost, _noteBrand, { raw: args?.raw === true, asked: mcpCtx.getStore()?.firstRun?.brandAsked === true }), apiPost, _noteBrand));
     }
     catch (e) {
       try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {}
+      if (isMemoRefusal(e)) { try { REPEAT_REFUSALS.record(_rk, e?.message); } catch {} }
       if (!e?._viaApi && !e?._signedOut) { try { reportToolError(_tool, e); } catch {} } // a caller with no key is not a defect, and its report would be anonymous noise
       // A RUNTIME ERROR NAMES ITS FRAMES IN THE LOG (2026-11-06, er:c5826cfae730): the ledger keeps only the message, so an
       // upload_file RangeError that reproduced in production and nowhere else could not be located. Same rule as a job's
@@ -3567,6 +3581,18 @@ export const undeclaredArgs = (h, input) => {
   if (catType && !/never/i.test(catType)) return [];
   return keys.filter((k) => !Object.prototype.hasOwnProperty.call(shape, k));
 };
+// THE SAME RENAMES AND PER-CALL BRAND ON EVERY PATH THAT VALIDATES A TOOL'S ARGUMENTS ITSELF (2026-11-16, preparedArgs):
+// call_tool, a held tool called directly, and a retired name all parse the inner tool's arguments here rather than in the
+// SDK, so the SDK guard never sees them. `outerBrand` is a brand named on call_tool itself; it rides in when the inner
+// call named none and the tool's own `brand` (if any) is the profile one. Returns the arguments to validate, plus what
+// markPreparedArgs puts on the parsed value.
+export function prepareHandleArgs(name, h, input, outerBrand = '') {
+  const declared = h && h.inputSchema ? declaredArgKeys(h.inputSchema) : null; // null: no arguments, or any — nothing to settle
+  let a = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  if (outerBrand && Array.isArray(declared) && !['brand', 'brandId', 'brand_id'].some((k) => Object.prototype.hasOwnProperty.call(a, k)) && (!declared.includes('brand') || brandArgIsProfile(h.inputSchema))) a = { ...a, brand: outerBrand };
+  const prep = preparedArgs(name, declared, h?.inputSchema, a);
+  return { input: prep.args, renames: prep.renames, callBrand: prep.callBrand };
+}
 export const undeclaredArgsStructured = (extra, h) => ({ error: 'unknown_arguments', unknownArguments: unknownArgsDetail(extra, h && h.inputSchema && typeof h.inputSchema.shape === 'object' ? Object.keys(h.inputSchema.shape) : []) });
 export const undeclaredArgsText = (name, extra, h) => {
   const shape = h && h.inputSchema && h.inputSchema.shape;
@@ -3588,7 +3614,8 @@ export async function legacyToolAnswer(name, request, extra, ctx) {
   const h = ctx.handleOf[spec.to];
   const fn = h && (h.handler || h.callback);
   if (typeof fn !== 'function') return withStaleNote({ content: [{ type: 'text', text: `${name} was renamed to ${spec.to}, which is not part of this session's roster.` }], isError: true }, ctx);
-  let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
+  const _prep = prepareHandleArgs(spec.to, h, request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {});
+  let input = _prep.input;
   { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return withStaleNote({ content: [{ type: 'text', text: undeclaredArgsText(spec.to, extraKeys, h) }], structuredContent: undeclaredArgsStructured(extraKeys, h), isError: true }, ctx); }
   if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
     const parsed = h.inputSchema.safeParse(input);
@@ -3598,6 +3625,7 @@ export async function legacyToolAnswer(name, request, extra, ctx) {
     }
     input = parsed.data;
   }
+  if (input && typeof input === 'object') markPreparedArgs(input, spec.to, _prep.renames, _prep.callBrand);
   return withStaleNote(h.inputSchema ? await fn(input, extra) : await fn(extra), ctx);
 }
 
@@ -4463,7 +4491,8 @@ export function installHeldToolCalls(mcp, ctx) {
         reportDeadEnd('stale_roster', name, `${name} was called directly while held out of this session's list on size — the host's tool list is stale`);
         const fn = h.handler || h.callback;
         if (typeof fn === 'function') {
-          let input = request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {};
+          const _prep = prepareHandleArgs(name, h, request?.params?.arguments && typeof request.params.arguments === 'object' ? request.params.arguments : {});
+          let input = _prep.input;
           { const extraKeys = undeclaredArgs(h, input); if (extraKeys.length) return { content: [{ type: 'text', text: undeclaredArgsText(name, extraKeys, h) }], structuredContent: undeclaredArgsStructured(extraKeys, h), isError: true }; }
           if (h.inputSchema && typeof h.inputSchema.safeParse === 'function') {
             const parsed = h.inputSchema.safeParse(input);
@@ -4473,6 +4502,7 @@ export function installHeldToolCalls(mcp, ctx) {
             }
             input = parsed.data;
           }
+          if (input && typeof input === 'object') markPreparedArgs(input, name, _prep.renames, _prep.callBrand);
           return withStaleNote(h.inputSchema ? await fn(input, extra) : await fn(extra), ctx); // the call proves the roster is stale; a widget host's agent is told so, its user is not
         }
       }
@@ -4860,11 +4890,34 @@ const _wfWrapped = new WeakMap();
 // the raw keys exist is the SDK's validateToolInput. It is wrapped ONCE per server instance: a refusal throws (the SDK
 // turns that into an isError result), and a key that is noted rather than refused rides the parsed args under a
 // symbol until withUnknownArgsNote puts the sentence at the top of the answer.
+// The renames and the per-call brand for one call's RAW arguments (mcp/arg-guard.mjs). PURE. Used by the SDK guard below
+// and by call_tool, which validates its inner tool's arguments itself.
+export function preparedArgs(toolName, declared, schema, args0) {
+  const ren = argRenames(toolName, declared, args0);
+  const bp = callBrandPlan(toolName, declared, args0, { profileBrand: brandArgIsProfile(schema) });
+  const renames = [...ren, ...(bp?.renames || [])];
+  let args = renames.length ? applyArgRenames(args0, renames) : args0;
+  let callBrand = '';
+  if (bp?.brand) { callBrand = bp.brand; args = { ...args }; for (const k of bp.drop) delete args[k]; }
+  return { args, renames, callBrand };
+}
+// Marks a parsed argument object with what preparedArgs decided: wrap() runs the call in `callBrand`, and the answer
+// starts with the rename note. Non-enumerable, so nothing reaches a handler's spread or the wire.
+export function markPreparedArgs(out, toolName, renames = [], callBrand = '') {
+  try {
+    if (callBrand) Object.defineProperty(out, CALL_BRAND_SYM, { value: callBrand, enumerable: false, configurable: true });
+    if (renames.length) Object.defineProperty(out, RENAMED_ARGS_SYM, { value: renamedArgsNote(toolName, renames), enumerable: false, configurable: true });
+  } catch {}
+  return out;
+}
 export function guardUnknownArgs(server) {
   if (!server || typeof server.validateToolInput !== 'function' || server[UNKNOWN_ARGS_SYM]) return server;
   const orig = server.validateToolInput;
-  const guarded = async function (tool, args, toolName) {
+  const guarded = async function (tool, args0, toolName) {
     const declared = declaredArgKeys(tool?.inputSchema);
+    // A COMMON MISNAME IS RENAMED, AND A BRAND NAMED ON ANY TOOL SCOPES THE CALL (2026-11-16, mcp/arg-guard.mjs): both are
+    // settled HERE, before the unknown-argument rule, because this is the only place the raw keys exist.
+    const { args, renames, callBrand } = preparedArgs(toolName, declared, tool?.inputSchema, args0);
     const unknown = unknownArgs(declared, args);
     const mode = argGuardMode();
     if (unknown.length && mode !== 'off') {
@@ -4882,6 +4935,7 @@ export function guardUnknownArgs(server) {
     const out = await orig.call(this, tool, args, toolName);
     // `context` (a META argument, arg-guard.mjs): the parse above stripped it unless the tool declares it; carried here.
     if (out && typeof out === 'object' && typeof args?.context === 'string' && args.context && !Object.prototype.hasOwnProperty.call(out, 'context')) { try { Object.defineProperty(out, CONTEXT_SYM, { value: args.context, enumerable: false, configurable: true }); } catch {} }
+    if (out && typeof out === 'object') markPreparedArgs(out, toolName, renames, callBrand);
     if (unknown.length && mode !== 'off' && out && typeof out === 'object') { try { Object.defineProperty(out, UNKNOWN_ARGS_SYM, { value: unknownArgsNote(toolName, unknown, declared), enumerable: false, configurable: true }); Object.defineProperty(out, UNKNOWN_ARGS_DETAIL_SYM, { value: unknownArgsDetail(unknown, declared), enumerable: false, configurable: true }); } catch {} }
     return out;
   };
@@ -4891,6 +4945,8 @@ export function guardUnknownArgs(server) {
 // THE NOTE IS TEXT AND DATA (2026-10-27): `ignoredArguments` [{name, didYouMean}] rides structuredContent on a call
 // that ran, and `unknownArguments` on one that was refused, so a program reads it without parsing the sentence.
 export function withUnknownArgsNote(result, args) {
+  const renamed = args && typeof args === 'object' ? args[RENAMED_ARGS_SYM] : '';
+  if (renamed && result && typeof result === 'object' && Array.isArray(result.content)) result = { ...result, content: [{ type: 'text', text: renamed }, ...result.content] };
   const note = args && typeof args === 'object' ? args[UNKNOWN_ARGS_SYM] : '';
   if (!note || !result || typeof result !== 'object' || !Array.isArray(result.content)) return result;
   const detail = args[UNKNOWN_ARGS_DETAIL_SYM] || [];
@@ -5577,7 +5633,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const bare = raw.replace(/^mcp__[A-Za-z0-9_-]*?__(?=[a-z])/, '').replace(/^hermoso[:./]/i, '');
     return handleOf[bare] ? bare : raw;
   };
-  const makeCallToolHandler = (ctx) => async ({ name, args, revision, context } = {}, extra) => {
+  const makeCallToolHandler = (ctx) => async (a0 = {}, extra) => {
+    let { name, args, revision, context } = a0 || {};
+    // A brand named on call_tool itself (a META argument there too, arg-guard.mjs) applies to the tool it runs.
+    const _outerBrand = a0 && typeof a0 === 'object' && typeof a0[CALL_BRAND_SYM] === 'string' ? a0[CALL_BRAND_SYM] : '';
     const n = bareToolName(String(name || '').trim(), ctx.handleOf);
     const h = ctx.handleOf[n];
     // `context` may ride on call_tool itself or inside args (a META argument, arg-guard.mjs); it is never an argument of the tool.
@@ -5626,6 +5685,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return { content: [{ type: 'text', text: `${n} has changed since revision ${revision.trim()}: nothing was run. Current revision ${toolRevision(h)}. Current params: ${params || '(none)'}. Rebuild the arguments from these and call again with revision "${toolRevision(h)}".` }], structuredContent: { error: 'stale_revision', name: n, revision: toolRevision(h), params: compactParams(h) }, isError: true };
     }
     let input = args && typeof args === 'object' ? args : {};
+    // THE SAME RENAMES AND PER-CALL BRAND AS A DIRECT CALL (2026-11-16, preparedArgs): call_tool validates its inner tool's
+    // arguments itself, so the SDK guard never sees them. A brand named on call_tool rides in when the inner call named none.
+    const _prep = prepareHandleArgs(n, h, input, _outerBrand);
+    input = _prep.input;
     const extraKeys = undeclaredArgs(h, input);
     if (extraKeys.length) {
       const params = Object.entries(compactParams(h)).map(([k, v]) => `${k}: ${v}`).join(' | ');
@@ -5645,6 +5708,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const fn = h.handler || h.callback;
     if (typeof fn !== 'function') return { content: [{ type: 'text', text: `${n} is registered but has no runnable handler on this server build.` }], isError: true };
     if (_ctxText && input && typeof input === 'object') { try { Object.defineProperty(input, CONTEXT_SYM, { value: _ctxText, enumerable: false, configurable: true }); } catch {} }
+    if (input && typeof input === 'object') markPreparedArgs(input, n, _prep.renames, _prep.callBrand);
     return h.inputSchema ? await fn(input, extra) : await fn(extra);
   };
   // THE FULL TEXT, ON DEMAND (2026-11-11): see SLIM_TOOL_DESCRIPTIONS. A slimmed tool's whole original description, any
@@ -9189,11 +9253,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     outputSchema: { held: z.boolean().optional(), holds: z.array(z.object({ account: z.string(), who: z.string().optional(), since: z.string(), refusals: z.number(), postsWaiting: z.number(), why: z.string() }).passthrough()).optional(), resumed: z.array(z.object({ account: z.string(), who: z.string().optional() }).passthrough()).optional(), released: z.array(z.object({ id: z.string(), at: z.string() }).passthrough()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, wrap(async (a) => {
+  }, wrap(inBrand(async (a) => { // inBrand (2026-11-16): `brand` was declared and never sent, so a resume could lift another brand's hold
     if (a.action === 'resume') { const d = await apiPost('/api/instagram/posting-hold/resume', { ...(a.account ? { account: a.account } : {}) }); return ok(d.note || 'Instagram posting is resumed.', d); }
     const d = await apiGet('/api/instagram/posting-hold');
     return ok(d.held ? `${d.note} Held: ${(d.holds || []).map((h) => `${h.who || h.account} since ${h.since}, ${h.postsWaiting} post${h.postsWaiting === 1 ? '' : 's'} waiting`).join('; ')}. Resume with action:"resume" once the user confirms the account holder checked Account Status.` : (d.note || 'Instagram posting is not held.'), d);
-  }));
+  })));
   server.registerTool('duplicate_scheduled', {
     title: 'Duplicate a scheduled post',
     description: 'Copy an existing scheduled or already-published post into a NEW queued post — the way to run a creative again, reuse a post that worked as the starting point for the next one, or re-send something after it went out. It copies the caption, media, per-channel captions, title, description, tags and the target board / Page / company Page / listing, and ANY of those can be overridden in the same call. Give a new time in `at`, or useQueue:true to drop it into the brand’s next free posting slot. The copy is INDEPENDENT — editing or cancelling it never touches the original — and it is a genuinely new post rather than a re-send, so it publishes even where the original already did. To re-fire only the channels that FAILED, use retry_scheduled instead.',
@@ -11469,18 +11533,23 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       ...MANAGE_BRAND,
       limit: z.number().optional().describe('1-20, default 10 (ignored when videoIds is given)'),
+      // THE NEXT PAGE (2026-11-16): the reply said "(more available)" and there was no way to ask for it, so an agent sent
+      // `cursor` 14 times in a row and got the same first page each time (it was stripped as undeclared). The route has
+      // always paged by cursor (tiktokVideos → TikTok video/list `cursor` + `has_more`).
+      cursor: z.union([z.number(), z.string()]).optional().describe('the cursor the previous page returned'),
       videoIds: z.array(z.string()).optional().describe('read these specific TikTok video ids instead of listing recent ones — up to 20 per call'),
     },
     outputSchema: { videos: z.array(z.object({ id: z.string().nullable().optional(), title: z.string().optional(), durationSeconds: z.number().nullable().optional(), cover: z.string().nullable().optional(), url: z.string().nullable().optional(), postedAt: z.string().nullable().optional(), views: z.number().nullable().optional(), likes: z.number().nullable().optional(), comments: z.number().nullable().optional(), shares: z.number().nullable().optional() })).optional(), cursor: z.number().nullable().optional(), hasMore: z.boolean().optional(), unresolved: z.array(z.string()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const ids = (a.videoIds || []).filter(Boolean);
-    const d = await apiGet('/api/tiktok/videos', queryBrand(a, ids.length ? { videoIds: ids.join(',') } : (a.limit ? { limit: a.limit } : {})));
+    const _cur = a.cursor !== undefined && a.cursor !== null && String(a.cursor).trim() !== '' ? String(a.cursor).trim() : '';
+    const d = await apiGet('/api/tiktok/videos', queryBrand(a, ids.length ? { videoIds: ids.join(',') } : { ...(a.limit ? { limit: a.limit } : {}), ...(_cur ? { cursor: _cur } : {}) }));
     const rows = (d.videos || []).map((v, i) => `${i + 1}. ${(v.title || '(no caption)').slice(0, 70)} — ${v.views ?? '?'} views, ${v.likes ?? '?'} likes${v.url ? ` — ${v.url}` : ''}`);
     // An id TikTok did not return is STATED, never silently dropped — otherwise a short list reads as the whole answer.
     const missing = (d.unresolved || []).length ? `\nNOT RETURNED by TikTok (not on this account, or gone): ${d.unresolved.join(', ')}` : '';
     if (!rows.length) return ok(ids.length ? `TikTok returned nothing for ${ids.length === 1 ? 'that video id' : 'those video ids'} — not on this account, or no longer there. TikTok does not say which.` : 'No public videos on that TikTok account yet.', d);
-    return ok(`${rows.length} TikTok post(s)${d.hasMore ? ' (more available)' : ''}:\n${rows.join('\n')}${missing}`, d);
+    return ok(`${rows.length} TikTok post(s)${d.hasMore && d.cursor != null && !ids.length ? ` (more available: call again with cursor ${d.cursor} for the next page)` : ''}:\n${rows.join('\n')}${missing}`, d);
   }));
   server.group('ads');
   server.registerTool('upload_meta_asset', {
@@ -21286,7 +21355,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       sortField: z.enum(['likes', 'replies', 'create_time']).optional().describe('likes, replies or create_time'),
       sortOrder: z.enum(['asc', 'desc']).optional().describe('asc or desc'),
       cursor: z.number().optional().describe("pagination cursor from the previous reply's cursor field"),
-      maxCount: z.number().optional().describe('number of comments to return in this page'),
+      maxCount: z.number().optional().describe('1-100, default 20; above 30 (TikTok\'s page size) Hermoso reads several pages'),
     },
     outputSchema: { videoId: z.string().optional(), comments: z.array(z.any()).optional(), cursor: z.any().optional(), hasMore: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
@@ -21294,7 +21363,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiGet('/api/tiktok-account/comments', a);
     const list = d.comments || [];
     if (!list.length) return ok(d.note || 'No comments on that post.', d);
-    return ok(`${list.length} comment(s) on TikTok post ${d.videoId}${d.hasMore ? ' (more available — pass cursor back)' : ''}:\n${list.map(c => `\u2022 ${c.commentId}${c.isReply ? ' (reply)' : ''} \u2014 ${c.username ? '@' + c.username : (c.displayName || 'someone')}${c.status ? ` [${c.status}]` : ''}${c.likes != null ? ` \u2661${c.likes}` : ''} \u2014 ${(c.text || '(no text)').slice(0, 90)}`).join('\n')}\n${d.note || ''}`, d);
+    return ok(`${list.length} comment(s) on TikTok post ${d.videoId}${d.hasMore ? ` (more available: call again with cursor ${d.cursor})` : ''}:\n${list.map(c => `\u2022 ${c.commentId}${c.isReply ? ' (reply)' : ''} \u2014 ${c.username ? '@' + c.username : (c.displayName || 'someone')}${c.status ? ` [${c.status}]` : ''}${c.likes != null ? ` \u2661${c.likes}` : ''} \u2014 ${(c.text || '(no text)').slice(0, 90)}`).join('\n')}\n${d.note || ''}`, d);
   }));
   server.registerTool('list_tiktok_comment_replies', {
     title: "List every reply to one TikTok comment",

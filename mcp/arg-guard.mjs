@@ -124,3 +124,82 @@ export function unknownArgsNote(tool, unknown = [], declared = [], { rejected = 
     ? `Unknown argument${unknown.length > 1 ? 's' : ''} ${named} for ${tool || 'this tool'} — nothing was run.${takes}`
     : `⚠ Ignored unknown argument${unknown.length > 1 ? 's' : ''} ${named}: ${tool || 'this tool'} does not take ${unknown.length > 1 ? 'them' : 'it'}, so the call ran WITHOUT ${unknown.length > 1 ? 'them' : 'it'}. Check the answer below still matches what you asked, or call again with the right name.${takes}`;
 }
+
+// ── A COMMON MISNAME IS RENAMED, NOT DROPPED (2026-11-16, agent-friction sweep of 14 days of `[mcp-unknown-arg]`) ──────
+// Measured on production: `call_tool` was sent `arguments` (the MCP protocol's own name for a tool's arguments) instead
+// of `args` 30 times, and every one of those calls ran the inner tool with NO arguments at all; `upload_file` was sent
+// `filename` 24 times instead of `name`. Neither is a typo the did-you-mean can see (edit distance 5 and 4), so the call
+// ran without it. A rename is applied only when it is unambiguous: the misname is not itself declared, the real name is
+// declared, and the caller did not send the real name too. Anything else stays an unknown argument, named back as before.
+export const ARG_RENAMES = Object.freeze({
+  call_tool: Object.freeze({ arguments: 'args', params: 'args', parameters: 'args', input: 'args' }),
+  upload_file: Object.freeze({ filename: 'name', fileName: 'name', file_name: 'name' }),
+});
+/** The renames a call needs: [{from, to}]. PURE. `declared` is the tool's declared keys (null = accepts anything). */
+export function argRenames(tool, declared, args) {
+  const map = ARG_RENAMES[String(tool || '')];
+  if (!map || !Array.isArray(declared) || !args || typeof args !== 'object' || Array.isArray(args)) return [];
+  const out = [];
+  for (const [from, to] of Object.entries(map)) {
+    if (!Object.prototype.hasOwnProperty.call(args, from) || declared.includes(from) || !declared.includes(to)) continue;
+    if (Object.prototype.hasOwnProperty.call(args, to) || out.some((r) => r.to === to)) continue; // the real name was sent too, or a second misname for it: ambiguous, left alone
+    out.push({ from, to });
+  }
+  return out;
+}
+/** A copy of `args` with the renames applied. PURE. */
+export function applyArgRenames(args, renames = []) {
+  if (!renames.length) return args;
+  const c = { ...args };
+  for (const { from, to } of renames) { c[to] = c[from]; delete c[from]; }
+  return c;
+}
+export const RENAMED_ARGS_SYM = Symbol.for('hermoso.renamedArgs');
+/** The one line a renamed call's answer starts with, so the agent learns the real name. */
+export function renamedArgsNote(tool, renames = []) {
+  if (!renames.length) return '';
+  return `Read ${renames.map((r) => `\`${r.from}\` as \`${r.to}\``).join(', ')} (${tool || 'this tool'} names ${renames.length > 1 ? 'them' : 'it'} that way).`;
+}
+
+// ── A BRAND NAMED ON ANY TOOL CALL SCOPES THAT CALL (2026-11-16, same sweep) ─────────────────────────────────────────
+// Agents running several brands named the brand on tools that never declared it: list_library {brandId} ×4,
+// list_connector_accounts {brand} ×4, list_connectors {brand} ×3, upload_file {brand} ×8, get_brand {brandId},
+// list_published_posts {brand_id}, meta_insights / list_meta_pages / generate_voice {brand} — ~27 calls in 10 sessions.
+// Each ran WITHOUT it, so the answer (or the upload) belonged to the connection's PINNED brand, not the one asked for.
+// The per-call brand already exists (mcp/client.mjs brandScope → `?brandId=`, read by the server's brandRefOf belt, which
+// resolves it, refuses a name that matches no brand or two, and enforces a brand key's scope), but only on the tools
+// that declare it. So `brand` / `brandId` / `brand_id` is a META argument on every tool that declares none of the
+// three: lifted onto the parsed args under CALL_BRAND_SYM and honoured by wrap(). It is NOT added to any schema (the
+// roster stays the same size). Not on Apple Ads tools: `brandId` is Apple's word there and their routes never read ours.
+// A tool that declares `brand` as a PROFILE (its description points at list_brands) also takes `brandId` / `brand_id`
+// as that `brand`; a tool whose `brand` means something else (a product's brand attribute) is left alone.
+export const BRAND_ARG_KEYS = Object.freeze(['brand', 'brandId', 'brand_id']);
+export const CALL_BRAND_SYM = Symbol.for('hermoso.callBrand');
+const _brandVal = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 120) : '');
+/**
+ * What to do with a brand named on this call. PURE.
+ *   { brand, drop: [keys] } — a META brand: run the call in that brand, and the keys are not unknown arguments;
+ *   { renames: [{from, to:'brand'}] } — the tool's own profile `brand`, sent under another spelling;
+ *   null — nothing to do (no brand named, an ambiguous pair, or a tool where the word is not ours).
+ * `profileBrand` says whether the tool's declared `brand` is a profile (true) or something else (false).
+ */
+export function callBrandPlan(tool, declared, args, { profileBrand = false } = {}) {
+  if (!Array.isArray(declared) || !args || typeof args !== 'object' || Array.isArray(args)) return null;
+  if (/apple_ads/.test(String(tool || ''))) return null;
+  const sent = BRAND_ARG_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(args, k) && !declared.includes(k));
+  if (!sent.length) return null;
+  const vals = [...new Set(sent.map((k) => _brandVal(args[k])).filter(Boolean))];
+  if (vals.length !== 1) return null; // none usable, or two different brands named: left as unknown arguments, never guessed between
+  if (!BRAND_ARG_KEYS.some((k) => declared.includes(k))) return { brand: vals[0], drop: sent };
+  if (declared.includes('brand') && profileBrand && !Object.prototype.hasOwnProperty.call(args, 'brand') && sent.length === 1) return { renames: [{ from: sent[0], to: 'brand' }] };
+  return null;
+}
+/** Whether a declared `brand` argument is the PROFILE brand: its description points at list_brands. */
+export function brandArgIsProfile(schema) {
+  try {
+    const shape = schema && typeof schema === 'object' ? (typeof schema.safeParse === 'function' ? (schema.shape || schema._def?.shape?.() || schema._zod?.def?.shape) : schema) : null;
+    const f = shape && shape.brand;
+    const d = f && (f.description || f._def?.description || f._zod?.def?.description || (typeof f.meta === 'function' ? f.meta()?.description : ''));
+    return /list_brands/.test(String(d || ''));
+  } catch { return false; }
+}
