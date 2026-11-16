@@ -12385,9 +12385,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/shopify/marketing-activity/delete', a); return ok(d.note, d); }));
 
   // SHOPIFY ▸ DISCOUNT CODES (2026-11-15, lib/shopify-discounts.mjs) — the store's own codes, for a "use code X" ad or
-  // email. `channels` like the other store writes: it changes what the merchant's live checkout accepts. No `shop`
-  // parameter, for the reason above. Create and disable are confirm-gated: the unconfirmed call is a free preview.
-  server.group('channels');
+  // email. No `shop` parameter, for the reason above. Create and disable are confirm-gated: the unconfirmed call is a
+  // free preview.
+  // `channel_admin`, NOT `channels` (2026-11-15), for these three AND the orders block below (no marker between them):
+  // managing the store (its codes, its orders, its buyers) is not publishing, and `channel_admin` is where the store's
+  // catalog (list_shopify_products) and the email lead list already live. In `channels` the six sat on the DEFAULT roster
+  // of every account, Shopify or not, and pushed it past tools/roster-weight-check.mjs. Nothing is lost: find_tools +
+  // call_tool reach them on any roster, enable_tools / ?tools=channel_admin lists them, and on an account with no store
+  // the Shopify-store gate (roster-scope.mjs SHOPIFY_STORE_TOOL_RE) still holds them with their own reason.
+  server.group('channel_admin');
   server.registerTool('create_shopify_discount_code', {
     title: 'Create a Shopify discount code',
     description: "Create a discount code customers type at checkout on the merchant's Shopify store, for every product: percentOff (20 = 20% off) OR amountOff (a fixed amount in the store's currency), with an optional minimum purchase (minSubtotal OR minQuantity, not both), startsAt (default now), endsAt, usageLimit (total uses) and oncePerCustomer. THE CODE WORKS AT THE LIVE CHECKOUT AND EVERY USE IS MONEY OFF THE STORE'S SALES, so without confirm:true NOTHING is created and the reply describes exactly the code that would be: show the user, get a yes, then call again with confirm:true. The reply after creating is Shopify's own copy of the code, read back. Nothing the user wrote is changed: an impossible value (a code with a space, 0% or over 100%, an end date in the past) is refused with the reason. The first time, the store may need to approve Hermoso's discount permission: the reply says how. Only works for accounts created by installing Hermoso from the Shopify App Store. Free.",
