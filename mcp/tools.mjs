@@ -2669,6 +2669,10 @@ export function normalizeInboxItem(source, row = {}) {
     ...(source === 'discord' ? { ...(typeof row.channelName === 'string' && row.channelName ? { channelName: row.channelName } : {}), ...(typeof row.server === 'string' && row.server ? { server: row.server } : {}), ...(row.contentHidden === true ? { contentHidden: true } : {}) } : {}),
     ...(source === 'email' ? { ...(typeof row.subject === 'string' ? { subject: row.subject } : {}), ...(row.automatic === true ? { automatic: true } : {}), ...(row.askedToStop === true ? { askedToStop: true } : {}) } : {}),
     ...(source === 'whatsapp' ? { windowOpen: row.windowOpen ?? null, windowClosesAt: row.windowClosesAt || null, ...(typeof row.windowNote === 'string' ? { windowNote: row.windowNote } : {}), ...(row.phoneNumberId ? { phoneNumberId: String(row.phoneNumberId) } : {}), ...(Array.isArray(row.recent) ? { recent: row.recent } : {}) } : {}),
+    // WHICH OF THE BRAND'S ACCOUNTS RECEIVED IT (2026-11-16): { id, label, handle? }, a WhatsApp number, a Facebook Page, an
+    // Instagram account, a Slack workspace or a Discord server, so a brand with several on one channel can tell; list_inbox's
+    // `account` argument filters on it. A Meta DM read through one of several Pages names that Page.
+    ...(() => { const a = row.account && typeof row.account === 'object' && row.account.id != null && String(row.account.id).trim() ? row.account : (dmPage ? { id: dmPage, label: typeof row.pageName === 'string' && row.pageName ? row.pageName : dmPage } : null); return a ? { account: { id: String(a.id), label: String(a.label || a.id), ...(a.handle && String(a.handle) !== String(a.label) ? { handle: String(a.handle) } : {}) } } : {}; })(),
   };
 }
 
@@ -2682,6 +2686,14 @@ export function sortInbox(items) {
 }
 
 /** One line per item, because plenty of MCP clients print the text block and nothing else. */
+/** Did this item come in on the account the caller named (its id, @handle, label or phone number)? */
+export function inboxAccountMatches(acc, wanted) {
+  const n = (v) => (v == null ? '' : String(v)).trim().replace(/^@/, '').toLowerCase(); const w = n(wanted);
+  if (!w) return true; if (!acc || typeof acc !== 'object') return false;
+  if ([acc.id, acc.label, acc.handle].map(n).includes(w)) return true;
+  const d = (v) => (v == null ? '' : String(v)).replace(/\D+/g, ''); const dw = d(wanted);
+  return dw.length >= 6 && [acc.id, acc.label, acc.handle].some((v) => d(v) === dw);
+}
 export function inboxLine(it) {
   const bits = [
     it.answered ? '✓' : '•',
@@ -3400,7 +3412,7 @@ export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['layerize_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'list_winning_ads']); // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it
+export const ON_DEMAND_TOOLS = new Set(['layerize_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'list_winning_ads', 'view_images']); // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -5734,7 +5746,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       documentUrl: z.string().optional().describe('send a FILE (≤50 MB) as the post, text as caption; not with image/video'),
       protectContent: z.boolean().optional().describe('no forwarding or saving'),
       disablePreview: z.boolean().optional().describe('suppress the link-preview card on a text-only post. Default is Telegram’s own behaviour (previews on).'),
-      silent: z.boolean().optional().describe('deliver without a notification sound (Telegram’s disable_notification). This is NOT a visibility setting — the message is just as visible.'),
+      silent: z.boolean().optional().describe('deliver without a notification sound (Telegram’s silent-delivery setting). This is NOT a visibility setting — the message is just as visible.'),
       buttons: z.array(z.union([z.object({ text: z.string(), url: z.string(), style: z.enum(['danger', 'success', 'primary']).optional() }), z.array(z.object({ text: z.string(), url: z.string(), style: z.enum(['danger', 'success', 'primary']).optional() }))])).optional().describe("URL BUTTONS under the post, Telegram's call to action: [{text:'Shop now', url:'https://…'}] one per row, or rows [[a,b],[c]]. URL buttons only (https://, http:// or tg://), optional style danger|success|primary. A single photo, a video or a text post can carry them; an ALBUM cannot (Telegram's sendMediaGroup takes no buttons), so that combination is refused."),
       parseMode: z.enum(['HTML']).optional().describe("'HTML' to format the text with Telegram's HTML: <b>, <i>, <u>, <s>, <a href=\"…\">, <code>, <pre>, <blockquote>, <tg-spoiler>. Omit for plain text (the default). In HTML mode a literal <, > or & in the copy must be written &lt; &gt; &amp;, which is why it is never turned on by itself. Markdown (**bold**) is NOT parsed; convert it to HTML tags."),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover (Telegram\u2019s in-chat video cover). true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
@@ -6737,6 +6749,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Facebook Page id (list_meta_pages) when the brand has several Pages connected: reads that Page\'s Messenger and Instagram DMs and comments only. Omit to read every connected Page.'),
       limit: z.number().optional().describe('Max items per source (default 25).'),
       unansweredOnly: z.boolean().optional().describe('Only items with no reply from the brand yet.'),
+      account: z.string().optional().describe('Only items received by this account of the brand: its id, @handle, Page name, Slack workspace or WhatsApp number (each item\'s `account`). For a brand with several accounts on one channel.'),
     },
     outputSchema: {
       items: z.array(z.any()).describe('normalised inbox items, newest first'),
@@ -6744,7 +6757,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       notes: z.array(z.string()).describe('sources that could not be read, and why — never silently dropped'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-  }, wrap(async ({ sources, postId, videoId, tiktokVideoId, linkedinPostUrn, discordMember, conversationId, pageId, limit, unansweredOnly }) => {
+  }, wrap(async ({ sources, postId, videoId, tiktokVideoId, linkedinPostUrn, discordMember, conversationId, pageId, limit, unansweredOnly, account }) => {
     const want = Array.isArray(sources) && sources.length
       ? sources.map((x) => String(x).trim().toLowerCase())
       : INBOX_SOURCE_NAMES;
@@ -6809,8 +6822,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
         notes.push(`${src.label}s could not be read: ${msg.slice(0, 140)}`);
       }
     }
-    const out = sortInbox(unansweredOnly ? items.filter((i) => !i.answered) : items);
-    const head = out.length ? out.map(inboxLine).join('\n') : 'Nothing waiting.';
+    const out = sortInbox(items.filter((i) => (!unansweredOnly || !i.answered) && inboxAccountMatches(i.account, account)));
+    // The receiving account is spelled out on a line only where the brand has more than one on that source (token-lean).
+    const multi = new Set(Object.entries(out.reduce((m, i) => { if (i.account) (m[i.source] ||= new Set()).add(i.account.id); return m; }, {})).filter(([, v]) => v.size > 1).map(([k]) => k));
+    const head = out.length ? out.map((i) => inboxLine(i) + (multi.has(i.source) ? ` · to ${i.account.label}` : '')).join('\n') : (account ? `Nothing waiting on "${String(account).slice(0, 80)}".` : 'Nothing waiting.');
     const tail = notes.length ? `\n\n${notes.map((n) => `⚠ ${n}`).join('\n')}` : '';
     return ok(`${out.length} item(s) waiting.\n${head}${tail}`, { items: out, count: out.length, notes });
   }));
@@ -12446,7 +12461,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // — find_tools matches it — and the no-top-up sentence is there so "add prepaid funds" gets an honest answer.
   server.registerTool('get_meta_ad_account', {
     title: 'Read a Meta ad account’s billing and status',
-    description: 'Read a Meta AD ACCOUNT’s BILLING and DELIVERY state: account status in words (ACTIVE, DISABLED, UNSETTLED unpaid balance, IN_GRACE_PERIOD failed payment, PENDING_RISK_REVIEW, CLOSED…) with the disable reason; currency and time zone; BALANCE (the bill amount due); AMOUNT SPENT; SPEND CAP and how much is left under it (none means no account spending limit); the minimum daily budget; whether it is a PREPAID account; and the PAYMENT METHOD / FUNDING SOURCE (card, PayPal, prepaid funds / stored balance, invoice, credit line). Every amount is converted from Meta’s minor units into the account currency. Use it for “what is my Meta ad balance”, “how much prepaid funds are left”, “which card pays for my ads”, “why are my ads not delivering”, and before activating anything. IT CANNOT ADD PREPAID FUNDS OR CHANGE THE PAYMENT METHOD — Meta publishes no API for either, so the reply links the account’s page in Meta Billing (Ads Manager > Billing & payments) where the user does it; say so rather than looking for another tool. If Meta refuses the billing fields to this connection (the connected person lacks the MANAGE role on the account), the reply says the funding source could not be read, which is not the same as having none. Meta fields read: account_status, disable_reason, balance, amount_spent, spend_cap, min_daily_budget, is_prepay_account, funding_source_details. Read-only, free.',
+    description: 'Read a Meta AD ACCOUNT’s BILLING and DELIVERY state: account status in words (ACTIVE, DISABLED, UNSETTLED unpaid balance, IN_GRACE_PERIOD failed payment, PENDING_RISK_REVIEW, CLOSED…) with the disable reason; currency and time zone; BALANCE (the bill amount due); AMOUNT SPENT; SPEND CAP and how much is left under it (none means no account spending limit); the minimum daily budget; whether it is a PREPAID account; and the PAYMENT METHOD / FUNDING SOURCE (card, PayPal, prepaid funds / stored balance, invoice, credit line). Every amount is converted from Meta’s minor units into the account currency. Use it for “what is my Meta ad balance”, “how much prepaid funds are left”, “which card pays for my ads”, “why are my ads not delivering”, and before activating anything. IT CANNOT ADD PREPAID FUNDS OR CHANGE THE PAYMENT METHOD — Meta publishes no API for either, so the reply links the account’s page in Meta Billing (Ads Manager > Billing & payments) where the user does it; say so rather than looking for another tool. If Meta refuses the billing fields to this connection (the connected person lacks the MANAGE role on the account), the reply says the funding source could not be read, which is not the same as having none. Meta fields read: account_status, the disable reason, balance, amount_spent, spend_cap, min_daily_budget, is_prepay_account, funding_source_details. Read-only, free.',
     inputSchema: {
       adAccountId: z.string().describe('the ad account (from list_connector_accounts / list_meta_pages), with or without the act_ prefix'),
     },
@@ -30134,7 +30149,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('list_library', {
     title: 'List library',
-    description: "This workspace's Library: every Studio image/video and upload, newest first. Each row: a served URL (fetch_asset gives a download link), its id (L0, L1…, which plan_ad and render_ad `inserts` take), a TITLE (headline, concept or file name), kind, a video's length, pixel size, model and age. An ad named by its headline (\"the Afternoon fix ad\"): pass `query`. Free, read-only.",
+    description: "This workspace's Library: every Studio image/video and upload, newest first. Each row: a served URL (fetch_asset gives a download link), its id (L0, L1…, which plan_ad and render_ad `inserts` take), a TITLE (headline, concept or file name), kind, a video's length, pixel size, model and age. An ad named by its headline (\"the Afternoon fix ad\"): pass `query`. To SEE what an image shows, view_images. Free, read-only.",
     inputSchema: {
       kind: z.enum(['image', 'video', 'document', 'all']).optional().describe("filter by asset kind (default 'all')"),
       uploads: z.boolean().optional(),
@@ -30179,6 +30194,36 @@ function memoryNoteVerdict(text) {
     const _len = (sec) => { const r = Math.round(sec); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, '0')}`; };
     const _meta = (x) => [x.kind === 'video' ? (x.durationSeconds ? `${_len(x.durationSeconds)} long` : 'length unknown') : '', x.width ? `${x.width}×${x.height}` : ''].filter(Boolean).join(', ');
     return ok(`${assets.length} asset${assets.length === 1 ? '' : 's'} (newest first):\n` + assets.map((x) => `  ${x.id}. ${x.title ? '“' + x.title + '” ' : ''}[${x.kind || '?'}${_meta(x) ? ' · ' + _meta(x) : ''}${x.source === 'upload' ? ' · your upload' + (x.name ? ' “' + x.name + '”' : '') : x.model ? ' · ' + x.model : ''}${x.ageHours != null ? ' · ' + x.ageHours + 'h ago' : ''}] ${x.url}`).join('\n'), { assets });
+  }));
+
+  // LOOK AT LIBRARY IMAGES (2026-11-16, lib/library-view.mjs): the pixels themselves, as MCP image content, so the host's own
+  // model can tell which image is which. The in-app Studio had this since 2026-11-08; this closes #409 in tools/mcp-parity.mjs.
+  // Listed on demand (ON_DEMAND_TOOLS): most sessions see a render inline when it is made, so only "which of my images is
+  // which" needs it, and list_library's description names it. Never gated on a widget host: the model seeing it is the point.
+  server.registerTool('view_images', {
+    title: 'Look at Library images',
+    description: "LOOK at pictures already in this brand's Library: returns each image itself (a JPEG, at most 1024 px on its long edge unless maxPx says otherwise) so you can see its headline, on-screen text, people, product and layout. Pass up to 6 Library ids (L0… from list_library) or Hermoso file links. Use it to tell which image is which, to write copy for one, or to check its text before quoting it; never describe an image you have not looked at. Only this brand's Library and Hermoso's own files are read. A video is named as one (video_frames shows its frames). Free, read-only.",
+    inputSchema: {
+      assetIds: z.array(z.string()).describe('Library ids from list_library (L0, L1…) or Hermoso file links, at most 6'),
+      maxPx: z.number().optional().describe('long edge in pixels, 256-1568 (default 1024)'),
+    },
+    outputSchema: {
+      images: z.array(z.object({ ref: z.string(), id: z.string().optional(), url: z.string(), title: z.string().optional(), width: z.number().nullable().optional(), height: z.number().nullable().optional(), bytes: z.number().optional() })).optional(),
+      missed: z.array(z.object({ ref: z.string(), why: z.string() })).optional(),
+      over: z.array(z.string()).optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async ({ assetIds, maxPx }) => {
+    const d = await apiPost('/api/library/view', { assetIds: Array.isArray(assetIds) ? assetIds : [assetIds], ...(maxPx != null ? { maxPx } : {}) });
+    const imgs = Array.isArray(d?.images) ? d.images : [];
+    const content = [{ type: 'text', text: String(d?.summary || '') }];
+    for (const x of imgs) {
+      if (!x || typeof x.data !== 'string' || !x.data) continue;
+      content.push({ type: 'text', text: `Image ${x.id || x.ref}${x.title ? ` · “${x.title}”` : ''}${x.width ? ` · ${x.width}×${x.height}` : ''} · ${x.url}` });
+      content.push({ type: 'image', data: x.data, mimeType: x.mimeType || 'image/jpeg' });
+    }
+    const images = imgs.map(({ data, mimeType, ...meta }) => meta); // the bytes ride the image blocks only, never structuredContent
+    return { content, structuredContent: { images, missed: Array.isArray(d?.missed) ? d.missed : [], over: Array.isArray(d?.over) ? d.over : [] } };
   }));
 
   // DELETE FROM THE LIBRARY (2026-10-23). A customer was told it could not be done and sent to support. The server

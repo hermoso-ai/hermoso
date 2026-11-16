@@ -49,6 +49,8 @@ export const CREATE_FREE_READS = Object.freeze([
   // Story films (2026-11-11): the catalog, one card's recipe and starting a run (the outline) are store reads and writes;
   // each says "Free" in its own description. advance_story_film runs the paid stages and stays a model tool.
   'list_story_cards', 'get_story_card', 'start_story_film',
+  // view_images (2026-11-16): the brand's own Library pictures scaled by local ffmpeg; says "Free" in its own description.
+  'view_images',
 ]);
 // Reads inside `research`. `find_competitors` says "0 credits" in its own description (it is the discovery model,
 // billed to us, not a paid ad-data call); the watch tools only write and read a stored preference — the weekly

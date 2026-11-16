@@ -25,7 +25,6 @@ export const CHATGPT_ROSTER_FAMILIES = Object.freeze([
   'bluesky', // publishing
   'openai_ads', // big-platform ads
   'mixpanel', // analytics
-  'wechat', // long tail
 ]);
 // Left out to stay under the cap, in rank order (the first one is the next to get in when room appears).
 export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
@@ -52,6 +51,7 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'shopify_blog', // long tail
   'vercel', // long tail
   'webflow', // long tail
+  'wechat', // long tail
   'whop', // long tail
   'wix', // long tail
 ]);
