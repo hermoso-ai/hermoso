@@ -3184,7 +3184,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
   manage_meta_post: [
     splitOp('edit_facebook_post', { action: 'edit', target: 'facebook' }, ['brand', 'postId!', 'message', 'aiGenerated', 'pageId'], splitW(true, true), 'Edit the text or AI label of a published Facebook post', 'Use this when the text of a Facebook post the brand already published needs changing, or its AI-generated label should be added (aiGenerated true) or cleared (false). Replaces the post’s message in public. Instagram and Threads posts cannot be edited after publishing. Get postId from list_meta_posts. Free.', { message: 'the new post text' }),
     splitOp('delete_meta_post', { action: 'delete' }, ['brand', 'postId!', 'target', 'pageId', 'confirm', 'confirmName', 'confirmChildren'], splitW(true, true), 'Delete a published Facebook, Instagram or Threads post', 'Use this when a post the brand published on Facebook, Instagram or Threads must be removed. PERMANENT. For Instagram call it first WITHOUT confirm: nothing is deleted and the reply shows the post’s caption, likes, comments and carousel cards; show the user that, then call again with confirm:true (plus confirmName / confirmChildren when the reply asks). An Instagram carousel is deleted as a whole album. Get postId from list_meta_posts or list_instagram_media. Free.', { confirm: 'must be true to delete (permanent)' }),
-    splitOp('manage_facebook_reel_collaborators', { action: 'collaborators', target: 'facebook' }, ['brand', 'postId!', 'invitePageIds', 'pageId'], splitW(false, false), 'List or invite collaborator Pages on a Facebook Reel', 'Use this when a Facebook Reel the brand published should be co-authored with another Facebook Page: pass invitePageIds to invite (10 invitations per Page per day), or nothing to list the collaborators and whether each accepted. postId is the Reel’s video id. Free.'),
+    splitOp('manage_facebook_reel_collaborators', { action: 'collaborators', target: 'facebook' }, ['brand', 'postId!', 'invitePageIds', 'pageId'], splitW(true, false), 'List or invite collaborator Pages on a Facebook Reel', 'Use this when a Facebook Reel the brand published should be co-authored with another Facebook Page: pass invitePageIds to invite (10 invitations per Page per day), or nothing to list the collaborators and whether each accepted. postId is the Reel’s video id. Free.'),
     splitOp('set_facebook_video_cover', { action: 'cover', target: 'facebook' }, ['brand', 'postId!', 'coverAtMs', 'coverImageUrl', 'videoUrl', 'pageId'], splitW(true, true), 'Replace the cover of a published Facebook video or Reel', 'Use this when a Facebook video or Reel the brand already published needs a new cover: a frame (coverAtMs) or a Hermoso-hosted picture (coverImageUrl). postId is the video id. Instagram covers cannot be changed after publishing. Free.'),
   ],
   set_youtube_watermark: [
@@ -3225,7 +3225,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('delete_youtube_comment', { action: 'delete' }, ['commentId!', 'confirm'], splitW(true, true), 'Delete a YouTube comment', 'Use this when a comment must be removed for good; YouTube has no undelete. Needs confirm:true. To only take it out of public view use reject_youtube_comment. Free.', { confirm: 'must be true to delete' }),
   ],
   manage_x_broadcast: [
-    splitOp('schedule_x_broadcast', { action: 'schedule' }, ['sourceId!', 'startAt!', 'manualPublish!', 'endAt', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(false, false), 'Schedule an X live broadcast', 'Use this when the brand wants to schedule an X live video broadcast. sourceId comes from list_x_stream_sources. manualPublish is required: true waits for start_x_broadcast; false makes X put the brand on air automatically at startAt and needs confirm:true.' + X_BILLED),
+    splitOp('schedule_x_broadcast', { action: 'schedule' }, ['sourceId!', 'startAt!', 'manualPublish!', 'endAt', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(true, false), 'Schedule an X live broadcast', 'Use this when the brand wants to schedule an X live video broadcast. sourceId comes from list_x_stream_sources. manualPublish is required: true waits for start_x_broadcast; false makes X put the brand on air automatically at startAt and needs confirm:true.' + X_BILLED),
     splitOp('update_x_broadcast', { action: 'update' }, ['id!', 'startAt', 'endAt', 'manualPublish', 'title', 'description', 'locale', 'availableForReplay', 'isLocked', 'chatOption', 'thumbnailMediaId', 'confirm'], splitW(true, true), 'Change a scheduled X broadcast', 'Use this when a scheduled X broadcast needs a new time, title or setting. Only the fields you pass change. Turning manualPublish off needs confirm:true.' + X_BILLED),
     splitOp('start_x_broadcast', { action: 'go_live' }, ['id!', 'confirm'], splitW(true, false), 'Go live on a scheduled X broadcast', 'Use this when a broadcast scheduled with manualPublish:true should go on air NOW, publicly, as the brand. Needs confirm:true after the user approved the exact broadcast and stream.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
     splitOp('create_x_broadcast', { action: 'create' }, ['sourceId!', 'title', 'locale', 'chatOption', 'skipPost', 'confirm'], splitW(true, false), 'Go live on an X stream source now', 'Use this when the brand wants to go on air NOW on X without a schedule. It is public at once: X announces it in a post unless skipPost is true, and ends it if no video reaches the source within 5 minutes. sourceId comes from list_x_stream_sources. Needs confirm:true.' + X_BILLED, { confirm: 'must be true: this goes on air publicly' }),
@@ -3239,7 +3239,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('get_x_stream_key', { action: 'stream_key' }, ['id!'], SPLIT_RO, 'Read an X stream source’s stream key', 'Use this when an encoder needs the stream key of one of the brand’s X stream sources. The key is a secret: put it in the encoder, never in a post. Read-only.' + X_BILLED),
     splitOp('get_x_ingest_region', { action: 'region' }, [], SPLIT_RO, 'Read the nearest X ingest region', 'Use this when you need the ingest region nearest X’s server, to pass when creating a stream source. Read-only.' + X_BILLED),
     splitOp('create_x_stream_source', { action: 'create' }, ['name!', 'region'], splitW(false, false), 'Create an X stream source', 'Use this when the brand needs a new RTMP ingest point for live video on X. The stream key is a secret, so never post it.' + X_BILLED),
-    splitOp('rename_x_stream_source', { action: 'rename' }, ['id!', 'name!'], splitW(false, true), 'Rename an X stream source', 'Use this when a stream source needs a new label. The stream key does not change.' + X_BILLED),
+    splitOp('rename_x_stream_source', { action: 'rename' }, ['id!', 'name!'], splitW(true, true), 'Rename an X stream source', 'Use this when a stream source needs a new label. The stream key does not change.' + X_BILLED),
     splitOp('delete_x_stream_source', { action: 'delete' }, ['id!', 'confirm'], splitW(true, true), 'Delete an X stream source', 'Use this when a stream source is no longer used. It kills the stream key; needs confirm:true.' + X_BILLED, { confirm: 'must be true to delete' }),
   ],
   moderate_x_broadcast: [
@@ -3286,14 +3286,14 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
   ],
   moderate_tiktok_comment: [
     splitOp('like_tiktok_comment', { action: 'LIKE' }, ['commentId!', 'videoId'], splitW(false, true), 'Like a TikTok comment', 'Use this when the brand should like a comment on its own TikTok post. Pass videoId too and the reply reads the comment back. Get commentId from list_tiktok_comments. Free.'),
-    splitOp('unlike_tiktok_comment', { action: 'UNLIKE' }, ['commentId!', 'videoId'], splitW(false, true), 'Unlike a TikTok comment', 'Use this when the brand should take its like off a comment on its own TikTok post. Free.'),
+    splitOp('unlike_tiktok_comment', { action: 'UNLIKE' }, ['commentId!', 'videoId'], splitW(true, true), 'Unlike a TikTok comment', 'Use this when the brand should take its like off a comment on its own TikTok post. Free.'),
     splitOp('hide_tiktok_comment', { action: 'HIDE' }, ['commentId!', 'videoId!'], splitW(true, true), 'Hide a TikTok comment', 'Use this when a comment on the brand’s own TikTok post should be hidden, including a stranger’s (only the brand’s own comments can be deleted). Reversible. Free.'),
     splitOp('unhide_tiktok_comment', { action: 'UNHIDE' }, ['commentId!', 'videoId!'], splitW(true, true), 'Unhide a TikTok comment', 'Use this when a hidden comment on the brand’s own TikTok post should be visible again. TikTok may keep it hidden if its own filters hid it; the reply reads the real status back. Free.'),
     splitOp('delete_tiktok_comment', { action: 'DELETE' }, ['commentId!', 'videoId', 'confirm'], splitW(true, true), 'Delete a TikTok comment the brand wrote', 'Use this when a comment the brand’s own account wrote must be removed for good. Other people’s comments can only be hidden (hide_tiktok_comment). PERMANENT: needs confirm:true. Free.', { confirm: 'must be true to delete (permanent)' }),
   ],
   manage_tiktok_brand_hashtags: [
     splitOp('enable_tiktok_brand_hashtags', { action: 'ADD' }, ['hashtags!', 'username'], splitW(false, true), 'Turn on brand hashtags for TikTok tracking', 'Use this when TikTok should count up to 10 hashtags as the brand’s (50 in total). A new hashtag is counted after 24 hours and cannot be turned off for 7 days. A tag must be on the available list or contain the account handle. Free.', { hashtags: 'up to 10, with or without the leading #' }),
-    splitOp('disable_tiktok_brand_hashtag', { action: 'REMOVE' }, ['hashtag!', 'username'], splitW(false, true), 'Turn off a brand hashtag for TikTok tracking', 'Use this when TikTok should stop counting one hashtag as the brand’s. Exactly one per call, and not within 7 days of enabling it (the reply names the wait). Free.', { hashtag: 'exactly one enabled hashtag' }),
+    splitOp('disable_tiktok_brand_hashtag', { action: 'REMOVE' }, ['hashtag!', 'username'], splitW(true, true), 'Turn off a brand hashtag for TikTok tracking', 'Use this when TikTok should stop counting one hashtag as the brand’s. Exactly one per call, and not within 7 days of enabling it (the reply names the wait). Free.', { hashtag: 'exactly one enabled hashtag' }),
   ],
   link_tiktok_tto_video: [
     splitOp('request_tiktok_tto_video_link', { action: 'LINK' }, ['ttoAccountId', 'campaignId!', 'videoId!'], splitW(true, false), 'Ask a creator to link a video to a TikTok One campaign', 'Use this when an invited creator should be asked to link one of their public videos to a TikTok One campaign. It sends a notification to a real person; a second request within 24 hours is refused and at most two reminders are allowed, so read list_tiktok_tto_link_requests before re-sending. Free.'),
@@ -3356,7 +3356,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
   set_openai_ads_feed_sftp: [
     splitOp('set_openai_ads_feed_sftp_key', { action: 'create', authenticationMethod: 'ssh_key' }, ['feedId!', 'sshPublicKey!'], splitW(true, false), 'Set the SSH key for ChatGPT Ads feed SFTP delivery', 'Use this when a ChatGPT Ads product feed should accept SFTP uploads signed in with the user’s SSH PUBLIC key. It replaces any SFTP credentials the feed had, and the old ones stop working at once. The reply carries the connection URI. get_openai_ads_feed_sftp reads the state without changing it.', { sshPublicKey: 'the SSH PUBLIC key (never a private key)' }),
     splitOp('activate_openai_ads_feed_sftp', { action: 'activate' }, ['feedId!'], splitW(false, true), 'Turn on ChatGPT Ads feed SFTP delivery', 'Use this when SFTP delivery for a ChatGPT Ads product feed should start accepting files, without changing its credentials. Delivered files show up in list_openai_ads_feed_uploads.'),
-    splitOp('pause_openai_ads_feed_sftp', { action: 'pause' }, ['feedId!'], splitW(false, true), 'Pause ChatGPT Ads feed SFTP delivery', 'Use this when SFTP delivery for a ChatGPT Ads product feed should stop accepting files for now, without changing its credentials. activate_openai_ads_feed_sftp turns it back on.'),
+    splitOp('pause_openai_ads_feed_sftp', { action: 'pause' }, ['feedId!'], splitW(true, true), 'Pause ChatGPT Ads feed SFTP delivery', 'Use this when SFTP delivery for a ChatGPT Ads product feed should stop accepting files for now, without changing its credentials. activate_openai_ads_feed_sftp turns it back on.'),
   ],
   manage_tiktok_ads_test_lead: [
     splitOp('create_tiktok_ads_test_lead', { action: 'create' }, ['advertiserId', 'pageId', 'leadSource'], splitW(false, false), 'Create a TikTok test lead', 'Use this when the user wants to test a TikTok lead pipeline end to end without a real person filling in the form. It makes one dummy lead on an Instant Form (pageId, from list_tiktok_ads_lead_forms) that download_tiktok_ads_leads reads like a real one; it spends nothing and reaches nobody. TikTok allows one test lead per form, so delete the existing one first. Free.'),
@@ -3379,7 +3379,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
   ],
   manage_sheet_tabs: [
     splitOp('add_sheet_tab', { action: 'add' }, ['spreadsheetId', 'sheetUrl', 'title!'], splitW(false, false), 'Add a tab to a Google Sheet', 'Use this when a Google Spreadsheet needs a new tab. Pass spreadsheetId or sheetUrl and the tab title. The tab is read back before it is reported.'),
-    splitOp('rename_sheet_tab', { action: 'rename' }, ['spreadsheetId', 'sheetUrl', 'tab!', 'newTitle!'], splitW(false, true), 'Rename a Google Sheet tab', 'Use this when a tab in a Google Spreadsheet should get a new name. Name the tab by its title or numeric sheetId (list_sheet_tabs gives both).'),
+    splitOp('rename_sheet_tab', { action: 'rename' }, ['spreadsheetId', 'sheetUrl', 'tab!', 'newTitle!'], splitW(true, true), 'Rename a Google Sheet tab', 'Use this when a tab in a Google Spreadsheet should get a new name. Name the tab by its title or numeric sheetId (list_sheet_tabs gives both).'),
     splitOp('delete_sheet_tab', { action: 'delete' }, ['spreadsheetId', 'sheetUrl', 'tab!', 'confirm', 'confirmCells'], splitW(true, true), 'Delete a Google Sheet tab', 'Use this when a tab and everything on it should be removed. Call it without confirm first to get the filled-cell count, then with confirm:true and confirmCells. The last remaining tab cannot be deleted.'),
   ],
   // update_pinterest_board has no action enum, but the scan found its NAME inconsistent with what it does (a privacy flip
@@ -7695,7 +7695,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       account: z.string().optional().describe('INSTAGRAM \u2014 which account, an @handle or id from list_connector_accounts("instagram"); needed for an Instagram Login account or when several are linked'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), platform: z.string().optional(), verified: z.boolean().optional(), comment: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/comment', { postId: a.postId, message: a.message, attachmentUrl: a.attachmentUrl, pageId: a.pageId, account: a.account });
     // THE ANSWER IS THE READ-BACK, NEVER THE 200. The server re-reads the comment off Meta after creating it and
@@ -7786,7 +7786,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Page id — omit when only one Page is connected'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/comment/reply', { commentId: a.commentId, message: a.message, account: a.account, pageId: a.pageId, ...(a.private === true ? { private: true } : {}) });
     return ok(d.private ? d.note : `Replied to comment ${a.commentId} (${d.id}).`, d);
@@ -7866,7 +7866,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().describe('reply text (max 500 characters)'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/threads/reply', { replyToId: a.replyToId, text: a.text });
     return ok(`Replied on Threads (${d.id}).`, d);
@@ -7914,7 +7914,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Repost an existing Threads post to the brand’s own Threads profile — the Threads equivalent of a retweet. It is how a brand amplifies a customer’s post, a mention, or one of its own older threads without copying the text, and there was previously no way to do it. Works on any Threads post id: list_threads_posts, list_threads_mentions and search_threads_keyword all return them. This creates a NEW post on the profile, so show the user what is being reposted and get a yes first. Threads publishes NO un-repost endpoint — because a repost returns its own media id, deleting THAT id with delete_thread is the likely undo, but Meta does not document it, so check the profile afterwards rather than promising it worked. 0 credits. Needs Threads connected.',
     inputSchema: { postId: z.string().describe('the Threads post id to repost') },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), repostedPostId: z.string().optional(), permalink: z.string().nullable().optional(), mediaType: z.string().nullable().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/threads/repost', { postId: a.postId });
     return ok(d.note, d);
@@ -8337,7 +8337,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('REQUIRED true — this sends a real message to a real phone and Meta bills the business for it'),
     },
     outputSchema: { ok: z.boolean().optional(), messageId: z.string().optional(), status: z.string().optional(), waId: z.string().optional(), to: z.string().optional(), groupId: z.string().optional(), kind: z.string().optional(), interactive: z.string().optional(), media: z.string().optional(), mediaId: z.string().optional(), template: z.string().nullable().optional(), language: z.string().nullable().optional(), note: z.string().optional(), window: z.string().optional(), pricing: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/whatsapp/send', { phoneNumberId: a.phoneNumberId, to: a.to, template: a.template, language: a.language, wabaId: a.wabaId, components: a.components, text: a.text, interactive: a.interactive, media: a.media, groupId: a.groupId, confirm: a.confirm });
     return ok(d.note, d);
@@ -9322,7 +9322,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Reject a scheduled post waiting for approval: it will not be published. The author can edit it, which sends it back for approval. Admins only.',
     inputSchema: { id: z.string(), reason: z.string().optional().describe('shown to the author, max 500 characters') },
     outputSchema: { id: z.string().optional(), approval: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiPost(`/api/schedule/${encodeURIComponent(a.id)}/reject`, { reason: a.reason || '' });
     return ok(`Rejected (read back): ${d.id}. ${d.note || ''}`, d);
@@ -9337,7 +9337,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       applyToQueued: z.boolean().optional(),
     },
     outputSchema: { mode: z.string().optional(), channels: z.array(z.string()).optional(), who: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiPut('/api/schedule/approval', a);
     return ok(`${d.summary || ''}${d.note ? ` ${d.note}` : ''}`, d);
@@ -9387,7 +9387,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Evergreen series on this brand: action list, stop (no more reposts; the next queued one is cancelled unless keepQueued), pause or resume.',
     inputSchema: { action: z.enum(['list', 'stop', 'pause', 'resume']), id: z.string().optional(), keepQueued: z.boolean().optional() },
     outputSchema: { rules: z.array(z.any()).optional(), rule: z.any().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.action === 'list') { const d = await apiGet('/api/schedule/evergreen', {}); return ok((d.lines || []).join('\n') || 'No evergreen series on this brand.', d); }
     if (!a.id) return ok('Pass the series id (action list shows them).', {});
@@ -9677,7 +9677,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       idempotencyKey: z.string().optional().describe('pass the same key to make a retry safe — a timeout that already sent would otherwise send twice'),
     },
     outputSchema: { conversationId: z.string().optional(), eventId: z.string().optional(), delivered: z.boolean().optional(), text: z.string().optional(), costCredits: z.number().optional(), idempotentReplay: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/x/dm', { text: a.text, conversationId: a.conversationId, participantId: a.participantId, idempotencyKey: a.idempotencyKey });
     // THE READ-BACK, NOT THE ASK. Both ids come out of X's own 201 body; `delivered` is whether X returned an
@@ -10543,7 +10543,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Post a public reply to a comment on the connected channel, as the channel. This is PUBLIC and immediate — show the user the exact reply text and get an explicit yes before calling. Get commentId from list_youtube_comments. Needs a connected YouTube channel.',
     inputSchema: { commentId: z.string().describe('id of the comment to reply to (from list_youtube_comments)'), text: z.string().describe('the reply, shown publicly under the video') },
     outputSchema: { id: z.string().optional(), text: z.string().optional(), at: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/youtube/reply-comment', a);
     return ok('Reply posted.', d);
@@ -10857,7 +10857,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Send a message to an X broadcast chat',
     description: "Post ONE chat message, as the brand, into a RUNNING live broadcast on the connected X account (max 140 characters; a longer one is refused, never cut). It is PUBLIC in front of everyone watching: show the user the exact wording, get a yes, then pass confirm:true. replyTo answers one specific message." + XB_SCOPE_NOTE,
     inputSchema: { broadcastId: z.string().describe('running broadcast id from list_x_broadcasts'), text: z.string().describe('chat message, max 140 characters; a longer one is refused'), replyTo: z.string().optional().describe('chat message id to reply to'), confirm: z.boolean().optional().describe('true only after the user approved this exact message; it is posted publicly') },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost(`/api/x/broadcasts/${encodeURIComponent(a.broadcastId)}/chat`, { text: a.text, replyTo: a.replyTo, confirm: a.confirm });
     return ok(d.sent ? `Sent to the broadcast chat: "${d.text}". Cost ${d.costCredits ?? '?'} credits.` : 'X did not confirm the chat message.', d);
@@ -11262,7 +11262,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dryRun: z.boolean().optional().describe('CHECK FIRST, SEND NOTHING. Asks Bluesky whether a DM to `to` would be delivered at all and returns canChat plus the reason when it would not \u2014 that account has DMs off, only accepts them from people it follows, has blocked this one, is suspended, or does not exist. Free, and the message is NOT sent. Use it before writing a long DM to someone who has never been messaged, so a refusal costs nothing instead of arriving after the words were written. `text` is still validated for length so a dry run cannot pass on a message the real send would refuse.'),
     },
     outputSchema: { convoId: z.string().optional(), messageId: z.string().optional(), sentAt: z.string().optional(), text: z.string().optional(), to: z.string().optional(), delivered: z.boolean().optional(), dryRun: z.boolean().optional(), sent: z.boolean().optional(), canChat: z.boolean().optional(), reason: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/bluesky/dm', a);
     // A DRY RUN MUST NEVER RENDER AS A SEND. The send sentence below reads "Sent the DM ..." and would be a
@@ -11687,7 +11687,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Facebook Page that owns the conversation; omit when only one Page is connected'),
     },
     outputSchema: { messageId: z.string().optional(), messageIds: z.array(z.string()).optional(), parts: z.array(z.any()).optional(), failed: z.any().optional(), unsent: z.array(z.any()).optional(), senderAction: z.any().optional(), recipientId: z.string().optional(), windowState: z.string().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/message', a);
     return d.failed ? { ...ok(d.summary, d), isError: !d.messageId } : ok(d.summary, d); // a part refused after others went out is said, never a green "sent"
@@ -12060,7 +12060,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pageId: z.string().optional().describe('Facebook Page id — omit when only one Page is connected'),
     },
     outputSchema: { mediaId: z.string().optional(), updated: z.boolean().optional(), count: z.number().nullable().optional(), tags: z.array(z.any()).optional(), summary: z.string().optional(), removal: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/instagram/media/product-tags', a).catch(async (e) => { if (a.tags) throw e; return apiGet('/api/instagram/media/product-tags', a); });
     // THE SUMMARY IS THE READ-BACK and it leads, because "5 tags" and "5 tags, 2 of which nobody will see" are
@@ -12688,7 +12688,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'Ask a Messenger contact to subscribe to marketing messages',
     description: 'Send Meta’s opt-in request (the notification_messages template) to someone ALREADY in a Messenger conversation with the Page, inside the 24-hour window. If they accept, Meta posts a messaging_optin webhook with their subscription token and they appear in list_messenger_subscribers. One identical-title request per person per week. Free to send. The PSID comes from the Page inbox.',
     inputSchema: { pageId: z.string().optional().describe('Page that sends the request; omit when only one Page is connected'), psid: z.string().describe('the person’s Page-scoped id'), title: z.string().describe('what they are subscribing to, ≤65 characters'), imageUrl: z.string().optional().describe('optional image shown with the opt-in request'), timezone: z.string().optional().describe('their timezone, e.g. America/New_York'), dryRun: z.boolean().optional().describe('true = preview the request and send nothing') },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/meta/marketing-messages/optin', a); return ok(d.note, d); }));
   server.registerTool('delete_messenger_marketing_campaign', {
     title: 'Delete a Messenger marketing-message campaign',
@@ -12860,7 +12860,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('true to create it; without it nothing is created and the reply describes the code'),
     },
     outputSchema: { shop: z.string().optional(), needsConfirm: z.boolean().optional(), created: z.boolean().optional(), verified: z.boolean().optional(), id: z.string().optional(), discount: z.any().optional(), plan: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/shopify/discount', a); return ok(d.note, d); }));
   server.registerTool('list_shopify_discount_codes', {
     title: 'List Shopify discount codes',
@@ -14112,7 +14112,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       videoCrawlSources: z.array(z.object({ url: z.string().describe('full http(s) URL Google may look for videos at'), platform: z.enum(['LANDING_PAGE', 'SOCIAL', 'YOUTUBE']).describe('what kind of source the URL is'), enabled: z.boolean().optional().describe('default true') })).optional().describe('only with settings.AUTOMATED_VIDEO_CRAWL: where Google may find videos'),
       confirm: z.boolean().optional().describe('true to turn an automation ON for a campaign or ad that is live'), dryRun: z.boolean().optional().describe('true = validate with Google and change nothing'), loginCustomerId: z.string().optional().describe('manager (MCC) account id, when the account is managed through one'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/google-ads/asset-automation', a); return ok(d.note || 'Done.', d); }));
   server.registerTool('manage_google_ads_seasonality', {
     title: 'Google Ads seasonality adjustments (tell Smart Bidding about a sale or launch)',
@@ -14880,7 +14880,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe('true to make the change; without it nothing is written and the reply says what would change'),
     },
     outputSchema: { platform: z.string().optional(), pixelId: z.string().optional(), pixelChecked: z.boolean().optional(), site: z.string().optional(), needsConfirm: z.boolean().optional(), installed: z.boolean().optional(), published: z.boolean().nullable().optional(), snippet: z.string().optional(), steps: z.string().optional(), verify: z.record(z.any()).nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tracking-tags/install', a);
     return ok(d.site === 'manual' && d.snippet ? `${d.note}\n\n${d.snippet}` : d.note, d);
@@ -19473,7 +19473,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async () => oaiNote(await apiGet('/api/openai-ads/lead-sync'))));
   server.registerTool('set_openai_ads_lead_sync', {
     title: 'Provision ChatGPT Ads lead delivery (webhook)', description: 'Provision lead delivery for this ChatGPT Ads account. OMIT destinationUrl to deliver to HERMOSO: leads land in Hermoso’s own signed receiver, list_openai_ads_leads reads them and the HubSpot lead sync can push them into HubSpot (no secret to store). Or pass your own https destinationUrl (a managed webhook), optionally with your own signingSecret; then THE SIGNING SECRET IS RETURNED ONCE — every lead webhook is signed with it. Needs ChatGPT Ads connected.',
-    inputSchema: { destinationUrl: z.string().optional().describe('omit to deliver the leads to Hermoso'), signingSecret: z.string().optional().describe('your own webhook signing secret; only used with destinationUrl, returned once') }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    inputSchema: { destinationUrl: z.string().optional().describe('omit to deliver the leads to Hermoso'), signingSecret: z.string().optional().describe('your own webhook signing secret; only used with destinationUrl, returned once') }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => oaiNote(await apiPost('/api/openai-ads/lead-sync', a))));
   server.registerTool('list_openai_ads_leads', {
     title: 'ChatGPT Ads leads received',
@@ -21263,7 +21263,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       imageHeight: z.number().optional().describe('required with imageUri'),
     },
     outputSchema: { videoId: z.string().optional(), commentId: z.string().nullable().optional(), comment: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/comment', a);
     return ok(`Commented on TikTok post ${d.videoId}${d.commentId ? ` \u2014 comment id ${d.commentId}` : ''}. ${d.note || ''}`, d);
@@ -21281,7 +21281,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       imageHeight: z.number().optional().describe('pixel height of the image sent as imageUri'),
     },
     outputSchema: { videoId: z.string().optional(), parentCommentId: z.string().optional(), commentId: z.string().nullable().optional(), comment: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-account/comment-reply', a);
     return ok(`Replied to comment ${d.parentCommentId} on TikTok post ${d.videoId}${d.commentId ? ` \u2014 reply id ${d.commentId}` : ''}. ${d.note || ''}`, d);
@@ -22485,7 +22485,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().describe('the reply, exactly as it will appear in public'),
     },
     outputSchema: { advertiserId: z.string().optional(), commentId: z.string().nullable().optional(), replyToCommentId: z.string().optional(), text: z.string().optional(), createTime: z.string().nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/comment-reply', a);
     return ok(`Replied to comment ${d.replyToCommentId}: "${d.text}"\n\n${d.note}`, d);
@@ -23714,7 +23714,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       action: z.enum(['EXTEND']).optional().describe('EXTEND adds the days to an authorization already approved'),
     },
     outputSchema: { ttoAccountId: z.string().optional(), videoId: z.string().optional(), authStatus: z.string().nullable().optional(), requested: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/tiktok-ads/tto-spark-apply', a);
     return ok(d.note, d);
@@ -24027,7 +24027,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       aiGenerated: z.boolean().optional().describe("Snapchat's AI-content self-declaration on the media. OMIT IT and Hermoso decides from provenance: a Hermoso render is declared, your own upload_file file or an external URL is not. true or false overrides; on a reused mediaId only an explicit value changes it"),
     },
     outputSchema: { aiContentSource: z.string().nullable().optional(), aiDeclared: z.boolean().optional(), aiDeclarationNote: z.string().optional(), adAccountId: z.string().optional(), mediaId: z.string().optional(), creativeId: z.string().optional(), kind: z.string().optional(), name: z.string().optional(), bytes: z.number().optional(), reusedMedia: z.boolean().optional(), creativeType: z.string().optional(), landingPageUrl: z.string().optional(), leadGenerationFormId: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/snapchat-ads/upload', a);
     return ok(`Uploaded to Snapchat ad account ${d.adAccountId} — mediaId ${d.mediaId}${d.creativeId ? `, creativeId ${d.creativeId}` : ''} (${d.reusedMedia ? 'reused existing media' : `${Math.round((d.bytes || 0) / 1024)}KB ${d.kind}`}). ${d.note}`, d);
@@ -24444,7 +24444,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       mentionName: z.string().optional().describe('with mentionAuthor: the name to show as the mention, e.g. their full name; the reply opens with it unless the text already contains it'),
     },
     outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), commentUrn: z.string().optional(), postUrn: z.string().optional(), text: z.string().optional(), mentioned: z.string().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/linkedin/comment', a); return ok(d.note, d); }));
 
   server.registerTool('delete_linkedin_comment', {
@@ -28617,7 +28617,7 @@ function memoryNoteVerdict(text) {
     description: "Choose which events one alert channel receives. provider: slack, discord or webhook. events: GROUPS (renders, posts, approvals, watch, credits, leads, connections, adrules, ads, whatsapp; opt-in, never on unless named: inbox, mentions, reviews, email, channel_posts), exact event names (post.failed, account.broken, comment.received) or a family (post.*), or \"all\". list_alert_settings catalog:true lists every event. An empty list keeps the channel connected and sends it nothing. Unknown names are refused by name. Read back from the stored setting. Free.",
     inputSchema: { provider: alertSinkEnum.describe('alert channel to configure: slack, discord or webhook'), events: z.union([z.array(z.string()), z.literal('all')]).describe('groups, event names or family.* wildcards, or "all"') },
     outputSchema: { provider: z.string().optional(), events: z.array(z.string()).nullable().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiPost('/api/alerts/events', a); return ok(d.note, d); }));
   server.registerTool('send_test_alert', {
     title: 'Send a test alert',
@@ -30198,7 +30198,7 @@ function memoryNoteVerdict(text) {
       url: z.string().optional().describe('or the file link'),
       preview: z.boolean().optional(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ id, url, preview }) => {
     const u = await galleryUrlOf(id, url);
     if (!u) return ok('Pass a Library id (L0… from list_library) or the file link. Nothing was published.', { submitted: false });
