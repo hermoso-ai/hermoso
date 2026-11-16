@@ -31513,7 +31513,7 @@ function memoryNoteVerdict(text) {
     const rows = posts.map(p => {
       const er = p.engagement || {};
       const eng = er.present ? `${(er.rate * 100).toFixed(2)}%` : `— (${er.reason || 'not measured'})`;
-      return `• ${p.channel} · ${String(p.publishedAt ? new Date(p.publishedAt).toISOString().slice(0, 10) : '?')} · ${p.media} — ${String(p.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 60)}\n    hook: ${p.hook || `(none — ${p.attribution})`} · engagement ${eng}${p.url ? ` · ${p.url}` : ''}`;
+      return `• ${p.channel} · ${String(p.publishedAt ? new Date(p.publishedAt).toISOString().slice(0, 10) : '?')} · ${p.media}${p.deleted ? ` · DELETED${p.deletedAt ? ` ${new Date(p.deletedAt).toISOString().slice(0, 10)}` : ''}` : ''} — ${String(p.caption || '(no caption)').replace(/\s+/g, ' ').slice(0, 60)}\n    hook: ${p.hook || `(none — ${p.attribution})`} · engagement ${eng}${p.url ? ` · ${p.url}` : ''}`;
     });
     return ok(`${posts.length} of ${d.total} recorded post(s):\n${rows.join('\n')}\n\nA dash is "the platform reported no number", never zero engagement.${d.nextCursor ? `\nOlder posts follow: pass cursor:"${d.nextCursor}".` : ''}`, d);
   }));
