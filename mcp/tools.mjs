@@ -5779,6 +5779,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // ── WORDPRESS (2026-11-03) — blog posts on the brand's OWN self-hosted site, through an application password ─────
   // Every rule and error sentence is the server's (lib/wordpress.mjs); these are thin calls, so the web app, the
   // Studio agent and both MCP twins can never disagree about what a WordPress post is.
+  // A PUBLISHING VERB IS IN `channels`, WHATEVER MARKER THE CODE AROUND IT SITS UNDER (2026-11-15). Everything from
+  // list_telegram_dms to reply_to_inbox_item is `channel_admin`, and every channel added inside that span since 2026-11-03
+  // inherited it, publish verb included: a brand with only Discord (or Slack, WordPress, Webflow, Wix) connected was
+  // listed none of that channel's tools, post_to_discord too, while post_to_telegram and post_to_x sat in the default
+  // roster. So each publish verb opens `channels` and the tool after it re-opens `channel_admin`, exactly as Telegram does.
+  // Pinned by tools/roster-connector-alias-check.mjs, which derives the connector ids from the code and runs the roster.
+  server.group('channels');
   server.registerTool('post_to_wordpress', {
     title: 'Publish a WordPress blog post',
     description: "Use this when the user wants to publish, draft or schedule a BLOG POST on their WordPress site. Publishing costs no credits. A title is REQUIRED and the text becomes the body: plain text or light markdown (## headings, - lists, **bold**, [links](url)) is turned into WordPress blocks, and HTML is sent as written. status: publish (default), draft, pending (submit for review), private (logged-in editors only) or future with a date — a future `date` makes WordPress schedule it natively. The FIRST image becomes the FEATURED image, every other image is uploaded and placed inline, and a video is uploaded and embedded (if the site's host refuses the file as too large, the post plays it from its own link and the reply says so). categories and tags take names or ids; a name the site lacks is CREATED and the reply says which. An over-long title is refused, never cut. WordPress has NO per-post views in its API: never quote a view count for a WordPress post. Works on a self-hosted site and on a site hosted on WordPress.com, whichever the brand connected. Not connected: the user connects it under Connectors > WordPress, or you call connect_connector with provider wordpress (siteUrl, username, appPassword).",
@@ -5806,6 +5813,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(r.note || `WordPress: ${r.status}.${r.url ? ` ${r.url}` : ''}`, r);
   }));
 
+  server.group('channel_admin');
   server.registerTool('update_wordpress_post', {
     title: 'Edit a WordPress post',
     description: "Change a WordPress post that already exists: title, body, excerpt, slug, status (publish a draft, unpublish to draft, make private, or schedule with a future date), categories, tags or the featured image. Only the fields passed change; the reply is WordPress's own copy of the post. Free.",
@@ -5900,6 +5908,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     imageUrls: z.array(z.string()).optional().describe('several images: the first is the cover, the rest go inside the body'),
     altText: z.string().optional().describe('alt text for the images'),
   };
+  server.group('channels');
   server.registerTool('post_to_shopify_blog', {
     title: 'Publish a Shopify blog article',
     description: "Use this when the user wants to publish, draft or schedule a BLOG ARTICLE on their Shopify store's blog. Publishing costs no credits. Works for an account created by installing Hermoso from the Shopify App Store (there is no Shopify tile to connect). A title is REQUIRED and the text becomes the body: plain text or light markdown (## headings, - lists, **bold**, [links](url)) becomes HTML, and HTML is sent as written. status: publish (default), draft, or scheduled with a future `date`, which Shopify schedules natively. The FIRST image becomes the featured image (Shopify copies it into the store); other images and a video go inside the body by their own links. A store with one blog needs no blog named; with several, pass blog (list_shopify_blogs); newBlogTitle creates a blog with the article. The reply is Shopify's own copy of the article, with its public address once published. An over-long tag is refused, never cut. A store that installed Hermoso before blog posts existed is asked to open the app once and approve the new permission. Shopify has no view counts on a blog article: never quote one.",
@@ -5929,6 +5938,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(r.note || `Shopify: ${r.status} ${r.url || ''}`, r);
   }));
 
+  server.group('channel_admin');
   server.registerTool('update_shopify_article', {
     title: 'Edit a Shopify blog article',
     description: "Change a Shopify blog article that already exists: title, body, excerpt, tags, author, slug (redirect:true keeps the old address working), featured image, search title and description, which blog it is in, or its status (publish a draft, unpublish to draft, or schedule with a future date). Only the fields passed change; the reply is Shopify's own copy of the article. Free.",
@@ -5992,6 +6002,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`${d.note}\n${(d.blogs || []).map((b) => `• ${b.title} (handle ${b.handle}, ${b.id})`).join('\n')}`.trim(), d);
   }));
 
+  server.group('channels');
   server.registerTool('post_to_webflow', {
     title: 'Publish a Webflow blog post',
     description: "Use this when the user wants to publish or draft a BLOG POST on their Webflow site. It becomes an item in the site's blog CMS collection. Publishing costs no credits. A title is REQUIRED and the text becomes the body: plain text or light markdown becomes HTML in the collection's rich text field, and HTML is sent as written (Webflow's API cannot take code blocks, so a body with one is refused). Hermoso maps the post onto the collection's OWN fields: title and slug, the body, a summary field, a cover image field (up to 4 MB), and search title and description fields when the collection has them. A part the collection has no field for is refused by name, never dropped. REQUIRED FIELDS of the collection are filled from the post where they can be: a required Title or Headline field takes the title, an Intro or Summary field the excerpt (else the first lines of the body), every required image field the cover image. A required Author, Category or other choice is NEVER guessed: the refusal names each such field's slug, type and allowed values (a Reference's items by name and id, an Option's options), and you pass them in fieldData by slug; a Reference or Option value may be the item's or option's id or its name. fieldData also sets any other field. status: publish (default) or draft. Webflow's API CANNOT SCHEDULE a post: for a later time use schedule_post with the webflow channel. The reply is Webflow's own copy of the item, with its public address. Webflow has no view counts on an item: never quote one. Not connected: the user connects it under Connectors > Webflow, or you call connect_connector with provider webflow (token).",
@@ -6017,6 +6028,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(r.note || `Webflow: ${r.status} ${r.url || ''}`, r);
   }));
 
+  server.group('channel_admin');
   server.registerTool('update_webflow_item', {
     title: 'Edit a Webflow blog item',
     description: "Change a Webflow blog item that already exists: title, body, summary, slug, cover image, search title and description, any field through fieldData, or its status (publish a draft, or unpublish to draft). Only the fields passed change. An edit to an item that is already live is published too. The reply is Webflow's own copy. Free.",
@@ -6092,6 +6104,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(d.note, d);
   }));
 
+  server.group('channels');
   server.registerTool('post_to_wix', {
     title: 'Publish a Wix blog post',
     description: "Use this when the user wants to publish, draft or schedule a BLOG POST on their Wix site. Publishing costs no credits. A title is REQUIRED (up to 200 characters) and the text becomes the body: plain text or light markdown is turned into Wix's own rich content, and HTML is converted by Wix (up to 30,000 characters). status: publish (default), draft, or scheduled with a future `date`, which Wix schedules natively. The FIRST image becomes the cover; other images and a video are brought into the site's Media Manager and placed in the body. tags and categories take names; one the blog lacks is CREATED, and the reply says which categories. A title over 200 characters, an excerpt over 500, a slug over 100 or more than 30 tags is refused, never cut. The reply is Wix's own copy of the post, with its public address once it is live. Not connected: the user connects it under Connectors > Wix, or you call connect_connector with provider wix (apiKey, siteId).",
@@ -6120,6 +6133,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(r.note || `Wix: ${r.status} ${r.url || ''}`, r);
   }));
 
+  server.group('channel_admin');
   server.registerTool('update_wix_post', {
     title: 'Edit a Wix blog post',
     description: "Change a Wix blog post that already exists: title, body, excerpt, slug, tags, categories, cover image, search title and description, or its status (publish a draft, unpublish to draft, or schedule with a future date). Only the fields passed change. An edit to a post that is already live is published too. The reply is Wix's own copy. Free.",
@@ -6185,6 +6199,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
 
   // ── DISCORD + SLACK ANNOUNCEMENTS (2026-11-03) — through the ANNOUNCEMENT webhook, never the alert one ──────────
+  server.group('channels');
   server.registerTool('post_to_discord', {
     title: 'Post a Discord announcement',
     description: "Post to the user's Discord server. Free. With the Hermoso bot added it posts as the bot to channel (or the brand's default channel) with attachments up to 25 MB a message, replyTo, threadId (inside a thread), startThread (a thread under the post) and threadName (a forum channel); the messageId it returns (\"<channel>/<message>\") is what edit, delete and get_discord_message take. Without the bot it posts through the brand's announcement webhook (never the alert one): ≤2000 characters, files up to 20 MB attached (up to 10), larger ones as links. Mentions never ping unless mentions:true. EITHER WAY it can carry embeds (up to 10 rich cards, 6000 characters between them), a native poll (question, up to 10 answers, 1 to 768 hours; get_discord_poll reads the votes) and tts (read aloud). A webhook post can also take a display name and avatar for that one post (username, avatarUrl); crosspost:true (bot only) also publishes the post to every server that follows the announcement channel. Anything over a Discord limit is refused, never cut. Reactions are the only per-post number (get_discord_message). Not connected: connect_connector with provider discord and no fields returns the install link.",
@@ -6216,6 +6231,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(r.note || `Posted to Discord${r.url ? `: ${r.url}` : ''}`, r);
   }));
 
+  server.group('channel_admin');
   server.registerTool('edit_discord_message', {
     title: 'Edit a Discord announcement',
     description: "Change the text of a Discord message Hermoso posted (≤2000 characters) — the bot's or the announcement webhook's. Pass messageId exactly as post_to_discord returned it. Mentions never ping on an edit. Free.",
@@ -6251,6 +6267,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(`Discord message ${d.messageId}${d.what && d.kind !== 'text' ? `: ${d.what}` : ''}. ${d.reactionCount} reaction(s)${(d.reactions || []).length ? ` (${d.reactions.map((r) => `${r.emoji} ${r.count}`).join(', ')})` : ''}.${d.url ? ` ${d.url}` : ''}${d.content ? `\nText: “${d.content}”` : ''}${_emb}${_pr}${d.note ? `\n${d.note}` : ''}`, d);
   }));
 
+  server.group('channels');
   server.registerTool('post_to_slack', {
     title: 'Post a Slack announcement',
     description: "Post to the user's Slack. Free. With the Hermoso app installed it posts as the app to channel (or the brand's default channel), uploads images and video, replies in a thread (threadTs) or schedules in Slack (postAt, text only, ≤120 days); the messageId it returns (\"<channel>/<ts>\") is what edit_slack_message, delete_slack_message and get_slack_message take. Without the app it posts through the brand's announcement webhook (never the alert one): text ≤40,000 characters (refused, never cut), a title line, png/jpg/gif images by link, video as a link; a webhook post has no id, so it cannot be edited, deleted or measured. Not connected: connect_connector with provider slack and no fields returns the install link.",
@@ -6314,6 +6331,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   };
   // Annotations are spelled LITERALLY on each registration: lib/studio-approvals.mjs parses them from this source.
   const CHAT_TOOLS = { slack: { list: chatList('slack'), set: chatSet('slack'), read: chatRead('slack') }, discord: { list: chatList('discord'), set: chatSet('discord'), read: chatRead('discord') } };
+  server.group('channel_admin');
   server.registerTool('list_slack_channels', { ...CHAT_TOOLS.slack.list[0], annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, CHAT_TOOLS.slack.list[1]);
   server.registerTool('set_slack_channel', { title: 'Set the default Slack channel', ...CHAT_TOOLS.slack.set[0], annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, CHAT_TOOLS.slack.set[1]);
   server.registerTool('read_slack_channel', { ...CHAT_TOOLS.slack.read[0], annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, CHAT_TOOLS.slack.read[1]);
@@ -6555,6 +6573,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/slack/scheduled/cancel', bodyBrand(a, { slackWorkspace: a.slackWorkspace, channel: a.channel, scheduledMessageId: a.scheduledMessageId })); return ok(d.note, d); }));
   // ── WHOP (2026-11-03) — the brand's own whop, posted into as the Hermoso app it installed ──────────────────────
+  server.group('channels');
   server.registerTool('post_to_whop', {
     title: 'Post to Whop',
     description: "Use this when the user wants to post into their WHOP (the community they sell on Whop). Publishing costs no credits. A FORUM post takes a title, Markdown text, images and video, pinning, members-only or public visibility, a paywall and a poll; a CHAT message takes text and files. It posts as the Hermoso app the whop installed. experienceId picks the forum or chat (list_whop_destinations names them); with one forum or chat it is used, with several and none named the call is refused and lists them. Mentions are OFF unless mention:true (it notifies every member). Returns the post id for edit_whop_post / delete_whop_post / get_whop_post. Not connected: the seller connects the whop from Hermoso (Connectors ▸ Whop) or presses Open Hermoso in the whop's dashboard; nothing is billed through Whop.",
@@ -6581,6 +6600,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(r.note || `Posted to Whop (id ${r.id}).`, r);
   }));
 
+  server.group('channel_admin');
   server.registerTool('list_whop_destinations', {
     title: 'List Whop forums and chats',
     description: "List the forums and chats in the brand's whop that Hermoso can post into, each with its experienceId and kind (forum or chat). Free.",
