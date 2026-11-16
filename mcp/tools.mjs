@@ -2434,14 +2434,25 @@ export const INBOX_SOURCES = [
   // mention is a new public post (a different billing path and a different set of rules, which is why that row
   // sends people to post_to_x), while a reply to a DM is a DM. The `needs` declaration is what keeps a plain
   // `list_inbox` free of X charges — with no conversationId this row is skipped with a note and never dispatches.
-  { source: 'x_dm',            provider: 'x',               read: '/api/x/dms',                    reply: '/api/x/dm',                        kind: 'dm',      label: 'X direct message', dmReplyId: 'conversationId', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_x_dms' } },
+  // EVERY X ACCOUNT ON THE BRAND, AND READ WITH NO ARGUMENT (2026-11-16, the owner: "why do we have that X and telegram
+  // limit?"). The row used to need a conversationId and read the brand's DEFAULT X account only. Now `readAll` lists every
+  // connected account's conversations (/api/x/inbox, one row each, already folded), each native id is
+  // `<the brand's X user id>|<conversation>` so the reply leaves from the account the person wrote to, and a bare
+  // conversation id (list_x_dms) still works: the route finds its account from the conversation's participants.
+  // COST: X bills per DM event read; the route caches each account's read for five minutes and bills only events X has
+  // not already billed today (X deduplicates per UTC day), so asking again with nothing new costs nothing.
+  { source: 'x_dm',            provider: 'x',               read: '/api/x/inbox/thread',           reply: '/api/x/inbox/reply',               kind: 'dm',      label: 'X direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the x_dm item id after "x_dm:") or list_x_dms' }, readAll: '/api/x/inbox' },
   // TELEGRAM, added 2026-08-25, and it is the ODD ONE OUT IN TWO WAYS, both of them properties of the Bot API
   // rather than inconsistencies. (1) It declares NO `needs`: `getUpdates` is account-wide, so it reads live with
   // no conversation id, and demanding one would hide the one DM source that works with no arguments at all.
   // (2) It declares NO `dmReplyId` and is therefore NOT folded here — its own route already returns one row per
   // chat, because a single call spans every chat that wrote in and the reply target is a property of each ROW, not
   // of the envelope. Its `reply` is the ordinary publish route: on Telegram a reply IS a message to a chat id.
-  { source: 'telegram_dm',     provider: 'telegram',        read: '/api/telegram/messages',        reply: '/api/telegram/post',               kind: 'dm',      label: 'Telegram message' },
+  // EVERY BOT ON THE BRAND (2026-11-16). It read the DEFAULT bot only; now `readAll` (/api/telegram/inbox) reads each
+  // connected bot's getUpdates and lists one row per chat, the native id `<bot id>|<chat id>`, and the reply leaves from
+  // that bot through /api/telegram/inbox/reply (a private message, not a channel post). A bare chat id from an older list
+  // still answers when the brand has one bot; with several it is refused by name.
+  { source: 'telegram_dm',     provider: 'telegram',        read: '/api/telegram/inbox/thread',    reply: '/api/telegram/inbox/reply',        kind: 'dm',      label: 'Telegram message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the telegram_dm item id after "telegram_dm:")' }, readAll: '/api/telegram/inbox' },
   // WHATSAPP, added 2026-11-12 (customer report: Meta's own onboarding task told a customer to "reply to this message in
   // Live Chat" on Hermoso, and nothing in Hermoso showed it). The Cloud API has NO endpoint that returns past messages, so
   // this reads the 48-hour per-account buffer the webhook fills (lib/whatsapp-inbox.mjs). Without a conversationId it lists
@@ -6729,9 +6740,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "skipped silently; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
       + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
       + "Messenger and Instagram DMs need no argument; each has a messageKind (text, story_mention, story_reply, share, "
-      + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky and X DMs need "
-      + "conversationId (list_bluesky_convos / list_x_dms). WhatsApp needs no argument: Hermoso keeps the last 48 hours of each WhatsApp conversation "
-      + "(WhatsApp has no message history to read back), and each item carries windowOpen, its last few messages (recent) and whether a free reply is still allowed. LINE needs no argument either (kept 7 days), nor do Slack DMs (every direct message people sent the Hermoso app) or Discord mentions (the server's busiest channels). Discord DMs are read one member at a time, because Discord gives a bot no list of its DMs: pass discordMember (the member's Discord id). TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. Free on every channel except X: X mentions and DMs cost credits per item returned.",
+      + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky DMs need "
+      + "conversationId (list_bluesky_convos). X DMs and Telegram need no argument and read EVERY X account and every Telegram bot on the brand (the last 30 days on X, 24 hours on Telegram); each item's `account` is the one it reached. WhatsApp needs no argument: Hermoso keeps the last 48 hours of each WhatsApp conversation "
+      + "(WhatsApp has no message history to read back), and each item carries windowOpen, its last few messages (recent) and whether a free reply is still allowed. LINE needs no argument either (kept 7 days), nor do Slack DMs (every direct message people sent the Hermoso app) or Discord mentions (the server's busiest channels). Discord DMs are read one member at a time, because Discord gives a bot no list of its DMs: pass discordMember (the member's Discord id). TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. Free on every channel except X: X mentions cost credits per item returned, and X DMs cost credits per message X has not already been paid for today (a repeat read with nothing new is free).",
     inputSchema: {
       // A HELD connector's source is still accepted (our team can connect it) but is not ADVERTISED here: the docs reference
       // prints this enumeration, and a held channel is named nowhere public until it is offered (KEY_CONNECTORS_HELD, 2026-11-15).
@@ -6745,11 +6756,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // and this schema did not carry it, so the note telling a caller to pass it named an argument the tool
       // refused — and the handler quietly read `postId` for anything that was not `videoId`. The check now
       // asserts INBOX_NEEDS_ARGS ⊆ these keys, so the two cannot drift again.
-      conversationId: z.string().optional().describe('Restrict DMs to one conversation (from list_meta_conversations, list_bluesky_convos or list_x_dms). Required for Bluesky and X DMs; on X reading one costs credits.'),
+      conversationId: z.string().optional().describe('Restrict DMs to one conversation (from list_meta_conversations, list_bluesky_convos or list_x_dms). Required for Bluesky DMs; on X and Telegram it reads that one conversation (an id list_inbox gave, or a list_x_dms conversation id).'),
       pageId: z.string().optional().describe('Facebook Page id (list_meta_pages) when the brand has several Pages connected: reads that Page\'s Messenger and Instagram DMs and comments only. Omit to read every connected Page.'),
       limit: z.number().optional().describe('Max items per source (default 25).'),
       unansweredOnly: z.boolean().optional().describe('Only items with no reply from the brand yet.'),
-      account: z.string().optional().describe('Only items received by this account of the brand: its id, @handle, Page name, Slack workspace or WhatsApp number (each item\'s `account`). For a brand with several accounts on one channel.'),
+      account: z.string().optional().describe('Only items received by this account of the brand: its id, @handle, Page name, Slack workspace, WhatsApp number, X account or Telegram bot (each item\'s `account`). For a brand with several accounts on one channel.'),
     },
     outputSchema: {
       items: z.array(z.any()).describe('normalised inbox items, newest first'),
@@ -6807,7 +6818,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         const use = src.dmReplyId ? foldConversationRows(rows, d?.[src.dmReplyId]) : rows;
         // The per-post comment sources carry their post on the ENVELOPE; it is the first half of their two-part id.
         const withPost = (r) => (src.source === 'tiktok' && !r.videoId && d?.videoId ? { ...r, videoId: d.videoId } : src.source === 'linkedin' && !r.postUrn && d?.postUrn ? { ...r, postUrn: d.postUrn } : r);
-        for (const r0 of use) { const r = withPost(r0); const it = normalizeInboxItem(src.source, src.dmReplyId && typeof d?.conversationId === 'string' && !r.conversationId ? { ...r, conversationId: d.conversationId } : r); if (it) items.push(it); }
+        // A FOLDED CONVERSATION KEEPS WHAT ITS ENVELOPE SAYS ABOUT IT: the conversation id, and (2026-11-16) the brand's account
+        // that received it, which a one-conversation read names once on the envelope rather than on every message.
+        for (const r0 of use) { const r = withPost(r0); const env = src.dmReplyId ? { ...(typeof d?.conversationId === 'string' && !r.conversationId ? { conversationId: d.conversationId } : {}), ...(d?.account && typeof d.account === 'object' && !r.account ? { account: d.account } : {}) } : {}; const it = normalizeInboxItem(src.source, { ...r, ...env }); if (it) items.push(it); }
       } catch (e) {
         // AN ID THAT DOES NOT RESOLVE ENDS THE CALL AS AN ERROR (2026-10-26, customer report: an unconnected pageId
         // answered "0 items"). The caller named a Page; reading nothing from it is not a quiet inbox, it is a wrong id.
@@ -6837,7 +6850,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       + "to know which reply tool a platform uses. The reply is posted as the brand — PUBLIC on every comment, reply, "
       + "mention and review (a Discord mention is answered with a reply in its channel), and PRIVATE on the DM sources (Slack and Discord DMs too), WhatsApp, LINE, Intercom (it goes to the customer from the brand's support inbox) and email (it goes in the same thread from the same Outlook mailbox) — so show the user the "
       + "exact wording and get their go-ahead first either way. X is the one exception and says so: a reply there is a new post, "
-      + "so it goes through post_to_x with replyTo. A WhatsApp reply goes out only while the 24-hour window is open (windowOpen on the item); "
+      + "so it goes through post_to_x with replyTo; an X or Telegram DIRECT MESSAGE is answered here, from the account or bot it reached (an X DM reply costs credits). A WhatsApp reply goes out only while the 24-hour window is open (windowOpen on the item); "
       + "after that WhatsApp accepts only an approved template, so the reply is refused for free and send_whatsapp_message with `template` is the way. A LINE reply is free inside a minute of their message and uses the account's LINE quota after it.",
     inputSchema: {
       id: z.string().describe("The composite id from list_inbox — '<source>:<platform id>'. A bare platform id is refused: replying to the wrong network as the brand cannot be taken back."),
@@ -6881,8 +6894,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     else if (t.source === 'meta_dm' || t.source === 'instagram_dm') { const [rid, pid] = String(t.nativeId).split('~p'); payload.recipientId = rid; if (pid) payload.pageId = pid; for (const [k, v] of Object.entries({ attachments, buttons, quickReplies })) if (Array.isArray(v) && v.length) payload[k] = v; }
     if ((attachments?.length || buttons?.length || quickReplies?.length) && t.source !== 'meta_dm' && t.source !== 'instagram_dm') return { content: [{ type: 'text', text: `Attachments, buttons and quick replies go on Messenger and Instagram direct messages only; a ${t.label} reply is text. Nothing was sent.` }], isError: true };
     else if (t.source === 'bluesky_dm') payload.convoId = t.nativeId;
-    else if (t.source === 'x_dm') payload.conversationId = t.nativeId;
-    else if (t.source === 'telegram_dm') payload.chatId = t.nativeId;
+    // X DMs and Telegram (2026-11-16): the native id IS the conversation and names the receiving account (`<x user id>|<conversation>`,
+    // `<bot id>|<chat id>`); the route proves the account is this brand's and replies from it.
+    else if (t.source === 'x_dm' || t.source === 'telegram_dm') payload.id = t.nativeId;
     // WhatsApp: the native id IS the conversation (`<phone number id>|<person>`); the route checks the window and sends.
     else if (t.source === 'whatsapp') payload.id = t.nativeId;
     // LINE and WeChat: the native id IS the conversation (`<account>|<person>`); the route checks the rules and sends.
