@@ -5994,7 +5994,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('post_to_webflow', {
     title: 'Publish a Webflow blog post',
-    description: "Use this when the user wants to publish or draft a BLOG POST on their Webflow site. It becomes an item in the site's blog CMS collection. Publishing costs no credits. A title is REQUIRED and the text becomes the body: plain text or light markdown becomes HTML in the collection's rich text field, and HTML is sent as written (Webflow's API cannot take code blocks, so a body with one is refused). Hermoso maps the post onto the collection's OWN fields: title and slug, the body, a summary field, a cover image field (up to 4 MB), and search title and description fields when the collection has them. A part the collection has no field for is refused by name, never dropped; fieldData sets any other field by its slug (tags, author, category). status: publish (default) or draft. Webflow's API CANNOT SCHEDULE a post: for a later time use schedule_post with the webflow channel. The reply is Webflow's own copy of the item, with its public address. Webflow has no view counts on an item: never quote one. Not connected: the user connects it under Connectors > Webflow, or you call connect_connector with provider webflow (token).",
+    description: "Use this when the user wants to publish or draft a BLOG POST on their Webflow site. It becomes an item in the site's blog CMS collection. Publishing costs no credits. A title is REQUIRED and the text becomes the body: plain text or light markdown becomes HTML in the collection's rich text field, and HTML is sent as written (Webflow's API cannot take code blocks, so a body with one is refused). Hermoso maps the post onto the collection's OWN fields: title and slug, the body, a summary field, a cover image field (up to 4 MB), and search title and description fields when the collection has them. A part the collection has no field for is refused by name, never dropped. REQUIRED FIELDS of the collection are filled from the post where they can be: a required Title or Headline field takes the title, an Intro or Summary field the excerpt (else the first lines of the body), every required image field the cover image. A required Author, Category or other choice is NEVER guessed: the refusal names each such field's slug, type and allowed values (a Reference's items by name and id, an Option's options), and you pass them in fieldData by slug; a Reference or Option value may be the item's or option's id or its name. fieldData also sets any other field. status: publish (default) or draft. Webflow's API CANNOT SCHEDULE a post: for a later time use schedule_post with the webflow channel. The reply is Webflow's own copy of the item, with its public address. Webflow has no view counts on an item: never quote one. Not connected: the user connects it under Connectors > Webflow, or you call connect_connector with provider webflow (token).",
     inputSchema: {
       brand: HOOK_ATTR.brand,
       ...INTENT_SHORT,
@@ -6005,7 +6005,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       excerpt: z.string().optional().describe('the summary'),
       slug: z.string().optional().describe('the end of the post URL (made from the title when omitted)'),
       seoTitle: z.string().optional(), seoDescription: z.string().optional(),
-      fieldData: z.record(z.any()).optional().describe('any other field of the collection, by its slug (list_webflow_collections with collectionId shows them)'),
+      fieldData: z.record(z.any()).optional().describe('the collection’s own fields by slug, e.g. {author: "<item id or name>", category: "<option id or name>"} (list_webflow_collections with collectionId shows them and their allowed values)'),
       collectionId: z.string().optional().describe('a collection other than the one chosen for the blog'),
       ...BLOG_MEDIA_IN,
       videoUrl: z.string().optional().describe('a link to a hosted video (YouTube or Vimeo), for a collection with a Video field; never a video file'),
@@ -6049,13 +6049,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_webflow_items', {
     title: 'List Webflow blog items',
     description: "List the items in the brand's Webflow blog collection, most recently changed first: published, drafts and items with unpublished changes, each with its id, status, title and public address. Free. Webflow has no view counts on an item, so this carries none.",
-    inputSchema: { ...MANAGE_BRAND, collectionId: z.string().optional(), title: z.string().optional().describe('only the item with exactly this title'), limit: z.number().optional().describe('1 to 100, default 20'), offset: z.number().optional() },
-    outputSchema: { items: z.array(z.any()).optional(), total: z.number().optional(), collection: z.string().optional(), site: z.string().optional() },
+    inputSchema: { ...MANAGE_BRAND, collectionId: z.string().optional(), title: z.string().optional().describe('only items whose title CONTAINS this text, ignoring case ("hermoso qa" finds "Hermoso QA test post")'), limit: z.number().optional().describe('1 to 100, default 20'), offset: z.number().optional() },
+    outputSchema: { items: z.array(z.any()).optional(), total: z.number().optional(), collection: z.string().optional(), site: z.string().optional(), searched: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/webflow/items', queryBrand(a, { collectionId: a.collectionId, title: a.title, limit: a.limit, offset: a.offset }));
     const rows = (d.items || []).map((p) => `• ${p.id} · ${p.status} · “${p.title}”${p.url ? ` · ${p.url}` : ''}`);
-    return ok(`${d.total} item(s) in “${d.collection}” on ${d.site}:\n${rows.join('\n') || '(none)'}`, d);
+    return ok(`${d.total} item(s) in “${d.collection}” on ${d.site}${d.title ? ` whose title contains “${d.title}”` : ''}:\n${rows.join('\n') || '(none)'}${d.note ? `\n${d.note}` : ''}`, d);
   }));
 
   server.registerTool('get_webflow_item', {
@@ -6071,13 +6071,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('list_webflow_collections', {
     title: 'List Webflow CMS collections',
-    description: "List the CMS collections on the brand's Webflow site and which one blog posts go to. With collectionId it also returns that collection's fields and how a post maps onto them (body, summary, cover image, search fields), which is what fieldData in post_to_webflow is keyed by. Free.",
+    description: "List the CMS collections on the brand's Webflow site and which one blog posts go to. With collectionId it also returns that collection's fields and how a post maps onto them (body, summary, cover image, search fields), which is what fieldData in post_to_webflow is keyed by, and `required`: the fields the collection REQUIRES, split into `auto` (filled from the post: title, summary, cover image) and `ask` (to pass in fieldData), each asked field with its allowed values (a Reference's items by name and id, an Option's options). Free.",
     inputSchema: { ...MANAGE_BRAND, collectionId: z.string().optional().describe('show this collection’s fields and the mapping') },
-    outputSchema: { collections: z.array(z.any()).optional(), selected: z.string().nullable().optional(), collection: z.any().optional(), mapping: z.any().optional(), site: z.string().optional(), note: z.string().optional() },
+    outputSchema: { collections: z.array(z.any()).optional(), selected: z.string().nullable().optional(), collection: z.any().optional(), mapping: z.any().optional(), required: z.any().optional(), site: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/webflow/collections', queryBrand(a, { collectionId: a.collectionId }));
-    return ok(`${d.note}\n${(d.collections || []).map((x) => `• ${x.name} (${x.id})${x.selected ? ' · the blog' : ''}`).join('\n')}`.trim(), d);
+    const req = d.required && Array.isArray(d.required.ask) && d.required.ask.length ? `\nRequired fields to pass in fieldData: ${d.required.ask.map((f) => `${f.name} (${f.slug}, ${f.type})${(f.choices || f.options || []).length ? `: ${(f.choices || f.options).slice(0, 25).map((x) => `“${x.name || x.id}” (${x.id})`).join(', ')}` : ''}`).join('; ')}` : '';
+    return ok(`${d.note}\n${(d.collections || []).map((x) => `• ${x.name} (${x.id})${x.selected ? ' · the blog' : ''}`).join('\n')}${req}`.trim(), d);
   }));
 
   server.registerTool('set_webflow_collection', {
@@ -8676,6 +8677,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       seoTitle: z.string().optional().describe('blog search title'),
       seoDescription: z.string().optional().describe('blog search description'),
       shopifyBlog: z.string().optional().describe('which Shopify blog'),
+      webflowFields: z.record(z.any()).optional().describe('WEBFLOW: required collection fields by slug, e.g. {author:"<item id>"}'),
       linkedinOrganizationId: z.string().optional().describe('LINKEDIN — publish as a COMPANY PAGE instead of the connected personal profile. The organization id from list_linkedin_pages. Omit and it posts as the person: an unset id means the profile, never “probably the company”. A Page can also carry VIDEO, which a personal profile cannot.'),
       pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — which connected Facebook Page (and its linked Instagram) publishes, from list_meta_pages. Needed when the profile has more than one Page connected: a Facebook post with several and no id is refused WHEN YOU SCHEDULE IT, with the Pages listed by name and id, so ask the user which Page and schedule again with its id. It is never sent from a guessed Page.'),
       locationId: z.string().optional().describe("GOOGLE BUSINESS PROFILE — which listing, e.g. 'locations/123' from list_business_locations. Needed when the account manages more than one storefront; it is never chosen for the user."),
@@ -8897,6 +8899,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       seoTitle: z.string().optional().describe('blog search title'),
       seoDescription: z.string().optional().describe('blog search description'),
       shopifyBlog: z.string().optional().describe('which Shopify blog'),
+      webflowFields: z.record(z.any()).optional().describe('WEBFLOW: required collection fields by slug, e.g. {author:"<item id>"}'),
       linkedinOrganizationId: z.string().optional().describe('LINKEDIN — target a different company Page, or "" to post as the connected person instead'),
       pageId: z.string().optional().describe('FACEBOOK / INSTAGRAM / THREADS — publish from a different connected Page (list_meta_pages)'),
       locationId: z.string().optional().describe('GOOGLE BUSINESS — a different listing (list_business_locations)'),
