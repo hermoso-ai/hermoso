@@ -1227,6 +1227,11 @@ const refWatchedLine = (w) => {
 // infer it afterwards produces a fluent guess that then votes in the ranking table. So they are recorded here or
 // never. Declared ONCE and spread into every publish tool's inputSchema — hand-listing the pair at ten seams is
 // exactly how SCHED_ID_FIELDS drifted on four of them.
+// RARE PER-CHANNEL EXTRAS ON schedule_post / reschedule_post, NESTED (2026-11-16). Ten flat fields cost every session
+// ~260 tokens per tool on the default roster; one loose object whose description names each key, its shape and its
+// channel carries the same facts in about half. The server validates each value exactly as it did when they were flat.
+// The handlers spread it back onto the HTTP body, which takes the same ten flat fields it always did (SCHED_META_FIELDS).
+const SCHED_CHANNEL_OPTIONS = z.record(z.string(), z.any()).optional().describe('rare per-channel extras: threadsChain[] / blueskyThread[] follow-ups threaded under it; linkedinPoll {question, options[], duration ONE_DAY|THREE_DAYS|SEVEN_DAYS|FOURTEEN_DAYS} a poll as the post; linkedinReshareOf repost this (link or urn); ytPlaylistId add to playlist; protectContent Telegram no forwarding/saving; telegramDocument file URL sent as the post; slackUsername / slackIconUrl / slackIconEmoji (:rocket:) the Slack app posts as that name and picture');
 const HOOK_ATTR = {
   // WHICH BRAND THIS POST BELONGS TO, NAMED ON THE CALL (2026-09-16). It rides in HOOK_ATTR because that bundle is
   // spread into exactly the ten publish/schedule tools and nothing else, so one edit reaches every one of them and a
@@ -2402,6 +2407,11 @@ export const INBOX_SOURCES = [
   { source: 'meta_dm',         provider: 'meta',            read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Meta direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' }, readAll: '/api/meta/dm-inbox', readAllQuery: { platform: 'MESSENGER' } },
   { source: 'instagram_dm',    provider: 'instagram',       read: '/api/meta/conversation',        reply: '/api/meta/message',                kind: 'dm',      label: 'Instagram direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'conversationId', from: 'list_meta_conversations' }, readAll: '/api/meta/dm-inbox', readAllQuery: { platform: 'INSTAGRAM' }, query: { platform: 'INSTAGRAM' } }, // `query` rides on the per-thread read too: without it a direct (Instagram Login) thread id was read on the Page path and refused, measured 2026-10-25. A DIRECT (Instagram Login) account's inbox — same routes, resolved through igDmCtx by `account` (2026-09-02)
   { source: 'meta_webhook',    provider: 'meta',            read: '/api/meta/webhooks/events',     reply: null,                               kind: 'pushed',  label: 'Pushed Meta event', query: { noWaMessages: '1' } }, // WhatsApp conversations are the `whatsapp` row's (2026-11-12), so they are not listed twice
+  // FACEBOOK PAGE REVIEWS AND INSTAGRAM @MENTIONS (2026-11-15). Both account-level, so neither declares `needs`. A review's id
+  // is its open_graph_story (the only id Meta gives a review); a mention's is `<media>|<comment>` (or `<media>` for a caption).
+  // Both reply routes are confirm-gated and reply_to_inbox_item passes confirm:true, its contract being that the user said yes.
+  { source: 'facebook_review', provider: 'meta',            read: '/api/meta/reviews',             reply: '/api/meta/reviews/reply',          kind: 'review',  label: 'Facebook review' },
+  { source: 'instagram_mention', provider: 'meta',          read: '/api/instagram/mentions',       reply: '/api/instagram/mentions/reply',    kind: 'mention', label: 'Instagram mention' },
   { source: 'threads_mention', provider: 'threads',         read: '/api/threads/mentions',         reply: '/api/threads/reply',               kind: 'mention', label: 'Threads mention' },
   { source: 'youtube',         provider: 'youtube',         read: '/api/youtube/comments',         reply: '/api/youtube/reply-comment',       kind: 'comment', label: 'YouTube comment',    needs: { arg: 'videoId', param: 'videoId', from: 'list_youtube_videos' } },
   { source: 'google_business', provider: 'google_business', read: '/api/google-business/reviews',  reply: '/api/google-business/review-reply', kind: 'review',  label: 'Google review' },
@@ -5638,6 +5648,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       text: z.string().describe('The post, up to 300 characters / 3000 UTF-8 bytes.'),
       imageUrls: z.array(z.string()).optional().describe('Up to 10 public image URLs to attach (1–4 a standard image post, 5–10 a Bluesky gallery; more than 10 is refused, never cut). Cannot be combined with videoUrl.'),
       altText: z.union([z.string(), z.array(z.string())]).optional().describe('Alt text \u2014 an ARRAY, one per image in the same order, or a single STRING to describe every image with it. WRITE ONE: Bluesky\u2019s own lexicon makes `alt` a REQUIRED property of every image, so a post without it is undescribed by design rather than by omission, and Bluesky users expect it. No maximum length is published, so nothing is truncated.'),
+      thread: z.array(z.string()).optional().describe('follow-up posts threaded under it, each replying to the last (≤300 chars, ≤20)'),
       videoUrl: z.string().optional().describe('One public MP4 URL. Cannot be combined with imageUrls. Bluesky transcodes it, which takes a minute or two; ' + MEDIA_PARAM_NOTE),
       videoAlt: z.string().optional().describe('Alt text describing the video, for accessibility.'),
       captions: z.array(z.record(z.any())).optional().describe("Up to 20 WebVTT caption tracks: [{lang:'en', url:'https://…/en.vtt'}] or [{lang:'en', content:'WEBVTT\\n\\n00:00…'}]. Each file is capped at 20000 bytes."),
@@ -5702,6 +5713,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       imageUrl: z.string().optional().describe('one image (≤10MB after upload); ' + MEDIA_PARAM_NOTE),
       imageUrls: z.array(z.string()).optional().describe('an ALBUM of 2–10 media, in order. Photos and videos may be mixed — Telegram allows it.'),
       videoUrl: z.string().optional().describe('one video (≤50MB). Passed alongside imageUrls it joins the album as one more item; ' + MEDIA_PARAM_NOTE),
+      documentUrl: z.string().optional().describe('send a FILE (≤50 MB) as the post, text as caption; not with image/video'),
+      protectContent: z.boolean().optional().describe('no forwarding or saving'),
       disablePreview: z.boolean().optional().describe('suppress the link-preview card on a text-only post. Default is Telegram’s own behaviour (previews on).'),
       silent: z.boolean().optional().describe('deliver without a notification sound (Telegram’s disable_notification). This is NOT a visibility setting — the message is just as visible.'),
       buttons: z.array(z.union([z.object({ text: z.string(), url: z.string(), style: z.enum(['danger', 'success', 'primary']).optional() }), z.array(z.object({ text: z.string(), url: z.string(), style: z.enum(['danger', 'success', 'primary']).optional() }))])).optional().describe("URL BUTTONS under the post, Telegram's call to action: [{text:'Shop now', url:'https://…'}] one per row, or rows [[a,b],[c]]. URL buttons only (https://, http:// or tg://), optional style danger|success|primary. A single photo, a video or a text post can carry them; an ALBUM cannot (Telegram's sendMediaGroup takes no buttons), so that combination is refused."),
@@ -6284,6 +6297,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       replyBroadcast: z.boolean().optional().describe('HERMOSO APP: also show the thread reply in the channel'),
       postAt: z.string().optional().describe('HERMOSO APP: schedule in Slack itself for this ISO time (≤120 days, text only; use schedule_post for files)'),
       unfurlLinks: z.boolean().optional().describe('false = no link previews'),
+      username: z.string().optional().describe('HERMOSO APP: post this text message under this name'),
+      iconUrl: z.string().optional().describe('HERMOSO APP: https picture for that name'),
+      iconEmoji: z.string().optional().describe('HERMOSO APP: emoji picture, like :rocket:'),
     },
     outputSchema: { ok: z.boolean().optional(), via: z.string().optional(), messageId: z.string().optional(), channel: z.string().optional(), channelName: z.string().nullable().optional(), slackWorkspace: z.string().optional(), scheduledMessageId: z.string().optional(), postAt: z.string().optional(), url: z.string().nullable().optional(), images: z.number().optional(), linked: z.number().optional(), files: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -6544,6 +6560,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { edited: z.boolean().optional(), messageId: z.string().optional(), url: z.string().nullable().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/slack/edit', bodyBrand(a, { messageId: a.messageId, text: a.text, slackWorkspace: a.slackWorkspace })); return ok(`Edited the Slack message ${d.messageId}${d.url ? `: ${d.url}` : ''}.`, d); }));
+  server.registerTool('react_to_slack_message', {
+    title: 'React to a Slack message',
+    description: 'Add an emoji reaction to a Slack message as the Hermoso app, or take one away (remove:true). messageId is what post_to_slack or read_slack_channel gave ("<channel>/<ts>"). Read back from Slack. A workspace that added the app before 2026-11-15 adds it again once (the tool says so). Free.',
+    inputSchema: { ...MANAGE_BRAND, messageId: z.string(), emoji: z.string().describe('emoji name, like thumbsup, white_check_mark or tada'), remove: z.boolean().optional(), slackWorkspace: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), added: z.string().optional(), removed: z.string().optional(), messageId: z.string().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/slack/react', bodyBrand(a, { messageId: a.messageId, emoji: a.emoji, remove: a.remove === true, slackWorkspace: a.slackWorkspace })); return ok(d.note, d); }));
   server.registerTool('delete_slack_message', {
     title: 'Delete a Slack message',
     description: 'PERMANENTLY delete a Slack message the Hermoso app posted. Call it WITHOUT confirm first: nothing is deleted and you get a sentence quoting the message to show the user. Free.',
@@ -6779,10 +6802,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       id: z.string().describe("The composite id from list_inbox — '<source>:<platform id>'. A bare platform id is refused: replying to the wrong network as the brand cannot be taken back."),
       text: z.string().describe('The reply, exactly as it should appear publicly.'),
+      attachments: z.array(z.any()).optional().describe('Messenger / Instagram DMs only: media, same shape as reply_to_meta_message'),
+      buttons: z.array(z.any()).optional().describe('Messenger / Instagram DMs only: up to 3 buttons, same shape as reply_to_meta_message'),
+      quickReplies: z.array(z.any()).optional().describe('Messenger / Instagram DMs only: up to 13 chips, same shape as reply_to_meta_message'),
     },
     outputSchema: { ok: z.boolean(), source: z.string().optional(), id: z.string().optional(), note: z.string() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  }, wrap(async ({ id, text }) => {
+  }, wrap(async ({ id, text, attachments, buttons, quickReplies }) => {
     const body = String(text || '').trim();
     if (!body) return { content: [{ type: 'text', text: 'Nothing to post — pass the reply text.' }], isError: true };
     const t = inboxReplyTarget(id);
@@ -6812,7 +6838,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // EACH VENDOR ANSWERS TO A DIFFERENT KIND OF THING and that is not a detail we can smooth over: Meta's Send
     // API addresses a PERSON by page-scoped id, Bluesky's addresses a CONVERSATION. `dmReplyId` is what picked
     // the right one out of each read route's own answer, so the id in hand is already the correct shape.
-    else if (t.source === 'meta_dm' || t.source === 'instagram_dm') { const [rid, pid] = String(t.nativeId).split('~p'); payload.recipientId = rid; if (pid) payload.pageId = pid; }
+    else if (t.source === 'meta_dm' || t.source === 'instagram_dm') { const [rid, pid] = String(t.nativeId).split('~p'); payload.recipientId = rid; if (pid) payload.pageId = pid; for (const [k, v] of Object.entries({ attachments, buttons, quickReplies })) if (Array.isArray(v) && v.length) payload[k] = v; }
+    if ((attachments?.length || buttons?.length || quickReplies?.length) && t.source !== 'meta_dm' && t.source !== 'instagram_dm') return { content: [{ type: 'text', text: `Attachments, buttons and quick replies go on Messenger and Instagram direct messages only; a ${t.label} reply is text. Nothing was sent.` }], isError: true };
     else if (t.source === 'bluesky_dm') payload.convoId = t.nativeId;
     else if (t.source === 'x_dm') payload.conversationId = t.nativeId;
     else if (t.source === 'telegram_dm') payload.chatId = t.nativeId;
@@ -6823,8 +6850,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // Intercom: the id rides in the PATH, and the route sends to the customer only with confirm:true (this tool's own
     // contract is that the user already approved the wording). Anything but a confirmed read-back is said as such.
     else if (t.source === 'intercom') payload.confirm = true;
+    else if (t.source === 'facebook_review') { payload.reviewId = t.nativeId; payload.confirm = true; }
+    else if (t.source === 'instagram_mention') { payload.id = t.nativeId; payload.confirm = true; }
     const route = t.route.includes(':id') ? t.route.replace(':id', encodeURIComponent(t.nativeId)) : t.route;
     const r = await apiPost(route, payload);
+    // A review or mention reply is only a reply once Meta returned a comment id (the routes read it back).
+    if ((t.source === 'facebook_review' || t.source === 'instagram_mention') && r?.posted !== true) { const n = r?.summary || r?.note || 'Meta did not post that reply.'; return ok(n, { ok: false, source: t.source, note: n }); }
     if (t.source === 'intercom' && r?.confirmed !== true) {
       const n = r?.dryRun ? 'Intercom did not send the reply (it returned a preview instead); nothing reached the customer.' : (r?.note || 'Intercom accepted the reply but did not confirm it; read the conversation before sending again.');
       return ok(n, { ok: false, source: t.source, note: n });
@@ -8144,10 +8175,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
       language: z.string().optional().describe('filter to one language code, e.g. en_US'),
       status: z.string().optional().describe('filter to one review status, e.g. APPROVED or PENDING'),
       limit: z.number().optional().describe('how many (1–200, default 50)'),
+      library: z.boolean().optional().describe('true lists META\'S TEMPLATE LIBRARY instead (pre-written UTILITY templates, often approved at once); make one yours with create_whatsapp_template libraryTemplateName'),
+      search: z.string().optional().describe('library only: words to look for, e.g. "delivery" or "group invite"'),
+      topic: z.string().optional().describe('library only: e.g. ORDER_MANAGEMENT, PAYMENTS, ACCOUNT_UPDATE, CUSTOMER_FEEDBACK'),
+      usecase: z.string().optional().describe('library only: e.g. SHIPMENT_CONFIRMATION, PAYMENT_DUE_REMINDER'),
+      industry: z.string().optional().describe('library only: E_COMMERCE or FINANCIAL_SERVICES'),
     },
-    outputSchema: { wabaId: z.string().optional(), count: z.number().optional(), approved: z.number().optional(), templates: z.array(z.any()).optional(), note: z.string().optional(), window: z.string().optional() },
+    outputSchema: { wabaId: z.string().optional(), count: z.number().optional(), approved: z.number().optional(), templates: z.array(z.any()).optional(), library: z.boolean().optional(), note: z.string().optional(), window: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
+    if (a.library) {
+      const d = await apiGet('/api/whatsapp/templates', { library: 'true', wabaId: a.wabaId, name: a.name, language: a.language, search: a.search, topic: a.topic, usecase: a.usecase, industry: a.industry, limit: a.limit });
+      const rows = (d.templates || []).map(t => `• ${t.name} [${t.language}] · ${t.category}${t.usecase ? ` · ${t.usecase}` : ''}\n    ${String(t.body || '').replace(/\s+/g, ' ')}`);
+      return ok(`${d.count} library template(s):\n${rows.join('\n') || '  (none)'}\n\n${d.note}`, d);
+    }
     const d = await apiGet('/api/whatsapp/templates', { wabaId: a.wabaId, name: a.name, language: a.language, status: a.status, limit: a.limit });
     // THE VARIABLE SET IS ON THE ROW, NOT INFERRED FROM THE PREVIEW. The body line is capped for context economy
     // and the cap used to hide whole placeholders — a three-variable body cut at 120 characters showed two and
@@ -8161,19 +8202,30 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('create_whatsapp_template', {
     title: 'Create a WhatsApp message template',
-    description: 'Submit a new WhatsApp message template for Meta’s review. This is the ONLY way a business can start a WhatsApp conversation: outside the 24-hour window that opens when a customer messages first, WhatsApp accepts approved templates and nothing else. CATEGORY IS NOT COSMETIC — MARKETING (anything promotional), UTILITY (a transactional follow-up to something the customer did) or AUTHENTICATION (a one-time passcode) decides both what Meta charges for the conversation and the policy the content is reviewed against, and Meta RE-CATEGORISES a template whose content does not match the claim; the reply reports the category Meta actually assigned, not the one requested. The name is lowercase letters, digits and underscores only. Language is never defaulted: en and en_US are different templates to Meta. Submitting does NOT make it sendable — it comes back PENDING and has to be re-read with list_whatsapp_templates. CAROUSEL TEMPLATES ARE SUPPORTED: add a “CAROUSEL” component whose “cards” array holds 2–10 cards, each card carrying its own HEADER (format IMAGE or VIDEO for a media carousel, PRODUCT for a catalog one), an optional card BODY of at most 160 characters — a different and far shorter limit than the message bubble’s 1024 — and up to 2 buttons. Meta requires every card to carry THE SAME components, and if any card has body text then all of them must. A MEDIA HEADER NEEDS AN UPLOADED ASSET: any IMAGE, VIDEO or DOCUMENT header — including every card header in a media carousel — must carry example: { header_handle: [ … ] } holding a handle from Meta’s Resumable Upload API, or Meta refuses the whole template with a bare “Invalid parameter”. Pass `mediaUrl` on that header (a public JPEG/PNG for IMAGE, MP4 for VIDEO, PDF for DOCUMENT) and Hermoso uploads it through Meta\'s Resumable Upload API and fills the handle; a header with neither is refused locally and by name. A TEXT header needs no handle, and a PRODUCT card carousel takes its pictures from a connected catalog. 0 credits.',
+    description: 'Submit a new WhatsApp message template for Meta’s review, or with edit:true change an existing one (see edit). This is the ONLY way a business can start a WhatsApp conversation: outside the 24-hour window that opens when a customer messages first, WhatsApp accepts approved templates and nothing else. CATEGORY IS NOT COSMETIC — MARKETING (anything promotional), UTILITY (a transactional follow-up to something the customer did) or AUTHENTICATION (a one-time passcode) decides both what Meta charges for the conversation and the policy the content is reviewed against, and Meta RE-CATEGORISES a template whose content does not match the claim; the reply reports the category Meta actually assigned, not the one requested. The name is lowercase letters, digits and underscores only. Language is never defaulted: en and en_US are different templates to Meta. Submitting does NOT make it sendable — it comes back PENDING and has to be re-read with list_whatsapp_templates. CAROUSEL TEMPLATES ARE SUPPORTED: add a “CAROUSEL” component whose “cards” array holds 2–10 cards, each card carrying its own HEADER (format IMAGE or VIDEO for a media carousel, PRODUCT for a catalog one), an optional card BODY of at most 160 characters — a different and far shorter limit than the message bubble’s 1024 — and up to 2 buttons. Meta requires every card to carry THE SAME components, and if any card has body text then all of them must. A MEDIA HEADER NEEDS AN UPLOADED ASSET: any IMAGE, VIDEO or DOCUMENT header — including every card header in a media carousel — must carry example: { header_handle: [ … ] } holding a handle from Meta’s Resumable Upload API, or Meta refuses the whole template with a bare “Invalid parameter”. Pass `mediaUrl` on that header (a public JPEG/PNG for IMAGE, MP4 for VIDEO, PDF for DOCUMENT) and Hermoso uploads it through Meta\'s Resumable Upload API and fills the handle; a header with neither is refused locally and by name. A TEXT header needs no handle, and a PRODUCT card carousel takes its pictures from a connected catalog. 0 credits.',
     inputSchema: {
       wabaId: z.string().optional().describe('the WhatsApp Business Account id, from list_whatsapp_accounts. Optional when exactly one account is shared with this profile; required when several are, and refused by name for one that is not shared'),
       name: z.string().describe('lowercase letters, digits and underscores only, e.g. "order_shipped" (max 512)'),
       language: z.string().describe('the language code, e.g. en_US, es_MX, pt_BR — Meta treats each as its own template'),
-      category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).describe('MARKETING = promotional, UTILITY = transactional follow-up, AUTHENTICATION = one-time passcode. It sets the price and the review policy.'),
-      components: z.array(z.record(z.any())).describe('Meta’s component array. A BODY is the only REQUIRED one: [{ type: "BODY", text: "Your order {{1}} has shipped." }]. Optional HEADER (text max 60), FOOTER (max 60) and BUTTONS (up to 10 in total). Body text max 1024. A carousel is { type: “CAROUSEL”, cards: [{ components: [{ type: “HEADER”, format: “IMAGE” }, { type: “BODY”, text: … }] }, …] } — 2–10 cards, all with the same components, card body max 160, up to 2 buttons each. AUTHENTICATION templates have their OWN shape (Meta presets the text): [{ type: "BODY", add_security_recommendation: true }, { type: "FOOTER", code_expiration_minutes: 10 }, { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE", text: "Copy code" }] }] — no body `text` (refused, never dropped), expiry 1–90 minutes, otp_type COPY_CODE or ONE_TAP (ONE_TAP also needs supported_apps: [{ package_name, signature_hash }], up to 5).'),
+      category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).optional().describe('MARKETING = promotional, UTILITY = transactional follow-up, AUTHENTICATION = one-time passcode. It sets the price and the review policy. Required to create; optional on an edit.'),
+      components: z.array(z.record(z.any())).optional().describe('Meta’s component array (leave it out only for a libraryTemplateName). A BODY is the only REQUIRED one: [{ type: "BODY", text: "Your order {{1}} has shipped." }]. Optional HEADER (text max 60), FOOTER (max 60) and BUTTONS (up to 10 in total). Body text max 1024. A carousel is { type: “CAROUSEL”, cards: [{ components: [{ type: “HEADER”, format: “IMAGE” }, { type: “BODY”, text: … }] }, …] } — 2–10 cards, all with the same components, card body max 160, up to 2 buttons each. AUTHENTICATION templates have their OWN shape (Meta presets the text): [{ type: "BODY", add_security_recommendation: true }, { type: "FOOTER", code_expiration_minutes: 10 }, { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE", text: "Copy code" }] }] — no body `text` (refused, never dropped), expiry 1–90 minutes, otp_type COPY_CODE or ONE_TAP (ONE_TAP also needs supported_apps: [{ package_name, signature_hash }], up to 5).'),
       parameterFormat: z.string().optional().describe('POSITIONAL (default, {{1}}) or NAMED'),
+      libraryTemplateName: z.string().optional().describe('make it from META\'S TEMPLATE LIBRARY instead of components: the library template\'s exact name (list_whatsapp_templates library:true). Category must be UTILITY; pass no components'),
+      libraryButtonInputs: z.array(z.record(z.any())).optional().describe('the library template\'s buttons, in Meta\'s form, e.g. [{ type: "URL", url: { base_url: "https://shop.example/{{1}}", url_suffix_example: "https://shop.example/o/1" } }, { type: "PHONE_NUMBER", phone_number: "+15551234567" }]. Required when the library template has buttons'),
+      libraryBodyInputs: z.record(z.any()).optional().describe('optional library extras, e.g. { add_contact_number: true }'),
+      edit: z.boolean().optional().describe('EDIT the existing template called name [language] instead of creating one: components REPLACE all of its components; category only if it is not APPROVED; only APPROVED, REJECTED or PAUSED templates, an approved one at most 10 times in 30 days and once a day, and it goes back to review. Needs confirm:true after a first call without it'),
+      templateId: z.string().optional().describe('edit: the template id, instead of name + language'),
+      ttlSeconds: z.number().optional().describe('edit: time to live, AUTHENTICATION 30–900, UTILITY 30–43200, MARKETING 43200–2592000; -1 is 30 days (not marketing)'),
+      confirm: z.boolean().optional().describe('edit: true to make the change, after the user saw the new wording'),
     },
-    outputSchema: { id: z.string().optional(), name: z.string().optional(), language: z.string().optional(), status: z.string().nullable().optional(), category: z.string().optional(), categoryChangedNote: z.string().optional(), note: z.string().optional(), optIn: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    outputSchema: { id: z.string().optional(), name: z.string().optional(), language: z.string().optional(), status: z.string().nullable().optional(), category: z.string().optional(), categoryChangedNote: z.string().optional(), library: z.string().optional(), changed: z.boolean().nullable().optional(), current: z.array(z.any()).optional(), proposed: z.any().optional(), components: z.array(z.any()).optional(), note: z.string().optional(), optIn: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/whatsapp/template', { wabaId: a.wabaId, name: a.name, language: a.language, category: a.category, components: a.components, parameterFormat: a.parameterFormat });
+    if (a.edit || a.templateId) {
+      const e = await apiPost('/api/whatsapp/template/edit', { wabaId: a.wabaId, name: a.name, language: a.language, templateId: a.templateId, components: a.components, category: a.category, ttlSeconds: a.ttlSeconds, confirm: a.confirm });
+      return ok(e.note, e);
+    }
+    const d = await apiPost('/api/whatsapp/template', { wabaId: a.wabaId, name: a.name, language: a.language, category: a.category, components: a.components, parameterFormat: a.parameterFormat, libraryTemplateName: a.libraryTemplateName, libraryButtonInputs: a.libraryButtonInputs, libraryBodyInputs: a.libraryBodyInputs });
     return ok(`${d.name} [${d.language}] submitted — ${d.status || 'PENDING'} (id ${d.id}).${d.categoryChangedNote ? `\n\n⚠ ${d.categoryChangedNote}` : ''}\n${d.note}`, d);
   }));
 
@@ -8204,19 +8256,21 @@ function buildTools(rawServer, opts = {}, sink = null) {
       conversationId: z.string().optional().describe('one conversation’s id from this tool or from list_inbox (the part after "whatsapp:"): the phone number id and the person, joined by |'),
       phoneNumberId: z.string().optional().describe('only the conversations on this number (from list_whatsapp_accounts)'),
       reply: z.string().optional().describe('send this text as the reply to conversationId. Only while the 24-hour window is open; the user must have approved the exact words'),
+      interactive: z.record(z.any()).optional().describe('reply with buttons, a list, a link button, a location request or a form instead of text: same shape as send_whatsapp_message interactive'),
+      media: z.record(z.any()).optional().describe('reply with an image, video, audio or document instead of text: same shape as send_whatsapp_message media'),
       limit: z.number().optional().describe('how many conversations (1–200, default 50)'),
     },
     outputSchema: { count: z.number().optional(), conversations: z.array(z.any()).optional(), messages: z.array(z.any()).optional(), windowOpen: z.boolean().nullable().optional(), windowNote: z.string().optional(), keepNote: z.string().optional(), ok: z.boolean().optional(), messageId: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    if (a.reply != null && String(a.reply).trim()) {
+    if ((a.reply != null && String(a.reply).trim()) || a.interactive || a.media) {
       if (!a.conversationId) return { content: [{ type: 'text', text: 'Which conversation? Pass conversationId with the reply. Nothing was sent.' }], isError: true };
-      const d = await apiPost('/api/whatsapp/inbox/reply', { id: a.conversationId, text: a.reply });
+      const d = await apiPost('/api/whatsapp/inbox/reply', { id: a.conversationId, text: a.reply, interactive: a.interactive, media: a.media });
       return ok(`${d.note || 'Sent.'}${d.windowClosesAt ? `\nThe reply window stays open until ${d.windowClosesAt}.` : ''}`, d);
     }
     if (a.conversationId) {
       const d = await apiGet('/api/whatsapp/inbox/thread', { id: a.conversationId });
-      const lines = (d.messages || []).map((m) => `${m.at} ${m.from === 'customer' ? d.who : m.from === 'business_app' ? 'You (WhatsApp Business app)' : 'You'}: ${JSON.stringify(String(m.text || '').slice(0, 300))}${m.status ? ` [${m.status}]` : ''}`);
+      const lines = (d.messages || []).map((m) => `${m.at} ${m.from === 'customer' ? d.who : m.from === 'business_app' ? 'You (WhatsApp Business app)' : 'You'}: ${JSON.stringify(String(m.text || '').slice(0, 300))}${m.choiceId ? ` [chose ${m.choiceId}]` : ''}${m.location ? ` [at ${m.location.latitude}, ${m.location.longitude}]` : ''}${m.status ? ` [${m.status}]` : ''}`);
       return ok(`WhatsApp with ${d.who} (conversationId ${d.id}):\n${lines.join('\n') || '(no messages in the last 48 hours)'}\n\n${d.windowNote || ''}\n${d.keepNote || ''}`.trim(), d);
     }
     const d = await apiGet('/api/whatsapp/inbox', { phoneNumberId: a.phoneNumberId, limit: a.limit });
@@ -8227,21 +8281,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('send_whatsapp_message', {
     title: 'Send a WhatsApp message',
-    description: 'Send a WhatsApp message from one of the brand’s registered numbers to a customer. TWO KINDS, and which one is legal depends on time: pass `template` (an APPROVED template name) to START a conversation — the only thing WhatsApp accepts outside the 24-hour customer-service window — or `text` for a free-form reply INSIDE that window, which opens only when the customer messages the business first. To ANSWER someone who wrote in, use read_whatsapp_inbox (or list_inbox + reply_to_inbox_item): it shows the conversation and whether the window is open, and refuses a free reply once it has closed. This tool does not check the window: a free-form message is sent as asked and Meta refuses it with a re-engagement error if it is closed, which the reply explains rather than reporting as a broken connection. THIS REACHES A REAL PERSON’S PHONE AND META BILLS THE BUSINESS for the conversation, so it is confirm-gated: show the user the exact message and the recipient, get an explicit yes, then call again with confirm:true. WhatsApp policy REQUIRES the business to hold the recipient’s opt-in first. An unapproved template is refused BEFORE the send, against the status Meta holds. ACCEPTED IS NOT DELIVERED — the reply reports what Meta accepted, and delivery arrives later on a webhook (read_whatsapp_inbox shows it as the message status), so never tell the user it was delivered. THE VARIABLE COUNT IS CHECKED BEFORE ANYTHING IS DISPATCHED: Hermoso reads the template’s own components back from Meta and refuses a payload that supplies the wrong number of values, naming exactly what is missing — for free, before a real phone is involved, instead of Meta answering 132000 after the attempt. It refuses only what it can prove; anything it cannot determine is sent for Meta to judge. 0 Hermoso credits.',
+    description: 'Send a WhatsApp message from one of the brand’s registered numbers to a customer. TWO KINDS, and which one is legal depends on time: pass `template` (an APPROVED template name) to START a conversation — the only thing WhatsApp accepts outside the 24-hour customer-service window — or `text` for a free-form reply INSIDE that window, which opens only when the customer messages the business first. Inside the window it can also send `interactive` (reply buttons, a list, a link button, a location request or a form) or `media` (image, video, audio, document); exactly one kind per message. To ANSWER someone who wrote in, use read_whatsapp_inbox (or list_inbox + reply_to_inbox_item): it shows the conversation and whether the window is open. A free-form message to someone whose window Hermoso knows has closed is refused for free; when it cannot tell, Meta judges and a closed window comes back as a re-engagement error the reply explains. THIS REACHES A REAL PERSON’S PHONE AND META BILLS THE BUSINESS for the conversation, so it is confirm-gated: show the user the exact message and the recipient, get an explicit yes, then call again with confirm:true. WhatsApp policy REQUIRES the business to hold the recipient’s opt-in first. An unapproved template is refused BEFORE the send, against the status Meta holds. ACCEPTED IS NOT DELIVERED — the reply reports what Meta accepted, and delivery arrives later on a webhook (read_whatsapp_inbox shows it as the message status), so never tell the user it was delivered. THE VARIABLE COUNT IS CHECKED BEFORE ANYTHING IS DISPATCHED: Hermoso reads the template’s own components back from Meta and refuses a payload that supplies the wrong number of values, naming exactly what is missing — for free, before a real phone is involved, instead of Meta answering 132000 after the attempt. It refuses only what it can prove; anything it cannot determine is sent for Meta to judge. 0 Hermoso credits.',
     inputSchema: {
       phoneNumberId: z.string().describe('WHICH NUMBER IT SENDS FROM — from list_whatsapp_accounts (a WABA can have several)'),
-      to: z.string().describe('the recipient in full international form, e.g. +14165550142 — or, for someone who reached the business by WhatsApp username and shared no number, their business-scoped user id exactly as received (e.g. US.13491208655302741918). Authentication templates need the phone number.'),
+      to: z.string().optional().describe('the recipient in full international form, e.g. +14165550142 — or, for someone who reached the business by WhatsApp username and shared no number, their business-scoped user id exactly as received (e.g. US.13491208655302741918). Authentication templates need the phone number. Omit it only with groupId.'),
       template: z.string().optional().describe('an APPROVED template name — required to start a conversation outside the 24-hour window'),
       language: z.string().optional().describe('which language of that template, e.g. en_US. Omitted, Hermoso uses the first one it finds and reports which.'),
       wabaId: z.string().optional().describe('the account the template’s review status is read from. Optional — it defaults to the account that owns phoneNumberId, and a wabaId naming a DIFFERENT account is refused rather than silently preferred'),
       components: z.array(z.record(z.any())).optional().describe('the template’s variable values, in Meta’s component form. The count must match the {{1}}, {{2}} placeholders exactly. Hermoso checks this against the template’s real components before dispatching and refuses a provable mismatch by name. A media header needs its own component holding the link even though it carries no {{n}}, and a carousel needs one entry per card.'),
       text: z.string().optional().describe('a free-form message — only lands INSIDE the 24-hour window'),
+      interactive: z.record(z.any()).optional().describe('inside the window: { type, body, header?, footer?, … }. type "buttons": buttons [{ id, title }] (1–3, title ≤20). "list": button (≤20), sections [{ title, rows: [{ id, title ≤24, description? ≤72 }] }] (≤10 rows in all, text header only, body ≤4096). "cta_url": displayText (≤20) + url. "location_request": body only. "flow": flowId or flowName, flowCta, mode draft|published, screen?, data?. body ≤1024; header is text (≤60) or { type: image|video|document, url }; footer ≤60. Over a limit is refused, never cut'),
+      media: z.record(z.any()).optional().describe('inside the window: { type: image|video|audio|document, url (public https) or id, caption? (≤1024, not audio), filename? (document), voice? (audio: an OPUS .ogg voice note) }. Image JPEG/PNG/WebP ≤5MB, video MP4/3GP ≤16MB, audio AAC/AMR/MP3/M4A/OGG ≤16MB, document PDF/Office/TXT ≤100MB'),
+      groupId: z.string().optional().describe('send to a WhatsApp GROUP instead of a person (manage_whatsapp_number list_groups); text, media or a template, not interactive. Omit `to`'),
       confirm: z.boolean().optional().describe('REQUIRED true — this sends a real message to a real phone and Meta bills the business for it'),
     },
-    outputSchema: { ok: z.boolean().optional(), messageId: z.string().optional(), status: z.string().optional(), waId: z.string().optional(), to: z.string().optional(), kind: z.string().optional(), template: z.string().nullable().optional(), language: z.string().nullable().optional(), note: z.string().optional(), window: z.string().optional(), pricing: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), messageId: z.string().optional(), status: z.string().optional(), waId: z.string().optional(), to: z.string().optional(), groupId: z.string().optional(), kind: z.string().optional(), interactive: z.string().optional(), media: z.string().optional(), mediaId: z.string().optional(), template: z.string().nullable().optional(), language: z.string().nullable().optional(), note: z.string().optional(), window: z.string().optional(), pricing: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/whatsapp/send', { phoneNumberId: a.phoneNumberId, to: a.to, template: a.template, language: a.language, wabaId: a.wabaId, components: a.components, text: a.text, confirm: a.confirm });
+    const d = await apiPost('/api/whatsapp/send', { phoneNumberId: a.phoneNumberId, to: a.to, template: a.template, language: a.language, wabaId: a.wabaId, components: a.components, text: a.text, interactive: a.interactive, media: a.media, groupId: a.groupId, confirm: a.confirm });
     return ok(d.note, d);
   }));
 
@@ -8273,6 +8330,53 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // missing `text`, which turns a SUCCESSFUL call into a protocol error the caller cannot read. The server always
     // sends a `note` now; this is the belt that stops a future field rename breaking the whole tool again.
     return ok(d.note || d.line || `WhatsApp broadcast: ${JSON.stringify(d).slice(0, 400)}`, d);
+  }));
+
+  // WHATSAPP DEPTH (2026-11-15): one number's profile, chat settings, blocklist and groups, and the account's forms (Flows).
+  // Two tools with an `action` carry what a per-verb roster would need twenty for (ChatGPT's list had room for two). Rules on the server
+  // in lib/whatsapp-depth.mjs; every write that changes what customers see is confirm-gated and read back.
+  server.registerTool('manage_whatsapp_number', {
+    title: 'WhatsApp number settings, blocklist and groups',
+    description: 'Everything about ONE WhatsApp business number except sending. PROFILE: "get" reads, "update" changes only what you pass: about ≤139, address ≤256, description ≤512, email ≤128, websites (≤2), vertical, photoUrl (JPEG/PNG), iceBreakers (≤4 tappable questions, ≤80, no emoji), commands ([{ name, hint }], ≤30, typed after /), welcomeMessage. BLOCKLIST: "list_blocked", "block", "unblock" with users (phones or business-scoped ids, ≤1,000; only people who wrote in the last 24 hours can be blocked). GROUPS (Official Business Accounts only; ≤8 people, joining only by invite link): "list_groups", "get_group", "create_group" (subject ≤128, description ≤2048, joinApproval), "invite_link", "update_group", "reset_invite_link", "remove_participants", "delete_group" (also confirmName = the subject). Every change customers or members see takes confirm:true after a first call without it, which changes nothing. Over a limit is refused, never cut. Answers are read back from Meta. Send to a group with send_whatsapp_message groupId. 0 credits.',
+    inputSchema: {
+      phoneNumberId: z.string().describe('the number, from list_whatsapp_accounts'),
+      action: z.enum(['get', 'update', 'list_blocked', 'block', 'unblock', 'list_groups', 'get_group', 'create_group', 'invite_link', 'update_group', 'reset_invite_link', 'remove_participants', 'delete_group']).optional().describe('get (default)'),
+      about: z.string().optional(), address: z.string().optional(), description: z.string().optional().describe('update: the profile description; create_group/update_group: the group description'),
+      email: z.string().optional(), websites: z.array(z.string()).optional(), vertical: z.string().optional().describe('e.g. RETAIL, RESTAURANT, BEAUTY, EDU, HEALTH, PROF_SERVICES, OTHER'),
+      photoUrl: z.string().optional(), iceBreakers: z.array(z.string()).optional(), commands: z.array(z.record(z.any())).optional(), welcomeMessage: z.boolean().optional(),
+      users: z.array(z.string()).optional().describe('block / unblock: phones in international form or business-scoped user ids'),
+      groupId: z.string().optional(), subject: z.string().optional(), joinApproval: z.boolean().optional(),
+      participants: z.array(z.string()).optional().describe('remove_participants: ≤8 phones or business-scoped ids'),
+      limit: z.number().optional(), after: z.string().optional(),
+      confirm: z.boolean().optional(), confirmName: z.string().optional().describe('delete_group: the group subject, echoed'),
+    },
+    outputSchema: { phoneNumberId: z.string().optional(), profile: z.any().optional(), automation: z.any().optional(), blocked: z.array(z.string()).optional(), groups: z.array(z.any()).optional(), group: z.any().optional(), inviteLink: z.string().optional(), changed: z.boolean().nullable().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/whatsapp/number', a);
+    return ok(d.text || d.note || 'Done.', d);
+  }));
+
+  server.registerTool('manage_whatsapp_flow', {
+    title: 'WhatsApp forms (Flows)',
+    description: 'WhatsApp Flows: forms people fill in without leaving the chat (sign-up, booking, lead capture, survey). action "list" or "get" (with a preview link). "create" makes a DRAFT from name, categories (SIGN_UP, SIGN_IN, APPOINTMENT_BOOKING, LEAD_GENERATION, CONTACT_US, CUSTOMER_SUPPORT, SURVEY, OTHER) and flowJson (Meta\'s Flow JSON, ≤10 MB), or cloneFlowId. "update" changes a DRAFT (name, categories, flowJson, endpointUri). Meta\'s validation errors come back verbatim. "publish" is FINAL (a published form cannot be changed or deleted, only deprecated), "deprecate" stops it being sent, "delete" removes a draft: these three need confirm:true after a first call without it. Send a form with send_whatsapp_message interactive { type: "flow", flowId, flowCta } (mode "draft" to test); answers arrive in read_whatsapp_inbox. 0 credits.',
+    inputSchema: {
+      action: z.enum(['list', 'get', 'create', 'update', 'publish', 'deprecate', 'delete']).optional().describe('list (default)'),
+      wabaId: z.string().optional().describe('optional when exactly one account is shared with this profile'),
+      flowId: z.string().optional(), name: z.string().optional(),
+      categories: z.array(z.string()).optional(),
+      flowJson: z.any().optional().describe('the Flow JSON object ({ version, screens: [...] }) or that JSON as a string'),
+      cloneFlowId: z.string().optional().describe('create: start as a copy of this form'),
+      endpointUri: z.string().optional().describe('only for a form that calls your own server (data_exchange)'),
+      confirm: z.boolean().optional().describe('true to publish, deprecate or delete, after the user said yes'),
+    },
+    outputSchema: { wabaId: z.string().optional(), count: z.number().optional(), flows: z.array(z.any()).optional(), flow: z.any().optional(), created: z.boolean().optional(), changed: z.boolean().nullable().optional(), deleted: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = !a.action || a.action === 'list' || a.action === 'get' ? await apiGet('/api/whatsapp/flows', { wabaId: a.wabaId, flowId: a.action === 'get' ? a.flowId : undefined }) : await apiPost('/api/whatsapp/flows', a);
+    const row = (f) => `• ${f.name} (${f.status}) id ${f.id}${f.validationErrors?.length ? ` · ${f.validationErrors.length} problem(s)` : ''}${f.previewUrl ? ` · preview ${f.previewUrl}` : ''}`;
+    const body = d.flows ? d.flows.map(row).join('\n') : d.flow ? `${row(d.flow)}${(d.flow.validationErrors || []).map((e) => `\n    ⚠ ${e.message}${e.path ? ` (${e.path})` : ''}`).join('')}` : '';
+    return ok([d.note, body].filter(Boolean).join('\n') || 'Done.', d);
   }));
 
   // ── LINE (2026-11-15): a messaging channel ──────────────────────────────────────────────────────────────────────
@@ -8485,7 +8589,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       instagramPoll: z.array(z.string()).optional().describe('INSTAGRAM — attach a POLL: 2 to 4 answers of 1–25 characters each, and the caption IS the question (so a caption is required). Feed photos, carousels and Reels only (never a story), one caption add-on per post (not with instagramCommentPrompt), and only on an account connected through Meta (a Facebook Page with a linked Instagram). WRITE-ONCE: Instagram cannot add, change or remove it after publishing, so show the user the answers first.'),
       instagramPollExtended: z.boolean().optional().describe('INSTAGRAM — give that poll Instagram’s extended voting duration instead of its default 3 days (Instagram’s changelog says it then stays open indefinitely). Only with instagramPoll.'),
       instagramCommentPrompt: z.boolean().optional().describe('INSTAGRAM — make the caption a COMMENT PROMPT that people answer in the comments. Same limits as instagramPoll, and never together with it.'),
-      firstComment: z.string().optional().describe('FIRST COMMENT — posted on the new post as the same account right after it publishes (Facebook or Instagram; not Threads, not a story, not an unpublished post). Up to 2,000 characters, refused rather than cut. If the comment fails the post stays live and firstComment in the result says why.'),
+      firstComment: z.string().optional().describe('FIRST COMMENT — posted on the new post as the same account right after it publishes (Facebook, Instagram, or Threads where it is a reply under the post, up to 500 characters; not a story, not an unpublished post). Up to 2,000 characters, refused rather than cut. If the comment fails the post stays live and firstComment in the result says why.'),
       shareToFeed: z.boolean().optional().describe('INSTAGRAM REEL — true puts the Reel in the Feed grid as well as the Reels tab. REELS ONLY. Left unset it follows Instagram’s own default; Hermoso does not flip it either way on the user’s behalf.'),
       audioName: z.string().optional().describe('INSTAGRAM REEL — the name of the Reel’s audio track, which is what viewers tap through to. REELS ONLY.'),
       audioId: z.string().optional().describe('INSTAGRAM REEL — put one of Instagram’s OWN licensed music tracks under the Reel: the `id` search_instagram_audio returns. Instagram mixes it in when the Reel is published; nothing is downloaded or re-rendered. REELS ONLY, and only on an Instagram account connected through Meta (a Facebook Page with a linked Instagram), which is Instagram’s own rule — the Instagram connector cannot take it and is refused by name.'),
@@ -8503,6 +8607,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       linkAttachment: z.string().optional().describe('THREADS TEXT POSTS ONLY — a full http(s) URL rendered as a clickable link card. This is how a Threads post carries a destination at all; without it a link is just text. Meta allows at most 5 links per post and refuses a link attachment on a post that also carries an image or video, so Hermoso refuses that combination up front rather than letting Meta silently drop it.'),
       replyControl: z.enum(['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only']).optional().describe('THREADS ONLY — who may reply. Default is everyone.'),
       threadsLongText: z.string().optional().describe('THREADS ONLY — LONG-FORM text, up to 10,000 characters, attached under a TEXT-only Threads post (Threads\' text attachment). The way to publish more than Threads\' 500-character post: keep a short lead in the message and put the full text here. Not with an image, video or carousel.'),
+      threadsChain: z.array(z.string()).optional().describe('THREADS: follow-up posts chained under it, each replying to the last (≤500 chars, ≤20)'),
       threadsGhostPost: z.boolean().optional().describe('THREADS ONLY — a GHOST post: text only, Threads archives it automatically after 24 hours (a flash offer, a 24h-only note). No other Threads option can ride it.'),
       threadsGif: z.string().optional().describe('THREADS ONLY — a GIPHY GIF id (the id in a giphy.com/gifs/… link) attached to a TEXT Threads post. GIPHY is the only provider Threads takes.'),
       quotePostId: z.string().optional().describe('THREADS ONLY — the id of a post to QUOTE. A quote post is a distinct post type, not a formatting option.'),
@@ -8530,7 +8635,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // an account that has not accepted it — and may never.
     // A PUBLISH CAN SUCCEED AND STILL DROP PART OF THE POST (Instagram's config_issue / caption add-on status): the note
     // says what went out without its caption, tags, poll or prompt, so "it's live" is never the whole story told.
-    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}${d.publishIssuesNote ? ` ${d.publishIssuesNote}` : ''}${d.mediaConformedNote ? ` ${d.mediaConformedNote}` : ''}`, d);
+    return ok(`Published ${d.carousel ? `a ${d.slides}-slide CAROUSEL ` : a.story ? 'a 24-hour STORY ' : ''}to ${d.account || d.page || d.target}${d.url ? ` — ${d.url}` : ''} (post ${d.postId}).${d.collaboratorNote ? ` ${d.collaboratorNote}` : ''}${d.publishIssuesNote ? ` ${d.publishIssuesNote}` : ''}${d.mediaConformedNote ? ` ${d.mediaConformedNote}` : ''}${d.chainNote ? ` ${d.chainNote}` : ''}${d.firstComment ? ` First comment: ${d.firstComment.ok ? 'posted' : (d.firstComment.error || d.firstComment.note || 'not posted')}.` : ''}`, d);
   }));
   // ── SCHEDULING (2026-07-30). ONE mechanism for every channel — our durable queue, not a per-platform special case.
   // Product feedback: "if only Facebook can do scheduling, then maybe we just do all the scheduling ourselves. There's probably
@@ -8542,7 +8647,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       ...HOOK_ATTR,
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram', 'wordpress', 'discord', 'slack', 'whop', 'shopify_blog', 'webflow', 'wix'])).describe('one or more channels to post to at that time'),
       at: z.string().optional().describe('when to post: local wall clock, no offset (2026-10-30T10:00), read in `timezone` or the brand\u2019s zone ON THAT DATE so a series survives a clock change; or UTC (…Z) / epoch ms. Future, at most 365 days out. Give this OR useQueue, never both.'),
-      useQueue: z.boolean().optional().describe('instead of naming a minute, drop this into the brand’s POSTING QUEUE: Hermoso takes the earliest of its saved posting times that is still free (skipping any slot another queued post already holds). This is the natural answer to “just queue it” / “post it at my next opening”. Mutually exclusive with `at` — passing both is refused rather than one being silently preferred. If the profile has no posting times set, or every slot for the next 90 days is taken, it is refused by name and nothing is scheduled.'),
+      useQueue: z.union([z.boolean(), z.string()]).optional().describe('take the next free slot in a posting queue (“just queue it”): true = default queue, or a queue name (manage_post_queues). Not with `at`; refused by name when no slot is free.'),
+      atByChannel: z.record(z.string()).optional().describe('per-channel times, e.g. {"x":"…T09:00"}; others use at/useQueue; each time is its own post'),
       timezone: z.string().optional().describe('IANA zone (e.g. "Africa/Cairo") a wall-clock `at` or the queue is read in; overrides the brand’s saved zone for this one post. Without either, UTC.'),
       message: z.string().optional().describe('the caption/text used for every channel unless overridden in captions'),
       captions: z.record(z.string()).optional().describe('per-channel caption overrides, e.g. { "instagram": "…", "threads": "…" } — platforms want different lengths and hashtag conventions'),
@@ -8683,6 +8789,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       slackChannel: z.string().optional().describe('SLACK app: channel id or #name (default: the brand\'s)'),
       slackWorkspace: z.string().optional().describe('SLACK app: which workspace'),
       slackThreadTs: z.string().optional().describe('SLACK app: reply in this thread (parent ts)'),
+      channelOptions: SCHED_CHANNEL_OPTIONS,
       discordChannel: z.string().optional().describe('DISCORD bot: channel id or #name (default: the brand\'s)'),
       discordServer: z.string().optional().describe('DISCORD bot: which server'),
       discordReplyTo: z.string().optional().describe('DISCORD bot: reply to this message id'),
@@ -8708,11 +8815,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       optimizeCopy: z.boolean().optional().describe('RECOMMENDED when one caption goes to several channels: fit the shared caption to each channel’s own rules when you schedule it (the fitted caption is stored on the scheduled post, so what you scheduled is what publishes) wherever no per-channel caption was written. The angle and every claim stay the author’s; a channel with its own caption is left exactly as written. Off by default so nobody’s words are rewritten unasked.'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover on every channel that allows one (Instagram, Facebook, TikTok direct posts, LinkedIn Pages, Pinterest, Telegram, YouTube) \u2014 and on X, Threads and Bluesky, which have none, a blank first frame is replaced on a copy sent there only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
     },
-    outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), label: z.string().optional() },
+    outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), label: z.string().optional(), posts: z.array(z.any()).optional(), approval: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiPost('/api/schedule', a);
-    return ok(`Scheduled for ${d.at} → ${(d.channels || []).join(', ')}. It is NOT posted yet; Hermoso publishes it at that time (id ${d.id}).${a.visibility && a.visibility !== 'public' ? ` Visibility: ${a.visibility} (as asked) — it will NOT be publicly live.` : ' It will go LIVE publicly.'}${d.note ? ` ${d.note}` : ''}`, d);
+    const { channelOptions, ...rest } = a;
+    const d = await apiPost('/api/schedule', { ...rest, ...(channelOptions || {}) });
+    return ok(`Scheduled for ${d.at} → ${(d.channels || []).join(', ')}. It is NOT posted yet; Hermoso publishes it at that time (id ${d.id}).${a.visibility && a.visibility !== 'public' ? ` Visibility: ${a.visibility} (as asked) — it will NOT be publicly live.` : (d.approval === 'pending' ? ' It WAITS FOR AN ADMIN’S APPROVAL, then goes LIVE publicly.' : ' It will go LIVE publicly.')}${d.note ? ` ${d.note}` : ''}`, d);
   }));
   server.registerTool('list_scheduled', {
     title: 'List scheduled and past posts',
@@ -8899,6 +9007,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       slackChannel: z.string().optional().describe('SLACK app: channel id or #name (default: the brand\'s)'),
       slackWorkspace: z.string().optional().describe('SLACK app: which workspace'),
       slackThreadTs: z.string().optional().describe('SLACK app: reply in this thread (parent ts)'),
+      channelOptions: SCHED_CHANNEL_OPTIONS,
       discordChannel: z.string().optional().describe('DISCORD bot: channel id or #name (default: the brand\'s)'),
       discordServer: z.string().optional().describe('DISCORD bot: which server'),
       discordReplyTo: z.string().optional().describe('DISCORD bot: reply to this message id'),
@@ -8932,8 +9041,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), visibility: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
-    const { id, ...patch } = a;
-    const d = await apiPatch(`/api/schedule/${encodeURIComponent(id)}`, patch);
+    const { id, channelOptions, ...patch } = a;
+    const d = await apiPatch(`/api/schedule/${encodeURIComponent(id)}`, { ...patch, ...(channelOptions || {}) });
     return ok(`Moved — ${d.id} now goes out at ${d.at} → ${(d.channels || []).join(', ')} (${d.visibility}). It is still NOT posted; confirm the new time back to the user.`, d);
   }));
   server.registerTool('cancel_scheduled', {
@@ -9056,6 +9165,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       postsPerDay: z.number().optional().describe('posts a day, up to the number of posting times ("2 times a day" = 2). 0 (default) = one per posting time. To post MORE per day than there are posting times, also pass postingTimes.'),
       postingTimes: z.array(z.string()).optional().describe('the brand\'s daily posting times, 24-hour "HH:MM" (e.g. ["09:00","13:00","18:00"]); REPLACES the list. Autopilot makes one post per posting time, and scheduled posts use the same times. get_post_refill shows the current ones.'),
       timezone: z.string().optional().describe('IANA timezone the posting times are in, e.g. "America/New_York" (default: the brand\'s, else UTC)'),
+      queue: z.string().optional().describe('a named queue to post at (postingTimes then edit it)'),
       channelPostsPerDay: z.record(z.number()).optional().describe('per channel, how many posts a day (the first N of the posting times), e.g. {"x":1,"instagram":3}. 0 turns a channel off; null resets it to every posting time. Merged into what is saved.'),
       goal: z.enum(['followers', 'sales', 'launch', 'other']).optional().describe('THE BRIEF: what the posts are for — grow followers, drive sales, promote a launch, or other (say what in goalNote). Required to switch it on.'),
       goalNote: z.string().optional().describe('THE BRIEF: a line about the goal (e.g. the launch date and what is launching).'),
@@ -9084,7 +9194,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     let _where = ''; try { _where = (await apiGet('/api/schedule/refill', {})).targets?.summary || ''; } catch {} // the saved choice, read back: where it posts now
     return ok((_where ? `WHERE IT POSTS: ${_where}\n` : '') + (d.enabled
       ? `Autoposting is ON in ${d.mode === 'auto' ? 'AUTO-PUBLISH mode — each run makes fresh posts and schedules them to go out on their own.' : 'REVIEW mode — each run makes fresh posts and keeps them as drafts; nothing is scheduled until you approve them with run_post_refill.'} get_post_refill lists the channels it posts to and what it costs a day. Run run_post_refill (a preview by default: it renders and queues nothing, and writing its copy bills its model cost) to see a plan.`
-      : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.') + (Array.isArray(d.postingTimes) ? `\nPosting times are now ${d.postingTimes.join(', ')} (${d.timezone || 'UTC'}).` : '') + (d.creditNote ? `\n${d.creditNote}` : ''), d);
+      : 'Autoposting is OFF. The recurring job is gone and nothing new will be made. Posts already in the calendar are untouched — cancel those with cancel_scheduled if you want them gone.') + (Array.isArray(d.postingTimes) ? `\nPosting times${d.queue ? ` of the "${d.queue}" queue` : ''} are now ${d.postingTimes.join(', ')} (${d.timezone || 'UTC'}).` : (d.queue ? `\nAutopilot posts at the "${d.queue}" queue’s times.` : '')) + (d.creditNote ? `\n${d.creditNote}` : ''), d);
   }));
   server.registerTool('run_post_refill', {
     title: 'Run autopilot now / approve its drafts',
@@ -9142,6 +9252,119 @@ function buildTools(rawServer, opts = {}, sink = null) {
       (d.notes || []).length ? `\nNotes: ${d.notes.join(' · ')}` : '',
     ].filter(Boolean).join('\n'), d);
   }));
+  // ── SCHEDULER DEPTH (2026-11-15): approval before publish, named posting queues, evergreen series, CSV import. In the
+  // opt-in channel_admin group (find_tools / call_tool reach them): none is a connected channel's publish verb.
+  server.group('channel_admin');
+  server.registerTool('list_pending_approvals', {
+    title: 'Posts waiting for approval',
+    description: 'Scheduled posts waiting for an admin of the brand to approve them before they can go out (the brand’s approval setting holds them), or state "rejected" for the ones turned down. Also says whether approval is on. Read-only, free.',
+    inputSchema: { state: z.enum(['pending', 'rejected']).optional().describe('default pending') },
+    outputSchema: { posts: z.array(z.any()).optional(), canApprove: z.boolean().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const [d, s] = await Promise.all([apiGet('/api/schedule/approvals', { state: a.state || 'pending' }), apiGet('/api/schedule/approval', {})]);
+    const posts = d.posts || [];
+    return ok([s.summary || '', posts.length ? `${posts.length} ${d.state}:\n${posts.slice(0, 30).map((r) => `- ${r.id} · ${r.at} → ${(r.channels || []).join(', ')} · ${String(r.message || '').replace(/\s+/g, ' ').slice(0, 160)}${r.approval?.reason ? ` · reason: ${r.approval.reason}` : ''}`).join('\n')}` : `No posts are ${d.state === 'rejected' ? 'rejected' : 'waiting for approval'}.`, d.canApprove ? '' : 'You are not an admin of this brand, so you cannot approve or reject.'].filter(Boolean).join('\n'), d);
+  }));
+  server.registerTool('approve_post', {
+    title: 'Approve a scheduled post',
+    description: 'Approve a scheduled post that is waiting for approval: it then goes out at its time (right away if that time has passed). Admins of the brand only. Show the user the post first (list_pending_approvals).',
+    inputSchema: { id: z.string().describe('scheduled post id'), note: z.string().optional() },
+    outputSchema: { id: z.string().optional(), approval: z.string().optional(), at: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost(`/api/schedule/${encodeURIComponent(a.id)}/approve`, { note: a.note || '' });
+    return ok(`Approved (read back): ${d.id} → ${(d.channels || []).join(', ')}. ${d.note || ''}`, d);
+  }));
+  server.registerTool('reject_post', {
+    title: 'Reject a scheduled post',
+    description: 'Reject a scheduled post waiting for approval: it will not be published. The author can edit it, which sends it back for approval. Admins only.',
+    inputSchema: { id: z.string(), reason: z.string().optional().describe('shown to the author, max 500 characters') },
+    outputSchema: { id: z.string().optional(), approval: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiPost(`/api/schedule/${encodeURIComponent(a.id)}/reject`, { reason: a.reason || '' });
+    return ok(`Rejected (read back): ${d.id}. ${d.note || ''}`, d);
+  }));
+  server.registerTool('set_post_approval', {
+    title: 'Approval before publishing',
+    description: 'Turn approval before publish on or off for this brand. mode "all" (every channel), "channels" (only those listed) or "off"; who "everyone" (default, admins’ posts wait too) or "members" (admins’ own posts skip it). Switching it on also holds posts already queued there unless applyToQueued is false. Switching it off never publishes what is already waiting. Admins only.',
+    inputSchema: {
+      mode: z.enum(['off', 'all', 'channels']).optional(),
+      channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram', 'wordpress', 'discord', 'slack', 'whop', 'shopify_blog', 'webflow', 'wix'])).optional(),
+      who: z.enum(['everyone', 'members']).optional(),
+      applyToQueued: z.boolean().optional(),
+    },
+    outputSchema: { mode: z.string().optional(), channels: z.array(z.string()).optional(), who: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiPut('/api/schedule/approval', a);
+    return ok(`${d.summary || ''}${d.note ? ` ${d.note}` : ''}`, d);
+  }));
+  server.registerTool('manage_post_queues', {
+    title: 'Posting queues',
+    description: 'The brand’s posting queues: Default (its posting times) plus named queues, each with its own times per weekday and channels. action list; save (by name: slots = every-day "HH:MM" times, days = per-weekday overrides like {"sat":[],"sun":["11:00"]}, timezone, channels, rename); delete. schedule_post useQueue:"<name>" fills one; set_post_refill queue points autopilot at one. Free.',
+    inputSchema: {
+      action: z.enum(['list', 'save', 'delete']),
+      name: z.string().optional().describe('queue name; "Default" is the brand’s posting times'),
+      rename: z.string().optional(),
+      slots: z.array(z.string()).optional(),
+      days: z.record(z.union([z.array(z.string()), z.null()])).optional().describe('weekday (sun…sat) → times; [] = none that day; null removes the override'),
+      timezone: z.string().optional(),
+      channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram', 'wordpress', 'discord', 'slack', 'whop', 'shopify_blog', 'webflow', 'wix'])).optional(),
+    },
+    outputSchema: { queues: z.array(z.any()).optional(), queue: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    if (a.action === 'list') { const d = await apiGet('/api/schedule/queues', {}); return ok((d.lines || []).join('\n'), d); }
+    if (a.action === 'delete') { if (!a.name) return ok('Name the queue to delete.', {}); const d = await apiDelete(`/api/schedule/queues/${encodeURIComponent(a.name)}`); return ok(`Deleted the "${d.deleted}" queue. ${d.note || ''}`, d); }
+    const { action, ...rest } = a;
+    const d = await apiPut('/api/schedule/queues', rest);
+    return ok(`Saved (read back): ${d.line}`, d);
+  }));
+  server.registerTool('make_evergreen', {
+    title: 'Repost on a repeat (evergreen)',
+    description: 'Post something again on a repeat: every N days, weeks or months, up to maxRepeats times. Source: fromPost (a published post id from list_published_posts), libraryId (L0…), or channels + message + media. Each repost is its own scheduled post, placed one at a time, through every check schedule_post runs (approval included). captionVariants (off by default) rotate the caption; X refuses identical reposts, so X needs two or more different variants. firstAt = the first repost (default one interval after the original).',
+    inputSchema: {
+      fromPost: z.string().optional(), libraryId: z.string().optional(),
+      channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram', 'wordpress', 'discord', 'slack', 'whop', 'shopify_blog', 'webflow', 'wix'])).optional(), message: z.string().optional(),
+      imageUrl: z.string().optional(), videoUrl: z.string().optional(), imageUrls: z.array(z.string()).optional(),
+      every: z.number().int(), unit: z.enum(['days', 'weeks', 'months']), maxRepeats: z.number().int(),
+      captionVariants: z.array(z.string()).optional(),
+      firstAt: z.string().optional(), timezone: z.string().optional(),
+      chatId: z.string().optional(), boardId: z.string().optional(), pageId: z.string().optional(), linkedinOrganizationId: z.string().optional(),
+      accounts: z.record(z.union([z.string(), z.array(z.string())])).optional().describe('as on schedule_post: which account on a channel with several'),
+    },
+    outputSchema: { rule: z.any().optional(), firstPost: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/schedule/evergreen', a);
+    return ok(d.note || 'Set up.', d);
+  }));
+  server.registerTool('manage_evergreen', {
+    title: 'Evergreen series',
+    description: 'Evergreen series on this brand: action list, stop (no more reposts; the next queued one is cancelled unless keepQueued), pause or resume.',
+    inputSchema: { action: z.enum(['list', 'stop', 'pause', 'resume']), id: z.string().optional(), keepQueued: z.boolean().optional() },
+    outputSchema: { rules: z.array(z.any()).optional(), rule: z.any().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    if (a.action === 'list') { const d = await apiGet('/api/schedule/evergreen', {}); return ok((d.lines || []).join('\n') || 'No evergreen series on this brand.', d); }
+    if (!a.id) return ok('Pass the series id (action list shows them).', {});
+    const d = await apiPost(`/api/schedule/evergreen/${encodeURIComponent(a.id)}/${a.action}`, { keepQueued: a.keepQueued === true });
+    return ok(d.note || 'Done.', d);
+  }));
+  server.registerTool('import_posts_csv', {
+    title: 'Schedule posts from a CSV',
+    description: 'Bulk-schedule posts from a CSV. Columns: text, media (URLs or Library ids, | between), channels, time or queue, timezone, link, title, text_<channel>, time_<channel>. A column it does not read is refused by name. DEFAULT IS A DRY RUN: every row is checked and its problems listed, nothing is created. dryRun false creates them, all or nothing unless skipInvalid. Pass url (an upload_file link) or csv (the text).',
+    inputSchema: { url: z.string().optional(), csv: z.string().optional(), dryRun: z.boolean().optional(), skipInvalid: z.boolean().optional() },
+    outputSchema: { rows: z.array(z.any()).optional(), created: z.array(z.any()).optional(), failed: z.array(z.any()).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/schedule/import', { ...a, dryRun: a.dryRun === false ? false : true });
+    if (d.dryRun) return ok(`${d.note}\n${(d.rows || []).slice(0, 60).map((x) => (x.ok ? `row ${x.row}: ok → ${(x.channels || []).join(', ')} ${x.at || (x.queue ? `queue ${x.queue}` : '')}` : `row ${x.row}: ${x.error}`)).join('\n')}`, d);
+    return ok(`${d.note}\n${(d.created || []).slice(0, 60).map((x) => `row ${x.row}: ${x.id} at ${x.at} → ${(x.channels || []).join(', ')}`).join('\n')}${(d.failed || []).length ? `\nNot scheduled:\n${d.failed.map((x) => `row ${x.row}: ${x.error}`).join('\n')}` : ''}`, d);
+  }));
+  server.group('channels');
   server.registerTool('post_to_linkedin', {
     title: 'Publish to LinkedIn',
     description: 'Use this when the user wants to post to their personal LinkedIn profile. Publishing costs no credits. Publish a post to the user’s connected LinkedIn profile — text, and optionally an image (imageUrl), a VIDEO (videoUrl, with captionsSrt and a videoThumbnailUrl cover), a 2–20 image MULTI-IMAGE post (imageUrls), a LINK post with a real preview card (linkUrl + linkTitle / linkDescription / linkThumbnailUrl — LinkedIn never scrapes the page), a DOCUMENT post (documentUrl: a PDF / PPTX readers swipe through), and @mentions of companies (mentions). The image does NOT have to be something Hermoso generated: LinkedIn is served the bytes from us, so the URL must be Hermoso-hosted, and upload_file turns ANY file the user already has into exactly that. This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Needs a connected LinkedIn account (Connectors > LinkedIn).',
@@ -9161,6 +9384,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       linkThumbnailUrl: z.string().optional().describe('Hermoso-hosted image for the card'),
       documentUrl: z.string().optional().describe('a DOCUMENT post — a Hermoso-hosted PDF / PPTX / DOCX (upload_file first) that readers swipe through page by page in the feed; LinkedIn takes up to 100MB and 300 pages. One kind of media per post: not with an image, video, slides or linkUrl.'),
       documentTitle: z.string().optional().describe('the title shown on the document (defaults to the file name)'),
+      poll: z.object({ question: z.string(), options: z.array(z.string()), duration: z.enum(['ONE_DAY', 'THREE_DAYS', 'SEVEN_DAYS', 'FOURTEEN_DAYS']).optional() }).optional().describe('a POLL as the post (question ≤140, 2-4 options ≤30); no media'),
+      reshareOf: z.string().optional().describe('REPOST this post (link or urn); text optional, no media. Link cards come only from linkUrl'),
       mentions: z.array(z.any()).optional().describe('TAG COMPANIES: write "@Name" in the text where each tag goes and list each company here — its vanity name (the part after linkedin.com/company/), its company page URL, or {organizationId, name}. Hermoso resolves it on LinkedIn and LinkedIn renders a real clickable mention; a company with no "@" spot in the text is refused rather than appended.'),
 
       idempotencyKey: z.string().optional().describe('SAFE RETRIES — any stable string: a repeat of the SAME publish within 24h returns the ORIGINAL post id instead of posting again (an identical publish is also auto-recognised for 10 minutes). On a timeout or an ambiguous error, CALL AGAIN WITH THE SAME KEY: it reports the original post or publishes it once. It never posts twice.'),
@@ -9172,7 +9397,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/linkedin/post', a);
     if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
-    return ok(`Published to LinkedIn${d.url ? ` — ${d.url}` : '.'}`, d);
+    return ok(`Published to LinkedIn${d.url ? ` — ${d.url}` : '.'}${d.extrasNote ? ` ${d.extrasNote}` : ''}`, d);
   }));
   // ── X / TWITTER (docs/connector-roadmap.md §2). UNLIKE EVERY OTHER CONNECTOR, X BILLS PER CALL — the descriptions
   // below say so explicitly, because an agent that fires ten posts to "see what sticks" is spending the user's money.
@@ -10016,6 +10241,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       tags: z.array(z.string()).optional().describe('up to 30 tags'),
       thumbnailUrl: z.string().optional().describe('the custom thumbnail: a Hermoso-hosted image (make_thumbnail, or upload_file for the user’s own). Omit it and a representative frame of the video is set, free; "auto" keeps YouTube’s pick. Custom thumbnails need a verified channel.'),
       privacy: z.enum(['private', 'unlisted', 'public']).optional().describe('default public (live + searchable on the channel); unlisted = link-only (the ad-ready setting, or to add YouTube music in Studio first — only when the user asks); private = eyes-only (cannot run as an ad)'),
+      playlistId: z.string().optional().describe('add it to this playlist (list_youtube_playlists)'),
+      firstComment: z.string().optional().describe('first comment as the channel (≤2,000)'),
       madeForKids: z.boolean().optional().describe('declare the video MADE FOR KIDS (COPPA) — default false; YouTube then turns off comments and personalised ads'),
       categoryId: z.string().optional().describe('YouTube category id, NUMERIC — default "22" (People & Blogs), which is wrong for most ads. 1 Film & Animation · 2 Autos & Vehicles · 10 Music · 15 Pets & Animals · 17 Sports · 19 Travel & Events · 20 Gaming · 22 People & Blogs · 23 Comedy · 24 Entertainment · 25 News & Politics · 26 Howto & Style · 27 Education · 28 Science & Technology · 29 Nonprofits & Activism. The assignable set is region-specific, so the value is forwarded as given and YouTube has the last word.'),
       publishAt: z.string().optional().describe('SCHEDULE the publish — ISO 8601, e.g. "2026-09-01T15:00:00Z", and it must be in the future. YouTube only allows this on a PRIVATE video and makes it PUBLIC at that moment, so pass privacy:"private" (or leave privacy unset) — asking for a scheduled "unlisted" or "public" post is refused rather than half-honoured.'),
@@ -10034,7 +10261,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // Printing the request would be a flat lie.
     const bits = [d.privacy, d.categoryName ? `category ${d.categoryName}` : (d.categoryId ? `category ${d.categoryId}` : null), d.publishAt ? `scheduled for ${d.publishAt}` : null].filter(Boolean);
     // The thumbnail line is YouTube's read-back or the plain reason it did not land; the upload stands either way.
-    return ok(`Posted to YouTube (${bits.join(', ')})${d.url ? ` — ${d.url}` : ''}.${d.thumbnailNote ? ` ${d.thumbnailNote}` : ''}${d.metadata ? ` Read back: ${Object.entries(d.metadata).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('/') : v}`).join(', ')}.` : ''}${d.warning ? `\n\n${d.warning}` : ''}${d.scheduleWarning ? `\n\n${d.scheduleWarning}` : ''}${d.metadataWarning ? `\n\n${d.metadataWarning}` : ''}${d.metadataPendingNote ? `\n\n${d.metadataPendingNote}` : ''}`, d);
+    return ok(`Posted to YouTube (${bits.join(', ')})${d.url ? ` — ${d.url}` : ''}.${d.thumbnailNote ? ` ${d.thumbnailNote}` : ''}${d.metadata ? ` Read back: ${Object.entries(d.metadata).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('/') : v}`).join(', ')}.` : ''}${d.warning ? `\n\n${d.warning}` : ''}${d.scheduleWarning ? `\n\n${d.scheduleWarning}` : ''}${d.metadataWarning ? `\n\n${d.metadataWarning}` : ''}${d.metadataPendingNote ? `\n\n${d.metadataPendingNote}` : ''}${d.playlist ? `\n\n${d.playlist.added ? `Added to playlist ${d.playlist.playlistId} (read back from YouTube).` : d.playlist.note}` : ''}${d.firstComment ? `\n\nFirst comment: ${d.firstComment.ok ? 'posted' : (d.firstComment.error || d.firstComment.note || 'not posted')}.` : ''}`, d);
   }));
   server.group('channel_admin');
   server.registerTool('youtube_channel', {
@@ -10754,6 +10981,21 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/telegram/pin', a);
     return ok(`${d.pinned ? 'Pinned' : 'Unpinned'}${d.messageId ? ` message ${d.messageId}` : ''} in ${d.chatId}.${d.note ? ` ${d.note}` : ''}`, d);
   }));
+  server.registerTool('set_telegram_commands', {
+    title: 'Read or set the Telegram command menu',
+    description: "Read or change the Telegram bot's command menu (the / list every user of the bot sees). action get (default) shows it; set replaces it with commands [{command, description}] (1 to 32 lowercase letters, digits or _; description 1 to 256; at most 100); delete clears it. scope: default, all_private_chats, all_group_chats, all_chat_administrators, or chat / chat_administrators with chatId; languageCode for one language. set and delete are CONFIRM-GATED: the first call shows the menu now and after and changes nothing; call again with confirm:true once the user agrees. Read back from Telegram. Free.",
+    inputSchema: {
+      ...MANAGE_BRAND,
+      action: z.enum(['get', 'set', 'delete']).optional(),
+      commands: z.array(z.object({ command: z.string(), description: z.string() })).optional(),
+      scope: z.enum(['default', 'all_private_chats', 'all_group_chats', 'all_chat_administrators', 'chat', 'chat_administrators']).optional(),
+      chatId: z.string().optional().describe('for the chat scopes: the @username or numeric chat id'),
+      languageCode: z.string().optional().describe('two letters, like en'),
+      confirm: z.boolean().optional().describe('true only once the user agreed'),
+    },
+    outputSchema: { commands: z.array(z.any()).optional(), needsConfirm: z.boolean().optional(), verified: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = (a.action || 'get') === 'get' ? await apiGet('/api/telegram/commands', queryBrand(a, Object.fromEntries(Object.entries({ scope: a.scope, chatId: a.chatId, languageCode: a.languageCode }).filter(([, v]) => v != null && v !== '')))) : await apiPost('/api/telegram/commands', bodyBrand(a, { action: a.action, commands: a.commands, scope: a.scope, chatId: a.chatId, languageCode: a.languageCode, confirm: a.confirm === true })); return ok(d.note, d); }));
   server.registerTool('create_telegram_invite_link', {
     title: 'Create a trackable Telegram invite link',
     description: 'Create a NAMED invite link to a Telegram channel or group, optionally with an expiry, a member cap, or join approval. THIS IS THE ONLY SUBSCRIBER ATTRIBUTION TELEGRAM OFFERS: the Bot API exposes no per-post views and no post history, so \u201cwhich campaign brought these subscribers\u201d is otherwise unanswerable \u2014 give each campaign its own named link and Telegram reports how many joined through each. A member limit and join approval are mutually exclusive in Telegram\u2019s own docs and passing both is refused by name. The bot must be an administrator with invite rights. Free, 0 credits. Needs Telegram connected.',
@@ -11386,21 +11628,119 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('reply_to_meta_message', {
     title: 'Reply to a Messenger / Instagram DM',
-    description: 'Send a text reply to someone who has messaged the brand. THIS REACHES A REAL PERSON — show the user the exact text and who it goes to, get a yes, then send. Pass `conversationId` as well as `recipientId` and Hermoso checks Meta’s 24-hour window for free BEFORE sending, and refuses with the real reason instead of letting Meta refuse it; without one it sends and discloses that the window could not be checked. HERMOSO SENDS REPLIES ONLY: messaging_type is always RESPONSE, and proactive messages and message tags are not offered at all — that is a deliberate product boundary, not a gap. THE ONE PROACTIVE THING MESSENGER ALLOWS IS A MARKETING-MESSAGES SUBSCRIPTION: to ask a person in the inbox to SUBSCRIBE to marketing messages, call request_messenger_optin (Meta’s own opt-in template, in the ads group — enable_tools(["ads"]) or find_tools if it is not in your list). Never answer that with a plain-text reply asking them to say YES, and never say the capability does not exist. And a closed window is a RULE that only the person writing again reopens. `recipientId` is a PAGE-SCOPED ID on Messenger and an INSTAGRAM-SCOPED ID on Instagram (read_meta_conversation returns it as `replyTo`); a username or a handle is not one and cannot be turned into one. ACCEPTED IS NOT DELIVERED — never report it as delivered or read. 0 credits.',
+    description: 'Send a text reply to someone who has messaged the brand. THIS REACHES A REAL PERSON — show the user the exact text and who it goes to, get a yes, then send. Pass `conversationId` as well as `recipientId` and Hermoso checks Meta’s 24-hour window for free BEFORE sending, and refuses with the real reason instead of letting Meta refuse it; without one it sends and discloses that the window could not be checked. HERMOSO SENDS REPLIES ONLY: messaging_type is always RESPONSE, and proactive messages and message tags are not offered at all — that is a deliberate product boundary, not a gap. THE ONE PROACTIVE THING MESSENGER ALLOWS IS A MARKETING-MESSAGES SUBSCRIPTION: to ask a person in the inbox to SUBSCRIBE to marketing messages, call request_messenger_optin (Meta’s own opt-in template, in the ads group — enable_tools(["ads"]) or find_tools if it is not in your list). Never answer that with a plain-text reply asking them to say YES, and never say the capability does not exist. And a closed window is a RULE that only the person writing again reopens. `recipientId` is a PAGE-SCOPED ID on Messenger and an INSTAGRAM-SCOPED ID on Instagram (read_meta_conversation returns it as `replyTo`); a username or a handle is not one and cannot be turned into one. ACCEPTED IS NOT DELIVERED — never report it as delivered or read. RICH REPLIES: `attachments` (photos, video, voice notes, PDFs by https URL; upload_file turns a local file into one), `buttons` (up to 3 link or postback buttons under the text), `cards` (a carousel of up to 10), `quickReplies` (up to 13 tap-to-answer chips), `replyToMessageId` (answer one earlier message), `senderAction` (typing_on, typing_off or mark_seen, sent first). One reply can become several Meta messages, sent in order: the text, the media, the cards; the answer lists each part and, when one is refused, which parts went out. Limits are Meta’s and a reply over one is refused, never cut (Instagram text is 1000 bytes). 0 credits.',
     inputSchema: {
       recipientId: z.string().describe('the PSID (Messenger) or IGSID (Instagram) to reply to — `replyTo` from read_meta_conversation'),
-      text: z.string().describe('the reply'),
+      text: z.string().optional().describe('the reply text; optional when sending only attachments, cards or a senderAction'),
+      attachments: z.array(z.object({ url: z.string().describe('https URL Meta downloads'), type: z.enum(['image', 'video', 'audio', 'file']).optional().describe('guessed from the file name when omitted') })).optional().describe('photos, a video, a voice note or a PDF; images group into one message'),
+      buttons: z.array(z.object({ type: z.enum(['url', 'postback']).describe('url opens a page; postback sends `payload` back as a tap'), title: z.string().describe('up to 20 characters'), url: z.string().optional(), payload: z.string().optional() })).optional().describe('up to 3 buttons under the text (text required, 640 characters max with buttons)'),
+      cards: z.array(z.object({ title: z.string().describe('up to 80 characters'), subtitle: z.string().optional().describe('up to 80 characters'), imageUrl: z.string().optional(), url: z.string().optional().describe('opened when the card is tapped'), buttons: z.array(z.object({ type: z.enum(['url', 'postback']), title: z.string(), url: z.string().optional(), payload: z.string().optional() })).optional().describe('up to 3') })).optional().describe('a carousel of up to 10 cards'),
+      quickReplies: z.array(z.union([z.string(), z.object({ title: z.string().describe('up to 20 characters'), payload: z.string().optional() })])).optional().describe('up to 13 chips on the last message; they disappear after the next message'),
+      replyToMessageId: z.string().optional().describe('a message id from read_meta_conversation to answer inline'),
+      senderAction: z.enum(['typing_on', 'typing_off', 'mark_seen']).optional().describe('shown to the person; can be sent on its own'),
+
       humanAgent: z.boolean().optional().describe('HUMAN AGENT — true when a PERSON on the team is personally answering a customer\'s question more than 24 hours after they last wrote (up to 7 days): Meta\'s HUMAN_AGENT tag. Never for automated, promotional or unrelated messages. Meta grants the tag only after approving Hermoso\'s Human Agent feature (App Review, pending); until then Meta refuses it and the reply says so.'),
       conversationId: z.string().optional().describe('strongly recommended: it is what lets the 24-hour window be checked BEFORE sending rather than discovered by a refusal'),
       platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional().describe('MESSENGER or INSTAGRAM; the channel the conversation is on'),
       account: z.string().optional().describe('which Instagram account — an @handle or id from list_connector_accounts("instagram"). The way a DIRECT (Instagram Login) account is reached; omit for the Page-linked one.'),
       pageId: z.string().optional().describe('Facebook Page that owns the conversation; omit when only one Page is connected'),
     },
-    outputSchema: { messageId: z.string().optional(), recipientId: z.string().optional(), windowState: z.string().optional(), summary: z.string().optional() },
+    outputSchema: { messageId: z.string().optional(), messageIds: z.array(z.string()).optional(), parts: z.array(z.any()).optional(), failed: z.any().optional(), unsent: z.array(z.any()).optional(), senderAction: z.any().optional(), recipientId: z.string().optional(), windowState: z.string().optional(), summary: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/message', a);
-    return ok(d.summary, d);
+    return d.failed ? { ...ok(d.summary, d), isError: !d.messageId } : ok(d.summary, d); // a part refused after others went out is said, never a green "sent"
+  }));
+  // Richer Messenger + Instagram (2026-11-15), still this section: handover, the welcome screen / ice breakers / menu,
+  // labels, Page reviews and Instagram @mentions. Every rule lives in the lib/ files server.js imports; these only call routes.
+  const metaAsk = (d) => (d.needsConfirm ? ok(`⚠ ${d.note}`, d) : ok(d.summary || d.note, d));
+  server.registerTool('meta_thread_control', {
+    title: 'Hand a Messenger / Instagram conversation to another app',
+    description: 'Who answers a conversation when the brand runs another chat app beside Hermoso (ManyChat, a help desk, Meta’s own inbox): Meta’s Conversation Routing. action "owner" (which app holds this conversation now), "status" (does the Page route between several apps), and, confirm-gated because they change who answers a real customer: "pass" (to targetAppId: another app’s numeric Meta app id, or "Page inbox" / "Instagram inbox"), "take" (for Hermoso; Meta blocks it unless the Page has a default app), "release" (back to the Page’s default app), "request" (ask the holder to hand it over), "extend" (keep it up to 7 days). Without confirm:true a write only previews. Facebook Page connections only. Secondary receivers belonged to Meta’s retired Handover Protocol and are not offered. 0 credits.',
+    inputSchema: {
+      action: z.enum(['owner', 'status', 'pass', 'take', 'release', 'request', 'extend']).describe('what to do'),
+      recipientId: z.string().optional().describe('the person: `replyTo` from read_meta_conversation (not needed for status)'),
+      targetAppId: z.string().optional().describe('pass: the app to hand to, or Page inbox / Instagram inbox'),
+      metadata: z.string().optional().describe('a note Meta hands to the receiving app'),
+      durationSeconds: z.number().optional().describe('extend: seconds, up to 604800'),
+      platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional().describe('the conversation’s surface'),
+      pageId: z.string().optional().describe('Facebook Page id; omit when only one Page is connected'),
+      confirm: z.boolean().optional().describe('true only after the user agreed to the previewed change'),
+    },
+    outputSchema: { needsConfirm: z.boolean().optional(), changed: z.boolean().optional(), action: z.string().optional(), owner: z.any().optional(), ownerIsUs: z.boolean().optional(), status: z.any().optional(), note: z.string().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => metaAsk(['owner', 'status'].includes(a.action) ? await apiGet('/api/meta/thread-control', a) : await apiPost('/api/meta/thread-control', a))));
+  server.registerTool('meta_messenger_profile', {
+    title: 'Welcome screen, ice breakers and menu for Messenger / Instagram DMs',
+    description: 'What EVERY person sees before they write: on Messenger the Get Started button and greeting, and on Messenger and Instagram the ice breakers (up to 4 suggested questions) and the persistent menu (up to 20 items, each a link or a reply tap). action "get" reads it from Meta; "set" and "delete" change it and are confirm-gated: without confirm:true they return the before and after and change nothing. The answer is read back from Meta, and anything Meta did not keep is named. Instagram has no greeting or Get Started button. Messenger shows a menu only when a Get Started button is set. Meta allows 10 changes per 10 minutes per Page. 0 credits.',
+    inputSchema: {
+      action: z.enum(['get', 'set', 'delete']).describe('read, change, or remove'),
+      platform: z.enum(['MESSENGER', 'INSTAGRAM']).optional().describe('which surface (default MESSENGER; INSTAGRAM for a direct account)'),
+      greeting: z.union([z.string(), z.array(z.object({ locale: z.string(), text: z.string() }))]).optional().describe('Messenger welcome text, up to 160 characters, or one per locale (a "default" one required)'),
+      getStarted: z.union([z.boolean(), z.string()]).optional().describe('Messenger: true, or the payload the tap sends back'),
+      iceBreakers: z.array(z.union([z.string(), z.object({ question: z.string(), payload: z.string().optional() }), z.object({ locale: z.string(), questions: z.array(z.union([z.string(), z.object({ question: z.string(), payload: z.string().optional() })])) })])).optional().describe('up to 4 questions, or per locale'),
+      persistentMenu: z.array(z.union([z.object({ title: z.string().describe('up to 30 characters'), url: z.string().optional(), payload: z.string().optional() }), z.object({ locale: z.string(), items: z.array(z.object({ title: z.string(), url: z.string().optional(), payload: z.string().optional() })) })])).optional().describe('menu items: a url opens a page, otherwise the tap sends payload'),
+      composerInputDisabled: z.boolean().optional().describe('Messenger only: hide the typing box so people use the menu'),
+      fields: z.array(z.enum(['get_started', 'greeting', 'ice_breakers', 'persistent_menu'])).optional().describe('delete: which to remove'),
+      account: z.string().optional().describe('which Instagram account: an @handle or id from list_connector_accounts("instagram")'),
+      pageId: z.string().optional().describe('Facebook Page id; omit when only one Page is connected'),
+      confirm: z.boolean().optional().describe('true only after the user agreed to the previewed change'),
+    },
+    outputSchema: { needsConfirm: z.boolean().optional(), changed: z.boolean().optional(), platform: z.string().optional(), profile: z.any().optional(), current: z.any().optional(), proposed: z.any().optional(), notStored: z.array(z.string()).optional(), note: z.string().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => metaAsk(a.action === 'get' ? await apiGet('/api/meta/messenger-profile', a) : await apiPost('/api/meta/messenger-profile', a))));
+  server.registerTool('meta_conversation_labels', {
+    title: 'Label people in the Messenger inbox',
+    description: 'The Facebook Page’s inbox labels (VIP, Wholesale, Call back…), which tag a PERSON in the Page inbox and Meta Business Suite and are never shown to them. action "list" (the Page’s labels), "person" (labels on one person), "create" (name), "assign" / "remove" (labelId or exact name + recipientId), "delete" (removes the label from everyone; confirm-gated). Each change is read back from Meta. Messenger only: Meta’s labels API covers Messenger people, not Instagram. 0 credits.',
+    inputSchema: {
+      action: z.enum(['list', 'person', 'create', 'assign', 'remove', 'delete']).describe('what to do'),
+      name: z.string().optional().describe('the label name (create, or to pick a label by name)'),
+      labelId: z.string().optional().describe('the label id from action list'),
+      recipientId: z.string().optional().describe('the person’s Messenger id (PSID): `replyTo` from read_meta_conversation'),
+      pageId: z.string().optional().describe('Facebook Page id; omit when only one Page is connected'),
+      confirm: z.boolean().optional().describe('delete: true only after the user agreed'),
+    },
+    outputSchema: { needsConfirm: z.boolean().optional(), changed: z.boolean().optional(), created: z.boolean().optional(), labels: z.array(z.any()).optional(), label: z.any().optional(), note: z.string().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => metaAsk(await apiPost('/api/meta/labels', a))));
+  server.registerTool('meta_page_reviews', {
+    title: 'Facebook Page reviews: read and reply',
+    description: 'The reviews (recommendations) people left on the brand’s Facebook Page: recommends or not, the stars when given, the words, who wrote it and when. action "list" reads them (cursor pages on); action "reply" posts a PUBLIC reply as the Page under one review (reviewId from the list) and is confirm-gated. Meta documents reading reviews and does not document replying to them, so a reply is tried, read back, and when Meta refuses it the answer says to reply from the Page on Facebook. Also in list_inbox as source facebook_review. 0 credits.',
+    inputSchema: {
+      action: z.enum(['list', 'reply']).describe('read, or reply to one'),
+      reviewId: z.string().optional().describe('reply: the review id from action list'),
+      text: z.string().optional().describe('reply: the public reply'),
+      limit: z.number().optional().describe('list: how many (1-100, default 25)'),
+      cursor: z.string().optional().describe('list: the next page'),
+      pageId: z.string().optional().describe('Facebook Page id; omit when only one Page is connected'),
+      confirm: z.boolean().optional().describe('reply: true only after the user agreed to the wording'),
+    },
+    outputSchema: { count: z.number().optional(), reviews: z.array(z.any()).optional(), cursor: z.string().optional(), needsConfirm: z.boolean().optional(), posted: z.boolean().optional(), id: z.string().optional(), note: z.string().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    if (a.action === 'reply') return metaAsk(await apiPost('/api/meta/reviews/reply', a));
+    const d = await apiGet('/api/meta/reviews', a);
+    return ok(d.count ? `${d.count} review(s) on ${d.pageName || 'the Page'}:\n${(d.reviews || []).map((r) => `• ${r.summary} [${String(r.at || '').slice(0, 10)}] · reviewId ${r.id || 'none'}`).join('\n')}${d.cursor ? `\nMore: cursor ${d.cursor}` : ''}${d.note ? `\n${d.note}` : ''}` : (d.note || 'No reviews.'), d);
+  }));
+  server.registerTool('instagram_mentions', {
+    title: 'Instagram posts and comments that @mention the brand',
+    description: 'Posts and comments by OTHER accounts that @mention the brand’s Instagram account. action "list" shows the ones Meta has told Hermoso about recently, with the words, who wrote it and the post link; action "reply" posts a PUBLIC comment as the brand under that mention (mediaId, and commentId for a comment mention) and is confirm-gated. Meta keeps no list to read back, only live notifications: Story mentions arrive as DMs instead, private accounts send nothing, and an account connected directly through Instagram gets its mentions inside comment notifications. Also in list_inbox as source instagram_mention. 0 credits.',
+    inputSchema: {
+      action: z.enum(['list', 'reply']).describe('read, or reply to one'),
+      mediaId: z.string().optional().describe('reply: the post the mention is on'),
+      commentId: z.string().optional().describe('reply: the comment that mentioned the brand (omit for a caption mention)'),
+      text: z.string().optional().describe('reply: the public comment'),
+      limit: z.number().optional().describe('list: how many (1-50, default 25)'),
+      account: z.string().optional().describe('which Instagram account: an @handle or id from list_connector_accounts("instagram")'),
+      pageId: z.string().optional().describe('Facebook Page id; omit when only one Page is connected'),
+      confirm: z.boolean().optional().describe('reply: true only after the user agreed to the wording'),
+    },
+    outputSchema: { count: z.number().optional(), mentions: z.array(z.any()).optional(), account: z.string().optional(), needsConfirm: z.boolean().optional(), posted: z.boolean().optional(), id: z.string().optional(), note: z.string().optional(), summary: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    if (a.action === 'reply') return metaAsk(await apiPost('/api/instagram/mentions/reply', a));
+    const d = await apiGet('/api/instagram/mentions', a);
+    return ok(d.count ? `${d.count} mention(s) of ${d.account}:\n${(d.mentions || []).map((m) => `• ${m.summary}${m.permalink ? ` ${m.permalink}` : ''} · mediaId ${m.mediaId}${m.commentId ? ` commentId ${m.commentId}` : ''}`).join('\n')}` : (d.note || 'No mentions.'), d);
   }));
   // ── META PAGE WEBHOOKS (2026-08-24, item ⑤). Being TOLD instead of asking. Every rule lives in
   //    lib/meta-webhooks.mjs and is applied by the routes, so there is no second copy here to drift.
@@ -12067,6 +12407,51 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/pixel', a);
     return ok(d.note, d); // print the READ-BACK sentence verbatim — never narrate an object we did not read back
+  }));
+  // Meta Conversions API for the brand's OWN pixel (2026-11-15, lib/meta-conversions.mjs). In the `ads` group: listed
+  // once Meta is connected and the ads group is on, reachable through find_tools / call_tool otherwise. Every value is
+  // hashed on the server; the pixel is checked against the brand's ticked ad account there, never here.
+  server.registerTool('send_meta_conversions', {
+    title: 'Send conversions to a Meta pixel (Conversions API)',
+    description: 'Send SERVER events to the brand’s OWN Meta pixel (the Conversions API): Purchase, Lead, CompleteRegistration, AddToCart, InitiateCheckout, ViewContent, Contact, Subscribe or a custom name, for sales and sign-ups the browser pixel misses (a CRM deal, a phone order, a checkout the browser blocked). The pixel must be on one of the brand’s ticked ad accounts (list_meta_pixels); any other id is refused. PASS PLAIN VALUES (email, phone with country code, firstName, lastName, city, state, zip, country, dateOfBirth, externalId): Hermoso normalizes and SHA-256 hashes them per Meta’s rules, so never hash them yourself. clientIpAddress, clientUserAgent, fbc or fbclid, fbp and a Meta leadId go as given. A website event needs eventSourceUrl and clientUserAgent. Give every event an eventId (the same one the browser pixel sends) so Meta deduplicates it. Events up to 7 days old (62 for physical_store), up to 1,000 per call. testEventCode sends to Events Manager’s Test Events, and those events still count. The brand is responsible for its customers’ consent to share this data with Meta. RECEIVED IS NOT MATCHED: the reply reads back Meta’s events_received. Free.',
+    inputSchema: {
+      adAccountId: z.string().describe('the ad account that owns the pixel, with or without act_'),
+      pixelId: z.string().describe('the pixel (dataset) id, or its exact name, from list_meta_pixels'),
+      events: z.array(z.record(z.any())).describe('each: eventName, actionSource (website, email, app, phone_call, chat, physical_store, system_generated, business_messaging, other), eventTime (unix seconds or ISO; default now), eventId, eventSourceUrl, plain identifiers (email, phone, firstName, lastName, city, state, zip, country, dateOfBirth, gender, externalId), clientIpAddress, clientUserAgent, fbc or fbclid, fbp, leadId, value + currency (required on Purchase), orderId, contentIds, contents [{id, quantity, itemPrice}], limitedDataUse'),
+      testEventCode: z.string().optional().describe('the code from Events Manager > Test Events'),
+      limitedDataUse: z.string().optional().describe('off, on (Meta works out the US state) or a US state code such as ca; default is the brand setting'),
+      hashExternalId: z.boolean().optional().describe('false keeps externalId as given, to match a pixel that sends it unhashed'),
+    },
+    outputSchema: { ok: z.boolean().optional(), pixelId: z.string().optional(), sent: z.number().optional(), eventsReceived: z.number().nullable().optional(), allReceived: z.boolean().optional(), fbtraceId: z.string().optional(), messages: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/meta/conversions', a); return ok(d.note, d); }));
+  server.registerTool('meta_dataset_quality', {
+    title: 'Check a Meta pixel’s Conversions API health',
+    description: 'How well the brand’s Meta pixel is set up for the Conversions API, from Meta’s Dataset Quality API: event match quality (out of 10) per website event, which match keys arrive and how often, Meta’s own list of problems with the fix for each, how much browser traffic the server also covers, deduplication key coverage, how fresh the uploads are and how many arrive late. Website events only: Meta scores nothing else. Read-only, free.',
+    inputSchema: {
+      adAccountId: z.string().describe('the ad account that owns the pixel'),
+      pixelId: z.string().describe('from list_meta_pixels'),
+    },
+    outputSchema: { pixelId: z.string().optional(), events: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/meta/dataset-quality', a); return ok(d.note, d); }));
+  server.registerTool('set_meta_conversions_auto', {
+    title: 'Automatic sending to a Meta pixel',
+    description: 'Read or change AUTOMATIC sending to the brand’s Meta pixel. Sources, each OFF by default: shopify (paid Shopify orders as Purchase, keyed by order id; waits on Shopify approving access to order details), metaLeads (Meta instant-form leads sent back as Lead), emailReplies (an email lead who replies, as Lead). Call with no arguments to read the setting and the last run. Turning a source ON needs confirm:true AND consent:true, after showing the user what is sent and that they are responsible for their customers’ consent. limitedDataUse sets Meta’s Limited Data Use for US state privacy laws. runNow:true sends now. An event is never sent twice, and a failed send is retried. Free.',
+    inputSchema: {
+      adAccountId: z.string().optional(), pixelId: z.string().optional(),
+      sources: z.object({ shopify: z.boolean().optional(), metaLeads: z.boolean().optional(), emailReplies: z.boolean().optional() }).optional(),
+      limitedDataUse: z.string().optional().describe('off, on, or a US state code'),
+      everyMinutes: z.number().optional().describe('15 to 1440, default 60'),
+      leadEventName: z.string().optional().describe('the event name leads are sent as, default Lead'),
+      runNow: z.boolean().optional(), confirm: z.boolean().optional(), consent: z.boolean().optional(),
+    },
+    outputSchema: { enabled: z.boolean().optional(), sources: z.any().optional(), pixelId: z.string().nullable().optional(), pending: z.number().optional(), nextRunAt: z.string().nullable().optional(), last: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const asks = Object.keys(a || {}).some((k) => a[k] !== undefined);
+    const d = asks ? await apiPost('/api/meta/conversions/auto', a) : await apiGet('/api/meta/conversions/auto', {});
+    return ok(d.note, d);
   }));
   server.registerTool('list_meta_lead_forms', {
     title: 'List Meta instant (lead) forms',
@@ -13167,13 +13552,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_google_ads_status', {
     title: 'Enable, pause or remove a Google Ads campaign / ad group / ad',
-    description: 'Turn a campaign, AD GROUP or AD ON (ENABLED), OFF (PAUSED) or REMOVED. Pass level:"campaign" + campaignId, level:"adGroup" + adGroupId, or level:"ad" + BOTH adGroupId and adId (Google keys an ad by adGroupId~adId). ENABLING STARTS REAL AD SPEND — you MUST first show the user the campaign name + its daily budget, get an explicit yes, then call with status:"ENABLED" and confirm:true. Pausing is always safe. REMOVED is PERMANENT in Google Ads and is handled by the same gate as delete_google_ads_object — call it once WITHOUT confirm to see what goes with it, and expect to echo back the object’s name and child count when it has children, is live, or has spent. The resulting status is READ BACK from Google before you are told it took.',
+    description: 'Turn a campaign, AD GROUP, AD or one KEYWORD ON (ENABLED), OFF (PAUSED) or REMOVED. Pass level:"campaign" + campaignId, level:"adGroup" + adGroupId, level:"ad" + BOTH adGroupId and adId (Google keys an ad by adGroupId~adId), or level:"keyword" + BOTH adGroupId and keywordId. ENABLING STARTS REAL AD SPEND — you MUST first show the user the campaign name + its daily budget, get an explicit yes, then call with status:"ENABLED" and confirm:true. Pausing is always safe. REMOVED is PERMANENT in Google Ads and is handled by the same gate as delete_google_ads_object — call it once WITHOUT confirm to see what goes with it, and expect to echo back the object’s name and child count when it has children, is live, or has spent. The resulting status is READ BACK from Google before you are told it took.',
     inputSchema: {
       customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
-      level: z.enum(['campaign', 'adGroup', 'ad']).optional().describe('what to change — default campaign'),
+      level: z.enum(['campaign', 'adGroup', 'ad', 'keyword']).optional().describe('what to change — default campaign'),
       campaignId: z.string().optional().describe('campaign id (level:"campaign")'),
       adGroupId: z.string().optional().describe('ad group id (level:"adGroup", or with adId for level:"ad")'),
       adId: z.string().optional().describe('ad id (level:"ad" — pass adGroupId too)'),
+      keywordId: z.string().optional().describe('keyword criterion id (level:"keyword", with adGroupId)'),
       campaignResourceName: z.string().optional().describe('full resource name, e.g. customers/{cid}/campaigns/{id}'),
       status: z.enum(['ENABLED', 'PAUSED', 'REMOVED']).describe('ENABLED = start spending; PAUSED = stop; REMOVED = permanent'),
       confirm: z.boolean().optional().describe('REQUIRED true to ENABLE (real spend) or to REMOVE (permanent)'),
@@ -13288,6 +13674,48 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/google-ads/negative-list', a);
     return ok(d.note || 'Done.', d);
   }));
+  server.registerTool('manage_google_ads_asset_groups', {
+    title: 'Manage Performance Max asset groups',
+    description: 'Performance Max ASSET GROUPS after launch. action: list (campaignId) | create (campaignId, name, finalUrls, assets; a non-retail group needs Google\'s minimum set in the same call: 3+ headlines, 1+ longHeadlines, 2+ descriptions, businessName + logos unless brand guidelines are on, 1+ marketingImages and squareMarketingImages as asset resource names from upload_google_ads_asset; born PAUSED) | update (assetGroupId; name, finalUrls, path1, path2) | pause | enable | remove (permanent: confirm:true + confirmName; never the last group) | link (assets to add) | unlink (unlink:[{asset, fieldType}], never below the minimum) | listing_groups (which feed products a RETAIL group advertises) | set_listing_groups (all:true, or dimension + values + mode include|exclude). A change to a live group needs confirm:true. Everything is read back. Free.',
+    inputSchema: {
+      customerId: z.string().optional().describe('omit to use the brand’s selected default account'),
+      action: z.enum(['list', 'create', 'update', 'pause', 'enable', 'remove', 'link', 'unlink', 'listing_groups', 'set_listing_groups']),
+      campaignId: z.string().optional().describe('the Performance Max campaign (list, create)'),
+      assetGroupId: z.string().optional().describe('every action except list and create'),
+      name: z.string().optional(), finalUrls: z.array(z.string()).optional(), path1: z.string().optional(), path2: z.string().optional(),
+      assets: z.object({ headlines: z.array(z.string()).optional(), longHeadlines: z.array(z.string()).optional(), descriptions: z.array(z.string()).optional(), businessName: z.string().optional(),
+        marketingImages: z.array(z.string()).optional(), squareMarketingImages: z.array(z.string()).optional(), portraitMarketingImages: z.array(z.string()).optional(), logos: z.array(z.string()).optional(), landscapeLogos: z.array(z.string()).optional(), youtubeVideos: z.array(z.string()).optional() }).optional().describe('text as text; images and videos as asset resource names'),
+      unlink: z.array(z.object({ asset: z.string(), fieldType: z.string() })).optional().describe('links to remove, e.g. {asset:"customers/1/assets/2", fieldType:"HEADLINE"}'),
+      all: z.boolean().optional().describe('set_listing_groups: advertise every product'),
+      dimension: z.enum(['brand', 'itemId', 'productType', 'category', 'condition', 'channel', 'customAttribute']).optional(),
+      values: z.array(z.string()).optional(), mode: z.enum(['include', 'exclude']).optional().describe('include = only these; exclude = all but these'),
+      level: z.number().optional().describe('productType / category level 1-5'), index: z.number().optional().describe('customAttribute index 0-4'),
+      confirm: z.boolean().optional(), confirmName: z.string().optional().describe('remove: the group name exactly'), dryRun: z.boolean().optional(),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), assetGroupId: z.string().optional(), groups: z.array(z.any()).optional(), nodes: z.array(z.any()).nullable().optional(), assets: z.record(z.any()).nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/google-ads/asset-groups', a); return ok(d.note, d); }));
+  server.registerTool('update_google_ads_ad', {
+    title: 'Edit a Google responsive search ad in place',
+    description: 'EDIT a responsive search ad IN PLACE so it keeps its history: headlines (3-15, ≤30 characters; {text, pin:"HEADLINE_1"} pins one), descriptions (2-4, ≤90), path1 / path2 (≤15), finalUrls, finalMobileUrls, finalUrlSuffix, trackingUrlTemplate. A list you pass REPLACES the ad\'s list, so send it whole. Over-long text is refused, never cut. A live ad needs confirm:true and Google reviews it again. Read back. Free.',
+    inputSchema: {
+      customerId: z.string().optional(), adGroupId: z.string().optional(), adId: z.string().describe('the ad id (from google_ads_report)'),
+      headlines: z.array(z.union([z.string(), z.object({ text: z.string(), pin: z.string().optional() })])).optional(),
+      descriptions: z.array(z.union([z.string(), z.object({ text: z.string(), pin: z.string().optional() })])).optional(),
+      path1: z.string().optional(), path2: z.string().optional(), finalUrls: z.array(z.string()).optional(), finalMobileUrls: z.array(z.string()).optional(),
+      finalUrlSuffix: z.string().optional(), trackingUrlTemplate: z.string().optional(), confirm: z.boolean().optional(), dryRun: z.boolean().optional(), loginCustomerId: z.string().optional(),
+    },
+    outputSchema: { ok: z.boolean().optional(), adId: z.string().optional(), verified: z.boolean().optional(), headlines: z.array(z.any()).optional(), descriptions: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/google-ads/ad/update', a); return ok(d.note, d); }));
+  server.registerTool('duplicate_google_ads_campaign', {
+    title: 'Duplicate a Google Ads campaign (paused)',
+    description: 'DUPLICATE a Google Ads Search or Display campaign: budget amount, bidding, networks, locations, languages, schedule, negatives, ad groups, keywords and responsive ads, rebuilt in one step (Google\'s API has no copy operation) and born PAUSED. History and Quality Score start fresh. dryRun:true checks it without creating anything. Free.',
+    inputSchema: { customerId: z.string().optional(), campaignId: z.string(), name: z.string().optional().describe('default "<name> (copy)"'), shareBudget: z.boolean().optional().describe('reuse a SHARED budget instead of a new one'), dryRun: z.boolean().optional(), loginCustomerId: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), campaignId: z.string().optional(), status: z.string().nullable().optional(), adGroups: z.number().nullable().optional(), keywords: z.number().nullable().optional(), ads: z.number().nullable().optional(), skipped: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/google-ads/duplicate', a); return ok(d.note, d); }));
   server.registerTool('manage_google_ads_labels', {
     title: "Google Ads labels on campaigns, ad groups and ads",
     description: "Google Ads LABELS for organising campaigns, ad groups and ads (\"Made by Hermoso\", \"Q4 test\"). action: list | create (name, color #RRGGBB, description, and targets to label at once) | update (name, color, description) | apply / remove (campaignIds, adGroupIds, ads:[{adGroupId, adId}]) | delete (confirm:true). Labels never change delivery or spend. Report by label with google_ads_report over campaign_label / ad_group_label / ad_group_ad_label.",
@@ -13362,7 +13790,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       campaignId: z.string().optional().describe('campaign id (level:"campaign")'),
       adGroupId: z.string().optional().describe('ad group id (level:"adGroup"; REQUIRED as the parent for "ad" and "keyword")'),
       adId: z.string().optional().describe('ad id (level:"ad" — pass adGroupId too)'),
-      keywordId: z.string().optional().describe('keyword criterion id (level:"keyword" — pass adGroupId too)'),
+      keywordId: z.string().optional().describe('keyword criterion id (level:"keyword", with adGroupId)'),
       conversionActionId: z.string().optional().describe('conversion action id (level:"conversionAction")'),
       resourceName: z.string().optional().describe('full resource name — REQUIRED for campaignAsset / adGroupAsset, accepted for any level'),
       confirm: z.boolean().optional().describe('REQUIRED true — REMOVED is permanent'),
@@ -13737,9 +14165,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       countryCode: z.string().optional().describe('2-letter hint to disambiguate a city name'),
       network: z.enum(['GOOGLE_SEARCH', 'GOOGLE_SEARCH_AND_PARTNERS']).optional().describe('default GOOGLE_SEARCH'),
       limit: z.number().optional().describe('how many ideas to return (1–200, default 50)'),
+      mode: z.enum(['ideas', 'historical']).optional().describe('historical = volume, competition, bids and month-by-month searches of the keywords you pass (up to 10,000), not new ideas'),
+      startMonth: z.string().optional().describe('historical only: YYYY-MM, with endMonth; default the past 12 months'),
+      endMonth: z.string().optional().describe('historical only: YYYY-MM'),
       loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
     },
-    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), note: z.string().optional() },
+    outputSchema: { ok: z.boolean().optional(), count: z.number().optional(), mode: z.string().optional(), keywords: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/keyword-ideas', a);
@@ -18470,19 +18901,31 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { accountId: z.string().optional(), audienceId: z.string().optional(), audience: z.any().optional(), users: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/audience-update', a); return ok(d.note, d); }));
+  server.registerTool('manage_x_ads_conversion_events', {
+    title: 'X Pixel conversion events (list / create / update)',
+    description: 'The X Pixel\'s CONVERSION EVENTS on an X ad account. action: list (each event\'s id, type, status UNVERIFIED or TRACKING, and the pixel id) | create (name + type: PURCHASE, SIGN_UP (lead), SITE_VISIT (page view), ADD_TO_CART, CHECKOUT_INITIATED, DOWNLOAD, SUBSCRIBE, START_TRIAL, ADDED_PAYMENT_INFO, ADD_TO_WISHLIST, CONTENT_VIEW, PRODUCT_CUSTOMIZATION, SEARCH, CUSTOM; clickWindow 1/7/14/30 days, default 30; viewThroughWindow 0/1/7/14/30, default 1; retargetingEnabled) | update (eventId + any of those). The pixel itself is made in X Events Manager. Read back. Free.',
+    inputSchema: {
+      ...xAcct, action: z.enum(['list', 'create', 'update']).optional().describe('default list'),
+      eventId: z.string().optional().describe('update: the event to change'), name: z.string().optional(), type: z.string().optional(),
+      clickWindow: z.number().optional(), viewThroughWindow: z.number().optional(), retargetingEnabled: z.boolean().optional(),
+    },
+    outputSchema: { accountId: z.string().optional(), events: z.array(z.any()).optional(), pixelIds: z.array(z.string()).optional(), event: z.record(z.any()).nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/x-ads/conversion-events', a); return ok(d.note, d); }));
   server.registerTool('send_x_ads_conversions', {
     title: 'Send conversions to X (Conversion API)',
-    description: "Report conversions to X server-side (the X Conversion API) — purchases, sign-ups, leads — so X attributes them to the ads that caused them and conversion bidding (goal WEBSITE_CONVERSIONS_V2) has something to optimise toward. pixelId and each eventId come from X Events Manager. Each event needs a click id (twclid from the landing URL), an email or an E.164 phone — emails and phones are SHA-256 hashed on Hermoso's server; IP + user agent only count together or beside one of those. Send conversionId to deduplicate against the X Pixel. Free.",
+    description: "Report conversions to X server-side (the X Conversion API) — purchases, sign-ups, leads — so X attributes them to the ads that caused them and conversion bidding (goal WEBSITE_CONVERSIONS_V2) has something to optimise toward. Leave pixelId out and name each event by eventType (PURCHASE, SIGN_UP…) or eventId: Hermoso reads the ids from the ad account's conversion events (manage_x_ads_conversion_events). Each event needs a click id (twclid from the landing URL), an email or an E.164 phone — emails and phones are SHA-256 hashed on Hermoso's server; IP + user agent only count together or beside one of those. Send conversionId to deduplicate against the X Pixel. Free.",
     inputSchema: {
-      ...xAcct, pixelId: z.string().describe('the X Pixel (event source) id from Events Manager'), eventId: z.string().optional().describe('default Event ID for every event'),
+      ...xAcct, pixelId: z.string().optional().describe('the X Pixel (event source) id; omit to use the one on the ad account'), eventId: z.string().optional().describe('default Event ID for every event'),
+      eventType: z.string().optional().describe('default event by its kind, e.g. PURCHASE; resolved on the ad account'),
       events: z.array(z.object({
-        eventId: z.string().optional().describe('event id for this one event; overrides the top-level eventId'), conversionTime: z.string().optional().describe('ISO 8601; default now'), twclid: z.string().optional().describe("X click id from the landing URL's twclid parameter"),
+        eventId: z.string().optional().describe('event id for this one event; overrides the top-level eventId'), eventType: z.string().optional().describe('this event by its kind instead of its id'), conversionTime: z.string().optional().describe('ISO 8601; default now'), twclid: z.string().optional().describe("X click id from the landing URL's twclid parameter"),
         email: z.string().optional().describe("email address; normalised and SHA-256 hashed on Hermoso's server"), phone: z.string().optional().describe('phone in E.164 form, e.g. +14155550100; hashed before sending'), ipAddress: z.string().optional().describe('visitor IP address; counts only with userAgent or an email or phone'), userAgent: z.string().optional().describe('visitor browser user agent; counts only with ipAddress or an email or phone'),
         value: z.number().optional().describe('conversion value in the currency given by currency'), currency: z.string().optional().describe('ISO 4217 currency code, e.g. USD'), numberItems: z.number().optional().describe('number of items in the conversion'),
         conversionId: z.string().optional().describe('dedup key shared with the X Pixel'), description: z.string().optional().describe('free-text description of the conversion'), eventSourceUrl: z.string().optional().describe('URL of the page where the conversion happened'),
       })).describe('conversion events to report, one entry per purchase, sign-up or lead'),
     },
-    outputSchema: { pixelId: z.string().optional(), sent: z.number().optional(), processed: z.number().nullable().optional(), debugId: z.string().nullable().optional(), note: z.string().optional() },
+    outputSchema: { pixelId: z.string().optional(), sent: z.number().optional(), processed: z.number().nullable().optional(), debugId: z.string().nullable().optional(), idsFrom: z.array(z.string()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/x-ads/conversions', a); return ok(d.note, d); }));
   server.registerTool('create_x_ads_promoted_tweet', {
@@ -22932,6 +23375,25 @@ function buildTools(rawServer, opts = {}, sink = null) {
       ? `TikTok ${d.level} ${d.id} budget is now ${d.read} (read back from TikTok).`
       : `TikTok accepted a budget of ${d.requested} for ${d.level} ${d.id}, but the read-back could not confirm what it STORED — check TikTok Ads Manager before relying on it.`, d);
   }));
+  server.registerTool('update_tiktok_ads_ad_group', {
+    title: 'Edit a TikTok ad group (targeting, bid, schedule)',
+    description: 'EDIT an existing TikTok ad group after launch: targeting (locationIds, zipcodeIds, ageGroups AGE_18_24…, gender, languages, interestCategoryIds, interestKeywordIds, audienceIds, excludedAudienceIds, operatingSystems, networkTypes, spendingPower, householdIncome, deviceModelIds), bid (bidType BID_TYPE_CUSTOM cost cap or BID_TYPE_NO_BID, bid, roasBid) and schedule (startTime before it starts, endTime, dayparting 336 characters). Placement, optimization goal and billing cannot change; budget is set_tiktok_ads_budget. TikTok\'s update replaces the whole ad group, so everything you do not change is resent from TikTok\'s stored row. A switched-on ad group needs confirm:true. Read back. Free.',
+    inputSchema: {
+      advertiserId: z.string().optional().describe('TikTok ad account id; omit when only one is shared'),
+      adgroupId: z.string().describe('the ad group id (from list_tiktok_ads_campaigns)'),
+      name: z.string().optional(),
+      targeting: z.object({ locationIds: z.array(z.string()).optional(), zipcodeIds: z.array(z.string()).optional(), languages: z.array(z.string()).optional(), ageGroups: z.array(z.string()).optional(), gender: z.string().optional(),
+        interestCategoryIds: z.array(z.string()).optional(), interestKeywordIds: z.array(z.string()).optional(), audienceIds: z.array(z.string()).optional(), excludedAudienceIds: z.array(z.string()).optional(),
+        operatingSystems: z.array(z.string()).optional(), networkTypes: z.array(z.string()).optional(), spendingPower: z.string().optional(), householdIncome: z.array(z.string()).optional(), deviceModelIds: z.array(z.string()).optional(), devicePriceRanges: z.array(z.number()).optional() }).optional().describe('only the fields you pass change; ids from search_tiktok_ads_targeting'),
+      bidType: z.enum(['BID_TYPE_CUSTOM', 'BID_TYPE_NO_BID']).optional(), bid: z.number().optional().describe('cost cap in the advertiser currency (click or conversion bid, by the ad group billing)'),
+      roasBid: z.number().optional(), scheduleType: z.enum(['SCHEDULE_START_END', 'SCHEDULE_FROM_NOW']).optional(),
+      startTime: z.string().optional().describe('only before the ad group starts; ISO 8601 or "YYYY-MM-DD HH:MM:SS" UTC'), endTime: z.string().optional(),
+      dayparting: z.string().optional().describe('336 characters of 0/1, Monday first, 48 half-hours a day; "" = always'),
+      confirm: z.boolean().optional().describe('required when the ad group is switched on'),
+    },
+    outputSchema: { advertiserId: z.string().optional(), adgroupId: z.string().optional(), requested: z.record(z.any()).optional(), read: z.record(z.any()).nullable().optional(), verified: z.boolean().optional(), status: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/tiktok-ads/adgroup/update', a); return ok(d.note, d); }));
   server.registerTool('delete_tiktok_ads_object', {
     title: 'Delete TikTok campaigns / ad groups / ads',
     description: 'Remove TikTok campaigns, ad groups or ads. TIKTOK HAS NO DELETE VERB — removal is modelled as a STATUS, exactly like Reddit — so this posts to the same route as set_tiktok_ads_status with status:"DELETE" rather than being a second implementation with its own rules. It is permanent, TikTok publishes no undelete, and it needs confirm:true; calling it WITHOUT confirm changes nothing and returns the sentence naming how many objects go, which is what you show the user first. TikTok does NOT document whether removing a campaign takes its ad groups and ads with it — each carries its own status — so remove the children yourself if they should go too, and VERIFY with list_tiktok_ads_campaigns afterwards rather than assuming a cascade either way. TO STOP DELIVERY WITHOUT DESTROYING ANYTHING, use set_tiktok_ads_status(status:"DISABLE"): that is reversible and this is not.',
@@ -23887,6 +24349,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       linkThumbnailUrl: z.string().optional().describe('a Hermoso-hosted image used as the card\u2019s picture (uploaded to LinkedIn for you). Without it the card has no image.'),
       documentUrl: z.string().optional().describe('a DOCUMENT post — a Hermoso-hosted PDF / PPTX / DOCX (upload_file first) that readers swipe through page by page in the feed; LinkedIn takes up to 100MB and 300 pages. One kind of media per post: not with an image, video, slides or linkUrl.'),
       documentTitle: z.string().optional().describe('the title shown on the document (defaults to the file name)'),
+      poll: z.object({ question: z.string(), options: z.array(z.string()), duration: z.enum(['ONE_DAY', 'THREE_DAYS', 'SEVEN_DAYS', 'FOURTEEN_DAYS']).optional() }).optional().describe('a POLL as the post (question ≤140, 2-4 options ≤30); no media'),
+      reshareOf: z.string().optional().describe('REPOST this post (link or urn); text optional, no media. Link cards come only from linkUrl'),
       mentions: z.array(z.any()).optional().describe('TAG COMPANIES: write "@Name" in the text where each tag goes and list each company here — its vanity name (the part after linkedin.com/company/), its company page URL, or {organizationId, name}. Hermoso resolves it on LinkedIn and LinkedIn renders a real clickable mention; a company with no "@" spot in the text is refused rather than appended.'),
       imageUrl: z.string().optional().describe('a Hermoso-hosted image URL — a render (list_library), or ANY image of the user’s own passed through upload_file first. An arbitrary external host is refused.'),
       videoUrl: z.string().optional().describe('a Hermoso-hosted video URL — a render, or the user’s own footage via upload_file. LinkedIn processes it before publishing, which takes a minute.'),
@@ -23908,7 +24372,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, publishWrap(async (a) => {
     const d = await apiPost('/api/linkedin/org-post', a);
     if (d?.idempotentReplay) return ok(`${d.note} (Nothing was posted a second time.)`, d);
-    return ok(`${d.note}${d.carousel ? ` It is a ${d.slides}-slide MultiImage post — one post the reader swipes through.` : ''} ${d.url || ''}`, d);
+    return ok(`${d.note}${d.carousel ? ` It is a ${d.slides}-slide MultiImage post — one post the reader swipes through.` : ''}${d.extrasNote ? ` ${d.extrasNote}` : ''} ${d.url || ''}`, d);
   }));
   // ── COMMUNITY MANAGEMENT (2026-08-28) — the comment surface, and the ONLY thing on the second LinkedIn app.
   // Page POSTING above rides w_organization_social from the Advertising product; these three ride the social-feed
@@ -23954,6 +24418,42 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), deleted: z.boolean().optional(), commentId: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/linkedin/comment/delete', a); return ok(d.note, d); }));
+
+  server.registerTool('react_to_linkedin_post', {
+    title: 'React to a LinkedIn post as the Page',
+    description: "React to a LinkedIn post or comment AS your company Page: LIKE, PRAISE (Celebrate), EMPATHY (Love), INTEREST (Insightful), APPRECIATION (Support) or ENTERTAINMENT (Funny); remove:true takes the Page's reaction away. Public: say which post first. Same LinkedIn comments authorization as the comment tools (provider linkedin_community). Read back from LinkedIn. Free.",
+    inputSchema: {
+      postUrn: z.string().describe('urn:li:share:…, urn:li:ugcPost:…, urn:li:activity:… or a urn:li:comment:(…)'),
+      reactionType: z.enum(['LIKE', 'PRAISE', 'EMPATHY', 'INTEREST', 'APPRECIATION', 'ENTERTAINMENT']).optional().describe('default LIKE'),
+      remove: z.boolean().optional(),
+      organizationId: z.string().optional().describe('the Page reacting; defaults to the Page shared with this profile'),
+    },
+    outputSchema: { ok: z.boolean().optional(), reactionType: z.string().optional(), removed: z.boolean().optional(), verified: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/linkedin/react', { ...a, remove: a.remove === true }); return ok(d.note, d); }));
+  server.registerTool('edit_linkedin_comment', {
+    title: 'Edit a LinkedIn Page comment',
+    description: "Change the text of a comment your LinkedIn company Page wrote (LinkedIn lets only the text change). Public: show the user the new wording first. Same LinkedIn comments authorization (provider linkedin_community). Read back. Free.",
+    inputSchema: {
+      postUrn: z.string().describe('the post the comment is on'),
+      commentId: z.string().describe('the comment id from list_linkedin_comments'),
+      text: z.string().describe('the new text, up to 2,000 characters'),
+      organizationId: z.string().optional().describe('the Page that wrote it; defaults to the Page shared with this profile'),
+    },
+    outputSchema: { ok: z.boolean().optional(), edited: z.boolean().optional(), verified: z.boolean().nullable().optional(), text: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/linkedin/comment/edit', a); return ok(d.note, d); }));
+  server.registerTool('list_linkedin_page_notifications', {
+    title: 'Read LinkedIn Page notifications',
+    description: "What happened on your LinkedIn company Page: comments, MENTIONS of the Page (SHARE_MENTION), reshares and likes, as far back as LinkedIn keeps them (60 days). For a Page ADMINISTRATOR. Use it to find who is talking about the brand before replying. Free.",
+    inputSchema: {
+      actions: z.array(z.enum(['LIKE', 'COMMENT', 'SHARE', 'SHARE_MENTION', 'ADMIN_COMMENT', 'COMMENT_EDIT', 'COMMENT_DELETE'])).optional().describe('default COMMENT, SHARE_MENTION, SHARE, LIKE'),
+      days: z.number().optional().describe('1 to 60 (default 7)'),
+      organizationId: z.string().optional().describe('the Page; defaults to the Page shared with this profile'),
+    },
+    outputSchema: { count: z.number().optional(), byAction: z.record(z.any()).optional(), notifications: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const q = Object.fromEntries(Object.entries({ actions: Array.isArray(a.actions) ? a.actions.join(',') : a.actions, days: a.days, organizationId: a.organizationId }).filter(([, v]) => v != null && v !== '')); const d = await apiGet('/api/linkedin/notifications', q); return ok(`${d.note}${(d.notifications || []).length ? `\n${d.notifications.slice(0, 40).map((n) => `• ${n.at || ''} ${n.action}${n.post ? ` on ${n.post}` : ''}${n.activity ? ` (${n.activity})` : ''}`).join('\n')}` : ''}`, d); }));
 
   server.registerTool('manage_linkedin_post', {
     title: 'Edit or delete a LinkedIn post',
@@ -24443,7 +24943,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/linkedin/ads-conversions', a); return ok(d.note, d); }));
   server.registerTool('update_meta_object', {
     title: 'Edit a Meta campaign / ad set / ad',
-    description: 'Update an EXISTING campaign, ad set, or ad — rename, change its daily budget, retarget (ad sets), or change status (PAUSED / ACTIVE / ARCHIVED). Pass objectId (from list_meta_ads) + adAccountId. Setting something ACTIVE can start REAL AD SPEND — show the user what will run + its budget, get a yes, then pass confirm:true. Pausing and renaming are always safe and always reversible. ARCHIVING IS NOT: Meta treats an archived object as DELETED and refuses to bring it back — every later edit answers "This campaign has been deleted, so you can only edit the name" (measured live 2026-08-05), archiving a campaign takes its ad sets and ads down with it, and the only way back is to duplicate it as a new object. Use PAUSED unless the user has said they are finished with it for good.',
+    description: 'Update an EXISTING campaign, ad set, or ad — rename, change its daily or lifetime budget, bid strategy, bid or cost cap, minimum ROAS, end time or optimization goal, retarget (ad sets), swap an ad\'s creative (creativeId, or imageHash / videoId from upload_meta_asset) or its UTMs (urlTags; Meta keeps creatives fixed, so a new one is built and the ad points at it, the old one kept), or change status (PAUSED / ACTIVE / ARCHIVED). Budget and bid fields go on one object per call, creative fields on an ad. Everything changed is read back. Pass objectId (from list_meta_ads) + adAccountId. Setting something ACTIVE can start REAL AD SPEND — show the user what will run + its budget, get a yes, then pass confirm:true. Pausing and renaming are always safe and always reversible. ARCHIVING IS NOT: Meta treats an archived object as DELETED and refuses to bring it back — every later edit answers "This campaign has been deleted, so you can only edit the name" (measured live 2026-08-05), archiving a campaign takes its ad sets and ads down with it, and the only way back is to duplicate it as a new object. Use PAUSED unless the user has said they are finished with it for good.',
     inputSchema: {
       objectId: z.string().describe('the campaign / ad set / ad id (from list_meta_ads)'),
       adAccountId: z.string().describe('ad account id (for auth + scope)'),
@@ -24453,14 +24953,39 @@ function buildTools(rawServer, opts = {}, sink = null) {
       targeting: z.record(z.any()).optional().describe('replacement targeting spec (ad sets) — a Meta targeting object'),
       dsaBeneficiary: z.string().optional().describe("ad sets: EU ad transparency, who the ad promotes. Meta requires it once targeting reaches the EU; retarget into the EU without it and the ad account default, else the profile's brand name, else the Page name is used"),
       dsaPayor: z.string().optional().describe('ad sets: EU ad transparency, who pays (defaults to dsaBeneficiary)'),
-      confirm: z.boolean().optional().describe('REQUIRED true ONLY to set status ACTIVE (real spend)'),
+      lifetimeBudgetUsd: z.number().optional().describe("lifetime budget in the ad account's currency (needs an end time; Meta refuses lowering it below 110% of what is spent)"),
+      bidStrategy: z.enum(['LOWEST_COST_WITHOUT_CAP', 'LOWEST_COST_WITH_BID_CAP', 'COST_CAP', 'LOWEST_COST_WITH_MIN_ROAS']).optional(),
+      bidAmountUsd: z.number().optional().describe('ad sets: the bid or cost cap, account currency (BID_CAP / COST_CAP)'),
+      minRoas: z.number().optional().describe('ad sets: minimum ROAS, e.g. 1.5 (LOWEST_COST_WITH_MIN_ROAS, optimization goal VALUE)'),
+      endTime: z.string().optional().describe('ad sets: ISO 8601 end, or "ongoing" for a daily-budget ad set'),
+      optimizationGoal: z.string().optional().describe('ad sets: new optimization goal; when Meta refuses a change on a set that has delivered, its reason is passed on'),
+      creativeId: z.string().optional().describe('ads: point the ad at this existing creative'),
+      imageHash: z.string().optional().describe('ads: new image (hash from upload_meta_asset); the rest of the creative is kept'),
+      videoId: z.string().optional().describe('ads: new video (id from upload_meta_asset)'),
+      urlTags: z.union([z.string(), z.boolean()]).optional().describe('ads: new UTM query string Meta appends to clicks, or false for none'),
+      confirm: z.boolean().optional().describe('REQUIRED true to set ACTIVE, or to change budget, bid, schedule, targeting or creative on a LIVE object'),
     },
-    outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), updated: z.array(z.string()).optional(), currency: z.string().optional().describe('the ad account currency the budget is in'), dailyBudget: z.number().optional(), lifetimeBudget: z.number().optional(), budgetText: z.string().optional().describe('the budget Meta now stores, read back, with its currency code'), note: z.string().optional(), euTransparency: z.string().optional().describe('the EU advertiser / payer names set on this edit, and where they came from') },
+    outputSchema: { ok: z.boolean().optional(), objectId: z.string().optional(), updated: z.array(z.string()).optional(), changes: z.array(z.string()).optional(), verified: z.record(z.any()).optional(), creativeId: z.string().optional(), currency: z.string().optional().describe('the ad account currency the budget is in'), dailyBudget: z.number().optional(), lifetimeBudget: z.number().optional(), budgetText: z.string().optional().describe('the budget Meta now stores, read back, with its currency code'), note: z.string().optional(), euTransparency: z.string().optional().describe('the EU advertiser / payer names set on this edit, and where they came from') },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/meta/object/update', a);
     return ok(`Updated ${a.objectId} (${(d.updated || []).join(', ')}).${d.note ? ` ${d.note}` : ''}${d.euTransparency ? ` ${d.euTransparency}` : ''}`, d);
   }));
+  server.registerTool('duplicate_meta_object', {
+    title: 'Duplicate a Meta campaign / ad set / ad (paused)',
+    description: 'DUPLICATE a Meta campaign, ad set or ad with Meta\'s copy feature. A campaign or ad set is copied with everything under it (deep:false copies only the top object). Every copy is born PAUSED and read back, so it spends nothing until switched on. Copy an ad set into another campaign with targetCampaignId, or an ad into another ad set with targetAdSetId. Up to 50 ads per call. Free.',
+    inputSchema: {
+      objectId: z.string().describe('the campaign / ad set / ad id (from list_meta_ads)'),
+      adAccountId: z.string().describe('ad account id (for auth + scope)'),
+      deep: z.boolean().optional().describe('default true: copy the ad sets and ads under it too'),
+      targetCampaignId: z.string().optional().describe('ad set copies: put the copy in this campaign'),
+      targetAdSetId: z.string().optional().describe('ad copies: put the copy in this ad set'),
+      renameSuffix: z.string().optional().describe('default: Meta adds " - Copy" to the top object'), renamePrefix: z.string().optional(),
+      startTime: z.string().optional().describe('ISO 8601 start for copied ad sets'), endTime: z.string().optional().describe('ISO 8601 end for copied ad sets'),
+    },
+    outputSchema: { ok: z.boolean().optional(), level: z.string().optional(), copiedId: z.string().nullable().optional(), copies: z.array(z.any()).optional(), readBack: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/meta/object/duplicate', a); return ok(d.note, d); }));
   // ── LINKEDIN LEAD SYNC (2026-09-04): forms + leads read, notification webhooks managed. Standard Tier granted
   // to app 257800418 that day; the consent dialog was probed for the scope BEFORE a line was written. Needs
   // LINKEDIN_LEADS_SCOPE=1 on the server and a RECONNECT of the LinkedIn connection; both refusals say which.
@@ -28035,20 +28560,21 @@ function memoryNoteVerdict(text) {
   server.group('channel_admin');
   server.registerTool('list_alert_settings', {
     title: 'Alert settings and recent deliveries',
-    description: "Where this brand's ALERTS go and whether they are arriving: for each alert channel (Slack, Discord, a generic webhook) whether it is connected, which event groups it receives (renders, posts, approvals, watch, credits, leads — default all), its health (delivering / NOT DELIVERING / stopped because the channel was deleted or revoked — reconnect by pasting a new URL in the app), whether the webhook is signed, and the last deliveries with their HTTP status and any retry queued. Read-only, free.",
-    inputSchema: {},
-    outputSchema: { sinks: z.array(z.any()).optional(), groups: z.any().optional(), log: z.array(z.any()).optional(), note: z.string().optional() },
+    description: "Where this brand's ALERTS go and whether they are arriving: for each alert channel (Slack, Discord, a generic webhook) whether it is connected, which events it receives, its health (delivering / NOT DELIVERING / stopped because the channel was deleted or revoked: reconnect by pasting a new URL in the app), whether the webhook is signed, and the recent deliveries, one per delivery id with its attempts, last HTTP status, outcome and any retry queued (redeliver_webhook resends one). catalog:true adds every event name with its group and payload fields. Read-only, free.",
+    inputSchema: { catalog: z.boolean().optional().describe('include every event with its payload fields') },
+    outputSchema: { sinks: z.array(z.any()).optional(), groups: z.any().optional(), log: z.array(z.any()).optional(), deliveries: z.array(z.any()).optional(), catalog: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, wrap(async () => {
-    const d = await apiGet('/api/alerts');
-    const rows = (d.log || []).slice(0, 15).map((l) => `  • ${String(l.at).slice(0, 16).replace('T', ' ')} ${l.provider} ${l.event}: ${l.outcome}${l.status ? ` (HTTP ${l.status})` : ''}${l.reason ? ` — ${l.reason}` : ''}${l.retryAt ? ` · retry at ${String(l.retryAt).slice(0, 16).replace('T', ' ')}` : ''}`);
+  }, wrap(async ({ catalog } = {}) => {
+    const d = await apiGet('/api/alerts', catalog ? { catalog: '1' } : {});
+    const rows = (d.deliveries || []).slice(0, 15).map((l) => `  • ${String(l.lastAt).slice(0, 16).replace('T', ' ')} ${l.id} ${l.provider} ${l.event}: ${l.outcome}${l.lastStatus ? ` (HTTP ${l.lastStatus})` : ''}, ${l.attempts} attempt${l.attempts === 1 ? '' : 's'}${l.reason ? ` — ${l.reason}` : ''}${l.retryAt ? ` · retry at ${String(l.retryAt).slice(0, 16).replace('T', ' ')}` : ''}`);
     const sinks = (d.sinks || []).filter((x) => x.connected).map((x) => `  • ${x.provider}: ${x.state}${x.note ? ` — ${x.note}` : ''} · events: ${(x.events || []).join(', ') || 'none'}${x.provider === 'webhook' ? ` · ${x.signed ? 'signed' : 'UNSIGNED (rotate_webhook_signing_secret creates a secret)'}` : ''}`);
-    return ok(`${d.note || ''}\n${sinks.join('\n')}${rows.length ? `\nRecent deliveries:\n${rows.join('\n')}` : ''}`, d);
+    const cat = d.catalog ? `\nEvents:\n${d.catalog.events.map((e) => `  • ${e.name} (${e.group || 'always sent'}, ${e.how}): ${Object.keys(e.payload).join(', ')}`).join('\n')}` : '';
+    return ok(`${d.note || ''}\n${sinks.join('\n')}${rows.length ? `\nRecent deliveries:\n${rows.join('\n')}` : ''}${cat}`, d);
   }));
   server.registerTool('set_alert_events', {
     title: 'Choose which alerts a channel receives',
-    description: "Choose which event groups one alert channel receives. provider: slack, discord or webhook. events: any of renders (a render finished or failed), posts (a scheduled post published, partly published or failed), approvals (autopilot drafts waiting for review), watch (new competitor ads found by the competitor watch), credits (credits running low), leads (a new lead-form lead from Meta, LinkedIn or Snapchat), connections (an account connected to or disconnected from the brand: account.connected / account.disconnected), adrules (an automated Google Ads rule with a notify action matched), inbox (a new Facebook or Instagram comment or direct message: comment.received / message.received; opt-in, never on unless named) — or \"all\". An empty list keeps the channel connected and sends it nothing. Unknown names are refused by name. Read back from the stored setting. Free.",
-    inputSchema: { provider: alertSinkEnum.describe('alert channel to configure: slack, discord or webhook'), events: z.union([z.array(z.enum(['renders', 'posts', 'approvals', 'watch', 'credits', 'leads', 'connections', 'adrules', 'inbox', 'all'])), z.literal('all')]).describe('event groups, or "all"') },
+    description: "Choose which events one alert channel receives. provider: slack, discord or webhook. events: GROUPS (renders, posts, approvals, watch, credits, leads, connections, adrules, ads, whatsapp; opt-in, never on unless named: inbox, mentions, reviews, email, channel_posts), exact event names (post.failed, account.broken, comment.received) or a family (post.*), or \"all\". list_alert_settings catalog:true lists every event. An empty list keeps the channel connected and sends it nothing. Unknown names are refused by name. Read back from the stored setting. Free.",
+    inputSchema: { provider: alertSinkEnum.describe('alert channel to configure: slack, discord or webhook'), events: z.union([z.array(z.string()), z.literal('all')]).describe('groups, event names or family.* wildcards, or "all"') },
     outputSchema: { provider: z.string().optional(), events: z.array(z.string()).nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiPost('/api/alerts/events', a); return ok(d.note, d); }));
@@ -28068,6 +28594,14 @@ function memoryNoteVerdict(text) {
     // signing, so a receiver that was not updated starts rejecting every event — a hard-to-reverse change.
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   }, wrap(async () => { const d = await apiPost('/api/alerts/webhook-secret', {}); return ok(`${d.note}\nSigning secret: ${d.signingSecret}`, d); }));
+  // REDELIVERY (2026-11-15): resend one past delivery by id. Same event, same webhook-id and body, signed again now.
+  server.registerTool('redeliver_webhook', {
+    title: 'Resend one alert delivery',
+    description: "Resend ONE past alert delivery by its delivery id (deliveries in list_alert_settings): the same event and, for the webhook, the same webhook-id and body bytes, signed again with a fresh timestamp, carrying the next attempt number (hermoso-attempt header). It reaches the channel even if that event was since switched off. Deliveries can be resent for 7 days. Reports what the channel answered. Free.",
+    inputSchema: { deliveryId: z.string().describe('msg_… from list_alert_settings deliveries') },
+    outputSchema: { deliveryId: z.string().optional(), provider: z.string().optional(), event: z.string().optional(), attempt: z.number().optional(), delivered: z.boolean().optional(), status: z.number().optional(), outcome: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/alerts/redeliver', a); return ok(d.note, d); }));
   // ── CONNECTOR WRITES. Connecting needs a browser (OAuth consent) and is correctly NOT headless — but the other two
   // halves of connector management are, and were web-only: DISCONNECTING, and choosing WHICH accounts a brand may
   // act as. The second is a permission decision that fails closed: a Page/ad account not in the list is one nothing

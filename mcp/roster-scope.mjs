@@ -212,6 +212,7 @@ export const INSTAGRAM_LOGIN_TOOLS = new Set([
   'post_to_meta', 'list_meta_posts', 'list_instagram_media', 'list_meta_stories', 'get_meta_story', 'instagram_story_insights', 'instagram_insights', 'meta_post_insights',
   'list_meta_comments', 'reply_to_meta_comment', 'moderate_meta_comment', 'like_instagram',
   'list_meta_conversations', 'read_meta_conversation', 'reply_to_meta_message',
+  'meta_messenger_profile', 'instagram_mentions', // ice breakers + menu and @mention replies on graph.instagram.com (2026-11-15)
   'list_instagram_collab_invites', 'list_instagram_collab_media', 'respond_instagram_collab_invite', 'search_instagram_audio',
   'list_instagram_dm_automations', 'save_instagram_dm_automation', 'test_instagram_dm_automation', 'delete_instagram_dm_automation', // DM automation sends through dmaCtx, which takes the Login token when there is no Page (2026-10-04)
 ]);
