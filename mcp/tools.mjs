@@ -2473,6 +2473,20 @@ export const INBOX_SOURCES = [
   // (`parentComment`). normalizeInboxItem builds it from the read route's own answer; reply_to_inbox_item splits it.
   { source: 'tiktok',          provider: 'tiktok_ads',      read: '/api/tiktok-account/comments',  reply: '/api/tiktok-account/comment-reply', kind: 'comment', label: 'TikTok comment',  needs: { arg: 'tiktokVideoId', param: 'videoId', from: 'list_tiktok_videos' } },
   { source: 'linkedin',        provider: 'linkedin',        read: '/api/linkedin/comments',        reply: '/api/linkedin/comment',             kind: 'comment', label: 'LinkedIn comment', needs: { arg: 'linkedinPostUrn', param: 'postUrn', from: 'list_published_posts (the urn post_to_linkedin_page returned)' } },
+  // SLACK, DISCORD AND OUTLOOK EMAIL, added 2026-11-16 (the owner, on the homepage Inbox card: "why is Slack missing here?").
+  // Each had working readers and senders (read_slack_dm / send_slack_dm, read_discord_channel / post_to_discord /
+  // send_discord_dm, list_email_replies / send_email) and none was a source here. Rules: lib/slack-discord-inbox.mjs.
+  //   slack_dm   like LINE: lists every DM people sent the Hermoso app with no argument (it needs the app's im:read
+  //              permission; an older install is told to add Hermoso again), and folds one conversation when given its id.
+  //   discord    account-level like the mention rows: messages that mention the Hermoso bot or reply to one of its posts,
+  //              in the server's busiest channels. The native id is `<channel>/<message>`; a reply is posted in that channel.
+  //   discord_dm per MEMBER, because Discord gives a bot no list of its DMs: `discordMember` names one (a member id).
+  //   email      the replies noticed on the brand's Outlook mailboxes (bounces are not something to answer); a reply goes
+  //              out in the same thread from the same mailbox.
+  { source: 'slack_dm',        provider: 'slack',           read: '/api/slack/inbox/thread',       reply: '/api/slack/inbox/reply',           kind: 'dm',      label: 'Slack direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the slack_dm item id after "slack_dm:")' }, readAll: '/api/slack/inbox' },
+  { source: 'discord',         provider: 'discord',         read: '/api/discord/inbox',            reply: '/api/discord/inbox/reply',         kind: 'mention', label: 'Discord mention' },
+  { source: 'discord_dm',      provider: 'discord',         read: '/api/discord/history',          reply: '/api/discord/dm',                  kind: 'dm',      label: 'Discord direct message', dmReplyId: 'replyTo', needs: { arg: 'discordMember', param: 'member', from: 'search_discord_members' } },
+  { source: 'email',           provider: 'outlook',         read: '/api/email/replies',            reply: '/api/email/send',                  kind: 'email',   label: 'Email reply', query: { kind: 'reply' } },
 ];
 
 export const INBOX_SOURCE_NAMES = INBOX_SOURCES.map((s) => s.source);
@@ -2650,6 +2664,10 @@ export function normalizeInboxItem(source, row = {}) {
     // agent answers with the context in hand (the Cloud API keeps no history, so this is the only place it exists).
     // LINE and WeChat (2026-11-15): the same, plus how many replies WeChat still allows and a link to any photo or file.
     ...(source === 'line' || source === 'wechat' ? { windowOpen: row.windowOpen ?? null, windowClosesAt: row.windowClosesAt || null, ...(typeof row.windowNote === 'string' ? { windowNote: row.windowNote } : {}), ...(row.repliesLeft != null ? { repliesLeft: row.repliesLeft } : {}), ...(Array.isArray(row.recent) ? { recent: row.recent } : {}), ...(typeof row.mediaUrl === 'string' && row.mediaUrl ? { mediaUrl: row.mediaUrl, mediaKind: String(row.mediaKind || 'file') } : {}) } : {}),
+    // SLACK, DISCORD AND EMAIL (2026-11-16): where it was said, and the last few messages of a Slack DM.
+    ...(source === 'slack_dm' ? { ...(typeof row.workspace === 'string' && row.workspace ? { workspace: row.workspace } : {}), ...(Array.isArray(row.recent) ? { recent: row.recent } : {}) } : {}),
+    ...(source === 'discord' ? { ...(typeof row.channelName === 'string' && row.channelName ? { channelName: row.channelName } : {}), ...(typeof row.server === 'string' && row.server ? { server: row.server } : {}), ...(row.contentHidden === true ? { contentHidden: true } : {}) } : {}),
+    ...(source === 'email' ? { ...(typeof row.subject === 'string' ? { subject: row.subject } : {}), ...(row.automatic === true ? { automatic: true } : {}), ...(row.askedToStop === true ? { askedToStop: true } : {}) } : {}),
     ...(source === 'whatsapp' ? { windowOpen: row.windowOpen ?? null, windowClosesAt: row.windowClosesAt || null, ...(typeof row.windowNote === 'string' ? { windowNote: row.windowNote } : {}), ...(row.phoneNumberId ? { phoneNumberId: String(row.phoneNumberId) } : {}), ...(Array.isArray(row.recent) ? { recent: row.recent } : {}) } : {}),
   };
 }
@@ -6339,11 +6357,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const W = p === 'slack' ? 'workspace' : 'server'; const A = p === 'slack' ? 'slackWorkspace' : 'discordServer'; const L = p === 'slack' ? 'Slack' : 'Discord';
     return [{
       title: `Read a ${L} channel`,
-      description: `Read a ${L} channel's recent messages, newest first, for context — what ${p === 'slack' ? 'the team is discussing' : 'members are saying'} before you write${p === 'slack' ? '. A public channel is joined first if needed; a private one needs /invite @Hermoso' : '. Other people’s text needs Discord’s Message Content intent; a message Discord withholds is marked contentHidden'}. Free.`,
-      inputSchema: { ...MANAGE_BRAND, [A]: z.string().optional(), channel: z.string().optional().describe('channel id or #name; unset = the default channel'), limit: z.number().optional().describe(`how many, 1–${p === 'slack' ? 200 : 100} (default 20)`), ...(p === 'slack' ? { oldest: z.string().optional().describe('only messages after this ts') } : { before: z.string().optional().describe('page back from this message id') }) },
+      description: `Read a ${L} channel's recent messages, newest first, for context — what ${p === 'slack' ? 'the team is discussing' : 'members are saying'} before you write${p === 'slack' ? '. A public channel is joined first if needed; a private one needs /invite @Hermoso' : '. Other people’s text needs Discord’s Message Content intent; a message Discord withholds is marked contentHidden. member reads the bot’s direct messages with that person instead (answer with send_discord_dm); mentions:true reads what people said TO the bot (messages that mention it or reply to its posts) in the busiest channels'}. Free.`,
+      inputSchema: { ...MANAGE_BRAND, [A]: z.string().optional(), channel: z.string().optional().describe('channel id or #name; unset = the default channel'), limit: z.number().optional().describe(`how many, 1–${p === 'slack' ? 200 : 100} (default 20)`), ...(p === 'slack' ? { oldest: z.string().optional().describe('only messages after this ts') } : { before: z.string().optional().describe('page back from this message id'), member: z.string().optional().describe('a member id (search_discord_members): read the bot’s DM with them'), mentions: z.boolean().optional().describe('true = only what people said to the bot') }) },
       outputSchema: { messages: z.array(z.any()).optional(), count: z.number().optional(), channel: z.string().optional(), channelName: z.string().nullable().optional(), note: z.string().optional() },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    }, wrap(async (a) => { const { brand: _b, ...q } = a; const d = await apiGet(`/api/${p}/history`, queryBrand(a, Object.fromEntries(Object.entries(q).filter(([, v]) => v != null && v !== '')))); return ok(chatHistoryText(d), d); })];
+    }, wrap(async (a) => {
+      const { brand: _b, ...q } = a;
+      const d = await apiGet(`/api/${p}/history`, queryBrand(a, Object.fromEntries(Object.entries(q).filter(([, v]) => v != null && v !== '' && v !== false))));
+      // Mentions span channels, so each line says where (2026-11-16); a channel or a DM reads as before.
+      if (p === 'discord' && a.mentions) return ok(`${d.count} message(s) said to the Hermoso bot. ${d.scope || ''}\n${(d.messages || []).map((m) => `• ${m.at} ${m.author} in #${m.channelName || m.channel}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 400)}${m.answered ? ' (answered)' : ''} [${m.id}]`).join('\n') || '(none)'}${d.note ? `\n${d.note}` : ''}`, d);
+      return ok(chatHistoryText(d), d);
+    })];
   };
   // Annotations are spelled LITERALLY on each registration: lib/studio-approvals.mjs parses them from this source.
   const CHAT_TOOLS = { slack: { list: chatList('slack'), set: chatSet('slack'), read: chatRead('slack') }, discord: { list: chatList('discord'), set: chatSet('discord'), read: chatRead('discord') } };
@@ -6374,12 +6398,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a = {}) => { const d = await apiPost('/api/slack/dm', bodyBrand(a, { slackWorkspace: a.slackWorkspace, member: a.member, text: a.text })); return ok(d.note, d); }));
   server.registerTool('read_slack_dm', {
     title: 'Read a Slack direct message thread',
-    description: 'Read the direct messages between the Hermoso app and ONE workspace member, newest first: what they answered after send_slack_dm, or what they wrote to the app. It reads only the app’s own DM with that person, never anyone else’s conversations. No DM yet is an empty list, said in words.' + SLACK_DM_NOTE,
-    inputSchema: { ...MANAGE_BRAND, slackWorkspace: z.string().optional().describe('which workspace (id or name) when there are several'), member: z.string().describe('member id (U…), @name or full name'), limit: z.number().optional().describe('how many, 1–200 (default 20)'), oldest: z.string().optional().describe('only messages after this ts') },
-    outputSchema: { workspace: z.string().optional(), member: z.any().optional(), conversation: z.string().nullable().optional(), messages: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
+    description: 'Read the direct messages between the Hermoso app and ONE workspace member, newest first: what they answered after send_slack_dm, or what they wrote to the app. Leave member out to list EVERY direct message people sent the app, one line per person with whether it was answered (this needs the app’s im:read permission; an install made before 2026-11-16 is told to add Hermoso again). It reads only the app’s own DMs, never anyone else’s conversations. No DM yet is an empty list, said in words.' + SLACK_DM_NOTE,
+    inputSchema: { ...MANAGE_BRAND, slackWorkspace: z.string().optional().describe('which workspace (id or name) when there are several'), member: z.string().optional().describe('member id (U…), @name or full name; leave out to list every DM'), limit: z.number().optional().describe('how many, 1–200 (default 20)'), oldest: z.string().optional().describe('only messages after this ts') },
+    outputSchema: { workspace: z.string().optional(), member: z.any().optional(), conversation: z.string().nullable().optional(), messages: z.array(z.any()).optional(), conversations: z.array(z.any()).optional(), count: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => {
     const d = await apiGet('/api/slack/dm-history', queryBrand(a, Object.fromEntries(Object.entries({ slackWorkspace: a.slackWorkspace, member: a.member, limit: a.limit, oldest: a.oldest }).filter(([, v]) => v != null && v !== ''))));
+    if (Array.isArray(d.conversations)) return ok(`${d.count} Slack direct message conversation(s) with the Hermoso app:\n${d.conversations.map((c) => `${c.answered ? '✓' : '•'} ${c.who}${c.workspace ? ` (${c.workspace})` : ''} ${c.at}: ${JSON.stringify(String(c.text).slice(0, 200))} [${c.id}]`).join('\n') || '(none)'}${d.note ? `\n${d.note}` : ''}`, d);
     return ok(`${d.note}${(d.messages || []).length ? `\n${d.messages.map((m) => `• ${m.at} ${m.fromHermoso ? 'Hermoso' : (d.member?.name || m.user || '?')}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')}` : ''}`, d);
   }));
   server.registerTool('list_discord_channels', { ...CHAT_TOOLS.discord.list[0], annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, CHAT_TOOLS.discord.list[1]);
@@ -6429,7 +6454,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const { brand: _b, ...rest } = a; const d = await apiPost('/api/discord/threads/update', bodyBrand(a, rest)); return ok(d.note, d); }));
   server.registerTool('send_discord_dm', {
     title: 'Send a Discord direct message',
-    description: "Send ONE member of the brand's Discord server a direct message from the Hermoso bot: text (up to 2000 characters), embeds, images or a video. userId is the member id from search_discord_members. DISCORD'S OWN RULES: the person must share a server with the bot AND allow direct messages from that server's members, otherwise Discord refuses and its refusal is passed on as it is; their reply cannot be read; and Discord blocks bots that open many DMs quickly, so this is for one person who is expecting it, never a broadcast. Only a member of a server this brand added the bot to can be messaged. Free.",
+    description: "Send ONE member of the brand's Discord server a direct message from the Hermoso bot: text (up to 2000 characters), embeds, images or a video. userId is the member id from search_discord_members. DISCORD'S OWN RULES: the person must share a server with the bot AND allow direct messages from that server's members, otherwise Discord refuses and its refusal is passed on as it is; their reply is read with read_discord_channel (member) or list_inbox (discordMember); and Discord blocks bots that open many DMs quickly, so this is for one person who is expecting it, never a broadcast. Only a member of a server this brand added the bot to can be messaged. Free.",
     inputSchema: { ...MANAGE_BRAND, ...DISCORD_SERVER_ARG, userId: z.string().describe('the member id (search_discord_members)'), text: z.string().optional().describe('the message, up to 2000 characters'), embeds: z.array(z.record(z.any())).optional().describe('up to 10 embeds, the same shape post_to_discord takes'), imageUrl: z.string().optional(), imageUrls: z.array(z.string()).optional(), videoUrl: z.string().optional() },
     outputSchema: { ok: z.boolean().optional(), sent: z.boolean().optional(), userId: z.string().optional(), to: z.string().optional(), messageId: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -6687,14 +6712,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "EVERYTHING PEOPLE SAID TO THIS BRAND, across every connected channel, in one list: Facebook and "
       + "Instagram comments, Threads replies and mentions, YouTube comments, TikTok comments, LinkedIn Page comments, Google Business reviews, "
       + "Bluesky replies and mentions, and X mentions — plus DIRECT MESSAGES on Meta (Messenger and Instagram "
-      + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp and LINE. Support tickets too: the open conversations in the brand's Intercom inbox. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
+      + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp, LINE, Slack and Discord. Discord messages that mention the Hermoso bot or reply to it, and replies to the brand's Outlook email. Support tickets too: the open conversations in the brand's Intercom inbox. Use this for 'what do I need to reply to', 'any new comments', 'any new DMs', 'how are people responding'. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
       + "skipped silently; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
       + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
       + "Messenger and Instagram DMs need no argument; each has a messageKind (text, story_mention, story_reply, share, "
       + "image, video...), a spoken summary, and unavailable:true when Meta withholds the content. Bluesky and X DMs need "
       + "conversationId (list_bluesky_convos / list_x_dms). WhatsApp needs no argument: Hermoso keeps the last 48 hours of each WhatsApp conversation "
-      + "(WhatsApp has no message history to read back), and each item carries windowOpen, its last few messages (recent) and whether a free reply is still allowed. LINE needs no argument either (kept 7 days). TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
+      + "(WhatsApp has no message history to read back), and each item carries windowOpen, its last few messages (recent) and whether a free reply is still allowed. LINE needs no argument either (kept 7 days), nor do Slack DMs (every direct message people sent the Hermoso app) or Discord mentions (the server's busiest channels). Discord DMs are read one member at a time, because Discord gives a bot no list of its DMs: pass discordMember (the member's Discord id). TikTok and LinkedIn comments are read per post: pass tiktokVideoId / linkedinPostUrn. FREE ON EVERY CHANNEL EXCEPT X, which bills per API call — X mentions and X DMs cost credits per item returned, "
       + "and every other source only re-reads what the per-channel tools already read.",
     inputSchema: {
       // A HELD connector's source is still accepted (our team can connect it) but is not ADVERTISED here: the docs reference
@@ -6704,6 +6729,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       videoId: z.string().optional().describe('Restrict YouTube to one video.'),
       tiktokVideoId: z.string().optional().describe('Include the comments on this TikTok post (its id, from list_tiktok_videos). TikTok reads comments per post.'),
       linkedinPostUrn: z.string().optional().describe('Include the comments on this LinkedIn Page post (its urn, as post_to_linkedin_page returned). LinkedIn reads comments per post.'),
+      discordMember: z.string().optional().describe('Include the Hermoso bot\'s Discord DM with this member (their Discord member id).'),
       // DECLARED BECAUSE A SOURCE ASKS FOR IT. Before 2026-08-25 `meta_dm` declared `needs.arg: conversationId`
       // and this schema did not carry it, so the note telling a caller to pass it named an argument the tool
       // refused — and the handler quietly read `postId` for anything that was not `videoId`. The check now
@@ -6719,7 +6745,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       notes: z.array(z.string()).describe('sources that could not be read, and why — never silently dropped'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-  }, wrap(async ({ sources, postId, videoId, tiktokVideoId, linkedinPostUrn, conversationId, pageId, limit, unansweredOnly }) => {
+  }, wrap(async ({ sources, postId, videoId, tiktokVideoId, linkedinPostUrn, discordMember, conversationId, pageId, limit, unansweredOnly }) => {
     const want = Array.isArray(sources) && sources.length
       ? sources.map((x) => String(x).trim().toLowerCase())
       : INBOX_SOURCE_NAMES;
@@ -6731,7 +6757,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // argument that was not `videoId` collapsed onto `postId` — which meant a source declaring a THIRD argument
     // silently read the wrong caller's id and could never be satisfied by the note it printed. A map cannot do
     // that: an arg this tool does not accept is simply absent, and absent is what produces the helpful note.
-    const argValues = { postId, videoId, tiktokVideoId, linkedinPostUrn, conversationId };
+    const argValues = { postId, videoId, tiktokVideoId, linkedinPostUrn, discordMember, conversationId };
     for (const src of INBOX_SOURCES.filter((x) => want.includes(x.source))) {
       const q = src.source === 'tiktok' ? { maxCount: per } : { limit: per }; // TikTok's page size is max_count
       if (src.needs) {
@@ -6795,7 +6821,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Answer an inbox item BY ITS COMPOSITE ID — the `id` list_inbox returned, e.g. 'facebook:123_456' "
       + "or 'google_business:accounts/1/locations/2/reviews/3'. Routes to the right channel for you; you do not need "
       + "to know which reply tool a platform uses. The reply is posted as the brand — PUBLIC on every comment, reply, "
-      + "mention and review, and PRIVATE on the DM sources, WhatsApp, LINE and Intercom (it goes to the customer from the brand's support inbox) — so show the user the "
+      + "mention and review (a Discord mention is answered with a reply in its channel), and PRIVATE on the DM sources (Slack and Discord DMs too), WhatsApp, LINE, Intercom (it goes to the customer from the brand's support inbox) and email (it goes in the same thread from the same Outlook mailbox) — so show the user the "
       + "exact wording and get their go-ahead first either way. X is the one exception and says so: a reply there is a new post, "
       + "so it goes through post_to_x with replyTo. A WhatsApp reply goes out only while the 24-hour window is open (windowOpen on the item); "
       + "after that WhatsApp accepts only an approved template, so the reply is refused for free and send_whatsapp_message with `template` is the way. A LINE reply is free inside a minute of their message and uses the account's LINE quota after it.",
@@ -6847,6 +6873,16 @@ function buildTools(rawServer, opts = {}, sink = null) {
     else if (t.source === 'whatsapp') payload.id = t.nativeId;
     // LINE and WeChat: the native id IS the conversation (`<account>|<person>`); the route checks the rules and sends.
     else if (t.source === 'line' || t.source === 'wechat') payload.id = t.nativeId;
+    // Slack DMs and Discord mentions: the native id IS the conversation (`<workspace>|<member>`, `<channel>/<message>`), and
+    // the route proves it is this brand's before it sends. A Discord DM's is `<server>|<member>`, the two send_discord_dm takes.
+    else if (t.source === 'slack_dm' || t.source === 'discord') payload.id = t.nativeId;
+    else if (t.source === 'discord_dm') {
+      const [g, u] = String(t.nativeId).split('|');
+      if (!g || !u) return { content: [{ type: 'text', text: `"${String(id).slice(0, 80)}" is missing its server or member half. Re-read list_inbox for a current id.` }], isError: true };
+      payload.discordServer = g; payload.userId = u;
+    }
+    // Email: the native id is the reply list_email_replies noticed; send_email answers it in the same thread.
+    else if (t.source === 'email') { payload.replyTo = t.nativeId; payload.body = body; }
     // Intercom: the id rides in the PATH, and the route sends to the customer only with confirm:true (this tool's own
     // contract is that the user already approved the wording). Anything but a confirmed read-back is said as such.
     else if (t.source === 'intercom') payload.confirm = true;
@@ -6863,7 +6899,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // A DM IS PRIVATE. Saying "replied publicly as the brand" about a direct message is wrong in the one
     // direction that matters — it invites a caller to be more guarded than it needs to be about a private reply,
     // and, worse, teaches that the same sentence covers both.
-    const note = (t.source.endsWith('_dm') || t.source === 'intercom' || t.source === 'whatsapp' || t.source === 'line' || t.source === 'wechat') ? `Sent a private reply to the ${t.label} as the brand.` : `Replied to the ${t.label} as the brand.`;
+    const note = (t.source.endsWith('_dm') || t.source === 'intercom' || t.source === 'whatsapp' || t.source === 'line' || t.source === 'wechat' || t.source === 'email') ? `Sent a private reply to the ${t.label} as the brand.` : `Replied to the ${t.label} as the brand.`;
+    if (r?.idempotentReplay) return ok(r.note, { ok: true, source: t.source, id: r?.id || r?.messageId || undefined, note: r.note }); // that same reply had already gone out
     return ok(note, { ok: true, source: t.source, id: r?.id || r?.messageId || r?.partId || r?.name || undefined, note });
   }));
 
