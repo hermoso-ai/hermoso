@@ -12427,7 +12427,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/shopify/discounts', a);
-    const rows = (d.codes || []).map((x) => `• ${x.code || x.title} · ${x.status}${x.summary ? ` · ${x.summary}` : ''}${x.usageCount != null ? ` · used ${x.usageCount}${x.usageLimit ? `/${x.usageLimit}` : ''}` : ''}${x.endsAt ? ` · ends ${x.endsAt}` : ''} (${x.id})`);
+    // `line` is the server's (lib/shopify-discounts.mjs shopifyDiscountLine): every discount kind named, never a blank row,
+    // times in the store's own zone. The fallback only serves a server older than that field.
+    const rows = (d.codes || []).map((x) => x.line || `• ${x.code || x.title || `a ${x.kind || 'discount'} with no code`} · ${x.status || 'status not reported'}${x.summary ? ` · ${x.summary}` : ''}${x.usageCount != null ? ` · used ${x.usageCount}${x.usageLimit ? `/${x.usageLimit}` : ''}` : ''}${x.endsAt ? ` · ends ${x.endsAt}` : ''} (${x.id})`);
     return ok([d.note, ...rows].join('\n'), d);
   }));
   server.registerTool('disable_shopify_discount_code', {
@@ -12450,7 +12452,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'List Shopify orders',
     description: "The merchant's Shopify orders, newest first: order number, date, total, payment and fulfilment status, discount codes used, where the buyer came from (Shopify's last visit before the order: its source and UTM tags) and the buyer's name and email. Default the last 30 days; pass days OR from/to (Shopify lets apps read the last 60 days of orders, and an older start is refused with that rule). Filter by status, financialStatus or discountCode. Pass id for ONE order in full: its items, first and last visit, landing page and days to convert. If Shopify has not approved access to customer names and emails for this app yet, the reply says so: a missing name or email is then not an empty one. Read-only, free.",
     inputSchema: {
-      id: z.string().optional().describe('one order in full: gid://shopify/Order/… or its number, from a previous list'),
+      id: z.string().optional().describe('one order in full: its order number as the store shows it (#1001 or 1001), or the gid://shopify/Order/… id from a previous list'),
       days: z.number().optional().describe('the last N days (use this OR from/to)'),
       from: z.string().optional().describe('start date, e.g. 2026-10-01 (default 30 days ago)'),
       to: z.string().optional().describe('end date, e.g. 2026-10-31 (default now)'),
