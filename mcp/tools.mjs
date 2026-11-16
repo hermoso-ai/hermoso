@@ -3634,6 +3634,11 @@ export const WITHHELD_FROM_DIRECTORY = new Set([
   // says "a fresh image, carousel or video for each" and run_post_refill with dryRun:false renders them — so it is a
   // generation lane that lives in `channels`, and it was listed on the cage the 2026-09-25 resubmission went out on.
   'get_post_refill', 'set_post_refill', 'run_post_refill', 'plan_week',
+  // 2026-11-16 (Claude directory re-audit): three ON_DEMAND tools were not in `create`, so every cage still REACHED them
+  // through call_tool, and the focused cages (directory-ads, directory-social) listed them outright. tiktok_ideas'
+  // `pick` hands back the arguments for a render call; save_location / delete_location keep a place to stage
+  // renders in. All three exist for generation, so they leave the cage.
+  'tiktok_ideas', 'save_location', 'delete_location',
 ]);
 // TWO DIRECTORY MODES (2026-09-02, after the directory turned out to list Tofu Ads — an AI ad-image generator
 // (RETIRED 2026-09-25: `directory-full` now parses to the cage — see parseToolScope. The 'full' mode below is kept only
@@ -3743,6 +3748,14 @@ const DIRECTORY_DESC_REWRITES = [
   [/ from a render \(paused\)/g, ' from an image (paused)'],
   [/Upload a render to Snapchat/g, 'Upload a file to Snapchat'],
   [/^List render jobs$/g, 'List background jobs'],
+  // 2026-11-16: the three create-group readers the focused cages carry (APP_DIRECTORY_CREATE_ALLOW) had no rewrite yet
+  [/^Get render job$/g, 'Get background job'],
+  [/^Poll a render job by id\.[\s\S]*$/g, 'Read a background job by id (a publish, an import or another long-running task). Returns status (queued|running|done|error), progress, and the result when done. An id that does not exist on this account answers status "not_found", which is final.'],
+  [/^the job id: starts with job_, from a render tool's jobId[\s\S]*$/g, 'the job id: starts with job_'],
+  [/^Resolve a generated asset reference \(a \/generated\/… path or any URL\)/g, 'Resolve a Hermoso-hosted file reference (a hosted path or any URL)'],
+  [/^the asset url or \/generated\/ path$/g, 'the file URL or Hermoso-hosted path'],
+  [/every Studio image\/video and upload, newest first/g, 'every image, video and file saved in the workspace, newest first'],
+  [/, pixel size, model and age\./g, ', pixel size and age.'],
 ];
 export const directoryDescription = (text) => {
   let t = String(text ?? '');
@@ -3852,7 +3865,9 @@ const APP_ADS_ALSO = /_post_ad_authorization$|^tiktok_spark_recommendations$/;
 // The Claude directory has no create app, so on the cage the research tools (ad spy, organic search) ride in Ads
 // Manager, and the read-only post-performance tools written in `create` stay reachable in Social (they generate
 // nothing; DIRECTORY_BANNED_GROUPS would otherwise hold them by group alone).
-export const APP_DIRECTORY_CREATE_ALLOW = new Set([...APP_SOCIAL_FROM_CREATE].filter((n) => n !== 'plan_week').concat(['list_library', 'fetch_asset', 'get_job', 'list_skills', 'get_skill']));
+// list_skills / get_skill are NOT allowed back in (2026-11-16): get_skill serves SKILL.md workflow instructions for the
+// model to follow, which the directory policy (2F) bars, and the bundled skills are generation workflows anyway.
+export const APP_DIRECTORY_CREATE_ALLOW = new Set([...APP_SOCIAL_FROM_CREATE].filter((n) => n !== 'plan_week').concat(['list_library', 'fetch_asset', 'get_job']));
 // ON THE CHATGPT APPS A WIDGET-HOST NAME CAN BE RENAMED AGAIN (APP_WIDGET_RENAMES; empty today). The one it held,
 // remake_video_for_brand -> plan_video_remake (2026-11-06 scan), became the widget-host name on every ChatGPT roster after
 // the 2026-11-14 scan flagged the all-in-one app's name too (WIDGET_HOST_RENAMES, WIDGET_HOST_DESCRIPTIONS).
