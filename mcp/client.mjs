@@ -204,6 +204,7 @@ async function unwrap(res, { read = false } = {}) {
 let _reportedThisProcess = 0;
 export function reportToolError(tool, err) {
   try {
+    if (signedOut()) return; // no credential: the server refuses an anonymous report, so sending one records nothing (see signedOutSilent below)
     if (_reportedThisProcess++ > 200) return; // a client stuck in a retry loop must not become the traffic
     const e = err && typeof err === 'object' ? err : {};
     fetch(`${API_BASE}/api/errors/report`, {
@@ -227,6 +228,7 @@ export function reportToolError(tool, err) {
  */
 export function reportDeadEnd(kind, tool, detail, inputs) {
   try {
+    if (signedOut()) return; // as reportToolError: an anonymous report is refused, so it is not sent
     if (_reportedThisProcess++ > 200) return;
     fetch(`${API_BASE}/api/errors/report`, {
       method: 'POST',
@@ -465,6 +467,12 @@ export function forgetWorkspaceScope() {
 // account and reconnects their client still does not see the tools, and on the hosted twin a module-level cache
 // would be a cross-tenant leak besides.
 export async function connectedProviders() {
+  // A PROCESS WITH NO CREDENTIAL DOES NOT ASK (2026-11-17). "No bearer at all" was already a failed read by the contract
+  // above; it was just learned the long way, as a 401 from the hosted API on every start of a keyless stdio server, CLI
+  // or offline check: about a thousand "Sign in to continue" rows a week on the error board for
+  // GET /api/connectors/providers. Same answer, no request. The same rule stops the two other calls such a process made
+  // that could only be refused: an error report (above) and an idempotency claim (claimToolKey in tools.mjs).
+  if (signedOut()) return { connected: new Set(), readOk: false };
   try {
     const r = await apiGet('/api/connectors/providers');
     const list = Array.isArray(r?.providers) ? r.providers : null;
