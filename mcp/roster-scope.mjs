@@ -291,7 +291,7 @@ export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 
 // that already holds a Gmail or Outlook connection, and for the gates' team pass. They are tied to NO single provider
 // in TOOL_PROVIDER_RULES on purpose: one tool serves both mailbox kinds, and the lead list is useful before a mailbox
 // is connected.
-export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts']);
+export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts']);
 // THE WECHAT TOOLS SHIP DARK WITH THE WECHAT CONNECTOR (2026-11-15, owner: "okay I guess we can skip wechat for now").
 // CONNECTOR_GATES.wechat is shut (WECHAT_ENABLED unset) because WeChat refuses every call from an address that is not on
 // the Service Account's IP whitelist and this deployment sends from a shared, changing pool. Three tools for a channel

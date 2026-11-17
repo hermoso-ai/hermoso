@@ -240,7 +240,7 @@ export const KEY_CONNECTORS = {
   stripe: { label: 'Stripe', route: 'stripe', fields: { apiKey: 'rs' }, how: 'a secret (sk_) or restricted (rk_) key from Stripe ▸ Developers ▸ API keys' },
   intercom: { label: 'Intercom', route: 'intercom', fields: { accessToken: 'rs', region: '' }, how: 'an access token from Intercom ▸ Settings ▸ Integrations ▸ Developer Hub ▸ your app ▸ Configure ▸ Authentication; region us, eu or au (found automatically when omitted)' },
   mailchimp: { label: 'Mailchimp', route: 'mailchimp', fields: { apiKey: 'rs', server: '' }, how: 'an API key: Mailchimp ▸ Profile ▸ Extras ▸ API keys ▸ Create A Key. Leave server out; pass it only when Hermoso answers that the key has no -us8 style ending' },
-  smtp: { label: 'Any mailbox', route: 'smtp', fields: { email: 'r', password: 'rs', preset: '', username: '', smtpHost: '', smtpPort: '', smtpSecurity: '', imapHost: '', imapPort: '', imapSecurity: '', fromName: '' }, how: 'the mailbox address and its password or APP password, and preset: google (Google Workspace or Gmail, app password from Google Account ▸ Security ▸ App passwords), zoho, zoho_pro, fastmail, yahoo, icloud, or other with smtpHost/smtpPort and imapHost/imapPort (security tls or starttls). Hermoso signs in to both before saving and sends nothing. Outlook and Microsoft 365 connect with the outlook connector instead (a Microsoft sign-in)' },
+  smtp: { label: 'Any mailbox', route: 'smtp', fields: { email: 'r', password: 'rs', preset: '', username: '', smtpHost: '', smtpPort: '', smtpSecurity: '', imapHost: '', imapPort: '', imapSecurity: '', fromName: '' }, how: 'the mailbox address and its password or APP password; the provider and servers are worked out from the address (detect_mailbox_settings shows what will be used), or pass preset: google (Google Workspace or Gmail, app password from Google Account ▸ Security ▸ App passwords), zoho, zoho_pro, fastmail, yahoo, icloud, or other with smtpHost/smtpPort and imapHost/imapPort (security tls or starttls). Hermoso signs in to both before saving and sends nothing. Outlook and Microsoft 365 connect with the outlook connector instead (a Microsoft sign-in)' },
   klaviyo: { label: 'Klaviyo', route: 'klaviyo', fields: { apiKey: 'rs' }, how: 'a private key (pk_…): Klaviyo ▸ Settings ▸ API keys ▸ Create Private API Key ▸ Custom Key' },
   vercel: { label: 'Vercel', route: 'vercel', fields: { token: 'rs', team: '' }, how: 'an access token from vercel.com/account/tokens (Settings ▸ Tokens ▸ Create); team is the team id (team_…) or slug when the token was made for a team' },
   openai_ads: { label: 'ChatGPT Ads', route: 'openai-ads', fields: { apiKey: 'rs' }, how: 'an Advertiser API key from ChatGPT Ads Manager ▸ Settings ▸ General ▸ API Keys ▸ Create New Key' },
@@ -16783,13 +16783,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('send_email', {
     title: 'Send an email from the brand’s own mailbox',
     // Gmail is held (CONNECTOR_GATES.gmail, GMAIL_SEND_VERIFIED): this names Outlook only; restore the Gmail wording when that gate opens
-    description: 'Send ONE email from the brand\'s own connected mailbox (Outlook / Microsoft 365) to a person: to, optional cc and bcc, subject, body. The body is plain text or simple markdown (paragraphs, **bold**, links, "- " bullets) and is sent as written: no tracking pixel, no rewritten links. attachments are links (use upload_file for a file on a computer), 25 MB in total. replyTo continues a thread Hermoso started: pass the id of an email it sent, or of a reply from list_email_replies, and leave subject out. mailbox says which connected mailbox sends when there are several. An address marked unsubscribed, bounced or do not contact on the lead list is refused. Returns the ids the mailbox stored. This is one-to-one email, not a newsletter (Klaviyo and Mailchimp are for those). It reaches a real person, so confirm the words first. Free.',
+    description: 'Send ONE email from the brand\'s own connected mailbox (Outlook / Microsoft 365) to a person: to, optional cc and bcc, subject, body. The body is plain text or simple markdown (paragraphs, **bold**, links, "- " bullets) and is sent as written: no tracking pixel, no rewritten links. Pass html instead of body for rich text (bold, italic, links, lists): it is cut down to those and sent with a plain-text copy. attachments are links (use upload_file for a file on a computer), 25 MB in total. replyTo continues a thread Hermoso started: pass the id of an email it sent, or of a reply from list_email_replies, and leave subject out. mailbox says which connected mailbox sends when there are several. An address marked unsubscribed, bounced or do not contact on the lead list is refused. Returns the ids the mailbox stored. This is one-to-one email, not a newsletter (Klaviyo and Mailchimp are for those). It reaches a real person, so confirm the words first. Free.',
     inputSchema: {
       to: z.union([z.string(), z.array(z.string())]).optional().describe('one address or several: "ann@x.com", "Ann Lee <ann@x.com>"; optional only with replyTo'),
       cc: z.array(z.string()).optional().describe('addresses copied on the email'),
       bcc: z.array(z.string()).optional().describe('addresses copied without the others seeing them'),
       subject: z.string().optional().describe('the subject line; leave out when replyTo is given'),
-      body: z.string().describe('plain text or simple markdown'),
+      body: z.string().optional().describe('plain text or simple markdown; or pass html instead'),
+      html: z.string().optional().describe('the body as rich text: p, br, b, i, a (http, https, mailto), ul, ol, li; anything else is removed'),
       format: z.enum(['markdown', 'text']).optional().describe('markdown (default) or text, which is sent exactly as written'),
       mailbox: z.string().optional().describe('the sending address or mailbox id from list_email_mailboxes; needed when several are connected'),
       fromName: z.string().optional().describe('a sender name; an Outlook / Microsoft 365 mailbox always sends under its own account name'), // Gmail is held (CONNECTOR_GATES.gmail, GMAIL_SEND_VERIFIED): this names Outlook only; restore the Gmail wording when that gate opens
@@ -16800,11 +16801,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/email/send', a); return ok(d.agentNote ? `${d.note} ${d.agentNote}` : d.note, d); })); // the ids and the replyTo hint ride in agentNote (server.js emSentAgentNote)
   server.registerTool('add_email_leads', {
     title: 'Add leads to the email list',
-    description: 'Add people to the brand\'s lead list for email: leads [{ email, name or first_name / last_name, company, any other column }], or spreadsheetId (+ range) to read them from a Google Sheet whose first row names the columns (needs Google Drive connected). De-duplicated by email: an address already on the list is updated, and one marked unsubscribed, bounced or do not contact stays that way. A basis column (customer, opted_in, public_business_address, other) records why each person may be emailed, and a timeZone column their own time zone. Extra columns become merge fields ({{column_name}}). Up to 500 a call. Sends nothing. Free.',
+    description: 'Add people to the brand\'s lead list for email: leads [{ email, name or first_name / last_name, company, any other column }], or spreadsheetId (+ range) to read them from a Google Sheet whose first row names the columns (needs Google Drive connected). De-duplicated by email: an address already on the list is updated, and one marked unsubscribed, bounced or do not contact stays that way. A basis column (customer, opted_in, public_business_address, other) records why each person may be emailed, and a timeZone column their own time zone. Extra columns become merge fields ({{column_name}}). Up to 500 a call. More than one address, or a sheet, needs listConfirmed: true (listConfirmed: true states that the addresses were not bought or rented, and that each person either asked to hear from the sender or has a business address published openly with no "no solicitation" note and the message is relevant to their role; bought or rented lists are not allowed). Sends nothing. Free.',
     inputSchema: {
       leads: z.array(z.record(z.any())).optional().describe('rows: { email, name, first_name, last_name, company, …any other column }'),
       spreadsheetId: z.string().optional().describe('a Google Sheet to read the rows from instead'),
       range: z.string().optional().describe('A1 range, default A1:Z2000; the first row is the header'),
+      listConfirmed: z.boolean().optional().describe('REQUIRED true for more than one address or a sheet: the list was not bought or rented, and each person asked to hear from you or has a business address published openly'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiPost('/api/email/leads', a); return ok(d.note, d); }));
@@ -16857,10 +16859,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
       mailboxes: z.array(z.string()).optional().describe('several sending addresses, sent from in turn'),
       steps: z.array(z.object({
         subject: z.string().optional().describe('required on step 1; omit on a later step to reply in the same thread'),
-        body: z.string().describe('plain text or simple markdown, with {{merge_fields}}'),
+        body: z.string().optional().describe('plain text or simple markdown, with {{merge_fields}}; or pass html'),
+        html: z.string().optional().describe('the step as rich text (p, br, b, i, a, ul, ol, li), with {{merge_fields}}'),
         waitDays: z.number().optional().describe('whole days after the step before it, 1 to 90; step 1 has none'),
         format: z.enum(['markdown', 'text']).optional().describe('markdown (default) or text'),
-        variants: z.array(z.object({ subject: z.string().optional(), body: z.string() })).optional().describe('up to 3 other versions of this step, for A/B testing'),
+        variants: z.array(z.object({ subject: z.string().optional(), body: z.string().optional(), html: z.string().optional() })).optional().describe('up to 3 other versions of this step, for A/B testing'),
       })).optional().describe('1 to 10 steps, in order'),
       window: z.object({
         days: z.array(z.string()).optional().describe('mon, tue, wed, thu, fri, sat, sun'),
@@ -16900,8 +16903,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('enroll_email_leads', {
     title: 'Enrol leads in an email sequence',
-    description: 'Put leads into a sequence so it starts emailing them: id (the sequence), and leads [emails or ids] or all:true for every active lead not yet in it. Step 1 goes out inside the sending window, under the mailbox\'s daily cap. A lead is skipped, with the reason, when it is unsubscribed, bounced, do not contact, already in the sequence, or has no value for a merge field the sequence uses. This starts real emails to real people, so confirm the sequence and the list first. Free.',
-    inputSchema: { id: z.string().describe('the sequence id'), leads: z.array(z.string()).optional().describe('email addresses or lead ids'), all: z.boolean().optional().describe('true = every active lead not yet in this sequence') },
+    description: 'Put leads into a sequence so it starts emailing them: id (the sequence), and leads [emails or ids] or all:true for every active lead not yet in it. Step 1 goes out inside the sending window, under the mailbox\'s daily cap. A lead is skipped, with the reason, when it is unsubscribed, bounced, do not contact, already in the sequence, or has no value for a merge field the sequence uses. listConfirmed: true is required: it states that the addresses were not bought or rented, and that each person either asked to hear from the sender or has a business address published openly with no "no solicitation" note and the message is relevant to their role; bought or rented lists are not allowed. This starts real emails to real people, so confirm the sequence and the list first. Free.',
+    inputSchema: { id: z.string().describe('the sequence id'), leads: z.array(z.string()).optional().describe('email addresses or lead ids'), all: z.boolean().optional().describe('true = every active lead not yet in this sequence'), listConfirmed: z.boolean().describe('REQUIRED true: the list was not bought or rented, and each person asked to hear from you or has a business address published openly with no "no solicitation" note') },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/email/sequences/enroll', a); return ok(d.note, d); }));
   server.registerTool('set_email_sequence_status', {
@@ -16962,15 +16965,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_email_mailbox', {
     title: 'Set a mailbox’s daily limit, ramp, or pause',
-    description: "Change ONE of the brand's mailboxes: dailyCap (1 to 400 emails in 24 hours), ramp { on, start, days, restart } (a newly connected mailbox starts at 10 real sends a day and steps up evenly to its cap over 21 days; start is 1 to the cap, days 7 to 42; on:false sends the full cap at once; restart:true begins again today), or status \"paused\" / \"active\" (resume). A mailbox also pauses on its own: when 4% of its emails bounce over 7 days (or 3 in its first 25), when the server refuses 10% of sends, or at once on a spam complaint, a blocked or suspended answer, or a refused sign-in. The reason is in list_email_mailboxes; status \"active\" resumes it (a refused sign-in is checked again first). No warm-up traffic is ever sent: only real emails count. Free.",
+    description: "Change ONE of the brand's mailboxes: dailyCap (1 to 400 emails in 24 hours), ramp { on, start, days, restart } (a newly connected mailbox starts at 10 real sends a day and steps up evenly to its cap over 21 days; start is 1 to the cap, days 7 to 42; on:false sends the full cap at once; restart:true begins again today), or status \"paused\" / \"active\" (resume). A mailbox also pauses on its own: when 2.5% of its emails bounce over 7 days (or 3 in its first 25), when the server refuses 10% of sends, or at once on a spam complaint, a blocked or suspended answer, or a refused sign-in. The reason is in list_email_mailboxes; status \"active\" resumes it (a refused sign-in is checked again first). A mailbox connected by SMTP with its own server details may set autoPauseBounces:false so it no longer pauses itself for bounces (who changed it and when is recorded); a mailbox connected with a Google or Microsoft sign-in always pauses for bounces and that is refused. No warm-up traffic is ever sent: only real emails count. Free.",
     inputSchema: {
       mailbox: z.string().describe('the address or mailbox id from list_email_mailboxes'),
       dailyCap: z.number().optional().describe('emails this mailbox may send in 24 hours, 1 to 400'),
       ramp: z.object({ on: z.boolean().optional(), start: z.number().optional().describe('emails a day on the first day'), days: z.number().optional().describe('7 to 42'), restart: z.boolean().optional().describe('begin the ramp again today') }).optional().describe('the gradual ramp of a new mailbox'),
       status: z.enum(['paused', 'active']).optional().describe('paused stops it sending; active resumes it'),
+      autoPauseBounces: z.boolean().optional().describe('SMTP mailboxes only: false = do not pause this mailbox automatically when too many emails bounce (true by default); refused for a Google or Microsoft sign-in'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/email/mailboxes/settings', a); return ok(d.note, d); }));
+  server.registerTool('detect_mailbox_settings', {
+    title: 'Work out the email settings for an address',
+    description: "Work out the email settings for an address BEFORE asking anyone for a password: the provider, the sending (SMTP) and incoming (IMAP) servers with their ports and security, whether an app password is needed and the page where one is made, and whether the provider's own sign-in (Google, Microsoft) is the better route here. Found from the address's domain, its mail servers (MX), its published autoconfig settings, its DNS SRV records, or as a last resort a test connection to smtp./imap./mail. that is only offered once it answered (no password is sent). Says plainly when a domain receives no email or when the settings could not be worked out. Then connect_connector with provider \"smtp\" and just { email, password } connects it with these settings. Sends nothing. Free.",
+    inputSchema: { email: z.string().describe('the mailbox address, like you@yourcompany.com') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/email/detect', a); return ok(d.note, d); }));
   server.registerTool('set_email_sender', {
     title: 'Set the sender name and postal address',
     description: "Set or read the SENDER IDENTITY every sequence email carries at its end: senderName and/or company, and postalAddress (a full street or PO box address). No sequence starts without them. With no fields it returns what is set and how the footer reads. The footer also carries an unsubscribe link Hermoso adds, which nobody can remove. Sends nothing. Free.",
@@ -17016,6 +17026,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       decision: z.enum(['approve', 'skip', 'stop']).describe('approve sends it; skip moves on without sending; stop ends the sequence for that lead'),
       subject: z.string().optional().describe('with ONE draft and approve: the edited subject'),
       body: z.string().optional().describe('with ONE draft and approve: the edited body'),
+      html: z.string().optional().describe('with ONE draft and approve: the edited body as rich text'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/email/drafts/review', a); return ok(d.note, d); }));
