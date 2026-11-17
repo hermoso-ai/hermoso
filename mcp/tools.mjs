@@ -14425,6 +14425,81 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // switched on the single heaviest group in the product, which is 236K tokens of campaign schema they did not ask
   // for. Pinned by tools/tool-group-truth-check.mjs, which derives ads-ness from the routes a tool DISPATCHES to.
   server.group('analytics');
+  // ── FREE EMAIL DELIVERABILITY CHECKS (2026-11-17) ─────────────────────────────────────────────────────────────
+  // The agent half of hermoso.ai's free email tools: the same server routes the site's pages call (/api/email-tools/*,
+  // lib/email-tools.mjs), answered in the words the server writes (`text`), so every surface says the same thing. DNS
+  // reads and pure rules only: free, no connection needed. In `analytics` (held out of the default list, like every
+  // tool about the brand's own site and domain); find_tools finds them and call_tool runs them on any roster.
+  server.registerTool('check_email_address', {
+    title: 'Check an email address',
+    description: 'Check one email address without sending anything: whether it is written correctly, whether its domain can receive mail (MX records), and whether it is a throwaway inbox, a role address such as info@ or sales@, a free provider such as Gmail, or a likely typo (gmial.com, with the fix). It never contacts the mail server, so it cannot tell whether that one mailbox exists, and the answer says so. Free.',
+    inputSchema: { address: z.string().describe('the email address, e.g. name@example.com') },
+    outputSchema: {
+      verdict: z.string().optional().describe('valid | risky | invalid | unknown (a DNS read failed)'),
+      address: z.string().optional(), domain: z.string().optional(),
+      suggestion: z.string().nullable().optional().describe('the corrected address when the domain looks like a typo'),
+      role: z.string().nullable().optional(), freeProvider: z.boolean().optional(), disposable: z.boolean().nullable().optional(),
+      checks: z.array(z.any()).optional().describe('{name, status, text} per check'),
+      mailboxChecked: z.boolean().optional().describe('always false: the mailbox is never contacted'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ address }) => {
+    const d = await apiGet('/api/email-tools/email', { address });
+    return ok(d.text || `${d.verdict}: ${d.address || address}`, d);
+  }));
+  server.registerTool('check_domain_email_health', {
+    title: 'Check a domain’s email setup',
+    description: 'Check a domain’s email setup from public DNS and say what to fix: MX (who receives its mail), SPF (which servers may send as it, counted against the 10-lookup limit), DKIM (signing keys; pass the selector when known, otherwise common ones are tried), DMARC (policy and reports) and blocklists (its mail servers on public spam lists whose terms allow this lookup). Pass `checks` to run only some. Use it when mail lands in spam, before sending a campaign, or to check SPF, DKIM or DMARC. Free; reads DNS only.',
+    inputSchema: {
+      domain: z.string().describe('the domain, e.g. example.com (a URL or an email address also works)'),
+      checks: z.array(z.enum(['mx', 'spf', 'dkim', 'dmarc', 'blocklists'])).optional().describe('which checks to run; omit for all five'),
+      selector: z.string().optional().describe('the DKIM selector, the s= value in the DKIM-Signature header of a sent message'),
+    },
+    outputSchema: {
+      domain: z.string().optional(), status: z.string().optional().describe('pass | warn | fail | unknown, the worst of the checks'),
+      summary: z.any().optional().describe('{pass, warn, fail, unknown, total}'),
+      checks: z.any().optional().describe('one object per check run: {status, record?, findings:[{level, code, text}]}'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async ({ domain, checks, selector }) => {
+    const d = await apiGet('/api/email-tools/domain', { domain, ...(checks && checks.length ? { checks: checks.join(',') } : {}), ...(selector ? { selector } : {}) });
+    return ok(d.text || `Email setup for ${d.domain}: ${d.status}.`, d);
+  }));
+  server.registerTool('generate_dns_record', {
+    title: 'Write an SPF or DMARC record',
+    description: 'Write an SPF or DMARC TXT record from plain choices, ready to paste at the DNS host. SPF: `providers` by id (google, microsoft, zoho, fastmail, proton, icloud, godaddy, namecheap, mailgun, zendesk, salesforce, freshdesk; amazonses, sendgrid, postmark, mailchimp, brevo, hubspot, klaviyo, shopify and intercom answer with what they need instead), extra `include` domains, `ip4`/`ip6` addresses and the ending (~all by default); with a `domain`, the includes are read and counted against the 10-lookup limit. DMARC: `policy` none, quarantine or reject, `rua` report addresses and alignment. It writes the record; publishing it at the DNS host is the user’s step. Free.',
+    inputSchema: {
+      type: z.enum(['spf', 'dmarc']),
+      domain: z.string().optional().describe('the domain the record is for; fills in the host name'),
+      providers: z.array(z.string()).optional().describe('SPF: sending services by id, e.g. ["google", "mailgun"]'),
+      include: z.array(z.string()).optional().describe('SPF: extra include domains'),
+      ip4: z.array(z.string()).optional().describe('SPF: IPv4 addresses or ranges'),
+      ip6: z.array(z.string()).optional().describe('SPF: IPv6 addresses or ranges'),
+      mx: z.boolean().optional().describe('SPF: let the domain’s own MX servers send'),
+      a: z.boolean().optional().describe('SPF: let the domain’s own address send'),
+      all: z.enum(['~all', '-all', '?all']).optional().describe('SPF ending, default ~all'),
+      policy: z.enum(['none', 'quarantine', 'reject']).optional().describe('DMARC policy, default none'),
+      subdomainPolicy: z.enum(['none', 'quarantine', 'reject']).optional(),
+      rua: z.array(z.string()).optional().describe('DMARC: addresses for the daily aggregate reports'),
+      ruf: z.array(z.string()).optional().describe('DMARC: addresses for failure reports'),
+      adkim: z.enum(['r', 's']).optional(), aspf: z.enum(['r', 's']).optional(),
+    },
+    outputSchema: { type: z.string().optional(), host: z.string().optional(), value: z.string().optional(), lookups: z.number().optional(), live: z.any().optional(), notes: z.array(z.string()).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/email-tools/record', a);
+    return ok(d.text || `${d.host} TXT ${d.value}`, d);
+  }));
+  server.registerTool('check_spam_words', {
+    title: 'Check an email for spam words',
+    description: 'Scan a subject line and email text for words and formatting that read as spam (pressure, money, hype, scam-like phrases, CAPITALS, many links, link shorteners) and say which to change. Rule based, free. It judges the wording only: sender reputation and SPF, DKIM and DMARC matter more, so a low score is not a promise of the inbox.',
+    inputSchema: { subject: z.string().optional().describe('the subject line'), body: z.string().optional().describe('the email text') },
+    outputSchema: { score: z.number().optional(), level: z.string().optional().describe('low | medium | high'), hits: z.array(z.any()).optional().describe('{phrase, category, where, count}'), signals: z.array(z.any()).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async ({ subject, body }) => {
+    const d = await apiPost('/api/email-tools/spam-words', { subject: subject || '', body: body || '' });
+    return ok(d.text || `Spam-word risk: ${d.level}.`, d);
+  }));
   // ── GOOGLE ANALYTICS (GA4) (2026-08-10) ────────────────────────────────────────────────────────────────────────
   // A SEPARATE connection from Google Ads even though it shares the GCP OAuth client — a brand that spends on Google
   // Ads every day may have no Analytics access at all, so never read one as the other.
