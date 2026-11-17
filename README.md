@@ -98,7 +98,7 @@ Ask in your own words. The agent picks the tools:
 - "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
 - "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
-**1352 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1354 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -339,12 +339,14 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1352 tools cover
+### What the 1354 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
 social (`search_tiktok`, `search_instagram`, `search_youtube`, `search_reddit`, `search_threads`);
-`fetch_social_data`, `mine_angles`, `analyze_video`, `check_ad_policy`, `list_skills` / `get_skill`.
+`fetch_social_data`, `mine_angles`, `analyze_video`, `check_ad_policy`, `list_skills` / `get_skill`. Leads:
+`find_leads` (companies and public posts showing a buying signal now, billed per lookup under a hard `maxCredits`)
+then `find_company_contacts` (the public business address from the company website, free).
 
 **Create** — `draft_brand` → `plan_ad` → `render_ad` (the Studio quality pipeline: composited text, clean speech,
 music, brand end card), or `generate_image` / `generate_video` / `generate_avatar` (UGC creators + lip-sync).
