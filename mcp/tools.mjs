@@ -35,6 +35,7 @@ import { toolCostClass, priceDigestFrom, toolPriceText } from './tool-cost.mjs';
 // PRICE FIRST, BUY ONCE (2026-11-11): get_cost / expected_credits / idempotency_key on every paying tool, `context` on all.
 import { spendTool, SPEND_ARG_TEXT, CONTEXT_ARG_TEXT, takeSpendMeta, argsHash, jobKeyRoot, redactContext, contextHeaderValue, quoteFromLegs, quoteText as spendQuoteText, expectedMismatchText, priceMatches } from './spend-guard.mjs';
 import { recordToolOutcome, toolHealth, healthLabel, healthPenalty } from './tool-health.mjs';
+import { recordToolUsage, noteLocalServer } from './tool-usage.mjs'; // one usage record per call, ok or not (2026-11-18): the per-host roster evidence
 // THE NEXT STEP, NAMED. The prose we already write stays; this is the same advice as an addressable field.
 import { withHints, hintsOf, videoChoiceText, videoChoiceHints, neutralCreditsText, creditsLowHints, welcomeClaimHint, finishedRenderKind, withWidgetResultNote, buyDoorsOf, buyDoorsText, buyDoorsHints, withInfoTier, ACCOUNT_INFO_URL, stripPlanPromo, withoutPlanPitch, PLAN_PITCH_RE } from './tool-hints.mjs';
 // THE CHATGPT EXTENSIONS APP (home, Library panel, concept picker, brief, setup, settings, @-mentions), registered only
@@ -885,6 +886,10 @@ const wrap = (fn) => {
     // because that is what the caller experienced, whoever authored the refusal.
     const _t0 = Date.now();
     let _rk = ''; // the repeat-refusal memo key (mcp/repeat-refusal.mjs), set once the arguments are final
+    // THE USAGE RECORD SITS BESIDE EVERY HEALTH SAMPLE BELOW (mcp/tool-usage.mjs): name, ok, and what the call was charged.
+    // `_stU` is the call's tally, hoisted so the catch can still say what a call that charged and then failed was charged.
+    let _stU = null;
+    const _usage = (ok) => { try { recordToolUsage(_tool, { ok, credits: (_stU?.apiCharged || 0) + (_stU?.jobCharged || 0) }); } catch {} };
     try {
       // A FILE ON THE CALLER'S SIDE IS REFUSED BEFORE ANY CALL (2026-11-05, fp bf206cd60b30): on a hosted connector a
       // "/mnt/data/…", file://, sandbox:/ or C:\ path in a media-named argument can never be read, so the agent is told to
@@ -896,7 +901,7 @@ const wrap = (fn) => {
       // file on this machine"), where toRef could only say ENOENT about a path with no argument named. Same sentence
       // as the hosted connector and the server (mcp/media-ref.mjs localMediaSentence).
       if (_tool !== 'upload_file') { const _lm = findClientLocalMedia(args, isRemote() ? { served: null } : { served: null, exists: (p) => { try { return localFileExists(p); } catch { return false; } } }); if (_lm) throw clientLocalMediaError(_lm); }
-      const _st = { tool: _tool };
+      const _st = { tool: _tool }; _stU = _st;
       if (typeof args?.account === 'string' && args.account.trim() && accountScopedTool(_tool)) _st.account = args.account.trim(); // see MULTI_ACCOUNT_CHANNELS
       // PRICE FIRST, BUY ONCE (spend-guard.mjs): the call controls never reach the handler; with none of them sent this
       // is exactly the call it always was. `context` is lifted off every tool's arguments and rides as a header.
@@ -904,12 +909,12 @@ const wrap = (fn) => {
       // THE SAME "NOT FOUND" TWICE IS NOT ASKED A THIRD TIME (2026-11-16, mcp/repeat-refusal.mjs): same caller, brand, tool and
       // arguments within ten minutes is answered here, said as such, and costs the user's platform rate limits nothing.
       { const _mc = mcpCtx.getStore(); _rk = repeatRefusalKey({ who: _mc?.token || 'local', brand: brandScope.getStore()?.brand || _mc?.profile || '', tool: _tool, args }); }
-      { const _rp = REPEAT_REFUSALS.check(_rk); if (_rp) { try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {} return { content: [{ type: 'text', text: repeatRefusalText(_tool, _rp) }], isError: true, _meta: { 'hermoso.ai/error': { status: 404, repeated: _rp.n - 1 } } }; } }
+      { const _rp = REPEAT_REFUSALS.check(_rk); if (_rp) { try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {} _usage(false); return { content: [{ type: 'text', text: repeatRefusalText(_tool, _rp) }], isError: true, _meta: { 'hermoso.ai/error': { status: 404, repeated: _rp.n - 1 } } }; } }
       const _sm = isSpendToolName(_tool) ? takeSpendMeta(args) : null;
       if (_sm) {
         args = withoutArgKeys(args, ['get_cost', 'expected_credits', 'idempotency_key']);
         const _early = await spendPreflight(_tool, _sm, args, extra, _st, fn);
-        if (_early) { try { recordToolOutcome(_tool, { ok: !_early.isError, ms: Date.now() - _t0 }); } catch {} return noPitchOnWidget(_early); }
+        if (_early) { try { recordToolOutcome(_tool, { ok: !_early.isError, ms: Date.now() - _t0 }); } catch {} _usage(!_early.isError); return noPitchOnWidget(_early); }
       }
       const _claim = _sm?.key ? await claimToolKey(_tool, _sm.key, args, _st) : null;
       if (_claim?.answer) return noPitchOnWidget(_claim.answer);
@@ -919,6 +924,7 @@ const wrap = (fn) => {
       if (_claim) await finishToolKey(_claim, _st, r, null);
       if (!r?.isError) REPEAT_REFUSALS.clear(_rk);
       try { recordToolOutcome(_tool, { ok: !r?.isError, ms: Date.now() - _t0 }); } catch {}
+      _usage(!r?.isError);
       // the charge, once, on every paid reply that did not already say it (chargeNote above)
       try {
         const _c = chargeTenth((_st.apiCharged || 0) + (_st.jobCharged || 0));
@@ -946,6 +952,7 @@ const wrap = (fn) => {
     }
     catch (e) {
       try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {}
+      _usage(false);
       if (isMemoRefusal(e)) { try { REPEAT_REFUSALS.record(_rk, e?.message); } catch {} }
       if (!e?._viaApi && !e?._signedOut) { try { reportToolError(_tool, e); } catch {} } // a caller with no key is not a defect, and its report would be anonymous noise
       // A RUNTIME ERROR NAMES ITS FRAMES IN THE LOG (2026-11-06, er:c5826cfae730): the ledger keeps only the message, so an
@@ -5253,6 +5260,7 @@ export function jobMissReply(id) {
     error: `"${s}" is not a job id.` };
 }
 export function registerTools(rawServer, opts = {}) {
+  if (!opts.hosted) noteLocalServer(rawServer); // stdio / `hermoso call`: the usage flush names the AI app this process serves (mcp/tool-usage.mjs)
   const server = wellFormedServer(rawServer); // the ONE crossing — see above
   // THE CACHE HOLDS SCHEMAS, SO A FLAG THAT CHANGES A SCHEMA MUST INVALIDATE IT (2026-09-16). `hosted` decides
   // whether upload_file offers a local `path` at all, and the canon is built once and replayed for every later

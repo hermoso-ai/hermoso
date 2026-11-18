@@ -705,7 +705,8 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     for (const k of idKeys) inflight.set(k, rec);
     const free = () => { for (const k of idKeys) if (inflight.get(k) === rec) inflight.delete(k); release(); };
     res.once('close', free);
-    try { await mcpCtx.run({ token, remote: true, client: entry.client || '', firstRun: entry.firstRun || null }, () => entry.transport.handleRequest(req, res, req.body)); }
+    // accountId / ua / src ride for the per-call usage record only (mcp/tool-usage.mjs); nothing authorises off them.
+    try { await mcpCtx.run({ token, remote: true, client: entry.client || '', firstRun: entry.firstRun || null, accountId: entry.user?.accountId || null, ua: entry.ua || '', src: entry.src || '' }, () => entry.transport.handleRequest(req, res, req.body)); }
     finally { if (wall) clearTimeout(wall); free(); }
     // ── A CANCELLED CALL'S STREAM IS ENDED, BECAUSE THE SDK WILL NEVER WRITE TO IT (2026-11-04) ──────────────────
     // On notifications/cancelled the SDK aborts the handler and, per the spec, sends NO response for that request —

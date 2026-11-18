@@ -125,6 +125,10 @@ function headers(extra = {}) {
   // reliable discriminator here. Forgeable, and harmlessly so: the worst a caller achieves is under-reporting
   // their own activity, which is why this decides bookkeeping and nothing else.
   if (ctx) h['x-hermoso-inproc'] = '1';
+  // A REQUEST FROM THE CALLER'S OWN MACHINE SAYS SO (2026-11-18): the stdio twin and `hermoso call` are the only senders with no
+  // ctx. It names the surface on a key's first use (the connect signal, lib/connect-signal.mjs), whose first request is often
+  // the roster's own connector read and carries no tool name. Bookkeeping only: it authorises nothing.
+  else h['x-hermoso-local'] = '1';
   // WHICH HOST THE PERSON IS IN, FOR A REFUSAL ONLY (2026-11-12, lib/buy-page.mjs). A hosted session remembers its client
   // (mcp/http.mjs rememberedClient); a ChatGPT one is named here so the server can mail the out-of-credits note in ~10
   // minutes, since nothing can be bought inside ChatGPT. Forgeable and harmless: the worst a caller does is hurry its own email.

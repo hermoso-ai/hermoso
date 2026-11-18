@@ -36,9 +36,25 @@ if Claude asks about Authentication, then sign in with your Hermoso account.
 **Grok Bot:** it cannot open the Hermoso sign-in page, so it signs in with a key. **[Create a key](https://app.hermoso.ai/?tab=api-keys)**,
 then **[add the Hermoso Marketing Bot](https://x.ai/bot/THQqogUKuhn1whWU0hrmb)** and paste the key when it asks.
 
-**Claude Code, Cursor, Codex and other coding agents:** one prompt. Paste this into a new chat and the agent installs
-Hermoso, opens the sign-in and makes your first ad (this is Claude Code's install line; each agent's own is in the app
-under MCP & CLI, and in [Install in one command](#install-in-one-command)):
+**Claude Code, Cursor, Codex and other coding agents:** one line. Paste this into a new chat and the agent reads
+[hermoso.ai/SKILL.md](https://hermoso.ai/SKILL.md), runs its own install, opens the sign-in and makes your first 3 ad ideas:
+
+```text
+Follow https://hermoso.ai/SKILL.md to set up Hermoso for me, then make 3 ad ideas for my brand and show me the best one as an image.
+```
+
+**OpenClaw and Hermes** usually run on a server you chat with on Telegram, Discord or WhatsApp, so there is no browser for
+the sign-in: **[create a key](https://app.hermoso.ai/?tab=api-keys)** first and put it in the line:
+
+```text
+Follow https://hermoso.ai/SKILL.md to set up Hermoso for me. My Hermoso API key is: <paste your key here>. Then make 3 ad ideas for my brand and show me the best one as an image.
+```
+
+<details>
+<summary>Set it up by hand</summary>
+
+**The full setup prompt**, the same setup spelled out for an agent that cannot open a link (this is Claude Code's install
+line; each agent's own is in the app under MCP & CLI):
 
 ```text
 Set up Hermoso for me. It is an AI marketing tool (hermoso.ai) that researches ads, makes image and video ads and posts to my social accounts.
@@ -49,9 +65,6 @@ Set up Hermoso for me. It is an AI marketing tool (hermoso.ai) that researches a
 3. Once I am signed in, do one small task to show it works: tell me my Hermoso credit balance and which profile is saved.
 4. Then set up my brand from my website and make my first ad.
 ```
-
-<details>
-<summary>Set it up by hand</summary>
 
 **Claude by hand:** Customize → Connectors → Add → *Add custom connector*, paste the URL below, choose **Sign in now** under
 Authentication, then Add and Connect. On a Team or Enterprise plan an Owner adds it for the organization first.
