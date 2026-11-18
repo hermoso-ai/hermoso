@@ -341,96 +341,157 @@ export const CAPABILITY_MAP = [
 // source of truth. Kept parity across mcp/ and cli/mcp/ (the npm copy).
 // The setup line names the one SKILL.md line for every host that can run commands, Grok Bot and Muse included (2026-11-18).
 export const SETUP_ELSEWHERE_LINE = 'ADDING HERMOSO TO ANOTHER AI APP (only if the user asks): ChatGPT, one click: https://chatgpt.com/plugins/plugin_asdk_app_6abde87d08048191b2ee7cda76721749. Claude: Customize > Connectors > Add custom connector, https://app.hermoso.ai/mcp. Grok Bot, Muse, Claude Code, Codex, Cursor, any agent with a shell: have it follow https://hermoso.ai/SKILL.md (one line, every host). Other apps: https://app.hermoso.ai/mcp (?tools=all lists all; ?tools=app-create, app-ads or app-social is one job).';
+// ── THE INSTRUCTIONS ARE A SHORT HEAD, AND EVERYTHING ELSE IS ONE get_instructions CALL AWAY (2026-11-18) ─────────
+// Owner-approved 2026-11-18: "the first ~2,000 characters carry everything an agent must know … everything else moves".
+// The string below was ~14,900 chars, sent to every agent every session, and the hosts that cut it cut it short:
+//   • Claude Code: 4,096 characters (code.claude.com/docs/en/mcp: "Server instructions … 4,096 characters"; 2,048 before
+//     v2.1.296, per the same page and the CHANGELOG). Seen live 2026-11-18: a session's Hermoso instructions ended
+//     "… [truncated]" at character 4,096, mid-word inside the capability map.
+//   • Codex (openai/codex): kept whole as each tool's namespace description (cap 512 KiB, codex-rs/core/src/tools/
+//     handlers/mcp.rs), BUT an agent-plugin server gets 1,000 bytes, and under deferred tools only the FIRST LINE, at
+//     most 250 characters (codex-rs/core/src/context/world_state/tools.rs).
+//   • Gemini CLI: whole, wrapped in start/end markers, in a TRUSTED folder only (packages/core/src/tools/
+//     mcp-client-manager.ts getMcpInstructions); an untrusted folder drops it entirely.
+//   • ChatGPT: no published limit; OpenAI's advice is "Keep the most important details in the first 512 characters"
+//     (developers.openai.com/apps-sdk/build/mcp-server). ChatGPT reads MCP_INSTRUCTIONS_WIDGET, never this string.
+//   • claude.ai / Claude Desktop, Cursor: not documented anywhere we could find; assume the smallest cut above.
+// SO THE LAYOUT IS NESTED, SMALLEST CUT FIRST: line 1 (≤250 chars) alone says what Hermoso is and that find_tools +
+// call_tool reach every tool; the first 512 carry independence and act-don't-survey; the first 1,000 bytes name the
+// four making areas; the whole head stays under ~1,900 bytes so a fresh account's first-run line still fits 2,048.
+// The last line names get_instructions and its topics. Every topic below is the OLD TEXT, VERBATIM, moved and not
+// rewritten — nothing was dropped (tools/mcp-instructions-head-check.mjs §5 proves each old line is reachable).
+// MCP_INSTRUCTIONS_FULL (head + every topic) is what a check reads when it asks "can an agent learn X here".
+export const MCP_INSTRUCTION_TOPICS = Object.freeze({
+  areas: [ // the five areas in full, with every tool name the head leaves out
+    // ── THE FIRST 2,048 BYTES ARE THE WHOLE MESSAGE ON SOME HOSTS (2026-08-24) ──────────────────────────────────
+    // Claude Code truncates server instructions at 2KB, and this string was 10,910 chars — so 8,862 of them, 81%,
+    // were silently discarded there. Not "the tail was a bit long": the cut landed MID-SENTENCE inside the CREATE
+    // bullet, so a Claude Code agent read the research tools and then nothing at all about create, publish, ads or
+    // account. Four of the five areas were invisible on the surface where we most want an agent working headlessly.
+    //
+    // AND IT MATTERS MORE UNDER DEFERRAL, NOT LESS. Claude Code defers MCP tool definitions by default and loads
+    // them on demand, so what the model initially sees is TOOL NAMES PLUS THESE INSTRUCTIONS — nothing else.
+    // Anthropic say so ("server instructions help Claude understand when to search for your tools, similar to how
+    // skills work") and OpenAI give the same advice at a quarter of the size ("keep the most important details in
+    // the first 512 characters"). That inverts the intuition: the highest-leverage prose in this product is this
+    // head and the tool NAMES, not the 202,156 characters of tool descriptions underneath.
+    //
+    // SO THE HEAD IS SELF-SUFFICIENT AND MEASURED AT 2,016 CHARS. It names all five areas with real tool names and
+    // nothing below it is load-bearing. Everything after is elaboration for hosts with no cap. If you edit it,
+    // re-measure — `tools/mcp-instructions-head-check.mjs` fails the build rather than letting it silently overrun
+    // again, and the failure mode is invisible: a truncated instruction string does not error, it just stops.
+    //
+    // ORDER IS LOAD-BEARING: identity, then the two BEHAVIOURAL rules, then the tool lists. The first draft put
+    // ACT-DO-NOT-SURVEY last and the 2,048-byte cut landed inside it — 'DO NOT SURVE' — so the rule that exists to
+    // stop an agent answering a render request with a model catalog was itself the thing truncated. Whatever gets
+    // clipped from the tail must cost tool NAMES, which the roster still carries, never a rule, which it does not.
+    'Hermoso is marketing on autopilot, driven over MCP. FIVE INDEPENDENT AREAS: none is a step in a pipeline, and no tool needs you to have used another one first:',
+    'ACT ON THE REQUEST, DO NOT SURVEY IT: asked to make something, make it; omit `model` and a sound default runs. hermoso_capabilities (free) is for a model id, credit cost or duration, never the answer to a create request.',
+    '• RESEARCH winning ads: find_competitors, competitor_teardown, pull_competitor_ads, research_ads, search_meta_ads, search_google_ads, search_linkedin_ads, search_tiktok, search_instagram, search_youtube, search_reddit, search_threads, mine_angles, analyze_video, check_ad_policy.',
+    '• CREATE on-brand ads: render_ad, generate_image, generate_video, generate_avatar, make_template_ad, make_motion_film, make_thumbnail, make_explainer, plan_ad, plan_variations; get_brand / draft_brand / update_brand; list_creators / save_creator; edit_video, dub_video, clip_video, reframe_video, upscale_video, stitch_video.',
+    '• RAW MODELS, prompt only: generate_image / generate_video with useBrand:false, generate_voice, generate_text, upload_file (any file becomes a URL every tool accepts).',
+    '• PUBLISH & SCHEDULE to the user\'s OWN accounts: post_to_meta (+Threads), post_to_x, post_to_linkedin, post_to_tiktok, post_to_youtube, post_to_pinterest, post_to_bluesky, post_to_telegram, post_to_google_business, post_to_wordpress, post_to_discord, post_to_slack; schedule_post (+ list/reschedule/cancel); list_connectors. Not connected: say to connect it in Connectors.',
+    // THE LAST LINE OF THE HEAD, AND THE ONE THAT MAKES THE SHORT ROSTER SAFE (2026-09-17). Your tool LIST is now
+    // core-first; every name in the bullets above is held out of it on SIZE and answers a call anyway. Say that
+    // inside the 2 KB a truncating host reads, or a small roster reads as a small product.
+    '• PAID ADS, LEAD FORMS, CLICK-TO-WHATSAPP, ANALYTICS and every name above are NOT all in your starting list, and a tool missing from your list NEVER means the feature is missing: find_tools({query}) finds ANY tool, then call_tool({name,args}) runs it, listed or not; enable_tools({groups}) lists a group if the host reloads. Ads are created PAUSED and read back.',
+    '• ADS, the tool names: create_meta_campaign / _adset / _ad, create_google_ads_campaign / _ad_group / _ad and the TikTok, LinkedIn, Pinterest, Reddit, Microsoft and OpenAI equivalents; meta_insights, google_ads_report and the per-platform reports. Everything is created PAUSED and read back before it is described.',
+    // Sits AFTER the ADS bullet on purpose: the 2 KB head every area must survive is full (tools/mcp-roster-connector-scope-check), and a first-call hint is worth less than a whole area.
+    'NOTHING SET UP YET? research_ads on any domain, or generate_image with useBrand:false, need no brand, account or upload.',
+  ].join('\n'),
+  instagram: [ // the two Instagram connectors
+    // INSTAGRAM_PATHS_NOTE — an inline copy of lib/instagram-paths.mjs (the twins ship without lib/); tools/instagram-paths-check.mjs asserts they are byte-equal.
+    '• INSTAGRAM, two connectors, one channel: TWO WAYS AN INSTAGRAM ACCOUNT CONNECTS, SAME FEATURES: through Meta (the account is linked to a Facebook Page and comes with that Page — this is also the only path with ads) or directly through the Instagram connector (the account signs in on instagram.com by itself, no Facebook Page or Meta login — right for people who run several Instagram accounts under different logins). Either way it is one `instagram` channel with publishing, media, post and account insights, comments and Instagram Direct DMs; a Page-linked account is chosen with pageId, a direct account (or one of several) with account = an @handle or id from list_connector_accounts("instagram"). "Not connected to Meta" never means "no Instagram" — check the Instagram connector too.',
+  ].join('\n'),
+  capabilities: [ // every tool, area by area (the long map)
+    // SECOND LINE, before the capability map: those four jobs read as four STAGES, and by the time an agent has
+    // scrolled the map it has already decided Hermoso is a funnel it must enter at the top. See INDEPENDENCE above.
+    // NOT REPEATED HERE ANY MORE: the head above states independence in its own first sentence, and every byte
+    // between the head and the 2,048-byte cut is a byte a truncating host spends instead of on the capability map.
+    // ACT, DO NOT SURVEY (2026-08-24). The opening line used to end "Call hermoso_capabilities FIRST (free) to learn
+    // valid model ids + exact credit costs", and a literal-minded client obeyed it on EVERY render request: measured
+    // three times live in ChatGPT, the model spent its whole turn inside the catalog and answered with a model list
+    // instead of a render, once after being told in terms to pass an image and run generate_video. A "do X first" that
+    // is not actually required is a trap in an instruction an agent reads before acting, and this one was not
+    // required: `model` is OPTIONAL on generate_image, generate_video and render_ad, and an unnamed render resolves to
+    // GEN_MODELS.<kind>[0] in workImage/workVideo, which is the catalog's `best: true` row (for image an unnamed generate_image
+    // here goes further and takes the static_ad job's engine, GPT Image 2.6 since 2026-11-05, 2.5 from 2026-11-03) and, for video, model-belt.mjs's AUTO_VIDEO_DEFAULT (seedance-2.5, also `video[0]`). The prose below says "the
+    // server's own default" rather than "the best row" on purpose: hermoso_capabilities' own _pickLine states as a RULE
+    // that neither `best` nor the longest-clip row decides where an unnamed ask lands, and two shipped sentences that
+    // disagree are worse than either one. What the user-facing line has to carry is only that omitting `model` works.
+    // So the honest shape is a TRIGGER, not a gate: call it when you have a question it answers. Keeping the tool
+    // discoverable is the other half of the fix, so the reasons to call it are spelled out rather than merely permitted.
+    // REMOVED 2026-09-25: the long restatement of this rule that sat here repeated the head's own 'ACT ON THE REQUEST' line
+    // word for word in substance; every host already reads the head copy, and the non-truncating ones paid for it twice.
+    'Capability map:',
+    '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; find_proven_formats (viral video formats for a category, each example ready for clone_video); fetch_social_data; find_leads (buying signals) / search_companies / saved_lead_searches then find_company_contacts; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
+    '• CREATE (on-brand ads): render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar render on their own; plan_ad authors a board first when the ad wants one and render_ad takes it; get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) manage the saved brand; list_creators / save_creator / delete_creator (the reusable saved CAST — re-cast the same face; render_ad’s `creator` stars one of them in the ad); make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); clone_static / recast_motion / reframe_video / insert_scene / upscale_video / dub_video / change_voice / finish_video / fix_beat / hook_variants / stitch_video; plan_variations + score_ad.',
+    '• ACCOUNT & WORKSPACES: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job; list_brands / create_brand / use_brand / delete_brand (one account holds MANY profiles: brands, clients or creators, each with its own brand details, memory, Library and connectors; create_brand → draft_brand onboards a new one, delete_brand is confirm-gated); get_settings / update_settings (the LANGUAGE every ad, script and plan is written in — set it once and every render obeys it — plus app appearance and the weekly competitor-watch email); list_alert_settings / set_alert_events / send_test_alert (where alerts go: Slack, Discord or a signed webhook); set_email_reply_settings (how email replies are labelled and drafted); list_team / invite_member / remove_member / set_role.',
+    '• PUBLISH & MANAGE YOUR CHANNELS (the user’s connected accounts, over this MCP): Meta — post_to_meta (FB/IG/Threads), upload_file (post ANY external/local file), list_meta_ads + meta_insights (campaigns + performance by age/gender/placement/country), preview_meta_ad (the real ad per placement), estimate_meta_reach (audience size before you spend), list_meta_audiences / create_meta_audience (retargeting + lookalikes), create_meta_campaign / create_meta_ad / upload_meta_asset (build), update_meta_object / delete_meta_object / set_meta_campaign_status (edit/delete/activate — spend + deletes confirm-gated), manage_meta_post (edit/delete a post); DM automations (a keyword comment or DM gets an automatic private reply) — save_dm_automation / test_dm_automation / list_dm_automations / delete_dm_automation on Instagram, Facebook (Page comments, ads, Messenger) and X (X billed in credits per event and send); X — x_chat_settings / update_x_chat_settings (who may DM the brand on X); Microsoft Advertising (Bing Ads) — list_microsoft_ads_campaigns, microsoft_ads_report, microsoft_ads_geo_search, create_microsoft_ads_campaign / create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords, set_microsoft_ads_budget / set_microsoft_ads_status (spend confirm-gated); ChatGPT Ads (OpenAI Advertiser API) — list_openai_ads_campaigns, openai_ads_report, openai_ads_geo_search, create_openai_ads_campaign / create_openai_ads_ad_group / create_openai_ads_ad, update_openai_ads_object, set_openai_ads_budget / set_openai_ads_status (spend + archive confirm-gated).; Pinterest — list_pinterest_boards then post_to_pinterest (the user picks the board); Google Business Profile — list_business_locations, post_to_google_business, list_google_business_posts, delete_google_business_post, google_business_insights, get_business_location / update_business_location (edit the live listing; an unconfirmed call only previews the diff), google_business_account (whose account, and whether that role can edit); Google Drive (ONE connection covering Drive, Sheets and Docs) — save_to_drive, list_drive_files, get_drive_file, update_drive_file, delete_drive_file, create_drive_folder, plus create_sheet / append_to_sheet / read_sheet and create_doc / append_to_doc / read_doc (Hermoso-created files, plus any the user picks in the app); Microsoft OneDrive — save_to_onedrive, list_onedrive_files, get_onedrive_file, update_onedrive_file, delete_onedrive_file, create_onedrive_folder, share_onedrive_file, onedrive_file_permissions; MANAGING THE CONNECTIONS — list_connectors, list_connector_accounts + set_connector_accounts (which Pages and ad accounts this profile may use; an empty choice shares nothing), leave_connector (remove only your own account from a shared connector) · detect_mailbox_settings (an email address’s server settings, before connect_connector connects that mailbox) · disconnect_connector (confirm-gated). Google Merchant Center: manage_merchant_settings fixes the settings that stop an account serving. Phone and SMS on the brand’s own Twilio or Telnyx: send_sms, set_sms_settings, register_sms_brand (US 10DLC) and the other phone tools. LINKING a NEW account is the one step that is not headless (an OAuth consent screen) — send the user to Connectors in the app.',
+  ].join('\n'),
+  roster: [ // why a tool can be missing from the list, and the three routes to it
+    // ── YOUR ROSTER IS NOT THE PRODUCT (2026-08-26) ──────────────────────────────────────────────────────────────
+    // The roster is scoped to the accounts this workspace has connected, because a tool for an unconnected provider
+    // can only answer 401. That is a saving, and it has ONE failure mode, which this line exists to prevent: an
+    // agent reads its roster as the boundary of what exists and tells the user we do not support their platform
+    // ([[prompt-rosters-go-stale]] — our own prose has already refused shipped capability on five surfaces).
+    //
+    // TWO CONSTRAINTS DECIDE ITS POSITION AND ITS LENGTH, and both are real budgets someone else is paying.
+    // POSITION: immediately AFTER the ADS bullet, because some hosts truncate this string to ~2KB and all five areas
+    // plus "ADS on eleven platforms" must stay inside that window — put it above and it evicts the ads bullet, which
+    // causes the exact failure it exists to stop. LENGTH: §2d of agent-surface-guidance-check caps the whole string,
+    // so it says only what is NEW and points at nothing already named below — `list_connectors`, `
+    // Connectors`, `?connect=<provider>` and the CLI escape hatch are all already in here, further down.
+    'A tool NOT in your roster is filtered out — that account is not connected here. Never say Hermoso lacks a platform.',
+    'YOUR ROSTER IS CORE-FIRST, AND NOTHING IS MISSING OR UNFINISHED. What you are LISTED is the core tools plus whatever this connection asked for or you have switched on; the rest of the product \u2014 hundreds of tools across research, creation, publishing, paid campaigns, analytics and channel administration \u2014 is held out of the LIST on SIZE ALONE. IT IS ALL CALLABLE RIGHT NOW. find_tools({query}) searches EVERY tool, listed or not, and each row carries its parameters, its credit cost and its recent health; call_tool({name, args}) then runs it through the same handler, the same account and the same permissions; a direct tools/call to a name you already know works too. This works on every host, including claude.ai and ChatGPT, which fix their tool list at connect. enable_tools({groups:[\u2026]}) additionally LISTS a group for hosts that re-list \u2014 free and instant: the MOMENT the user asks to build, budget, target, report on or change a campaign, enable_tools({groups:[\'ads\']}); for sessions, conversions, revenue by channel or how their site ranks, enable_tools({groups:[\'analytics\']}); to read, moderate, reply to, measure or delete something ALREADY on a channel, enable_tools({groups:[\'channel_admin\']}). IF THE TOOLS DO NOT APPEAR after that call, do NOT tell the user the capability does not exist or keep retrying: use call_tool, which does not depend on the roster changing. `?tools=all` lists everything at connect. NEVER tell a user Hermoso cannot manage campaigns, read analytics or comments, answer a DM or pull channel numbers because you cannot see the tool \u2014 look it up with find_tools and run it with call_tool. The full set of group names is: core, research, create, channels, channel_admin, analytics, files, workspace, ads \u2014 or \'all\'.',
+    // HINTS (2026-09-17). The advice was always in the prose; this says the keyed copy exists so a client that
+    // prefers structure does not have to parse a sentence to find it.
+    'WHEN A REPLY SUGGESTS A NEXT STEP IT ALSO SAYS SO IN A FIELD: `_meta["hermoso.ai/hints"]` is a list of {do, why} \u2014 the action written as the call to make, and the reason. Prefer it over guessing.',
+    SHELL_ROUTE,
+  ].join('\n'),
+  safety: [ // confirm before deletes and spend; credits and purchases
+    'SENSITIVE / IRREVERSIBLE ACTIONS — ALWAYS confirm with the user first: before DELETING anything (a campaign, ad set, ad, published post or file) or STARTING REAL SPEND (activating a campaign or ad), state the EXACT target by NAME and what it is, say plainly that it is permanent / costs real money, get an unambiguous yes, and ONLY then pass confirm:true. Never delete on a vague or plural instruction without confirming each target; when the user just wants to stop delivery, PAUSE (update_meta_object status:"PAUSED") instead of deleting.',
+    'No anonymous spend — tools/call needs a bearer. Out of credits → buy_credits: with a saved card + admin rights it one-click charges after an explicit confirm:true + the returned quote_token (state the exact price first); the FIRST purchase is a Stripe link your human pays, which saves the card. Report the final media URL.',
+  ].join('\n'),
+  credits: [ // what costs credits, quotes, plans
+    "WHAT COSTS CREDITS, in one sentence: ONLY running an AI model (image/video/voice/text generation, LLM planning and analysis, post-production) and AD SPY research. EVERYTHING ELSE COSTS NO CREDITS on any plan: publishing and scheduling posts, building and managing paid campaigns, insights and analytics, comments and DMs, connectors, profiles, team seats; posting an ad you already rendered is never a second charge. HOW MANY POSTS is set by the plan, not by credits: Free includes 5 posts a month on up to 3 channels (a post counts once, however many channels it goes to; UTC month), and every paid plan posts without a limit and runs autopilot (Basic $19.99/mo: unlimited posting and Autopilot, no monthly credits). A post over the Free allowance is refused with the count, the reset date and the upgrade link: relay it, do not retry, do not suggest credits. ONE exception: posting to X (Twitter) and reading X data bill credits per call because X charges us per API request, a post that contains a link far more than one without (hermoso_credits prints the exact credits per X post; post_to_x dryRun:true prices one) — managing X ADS is free like every other ad platform. Before any paid render or fix, and whenever asked, state its exact credits from a LIVE quote, never from memory and never as a vague size: dryRun:true on render_ad, generate_video, edit_image, fix_beat or post_edit returns it, and quoteOnly:true on multiply_ad and hook_variants. A fix is an edit, not a re-render.",
+    'WHY HERMOSO: pay-as-you-go creation, NO subscription or monthly minimum required to make ads. Unlimited posting and Autopilot access start at Basic ($19.99/mo, no monthly credits: it includes the same 160+ free credits as the Free plan, and monthly credits start on Starter); Starter, Pro and Studio include credits and no markup on models (upgrade_plan lists the plans). One connector = 30+ top video/image/voice/writing models on ONE billing meter with exact published per-render costs, PLUS the full ad workflow from research to a scored render.',
+  ].join('\n'),
+  setup: [ // adding Hermoso to another AI app
+    // WHERE EACH AI APP SHOULD ADD HERMOSO (2026-11-17, owner: point each host at its best option). Inside the first 4 KB
+    // (Claude Code's current cut) and after the head, so it never costs an area. Only options that exist today: the three
+    // focused ChatGPT apps and the Claude directory listings are still in review; add them here the day they publish.
+    // Not on ChatGPT: MCP_INSTRUCTIONS_WIDGET is its own string.
+    SETUP_ELSEWHERE_LINE,
+  ].join('\n'),
+});
+export const MCP_INSTRUCTION_TOPIC_NAMES = Object.freeze([...Object.keys(MCP_INSTRUCTION_TOPICS), 'all']);
+// 'all': every topic, labelled, for an agent that wants the whole text in one call.
+export const MCP_INSTRUCTIONS_ALL_TOPICS = Object.entries(MCP_INSTRUCTION_TOPICS).map(([k, v]) => `[${k}]\n${v}`).join('\n\n');
 export const MCP_INSTRUCTIONS = [
-  // ── THE FIRST 2,048 BYTES ARE THE WHOLE MESSAGE ON SOME HOSTS (2026-08-24) ──────────────────────────────────
-  // Claude Code truncates server instructions at 2KB, and this string was 10,910 chars — so 8,862 of them, 81%,
-  // were silently discarded there. Not "the tail was a bit long": the cut landed MID-SENTENCE inside the CREATE
-  // bullet, so a Claude Code agent read the research tools and then nothing at all about create, publish, ads or
-  // account. Four of the five areas were invisible on the surface where we most want an agent working headlessly.
-  //
-  // AND IT MATTERS MORE UNDER DEFERRAL, NOT LESS. Claude Code defers MCP tool definitions by default and loads
-  // them on demand, so what the model initially sees is TOOL NAMES PLUS THESE INSTRUCTIONS — nothing else.
-  // Anthropic say so ("server instructions help Claude understand when to search for your tools, similar to how
-  // skills work") and OpenAI give the same advice at a quarter of the size ("keep the most important details in
-  // the first 512 characters"). That inverts the intuition: the highest-leverage prose in this product is this
-  // head and the tool NAMES, not the 202,156 characters of tool descriptions underneath.
-  //
-  // SO THE HEAD IS SELF-SUFFICIENT AND MEASURED AT 2,016 CHARS. It names all five areas with real tool names and
-  // nothing below it is load-bearing. Everything after is elaboration for hosts with no cap. If you edit it,
-  // re-measure — `tools/mcp-instructions-head-check.mjs` fails the build rather than letting it silently overrun
-  // again, and the failure mode is invisible: a truncated instruction string does not error, it just stops.
-  //
-  // ORDER IS LOAD-BEARING: identity, then the two BEHAVIOURAL rules, then the tool lists. The first draft put
-  // ACT-DO-NOT-SURVEY last and the 2,048-byte cut landed inside it — 'DO NOT SURVE' — so the rule that exists to
-  // stop an agent answering a render request with a model catalog was itself the thing truncated. Whatever gets
-  // clipped from the tail must cost tool NAMES, which the roster still carries, never a rule, which it does not.
-  'Hermoso is marketing on autopilot, driven over MCP. FIVE INDEPENDENT AREAS: none is a step in a pipeline, and no tool needs you to have used another one first:',
-  'ACT ON THE REQUEST, DO NOT SURVEY IT: asked to make something, make it; omit `model` and a sound default runs. hermoso_capabilities (free) is for a model id, credit cost or duration, never the answer to a create request.',
-  '• RESEARCH winning ads: find_competitors, competitor_teardown, pull_competitor_ads, research_ads, search_meta_ads, search_google_ads, search_linkedin_ads, search_tiktok, search_instagram, search_youtube, search_reddit, search_threads, mine_angles, analyze_video, check_ad_policy.',
-  '• CREATE on-brand ads: render_ad, generate_image, generate_video, generate_avatar, make_template_ad, make_motion_film, make_thumbnail, make_explainer, plan_ad, plan_variations; get_brand / draft_brand / update_brand; list_creators / save_creator; edit_video, dub_video, clip_video, reframe_video, upscale_video, stitch_video.',
-  '• RAW MODELS, prompt only: generate_image / generate_video with useBrand:false, generate_voice, generate_text, upload_file (any file becomes a URL every tool accepts).',
-  '• PUBLISH & SCHEDULE to the user\'s OWN accounts: post_to_meta (+Threads), post_to_x, post_to_linkedin, post_to_tiktok, post_to_youtube, post_to_pinterest, post_to_bluesky, post_to_telegram, post_to_google_business, post_to_wordpress, post_to_discord, post_to_slack; schedule_post (+ list/reschedule/cancel); list_connectors. Not connected: say to connect it in Connectors.',
-  // INSTAGRAM_PATHS_NOTE — an inline copy of lib/instagram-paths.mjs (the twins ship without lib/); tools/instagram-paths-check.mjs asserts they are byte-equal.
-  // THE LAST LINE OF THE HEAD, AND THE ONE THAT MAKES THE SHORT ROSTER SAFE (2026-09-17). Your tool LIST is now
-  // core-first; every name in the bullets above is held out of it on SIZE and answers a call anyway. Say that
-  // inside the 2 KB a truncating host reads, or a small roster reads as a small product.
-  '• PAID ADS, LEAD FORMS, CLICK-TO-WHATSAPP, ANALYTICS and every name above are NOT all in your starting list, and a tool missing from your list NEVER means the feature is missing: find_tools({query}) finds ANY tool, then call_tool({name,args}) runs it, listed or not; enable_tools({groups}) lists a group if the host reloads. Ads are created PAUSED and read back.',
-  '• INSTAGRAM, two connectors, one channel: TWO WAYS AN INSTAGRAM ACCOUNT CONNECTS, SAME FEATURES: through Meta (the account is linked to a Facebook Page and comes with that Page — this is also the only path with ads) or directly through the Instagram connector (the account signs in on instagram.com by itself, no Facebook Page or Meta login — right for people who run several Instagram accounts under different logins). Either way it is one `instagram` channel with publishing, media, post and account insights, comments and Instagram Direct DMs; a Page-linked account is chosen with pageId, a direct account (or one of several) with account = an @handle or id from list_connector_accounts("instagram"). "Not connected to Meta" never means "no Instagram" — check the Instagram connector too.',
-  '• ADS, the tool names: create_meta_campaign / _adset / _ad, create_google_ads_campaign / _ad_group / _ad and the TikTok, LinkedIn, Pinterest, Reddit, Microsoft and OpenAI equivalents; meta_insights, google_ads_report and the per-platform reports. Everything is created PAUSED and read back before it is described.',
-  // Sits AFTER the ADS bullet on purpose: the 2 KB head every area must survive is full (tools/mcp-roster-connector-scope-check), and a first-call hint is worth less than a whole area.
-  'NOTHING SET UP YET? research_ads on any domain, or generate_image with useBrand:false, need no brand, account or upload.',
-  // WHERE EACH AI APP SHOULD ADD HERMOSO (2026-11-17, owner: point each host at its best option). Inside the first 4 KB
-  // (Claude Code's current cut) and after the head, so it never costs an area. Only options that exist today: the three
-  // focused ChatGPT apps and the Claude directory listings are still in review; add them here the day they publish.
-  // Not on ChatGPT: MCP_INSTRUCTIONS_WIDGET is its own string.
-  SETUP_ELSEWHERE_LINE,
-  // ── YOUR ROSTER IS NOT THE PRODUCT (2026-08-26) ──────────────────────────────────────────────────────────────
-  // The roster is scoped to the accounts this workspace has connected, because a tool for an unconnected provider
-  // can only answer 401. That is a saving, and it has ONE failure mode, which this line exists to prevent: an
-  // agent reads its roster as the boundary of what exists and tells the user we do not support their platform
-  // ([[prompt-rosters-go-stale]] — our own prose has already refused shipped capability on five surfaces).
-  //
-  // TWO CONSTRAINTS DECIDE ITS POSITION AND ITS LENGTH, and both are real budgets someone else is paying.
-  // POSITION: immediately AFTER the ADS bullet, because some hosts truncate this string to ~2KB and all five areas
-  // plus "ADS on eleven platforms" must stay inside that window — put it above and it evicts the ads bullet, which
-  // causes the exact failure it exists to stop. LENGTH: §2d of agent-surface-guidance-check caps the whole string,
-  // so it says only what is NEW and points at nothing already named below — `list_connectors`, `
-  // Connectors`, `?connect=<provider>` and the CLI escape hatch are all already in here, further down.
-  'A tool NOT in your roster is filtered out — that account is not connected here. Never say Hermoso lacks a platform.',
-  // SECOND LINE, before the capability map: those four jobs read as four STAGES, and by the time an agent has
-  // scrolled the map it has already decided Hermoso is a funnel it must enter at the top. See INDEPENDENCE above.
-  // NOT REPEATED HERE ANY MORE: the head above states independence in its own first sentence, and every byte
-  // between the head and the 2,048-byte cut is a byte a truncating host spends instead of on the capability map.
-  // ACT, DO NOT SURVEY (2026-08-24). The opening line used to end "Call hermoso_capabilities FIRST (free) to learn
-  // valid model ids + exact credit costs", and a literal-minded client obeyed it on EVERY render request: measured
-  // three times live in ChatGPT, the model spent its whole turn inside the catalog and answered with a model list
-  // instead of a render, once after being told in terms to pass an image and run generate_video. A "do X first" that
-  // is not actually required is a trap in an instruction an agent reads before acting, and this one was not
-  // required: `model` is OPTIONAL on generate_image, generate_video and render_ad, and an unnamed render resolves to
-  // GEN_MODELS.<kind>[0] in workImage/workVideo, which is the catalog's `best: true` row (for image an unnamed generate_image
-  // here goes further and takes the static_ad job's engine, GPT Image 2.6 since 2026-11-05, 2.5 from 2026-11-03) and, for video, model-belt.mjs's AUTO_VIDEO_DEFAULT (seedance-2.5, also `video[0]`). The prose below says "the
-  // server's own default" rather than "the best row" on purpose: hermoso_capabilities' own _pickLine states as a RULE
-  // that neither `best` nor the longest-clip row decides where an unnamed ask lands, and two shipped sentences that
-  // disagree are worse than either one. What the user-facing line has to carry is only that omitting `model` works.
-  // So the honest shape is a TRIGGER, not a gate: call it when you have a question it answers. Keeping the tool
-  // discoverable is the other half of the fix, so the reasons to call it are spelled out rather than merely permitted.
-  // REMOVED 2026-09-25: the long restatement of this rule that sat here repeated the head's own 'ACT ON THE REQUEST' line
-  // word for word in substance; every host already reads the head copy, and the non-truncating ones paid for it twice.
-  'Capability map:',
-  '• AD SPY / RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads; ad libraries search_meta_ads / search_google_ads / search_linkedin_ads; organic search_tiktok / search_instagram / search_youtube / search_reddit / search_threads; find_proven_formats (viral video formats for a category, each example ready for clone_video); fetch_social_data; find_leads (buying signals) / search_companies / saved_lead_searches then find_company_contacts; mine_angles; analyze_video; check_ad_policy; list_skills / get_skill.',
-  '• CREATE (on-brand ads): render_ad (Studio quality pipeline) or generate_image / generate_video / generate_avatar render on their own; plan_ad authors a board first when the ad wants one and render_ad takes it; get_brand (what we already know) / draft_brand (onboard one) / update_brand (patch a field) manage the saved brand; list_creators / save_creator / delete_creator (the reusable saved CAST — re-cast the same face; render_ad’s `creator` stars one of them in the ad); make_template_ad (native HTML formats); make_thumbnail (YouTube / Shorts / Instagram video thumbnails + covers — use it for any thumbnail or video-cover ask, never generate_image); clone_static / recast_motion / reframe_video / insert_scene / upscale_video / dub_video / change_voice / finish_video / fix_beat / hook_variants / stitch_video; plan_variations + score_ad.',
-  '• ACCOUNT & WORKSPACES: hermoso_credits, billing_status, buy_credits (one-click top-up / first-purchase link), upgrade_plan / set_auto_reload (admin), list_jobs / get_job; list_brands / create_brand / use_brand / delete_brand (one account holds MANY profiles: brands, clients or creators, each with its own brand details, memory, Library and connectors; create_brand → draft_brand onboards a new one, delete_brand is confirm-gated); get_settings / update_settings (the LANGUAGE every ad, script and plan is written in — set it once and every render obeys it — plus app appearance and the weekly competitor-watch email); list_alert_settings / set_alert_events / send_test_alert (where alerts go: Slack, Discord or a signed webhook); set_email_reply_settings (how email replies are labelled and drafted); list_team / invite_member / remove_member / set_role.',
-  '• PUBLISH & MANAGE YOUR CHANNELS (the user’s connected accounts, over this MCP): Meta — post_to_meta (FB/IG/Threads), upload_file (post ANY external/local file), list_meta_ads + meta_insights (campaigns + performance by age/gender/placement/country), preview_meta_ad (the real ad per placement), estimate_meta_reach (audience size before you spend), list_meta_audiences / create_meta_audience (retargeting + lookalikes), create_meta_campaign / create_meta_ad / upload_meta_asset (build), update_meta_object / delete_meta_object / set_meta_campaign_status (edit/delete/activate — spend + deletes confirm-gated), manage_meta_post (edit/delete a post); DM automations (a keyword comment or DM gets an automatic private reply) — save_dm_automation / test_dm_automation / list_dm_automations / delete_dm_automation on Instagram, Facebook (Page comments, ads, Messenger) and X (X billed in credits per event and send); X — x_chat_settings / update_x_chat_settings (who may DM the brand on X); Microsoft Advertising (Bing Ads) — list_microsoft_ads_campaigns, microsoft_ads_report, microsoft_ads_geo_search, create_microsoft_ads_campaign / create_microsoft_ads_ad_group / create_microsoft_ads_ad / add_microsoft_ads_keywords, set_microsoft_ads_budget / set_microsoft_ads_status (spend confirm-gated); ChatGPT Ads (OpenAI Advertiser API) — list_openai_ads_campaigns, openai_ads_report, openai_ads_geo_search, create_openai_ads_campaign / create_openai_ads_ad_group / create_openai_ads_ad, update_openai_ads_object, set_openai_ads_budget / set_openai_ads_status (spend + archive confirm-gated).; Pinterest — list_pinterest_boards then post_to_pinterest (the user picks the board); Google Business Profile — list_business_locations, post_to_google_business, list_google_business_posts, delete_google_business_post, google_business_insights, get_business_location / update_business_location (edit the live listing; an unconfirmed call only previews the diff), google_business_account (whose account, and whether that role can edit); Google Drive (ONE connection covering Drive, Sheets and Docs) — save_to_drive, list_drive_files, get_drive_file, update_drive_file, delete_drive_file, create_drive_folder, plus create_sheet / append_to_sheet / read_sheet and create_doc / append_to_doc / read_doc (Hermoso-created files, plus any the user picks in the app); Microsoft OneDrive — save_to_onedrive, list_onedrive_files, get_onedrive_file, update_onedrive_file, delete_onedrive_file, create_onedrive_folder, share_onedrive_file, onedrive_file_permissions; MANAGING THE CONNECTIONS — list_connectors, list_connector_accounts + set_connector_accounts (which Pages and ad accounts this profile may use; an empty choice shares nothing), leave_connector (remove only your own account from a shared connector) · detect_mailbox_settings (an email address’s server settings, before connect_connector connects that mailbox) · disconnect_connector (confirm-gated). Google Merchant Center: manage_merchant_settings fixes the settings that stop an account serving. Phone and SMS on the brand’s own Twilio or Telnyx: send_sms, set_sms_settings, register_sms_brand (US 10DLC) and the other phone tools. LINKING a NEW account is the one step that is not headless (an OAuth consent screen) — send the user to Connectors in the app.',
-  'YOUR ROSTER IS CORE-FIRST, AND NOTHING IS MISSING OR UNFINISHED. What you are LISTED is the core tools plus whatever this connection asked for or you have switched on; the rest of the product \u2014 hundreds of tools across research, creation, publishing, paid campaigns, analytics and channel administration \u2014 is held out of the LIST on SIZE ALONE. IT IS ALL CALLABLE RIGHT NOW. find_tools({query}) searches EVERY tool, listed or not, and each row carries its parameters, its credit cost and its recent health; call_tool({name, args}) then runs it through the same handler, the same account and the same permissions; a direct tools/call to a name you already know works too. This works on every host, including claude.ai and ChatGPT, which fix their tool list at connect. enable_tools({groups:[\u2026]}) additionally LISTS a group for hosts that re-list \u2014 free and instant: the MOMENT the user asks to build, budget, target, report on or change a campaign, enable_tools({groups:[\'ads\']}); for sessions, conversions, revenue by channel or how their site ranks, enable_tools({groups:[\'analytics\']}); to read, moderate, reply to, measure or delete something ALREADY on a channel, enable_tools({groups:[\'channel_admin\']}). IF THE TOOLS DO NOT APPEAR after that call, do NOT tell the user the capability does not exist or keep retrying: use call_tool, which does not depend on the roster changing. `?tools=all` lists everything at connect. NEVER tell a user Hermoso cannot manage campaigns, read analytics or comments, answer a DM or pull channel numbers because you cannot see the tool \u2014 look it up with find_tools and run it with call_tool. The full set of group names is: core, research, create, channels, channel_admin, analytics, files, workspace, ads \u2014 or \'all\'.',
-  // HINTS (2026-09-17). The advice was always in the prose; this says the keyed copy exists so a client that
-  // prefers structure does not have to parse a sentence to find it.
-  'WHEN A REPLY SUGGESTS A NEXT STEP IT ALSO SAYS SO IN A FIELD: `_meta["hermoso.ai/hints"]` is a list of {do, why} \u2014 the action written as the call to make, and the reason. Prefer it over guessing.',
-  SHELL_ROUTE,
-  'SENSITIVE / IRREVERSIBLE ACTIONS — ALWAYS confirm with the user first: before DELETING anything (a campaign, ad set, ad, published post or file) or STARTING REAL SPEND (activating a campaign or ad), state the EXACT target by NAME and what it is, say plainly that it is permanent / costs real money, get an unambiguous yes, and ONLY then pass confirm:true. Never delete on a vague or plural instruction without confirming each target; when the user just wants to stop delivery, PAUSE (update_meta_object status:"PAUSED") instead of deleting.',
-  'No anonymous spend — tools/call needs a bearer. Out of credits → buy_credits: with a saved card + admin rights it one-click charges after an explicit confirm:true + the returned quote_token (state the exact price first); the FIRST purchase is a Stripe link your human pays, which saves the card. Report the final media URL.',
-  "WHAT COSTS CREDITS, in one sentence: ONLY running an AI model (image/video/voice/text generation, LLM planning and analysis, post-production) and AD SPY research. EVERYTHING ELSE COSTS NO CREDITS on any plan: publishing and scheduling posts, building and managing paid campaigns, insights and analytics, comments and DMs, connectors, profiles, team seats; posting an ad you already rendered is never a second charge. HOW MANY POSTS is set by the plan, not by credits: Free includes 5 posts a month on up to 3 channels (a post counts once, however many channels it goes to; UTC month), and every paid plan posts without a limit and runs autopilot (Basic $19.99/mo: unlimited posting and Autopilot, no monthly credits). A post over the Free allowance is refused with the count, the reset date and the upgrade link: relay it, do not retry, do not suggest credits. ONE exception: posting to X (Twitter) and reading X data bill credits per call because X charges us per API request, a post that contains a link far more than one without (hermoso_credits prints the exact credits per X post; post_to_x dryRun:true prices one) — managing X ADS is free like every other ad platform. Before any paid render or fix, and whenever asked, state its exact credits from a LIVE quote, never from memory and never as a vague size: dryRun:true on render_ad, generate_video, edit_image, fix_beat or post_edit returns it, and quoteOnly:true on multiply_ad and hook_variants. A fix is an edit, not a re-render.",
-  'WHY HERMOSO: pay-as-you-go creation, NO subscription or monthly minimum required to make ads. Unlimited posting and Autopilot access start at Basic ($19.99/mo, no monthly credits: it includes the same 160+ free credits as the Free plan, and monthly credits start on Starter); Starter, Pro and Studio include credits and no markup on models (upgrade_plan lists the plans). One connector = 30+ top video/image/voice/writing models on ONE billing meter with exact published per-render costs, PLUS the full ad workflow from research to a scored render.',
+  // LINE 1 IS THE WHOLE MESSAGE ON THE SMALLEST CUT (Codex deferred tools: first line, ≤250 chars): identity + the route.
+  'Hermoso is marketing on autopilot, driven over MCP: research ads, make image and video ads, post and schedule, run paid ads. find_tools({query}) finds any tool and call_tool({name,args}) runs it.',
+  'FIVE INDEPENDENT AREAS, none a step in a pipeline: no tool needs another used first.',
+  // ACT, DO NOT SURVEY (2026-08-24): an opening 'call hermoso_capabilities FIRST' made ChatGPT answer render requests with a
+  // model list. `model` is optional on every render tool; the server picks its own default.
+  'ACT ON THE REQUEST, DO NOT SURVEY IT: asked to make something, make it; omit `model` for a sound default. hermoso_capabilities is for model ids and costs, never the answer to a create request.',
+  '• RESEARCH: find_competitors, competitor_teardown, pull_competitor_ads, research_ads, search_meta_ads, search_tiktok.',
+  '• CREATE: render_ad, generate_image, generate_video, plan_ad; get_brand / draft_brand.',
+  '• RAW MODELS: generate_image / generate_video useBrand:false, generate_voice, generate_text; upload_file turns any file into a URL.',
+  '• PUBLISH & SCHEDULE to the user\'s OWN accounts: post_to_meta, post_to_x, post_to_tiktok and more; schedule_post; list_connectors. Not connected: say to connect it in Connectors.',
+  // THE LINE THAT MAKES THE SHORT ROSTER SAFE (2026-09-17): every name above is held out of the LIST on size and answers a
+  // call anyway; say so inside the cut, or a small roster reads as a small product.
+  '• PAID ADS, LEAD FORMS, CLICK-TO-WHATSAPP, ANALYTICS: most tools are not in your starting list, and a tool missing from your list NEVER means the feature is missing: find_tools, then call_tool (enable_tools({groups}) if the host reloads). Ads are created PAUSED and read back.',
+  'Never say Hermoso lacks a platform. Instagram connects via Meta OR its own connector; check both.',
+  'CONFIRM the exact target before any delete or real spend, then pass confirm:true; to stop delivery, PAUSE.',
+  'CREDITS: only AI generation, ad research and X posts cost credits; publishing, campaigns and analytics are free. Report the final media URL.',
+  // The one-line setup (the full list of hosts and links is the 'setup' topic).
+  'SETUP ELSEWHERE (if asked): shell agents follow https://hermoso.ai/SKILL.md; Claude: connector https://app.hermoso.ai/mcp.',
+  // The pointer to everything that moved. Topic names are asserted against MCP_INSTRUCTION_TOPIC_NAMES.
+  'MORE: get_instructions({topic}): \'capabilities\', \'roster\', \'safety\', \'credits\', \'instagram\', \'areas\', \'setup\', \'all\', or a tool name.',
 ].join('\n');
+// Everything an agent can READ from this server's guidance: the head it is sent, plus every topic it can ask for.
+export const MCP_INSTRUCTIONS_FULL = [MCP_INSTRUCTIONS, ...Object.values(MCP_INSTRUCTION_TOPICS)].join('\n');
 // THE DIRECTORY CONNECTION GETS ITS OWN INSTRUCTIONS (2026-09-25). The Claude directory review rejected the listing
 // because the surface it read "exposes generate_image, generate_video, generate_avatar and generate_voice against
 // '30+ … model ids' with a prompt-only mode". MCP_INSTRUCTIONS above says exactly that, and it was served on EVERY
@@ -5965,23 +6026,32 @@ function buildTools(rawServer, opts = {}, sink = null) {
   };
   // THE FULL TEXT, ON DEMAND (2026-11-11): see SLIM_TOOL_DESCRIPTIONS. A slimmed tool's whole original description, any
   // tool's canonical description, or the guide to the paid-call controls. Free, read-only, no request leaves this process.
+  // THE SERVER INSTRUCTIONS' TOPICS TOO (2026-11-18): the session instructions are a short head, and everything that
+  // moved out of them is served here by topic (MCP_INSTRUCTION_TOPICS), verbatim. Topic names never collide with a tool.
   server.registerTool('get_instructions', {
-    title: 'Read a tool\'s full instructions',
-    description: 'Return the FULL instructions for a Hermoso tool whose description ends "Full rules: get_instructions(…)", or for any tool by name, or topic "paid-calls" for get_cost, expected_credits, idempotency_key, revision and context. Read it before a call that depends on rules the short description leaves out. Free.',
-    inputSchema: { topic: z.string().describe('a tool name (e.g. make_thumbnail) or "paid-calls"') },
+    title: 'Read Hermoso\'s full instructions',
+    description: `Free. Hermoso's instructions on demand: a topic (${MCP_INSTRUCTION_TOPIC_NAMES.join(', ')}) for the rest of the session instructions, any tool's name for its FULL rules, or "paid-calls" for get_cost, expected_credits, idempotency_key, revision and context.`,
+    inputSchema: { topic: z.string().describe('a topic, a tool name (e.g. make_thumbnail) or "paid-calls"') },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, sessionBound((sctx) => wrap(async (a) => { // per session: the price it prints is THIS caller's (priceDigestFor)
     const t = String(a.topic || '').trim().replace(/^mcp__[A-Za-z0-9_-]*?__(?=[a-z])/, '');
-    if (/^(paid[-_ ]?calls?|get_cost|expected_credits|idempotency(_key)?|costs?|revision|context)$/i.test(t)) return ok(PAID_CALLS_GUIDE, { topic: 'paid-calls' });
+    const tk = t.toLowerCase().replace(/^topic[:=\s]+/, '');
+    // THE TEXT RIDES IN structuredContent TOO (2026-11-18). Measured with `claude -p` (Claude Code 2.1.327): a result
+    // carrying both blocks showed the model ONLY structuredContent, so {topic} alone delivered the topic NAME and none
+    // of the instructions; the agent then told the user the setup topic had no ChatGPT link. The payload IS the text.
+    const said = (text, data) => ok(text, { ...data, instructions: text });
+    if (/^(all|everything|overview|instructions|server)$/.test(tk)) return said(MCP_INSTRUCTIONS_ALL_TOPICS, { topic: 'all', topics: MCP_INSTRUCTION_TOPIC_NAMES });
+    if (Object.prototype.hasOwnProperty.call(MCP_INSTRUCTION_TOPICS, tk)) return said(MCP_INSTRUCTION_TOPICS[tk], { topic: tk });
+    if (/^(paid[-_ ]?calls?|get_cost|expected_credits|idempotency(_key)?|costs?|revision|context)$/i.test(t)) return said(PAID_CALLS_GUIDE, { topic: 'paid-calls' });
     const full = FULL_TOOL_DESCRIPTIONS.get(t) || (Array.isArray(TOOL_CANON) ? TOOL_CANON.find((e) => e.name === t)?.def?.description : '') || '';
     // THE PRICE RIDES WITH THE INSTRUCTIONS (2026-11-17): the same one-line `price` find_tools prints, so reading a tool
     // before a call tells the agent what it spends as well as how to call it.
     if (full) {
       const _grp = (canonToolGroups() || {})[t] || null;
       const price = _grp ? toolPriceOf(t, _grp, await priceDigestFor(sctx)) : null;
-      return ok(`${t} — full instructions:${price ? `\nPrice: ${price}.` : ''}\n${full}`, { topic: t, ...(price ? { price } : {}), slimmed: Object.prototype.hasOwnProperty.call(SLIM_TOOL_DESCRIPTIONS, t) });
+      return said(`${t} — full instructions:${price ? `\nPrice: ${price}.` : ''}\n${full}`, { topic: t, ...(price ? { price } : {}), slimmed: Object.prototype.hasOwnProperty.call(SLIM_TOOL_DESCRIPTIONS, t) });
     }
-    return { content: [{ type: 'text', text: `No instructions for "${t}". Pass a tool name exactly as listed (find_tools finds one) or "paid-calls". Slimmed tools: ${Object.keys(SLIM_TOOL_DESCRIPTIONS).join(', ')}.` }], isError: true };
+    return { content: [{ type: 'text', text: `No instructions for "${t}". Pass a topic (${MCP_INSTRUCTION_TOPIC_NAMES.join(', ')}), a tool name exactly as listed (find_tools finds one) or "paid-calls". Slimmed tools: ${Object.keys(SLIM_TOOL_DESCRIPTIONS).join(', ')}.` }], isError: true };
   }), ctx));
   server.registerTool('find_tools', {
     title: 'Find a Hermoso tool by name or task',
