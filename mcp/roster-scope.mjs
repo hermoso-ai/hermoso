@@ -53,6 +53,10 @@
 export const PHONE_TOOL_RE = /(^|_)sms(_|$)|^(list|search)_phone_numbers$|^(buy|configure|release)_phone_number$|10dlc|tollfree|^list_calls$|^list_call_recordings$|^transcribe_call$|^place_call$|^call_tracking_report$|^assign_number_to_campaign$|^list_provider_opt_outs$/;
 // A phone tool is filed under 'twilio' and served by a Telnyx connection just as well.
 export const PHONE_TOOL_ALSO = Object.freeze(['telnyx']);
+// The AI voice-agent tools (2026-11-18): every one carries `voice_agent` in its name, which nothing else does.
+export const VOICE_TOOL_RE = /voice_agents?(_|$)/;
+// Filed under 'vapi'; served by a Retell AI, ElevenLabs or Telnyx connection (Telnyx AI Assistants) just as well.
+export const VOICE_TOOL_ALSO = Object.freeze(['retell', 'elevenlabs', 'telnyx']);
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
@@ -95,6 +99,8 @@ export const TOOL_PROVIDER_RULES = [
   // under 'twilio'; toolHeldBackByConnectors offers it to a brand with either connected (PHONE_TOOL_ALSO). `call_tool` and
   // the WhatsApp phone tools never match: the names are exact or `sms`-shaped, and the Meta rule above answers first.
   [PHONE_TOOL_RE, 'twilio'],
+  // AI VOICE AGENTS (2026-11-18): the brand's OWN Vapi, Retell AI, ElevenLabs or Telnyx AI account, one tool set filed under 'vapi'.
+  [VOICE_TOOL_RE, 'vapi'],
   // ── analytics / measurement, each its own connection ──
   [/_analytics_|^analytics_(realtime|report|data_retention)$|analytics_compatibility|analytics_stream/, 'google_analytics'],
   [/mixpanel/, 'mixpanel'],
@@ -336,5 +342,6 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'meta' && on.has('whatsapp') && isWhatsAppTool(name)) return false;
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
   return !on.has(p);
 }

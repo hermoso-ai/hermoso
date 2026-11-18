@@ -37,6 +37,7 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'discord', // publishing
   'slack', // publishing
   'twilio', // publishing
+  'vapi', // publishing
   'microsoft_ads', // big-platform ads
   'amplitude', // analytics
   'hubspot', // analytics
