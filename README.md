@@ -33,8 +33,17 @@ directory. Press Install plugin and sign in with your Hermoso account, no key ne
 opens Claude's *Add custom connector* dialog with Hermoso already filled in. Press Continue, choose **Sign in now**
 if Claude asks about Authentication, then sign in with your Hermoso account.
 
-**Grok Bot:** it cannot open the Hermoso sign-in page, so it signs in with a key. **[Create a key](https://app.hermoso.ai/?tab=api-keys)**,
-then **[add the Hermoso Marketing Bot](https://x.ai/bot/THQqogUKuhn1whWU0hrmb)** and paste the key when it asks.
+**Grok Bot:** one prompt, no key. Send this to your Bot in a new chat; it runs Hermoso on its own cloud computer and sends
+you a sign-in link with a short code to approve on your phone or computer:
+
+```text
+Set up Hermoso for me so I can research ads, find creators, generate images and videos, and publish from here.
+1. Sign me in from your command line: run `npx -y hermoso auth login --device --no-wait`. It prints a link and a code. Send me both, wait until I say I approved, then run `npx -y hermoso auth login --device --resume`.
+2. Add an MCP server of type stdio (a command), not a URL. Command: `npx -y hermoso mcp`. It uses the sign-in from step 1, so it needs no key.
+3. Then run one real tool call: list my brands.
+```
+
+Prefer a ready-made Bot? The [Hermoso Marketing Bot](https://x.ai/bot/THQqogUKuhn1whWU0hrmb) asks for a key instead.
 
 **Claude Code, Cursor, Codex and other coding agents:** one line. Paste this into a new chat and the agent reads
 [hermoso.ai/SKILL.md](https://hermoso.ai/SKILL.md), runs its own install, opens the sign-in and makes your first 3 ad ideas:
@@ -44,11 +53,8 @@ Follow https://hermoso.ai/SKILL.md to set up Hermoso for me, then make 3 ad idea
 ```
 
 **OpenClaw and Hermes** usually run on a server you chat with on Telegram, Discord or WhatsApp, so there is no browser for
-the sign-in: **[create a key](https://app.hermoso.ai/?tab=api-keys)** first and put it in the line:
-
-```text
-Follow https://hermoso.ai/SKILL.md to set up Hermoso for me. My Hermoso API key is: <paste your key here>. Then make 3 ad ideas for my brand and show me the best one as an image.
-```
+the sign-in. Paste the same line there: the agent sends you a sign-in link with a short code, you approve it on your phone,
+and it carries on. No key needed.
 
 <details>
 <summary>Set it up by hand</summary>
@@ -61,7 +67,7 @@ Set up Hermoso for me. It is an AI marketing tool (hermoso.ai) that researches a
 1. Install it by running: claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
    If the new skills only load after a restart, tell me, and use npx meanwhile.
 2. Sign me in by running: npx -y hermoso auth login
-   It opens my browser and I will approve the connection there. If this machine has no browser, ask me for a Hermoso API key and run npx -y hermoso auth login --token <key> instead.
+   It opens my browser and I will approve the connection there. If this machine has no browser, run npx -y hermoso auth login --device --no-wait instead: send me the link and the code it prints, and once I say I approved, run npx -y hermoso auth login --device --resume.
 3. Once I am signed in, do one small task to show it works: tell me my Hermoso credit balance and which profile is saved.
 4. Then set up my brand from my website and make my first ad.
 ```
@@ -177,8 +183,10 @@ gemini extensions install https://github.com/hermoso-ai/hermoso
 
 - **grok.com and the Grok apps** take the hosted connector: open **Plugins → Connectors → New Connector → Custom**
   (or go straight to grok.com/connectors), paste `https://app.hermoso.ai/mcp` and sign in with your Hermoso account.
-- **Grok Bot**: add the [Hermoso Marketing Bot template](https://x.ai/bot/THQqogUKuhn1whWU0hrmb). It arrives wired
-  to Hermoso and asks for a key, which you create in the app under **MCP & CLI → Terminal & API keys**.
+- **Grok Bot**: send it the prompt above. It signs in from its own cloud computer with
+  `npx -y hermoso auth login --device` (a link and a short code you approve on your phone), then runs the stdio server
+  `npx -y hermoso mcp`. No key. The [Hermoso Marketing Bot template](https://x.ai/bot/THQqogUKuhn1whWU0hrmb) asks
+  for a key instead, which you create in the app under **MCP & CLI → Terminal & API keys**.
 - **Grok Build**, xAI's terminal agent, runs a local MCP server. Sign in once, then add it:
 
   ```bash
@@ -200,8 +208,11 @@ It asks which agents to install into; `-a opencode` (or `cursor`, `github-copilo
 below). The ChatGPT desktop app and ChatGPT workspace admins can also read this repo's
 `.claude-plugin/marketplace.json`, which installs the skills.
 
-No browser on the machine? Create a key in the app under **MCP & CLI** and run
-`npx -y hermoso auth login --token <key>`.
+No browser on the machine (a server, an SSH session)? `npx -y hermoso auth login` notices and shows a link and a short
+code instead: open the link on your phone and approve. `--device` asks for it directly; an agent that relays the link
+over chat runs `npx -y hermoso auth login --device --no-wait` (prints the link and exits), then
+`npx -y hermoso auth login --device --resume` once you have approved. Only if nothing can open a link: create a key in
+the app under **MCP & CLI** and run `npx -y hermoso auth login --token <key>`.
 
 On a server, a CI job or an agent gateway that calls Hermoso many times a day, install it once
 (`npm i -g hermoso`) and call `hermoso` directly. `npx` asks the npm registry about the package on every run,
@@ -309,8 +320,9 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
    Already inside a session? `/plugin marketplace add hermoso-ai/hermoso`, then `/plugin install hermoso@hermoso`.
    Codex, Gemini CLI and the rest are in [Install in one command](#install-in-one-command).
 3. **Sign in once.** `npx -y hermoso auth login` opens your browser; your agent also runs it by itself the first
-   time it needs Hermoso. On a machine with no browser, use `npx -y hermoso auth login --token hmk_…` with a key
-   from the **MCP & CLI** tab, under **Terminal & API keys** (Settings → API keys, or https://app.hermoso.ai/?tab=api-keys, go straight there).
+   time it needs Hermoso. On a machine with no browser it shows a link and a short code to approve on your phone
+   (`npx -y hermoso auth login --device`). Only if nothing can open a link, use `npx -y hermoso auth login --token hmk_…`
+   with a key from the **MCP & CLI** tab, under **Terminal & API keys** (https://app.hermoso.ai/?tab=api-keys).
 4. **Ask for what you want**, in your normal prompts. Claude Code picks the Hermoso skill for the job and runs the
    commands. You type none of them.
 

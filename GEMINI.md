@@ -13,7 +13,7 @@ Hermoso is an AI marketing agent and AI ad generator, run from your own AI agent
 
 Everything runs through the `hermoso` CLI in the shell, so no tool list is loaded into the session and nothing costs context until it runs.
 
-1. Sign in once: `npx -y hermoso auth login` opens a browser. On a machine with no browser, create a key in the app under MCP & CLI and run `npx -y hermoso auth login --token <key>`.
+1. Sign in once: `npx -y hermoso auth login` opens a browser. On a machine with no browser, `npx -y hermoso auth login --device` shows a link and a short code to approve on your phone instead. Only if nothing can open a link, create a key in the app under MCP & CLI and run `npx -y hermoso auth login --token <key>`.
 2. No account yet? Sign up at https://app.hermoso.ai and set up a profile (a website, a social handle or a short description is enough).
 
 ## How to work

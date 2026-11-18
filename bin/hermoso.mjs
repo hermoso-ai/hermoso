@@ -5,6 +5,7 @@
 //
 //   npm i -g  (from this repo)  OR  node bin/hermoso.mjs <cmd>
 //   hermoso auth login                                 # browser sign-in (loopback, like gh/heroku); --token <key> for CI
+//   hermoso auth login --device                        # no browser here: a link + code to approve on any device
 //   hermoso capabilities                                 # learn valid model ids + costs (run first)
 //   hermoso create --brand Flourish --product "protein pancakes" --format image
 //   hermoso generate image --prompt "…" --ref ./bag.png --wait
@@ -100,10 +101,36 @@ async function main() {
     const profile = flags.profile || (cfg.profile && cfg.profile !== 'default' ? cfg.profile : '');
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(apiBase);
     if (flags.token) { await saveConfig({ apiBase, token: String(flags.token), profile }); return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`); }
+    // NO BROWSER ON THIS MACHINE: THE DEVICE SIGN-IN (RFC 8628, 2026-11-18). An agent on a server, chatted through
+    // Telegram or Discord, cannot finish the loopback sign-in: the browser that opens is the user's, on their phone, and
+    // it cannot reach 127.0.0.1 on the server. So the CLI prints a link and a short code, the user approves on any
+    // device, and the CLI polls for the key. `--no-wait` prints them and exits (an agent's shell returns nothing until a
+    // command ends, so it relays the link first), and `--resume` then waits for that approval.
+    // An explicit --device runs against any server, a local one included (that is how the check tests it); the automatic
+    // fallback never fires for a localhost base, which needs no sign-in at all.
+    const wantDevice = !!(flags.device || flags.resume || flags['no-wait']);
+    if (sub === 'login' && (wantDevice || (!isLocal && noBrowserHere()))) {
+      if (!wantDevice) console.log('No browser on this machine, so this uses a sign-in link and code instead (hermoso auth login --device).');
+      let pending;
+      if (flags.resume) {
+        pending = await loadPending();
+        if (!pending) return die('No sign-in is waiting. Start one with: hermoso auth login --device');
+        if (pending.exp < Date.now()) { await clearPending(); return die('That sign-in expired. Start a new one with: hermoso auth login --device'); }
+      } else {
+        try { pending = await deviceStart(apiBase); } catch (e) { return die(e.message); }
+        await savePending(pending);
+        printDeviceCode(pending, { json: !!flags.json, wait: !flags['no-wait'] });
+        if (flags['no-wait']) return;
+      }
+      let key; try { key = await devicePoll(pending); } catch (e) { await clearPending(); return die(e.message); }
+      await clearPending();
+      await saveConfig({ apiBase: pending.apiBase || apiBase, token: key, profile });
+      return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${pending.apiBase || apiBase}`);
+    }
     if (isLocal) { await saveConfig({ apiBase, token: '', profile }); return console.log(`✓ Local dev — no auth required. API: ${apiBase}`); }
     if (sub === 'login') { // browser sign-in: spin a loopback server, open the app's /?cliauth page, receive a minted key
       const key = await browserLogin(apiBase);
-      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login", or paste a key: hermoso auth login --token <key>  (create one at https://app.hermoso.ai/?tab=api-keys, the MCP & CLI tab under Terminal & API keys).`);
+      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login". No browser on this machine? Run "hermoso auth login --device" to sign in with a link and a code on any device, or paste a key: hermoso auth login --token <key>  (create one at https://app.hermoso.ai/?tab=api-keys, the MCP & CLI tab under Terminal & API keys).`);
       await saveConfig({ apiBase, token: key, profile });
       return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`);
     }
@@ -317,6 +344,7 @@ async function main() {
         }
         console.log(`hermoso <command>
   auth login [--url <base>] [--token <t>]   credits          capabilities
+  auth login --device [--no-wait | --resume]   no browser here: sign in with a link + code on any device
   brand   ·   brand draft (--domain|--description|--social …)  create --brand --product [--format]
   generate image --prompt [--ref] [--model] [--aspect]        generate video|avatar|stitch … [--wait]
   jobs list | jobs get <id> [--wait]                          competitors <domain>
@@ -498,6 +526,67 @@ async function browserLogin(apiBase) {
     });
     setTimeout(() => finish(null), 180000);
   });
+}
+// ---- device sign-in (RFC 8628): a link + a short code the user approves on ANY device, for a machine with no browser.
+//      The CLI asks as the first-party client `hermoso-cli`; a server that predates that id refuses it (invalid_client),
+//      and then the CLI registers itself over DCR as "Hermoso CLI", which a registered client may do (mcp/oauth.mjs). ----
+const DEVICE_CLIENT_ID = 'hermoso-cli';
+const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
+const PENDING_FILE = path.join(CONFIG_DIR, 'device-pending.json');
+/** PURE. True when a browser cannot open on THIS machine: asked for, CI, an SSH session, or Linux with no display. */
+function noBrowserHere(env = process.env, plat = process.platform) {
+  if (env.HERMOSO_NO_BROWSER && env.HERMOSO_NO_BROWSER !== '0') return true;
+  if (env.CI && env.CI !== 'false' && env.CI !== '0') return true;
+  if (env.SSH_CONNECTION || env.SSH_TTY) return true;
+  if (plat === 'linux' && !env.DISPLAY && !env.WAYLAND_DISPLAY) return true;
+  return false;
+}
+async function oauthPost(url, form) {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams(form).toString() });
+  let j = null; try { j = await r.json(); } catch { j = null; }
+  return { status: r.status, ok: r.ok, j: j || {} };
+}
+async function deviceStart(apiBase) {
+  const ask = (clientId) => oauthPost(`${apiBase}/oauth/device_authorization`, { client_id: clientId });
+  let clientId = DEVICE_CLIENT_ID, r;
+  try { r = await ask(clientId); } catch (e) { throw new Error(`Could not reach ${apiBase} to start the sign-in (${e?.message || e}).`); }
+  if (r.status === 401 && r.j.error === 'invalid_client') {
+    const reg = await fetch(`${apiBase}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Hermoso CLI', redirect_uris: ['http://127.0.0.1/callback'], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', DEVICE_GRANT] }) })
+      .then((x) => x.json()).catch(() => ({}));
+    if (!reg.client_id) throw new Error('Could not start the sign-in. Try again, or sign in with a key: hermoso auth login --token <key>');
+    clientId = reg.client_id; r = await ask(clientId);
+  }
+  if (!r.ok || !r.j.device_code) throw new Error(`Could not start the sign-in: ${r.j.error_description || r.j.error || 'HTTP ' + r.status}.`);
+  const d = r.j;
+  return { apiBase, clientId, deviceCode: d.device_code, userCode: d.user_code, link: d.verification_uri_complete || d.verification_uri, page: d.verification_uri,
+    interval: Math.max(1, Number(d.interval) || 5), exp: Date.now() + (Number(d.expires_in) || 600) * 1000 };
+}
+function printDeviceCode(p, { json = false, wait = true } = {}) {
+  const mins = Math.max(1, Math.round((p.exp - Date.now()) / 60000));
+  if (json) return console.log(JSON.stringify({ link: p.link, code: p.userCode, expiresInMinutes: mins, next: wait ? 'waiting for approval' : 'hermoso auth login --device --resume' }));
+  console.log(`\nTo sign in, open this link on any device (your phone works) and approve:\n  ${p.link}\nCode: ${p.userCode}  (the page shows the same code; it expires in ${mins} minutes)\n`);
+  console.log(wait ? 'Waiting for approval…' : 'When it is approved, finish with: hermoso auth login --device --resume');
+}
+async function savePending(p) { await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 }); await writeFile(PENDING_FILE, JSON.stringify(p), { mode: 0o600 }); try { await chmod(PENDING_FILE, 0o600); } catch {} }
+async function loadPending() { try { return JSON.parse(await readFile(PENDING_FILE, 'utf8')); } catch { return null; } }
+async function clearPending() { try { const { unlink } = await import('node:fs/promises'); await unlink(PENDING_FILE); } catch {} }
+/** Poll the token endpoint until the person approves (the hmk_ key), cancels or the code expires (throws). */
+async function devicePoll(p, { sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  let interval = p.interval || 5;
+  while (Date.now() < p.exp) {
+    await sleep(interval * 1000);
+    let r; try { r = await oauthPost(`${p.apiBase}/oauth/token`, { grant_type: DEVICE_GRANT, device_code: p.deviceCode, client_id: p.clientId }); } catch { continue; } // a dropped poll is "could not tell": keep waiting
+    if (r.ok && /^hmk_/.test(String(r.j.access_token || ''))) return r.j.access_token;
+    const e = r.j.error;
+    if (e === 'authorization_pending') continue;
+    if (e === 'slow_down') { interval = Math.max(interval + 5, Number(r.j.interval) || 0); continue; }
+    if (e === 'access_denied') throw new Error('The sign-in was cancelled on the approval page. Run "hermoso auth login --device" to try again.');
+    if (e === 'expired_token') throw new Error('That sign-in expired before it was approved. Run "hermoso auth login --device" for a new link.');
+    if (r.status >= 500) continue;
+    throw new Error(`Sign-in failed: ${r.j.error_description || e || 'HTTP ' + r.status}.`);
+  }
+  throw new Error('That sign-in expired before it was approved. Run "hermoso auth login --device" for a new link.');
 }
 function openBrowser(url) {
   import('node:child_process').then(({ spawn }) => {

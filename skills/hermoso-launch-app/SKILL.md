@@ -20,6 +20,8 @@ and, only if the user asks, paid campaigns created paused.
   (Lovable, Replit, Bolt, v0 and Base44 each have a page with the exact clicks).
 - In a terminal there is no MCP server to connect: the same tools run through the Hermoso CLI. Sign in once with
   `npx -y hermoso auth login` (opens a browser; nothing to paste). On a machine with no browser:
+  `npx -y hermoso auth login --device --no-wait` prints a link and a short code; send both to the user, and once
+  they approve run `npx -y hermoso auth login --device --resume`. No key needed. Only if nobody can open a link:
   `npx -y hermoso auth login --token <your key>`, using a key from app.hermoso.ai under **MCP & CLI**. Then
   `hermoso tools --search <what you want>` finds a tool, `hermoso tools <name>` prints its arguments and
   `hermoso call <name> --json '{...}'` runs it (after `npm install -g hermoso`, or prefix each with `npx -y`).
