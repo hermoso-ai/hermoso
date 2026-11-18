@@ -9082,7 +9082,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // post_to_youtube declares both; the QUEUE had nowhere to put them, so every scheduled upload landed with an
       // empty description box and no tags. The caption cannot stand in for them — it becomes the video TITLE.
       description: z.string().optional().describe('YOUTUBE: the video DESCRIPTION, max 5000 characters, carrying the links, the CTA and what YouTube search reads. Omit it and the caption is used.'),
-      tags: z.array(z.string()).optional().describe('YOUTUBE — up to 30 search tags for the video (plain words, no #).'),
+      tags: z.array(z.string()).optional().describe('YOUTUBE — up to 30 search tags (plain words, no #); [] = none, omitted = from the title.'),
       thumbnailUrl: z.string().optional().describe('YOUTUBE: the custom thumbnail, a Hermoso-hosted image (make_thumbnail, or upload_file for the user’s own). Omit it and a frame of the video is used; "auto" keeps YouTube’s pick.'),
       paidProductPlacement: z.boolean().optional().describe('YOUTUBE: paid product placement (shows the disclosure). Carried to the upload when the post fires.'),
       brandPartner: z.string().optional().describe('YOUTUBE: sponsoring brand channel (UC… or @handle). Carried to the upload when the post fires.'),
