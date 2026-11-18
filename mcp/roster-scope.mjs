@@ -49,6 +49,10 @@
 // `discover_tiktok_creators`, `tiktok_creator_info`. Those read the PLATFORM's data through the USER'S token
 // (Business Discovery, the Threads API, TikTok's Creator Marketplace) — free to us, but impossible without the
 // connection, so gating them is correct.
+// The phone / SMS / voice tools (2026-11-18). Exact names or `sms` as a whole word, so no existing tool can match.
+export const PHONE_TOOL_RE = /(^|_)sms(_|$)|^(list|search)_phone_numbers$|^(buy|configure|release)_phone_number$|10dlc|tollfree|^list_calls$|^list_call_recordings$|^transcribe_call$|^place_call$|^call_tracking_report$|^assign_number_to_campaign$|^list_provider_opt_outs$/;
+// A phone tool is filed under 'twilio' and served by a Telnyx connection just as well.
+export const PHONE_TOOL_ALSO = Object.freeze(['telnyx']);
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
@@ -87,6 +91,10 @@ export const TOOL_PROVIDER_RULES = [
   [/_discord_thread$/, 'discord'],
   [/^threads_|_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
   [/_meta_|^meta_|_meta$|instagram|whatsapp|messenger/, 'meta'], // messenger: Page marketing messages ride the Meta connector (2026-09-07)
+  // PHONE / SMS / VOICE (2026-11-18): the brand's OWN Twilio or Telnyx account. ONE tool set serves both providers, filed
+  // under 'twilio'; toolHeldBackByConnectors offers it to a brand with either connected (PHONE_TOOL_ALSO). `call_tool` and
+  // the WhatsApp phone tools never match: the names are exact or `sms`-shaped, and the Meta rule above answers first.
+  [PHONE_TOOL_RE, 'twilio'],
   // ── analytics / measurement, each its own connection ──
   [/_analytics_|^analytics_(realtime|report|data_retention)$|analytics_compatibility|analytics_stream/, 'google_analytics'],
   [/mixpanel/, 'mixpanel'],
@@ -327,5 +335,6 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'meta' && on.has('instagram') && INSTAGRAM_LOGIN_TOOLS.has(name)) return false;
   if (p === 'meta' && on.has('whatsapp') && isWhatsAppTool(name)) return false;
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
+  if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
   return !on.has(p);
 }
