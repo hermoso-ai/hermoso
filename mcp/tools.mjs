@@ -86,10 +86,21 @@ const stripNulls = (v) => { if (Array.isArray(v)) return v.map(stripNulls); if (
 // a broken server, and the structured payload it needs is sitting right there in the same object, discarded.
 // So the summary degrades: the field if it is a non-empty string, else the payload itself, else a bare
 // acknowledgement. A thin summary beats an unusable result, and the structuredContent is unaffected either way.
-const ok = (text, data) => ({
-  content: [{ type: 'text', text: (typeof text === 'string' && text.trim()) ? text : (data == null ? 'Done.' : JSON.stringify(stripNulls(data)).slice(0, 4000)) }],
-  structuredContent: data == null ? {} : stripNulls(data),
-});
+// revenue_by_source's lines: one per group, every number per currency. Byte-identical to server.js attribReportText.
+function attribReportText(d) {
+  const m = (o) => Object.entries(o || {}).map(([c, v]) => `${Number(v).toFixed(2)} ${c}`).join(' + ') || '0';
+  const rows = (d.rows || []).slice(0, 25).map((r) => `• ${r.label ? `“${r.label}” · ` : ''}${r.key}${r.channel && r.channel !== r.key ? ` (${r.channel})` : ''}: ${r.orders} payment${r.orders === 1 ? '' : 's'}, ${m(r.revenue)}, ${r.customers} customer${r.customers === 1 ? '' : 's'} · ${Object.entries(r.methods).map(([k, n]) => `${k}×${n}`).join(', ')} · ${r.confidence} confidence${r.ledTo ? '' : ' · a match, not "led to"'}${r.postUrl ? ` · ${r.postUrl}` : ''}`);
+  const src = Object.entries(d.sources || {}).map(([k, v]) => `${k}: ${v.status}${v.reason ? ` (${v.reason})` : ''}`).join(' · ');
+  return [d.note, rows.length ? `By ${d.groupBy}:\n${rows.join('\n')}` : '', src ? `Sources: ${src}` : ''].filter(Boolean).join('\n');
+}
+// TRACKING LINKS (2026-11-17): a publish the server tagged carries `trackedLinks.note` (server.js trackingLinkBelt). It is
+// said under EVERY tool's own text, here, so no publish tool can forget to tell the user their link was changed.
+const trackedNote = (data) => (data && typeof data === 'object' && data.trackedLinks && typeof data.trackedLinks.note === 'string' ? data.trackedLinks.note.trim() : '');
+const ok = (text, data) => {
+  const base = (typeof text === 'string' && text.trim()) ? text : (data == null ? 'Done.' : JSON.stringify(stripNulls(data)).slice(0, 4000));
+  const tn = trackedNote(data);
+  return { content: [{ type: 'text', text: tn && !base.includes(tn) ? `${base}\n${tn}` : base }], structuredContent: data == null ? {} : stripNulls(data) };
+};
 // A TEXT RESPONSE THAT SAYS ONLY "12 row(s)" IS NOT A REPORT. MCP clients differ in whether they surface
 // structuredContent at all — plenty print the text block and nothing else — so a reporting tool whose rows live
 // ONLY in structuredContent answers the caller's question with a row COUNT. Every other reporting tool here prints
@@ -16816,6 +16827,51 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), note: z.string().optional(), paidPurchases: z.number().optional(), capped: z.boolean().optional(), totals: z.array(z.any()).optional(), rows: z.array(z.any()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/stripe/payment-link-revenue', a); return ok(`${d.note}\n${(d.rows || []).map(r => `• ${r.key}${r.url ? ` (${r.url})` : ''}: ${r.purchases} purchase(s), ${r.revenue} ${r.currency}${r.discounts ? `, ${r.discounts} discounted` : ''}`).join('\n')}`, d); }));
+  // ---------- REVENUE ATTRIBUTION (2026-11-17): which posts, ads and emails led to sales (server.js revenueBySource) ----------
+  server.registerTool('revenue_by_source', {
+    title: 'Revenue by source (posts, ads, emails)',
+    description: "Which posts, ads and emails led to actual sales: the brand's payments (Shopify orders and Stripe charges, whichever is connected) matched back to what Hermoso published or sent, with revenue, payments and customers per channel, campaign, single post/ad/email (groupBy item) or match method. Each payment is matched ONCE, strongest first, and says how: utm (a Hermoso tracking id on the visit), reference (a Hermoso id on a Stripe checkout), code (a discount code Hermoso created, or one you name in codes), ad_utm (the UTM tags Hermoso puts on ads it builds), tag (Hermoso's tags without an id) — these LED TO the sale; email (the buyer is someone Hermoso emailed or who replied, within emailWindowDays before paying) and referrer (the visit came from a social platform the brand posts to) are looser matches, never causation. The unattributed remainder is stated plainly. GA4's own attribution of purchases to Hermoso's tags and the ad platforms' own reported conversions (Meta, Google Ads) are shown APART, never added in: they can describe the same sales again. Money is per currency, never summed across currencies. A source that could not be read is said as such, never as zero sales. Default: the last 30 days (Shopify lets apps read its last 60). Read-only, free. Links carry Hermoso's ids only when tracking links are on (set_tracking_links).",
+    inputSchema: {
+      since: z.string().optional().describe('start date, YYYY-MM-DD; default 30 days before until'),
+      until: z.string().optional().describe('end date, YYYY-MM-DD; default today'),
+      days: z.number().optional().describe('the last N days, instead of since'),
+      groupBy: z.enum(['channel', 'campaign', 'item', 'method']).optional().describe('channel (default), campaign, item (one row per post, ad, email or code) or method'),
+      sources: z.array(z.enum(['shopify', 'stripe', 'ga4', 'email', 'ads'])).optional().describe('which to read; default all that are connected'),
+      codes: z.array(z.string()).optional().describe('more discount or promotion codes to count as Hermoso’s'),
+      emailWindowDays: z.number().optional().describe('how many days after an email a payment still matches the person; default 30, at most 90'),
+      includeTest: z.boolean().optional().describe('true to count Shopify test orders'),
+      ga4Property: z.string().optional().describe('which shared GA4 property, e.g. properties/123; default the first shared one'),
+      googleAdsCustomerId: z.string().optional().describe('which Google Ads account for platform-reported conversions'),
+      platformReported: z.boolean().optional().describe('false to skip the ad platforms’ own reported conversions'),
+    },
+    outputSchema: { note: z.string().optional(), since: z.string().optional(), until: z.string().optional(), groupBy: z.string().optional(), sources: z.any().optional(), totals: z.any().optional(), attributed: z.any().optional(), ledTo: z.any().optional(), unattributed: z.any().optional(), methods: z.any().optional(), rows: z.array(z.any()).optional(), ga4: z.any().optional(), platformReported: z.array(z.any()).optional(), trackingLinks: z.any().optional(), matches: z.array(z.any()).optional(), costCredits: z.number().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/attribution/revenue', a); return ok(attribReportText(d), d); }));
+  server.registerTool('set_tracking_links', {
+    title: 'Tracking links on or off',
+    description: "Turn TRACKING LINKS on or off for this brand, or read the setting (call with no arguments). When on, every link to the brand's OWN site that Hermoso publishes or sends (posts on every channel, scheduled posts, email sequences and new emails) gets utm_source (the channel), utm_medium (social, email or organic), utm_campaign (\"hermoso\" or yours) and an id in utm_content, so revenue_by_source can tie a sale to the exact post or email. A link that already has utm_ tags, a link to another site, a short link and a link inside the brand's own blog are never changed; Instagram and TikTok captions have no tappable link, so nothing is tagged there; ads already carry their platform's UTM template. Every publish that tagged a link says so in its reply. Brands created from 2026-11-18 get it on by default after one notice; older brands keep links exactly as written until this turns it on. domains adds sites beyond the brand profile's website. Free.",
+    inputSchema: {
+      enabled: z.boolean().optional().describe('true to tag links to the brand site, false to publish links exactly as written; omit to read'),
+      campaign: z.string().optional().describe('the utm_campaign to use instead of hermoso; empty string resets it'),
+      domains: z.array(z.string()).optional().describe('more domains that are the brand’s own site, e.g. shop.example.com'),
+    },
+    outputSchema: { note: z.string().optional(), state: z.string().optional(), source: z.string().nullable().optional(), campaign: z.string().optional(), hosts: z.array(z.string()).optional(), recent: z.array(z.any()).nullable().optional(), costCredits: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const has = a && (a.enabled != null || a.campaign != null || a.domains != null); const d = has ? await apiPost('/api/attribution/settings', a) : await apiGet('/api/attribution/settings', {}); return ok(d.note, d); }));
+  server.registerTool('make_tracking_link', {
+    title: 'Make a tracking link',
+    description: "Tag ONE link with Hermoso's tracking parameters for a place you put it yourself (a bio link, a QR code, a partner's newsletter, a link in an ad or post made elsewhere): utm_source (channel), utm_medium, utm_campaign and an id in utm_content that revenue_by_source matches orders against. A Stripe payment link (buy.stripe.com) also gets the id as client_reference_id, the field Stripe keeps on the checkout. Works whether or not tracking links are on, on any site; a link that already has utm_ tags is returned unchanged. Free.",
+    inputSchema: {
+      url: z.string().describe('the full web address to tag, https://…'),
+      channel: z.string().optional().describe('where it will be clicked: instagram_bio, newsletter, qr, facebook …; becomes utm_source'),
+      campaign: z.string().optional().describe('utm_campaign; default hermoso'),
+      medium: z.string().optional().describe('utm_medium; default social (email for channel email)'),
+      label: z.string().optional().describe('what this link is, shown in revenue_by_source'),
+      kind: z.enum(['link', 'post', 'email', 'ad']).optional().describe('what carries it; default link'),
+    },
+    outputSchema: { note: z.string().optional(), url: z.string().optional(), tagged: z.boolean().optional(), id: z.string().optional(), utm: z.any().optional(), reason: z.string().optional(), costCredits: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/attribution/link', a); return ok(d.note, d); }));
   // ---------- HubSpot (2026-09-09): the brand's OWN CRM — contacts, an upsert by email, lead forms → contacts, deals ----------
   server.registerTool('list_hubspot_contacts', {
     title: 'List or search HubSpot contacts',
