@@ -332,7 +332,8 @@ export const CAPABILITY_MAP = [
 // the capability map: it names the three jobs + the same four categories so a freshly-connected agent immediately
 // knows the breadth. Exported so BOTH the stdio server (hermoso-mcp.mjs) and the hosted connector (http.mjs) share one
 // source of truth. Kept parity across mcp/ and cli/mcp/ (the npm copy).
-export const SETUP_ELSEWHERE_LINE = 'ADDING HERMOSO TO ANOTHER AI APP (only if the user asks): ChatGPT, one click: https://chatgpt.com/plugins/plugin_asdk_app_6abde87d08048191b2ee7cda76721749. Claude: Customize > Connectors > Add custom connector, https://app.hermoso.ai/mcp. Claude Code, Codex, Cursor, Gemini CLI: the one setup prompt at https://hermoso.ai/mcp/. Any other AI app: https://app.hermoso.ai/mcp (a short list; find_tools + call_tool reach the rest; ?tools=all lists everything; ?tools=app-create, app-ads or app-social is one job).';
+// The setup line names the one SKILL.md line for every host that can run commands, Grok Bot and Muse included (2026-11-18).
+export const SETUP_ELSEWHERE_LINE = 'ADDING HERMOSO TO ANOTHER AI APP (only if the user asks): ChatGPT, one click: https://chatgpt.com/plugins/plugin_asdk_app_6abde87d08048191b2ee7cda76721749. Claude: Customize > Connectors > Add custom connector, https://app.hermoso.ai/mcp. Grok Bot, Muse, Claude Code, Codex, Cursor, any agent with a shell: paste "Follow https://hermoso.ai/SKILL.md to set up Hermoso for me". Other apps: https://app.hermoso.ai/mcp (?tools=all lists all; ?tools=app-create, app-ads or app-social is one job).';
 export const MCP_INSTRUCTIONS = [
   // ── THE FIRST 2,048 BYTES ARE THE WHOLE MESSAGE ON SOME HOSTS (2026-08-24) ──────────────────────────────────
   // Claude Code truncates server instructions at 2KB, and this string was 10,910 chars — so 8,862 of them, 81%,
