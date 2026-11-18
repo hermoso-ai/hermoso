@@ -3270,6 +3270,12 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   find_company_contacts: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a company\'s public contact is read in the Hermoso app (Studio) and on every other MCP host',
   search_companies: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a company search runs in the Hermoso app (Studio) and on every other MCP host',
   saved_lead_searches: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); saved searches run in the Hermoso app (Studio) and on every other MCP host',
+  // THE RAW STORE READ (2026-11-17, revenue attribution): revenue_by_source and set_tracking_links need no connector, so
+  // on this host they count as always-listed and pushed the WordPress family off the reviewed list. The cut is the tool with a
+  // typed sibling for every key it reads and no recorded use: store_get had 0 rows in the 30-day error ledger (the only
+  // per-tool record that exists; nothing records a successful call per host), and its own description sends callers to the
+  // typed tools first. make_tracking_link was folded into set_tracking_links (url) the same day for the same reason.
+  store_get: 'each store it reads has a typed tool here that reads it better: get_brand, list_memory, list_skills, list_playbooks, list_creators, list_elements, list_library and list_swipefile; store_get itself runs on every other MCP host',
   // THE SHOPIFY STORE CONNECTOR (2026-11-17): no single connector, so on this host the two would count as always-listed and
   // push the WordPress family off the reviewed list. Connecting is done in the app there anyway (connect_connector is withheld too).
   connect_shopify_store: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a Shopify store is connected in the Hermoso app (Connectors \u25b8 Shopify) and on every other MCP host',
@@ -4416,6 +4422,38 @@ let CANON_HOSTED = false;   // which surface TOOL_CANON was built for — see re
 // pass ever listed them although each sits under server.group('create'). Reading the recorded marker answers the
 // question actually asked, and a tool registered above the first marker still reads null (reported as `?`).
 export const canonToolGroups = () => (TOOL_CANON ? Object.fromEntries(TOOL_CANON.map((e) => [e.name, e.group ?? null])) : null);
+
+// FIND_TOOLS' RANKING, FOR A CALLER THAT IS NOT AN MCP SESSION (2026-11-17). GET /v1/tools?search= ran a raw substring
+// ("email outreach" → 0 tools while find_tools found them). The scorer is the one find_tools runs, published by the
+// build that defined it (TOOL_QUERY_SCORER, set inside buildTools); null before any build, and the caller then says so.
+// `entries` are the rows to rank, each {name, group, description, inputSchema}; `corpus` (default: entries) is the whole
+// roster the token weights and vocabulary are read from, as find_tools reads them from its session's full handleOf.
+// Same order as find_tools: score, then the shorter name, then the alphabet. Returns {ranked:[{name, score}], strong}
+// or null; `strong` is find_tools' own match count (findToolsMatchCount). Health is not applied: it is per server.
+let TOOL_QUERY_SCORER = null;
+const _rankCorpusCtx = new WeakMap();
+const asSearchHandle = (e) => ({ description: String(e?.description || ''), inputSchema: e?.inputSchema && typeof e.inputSchema.safeParse === 'function' ? e.inputSchema : { shape: e?.inputSchema && typeof e.inputSchema === 'object' ? e.inputSchema : {} } });
+export function rankToolsByQuery(query, entries, { corpus = null } = {}) {
+  if (!TOOL_QUERY_SCORER) return null;
+  const list = Array.isArray(entries) ? entries : [];
+  const corp = corpus && typeof corpus === 'object' ? corpus : list;
+  let ctx = _rankCorpusCtx.get(corp);
+  if (!ctx) {
+    const handleOf = Object.create(null);
+    for (const e of (corp instanceof Map ? corp.values() : corp)) if (e && e.name) handleOf[e.name] = asSearchHandle(e);
+    ctx = { handleOf };
+    _rankCorpusCtx.set(corp, ctx);
+  }
+  const rows = [];
+  for (const e of list) {
+    if (!e || !e.name) continue;
+    const h = ctx.handleOf[e.name] || asSearchHandle(e);
+    const sc = TOOL_QUERY_SCORER.score(e.name, h, String(e.group || 'core'), query, ctx);
+    if (sc) rows.push({ name: e.name, ...sc });
+  }
+  rows.sort((a, b) => b.score - a.score || a.name.length - b.name.length || a.name.localeCompare(b.name));
+  return { ranked: rows.map((r) => ({ name: r.name, score: r.score })), strong: TOOL_QUERY_SCORER.matchCount(rows, !!String(query || '').trim()) };
+}
 
 // Declare a handler that MUST be rebuilt per session. `factory(ctx)` receives {enabledGroups, groupOf, handleOf}.
 // ── SWITCHING BRAND MUST RE-GATE THE ROSTER (2026-09-01) ────────────────────────────────────────────────────────
@@ -5599,6 +5637,65 @@ function buildTools(rawServer, opts = {}, sink = null) {
   };
   const GENERIC_VERB_RE = /^(read|get|list|show|fetch|view|see|check|find|give|load|open)$/;
   const MAKE_VERB_RE = /^(repurpose|make|generate|create|render|write|build|remix|clone)$/; // a tool named for what it MAKES out of its noun
+  // ONE SCORER FOR EVERY TOOL SEARCH (2026-11-17). find_tools scored each tool inline, so GET /v1/tools?search= could not
+  // reuse it and ran a raw substring instead: "email outreach" matched 0 tools over REST while find_tools found the
+  // outreach tools. This is the per-tool half of find_tools, lifted out unchanged; rankToolsByQuery (module level) is how
+  // /v1 reaches it. `h` is anything with {description, inputSchema}; `ctx.handleOf` is the corpus the token weights and
+  // the query vocabulary come from. null when the query has words and none landed, else {score, _cov, _nh, _nd, _nw}.
+  const scoreToolQuery = (name, h, grp, query, ctx) => {
+    const q = String(query || '').toLowerCase().trim();
+    const desc = String(h.description || '');
+    const tokenWeight = tokenWeightFor(ctx);
+    let score = 0, _cov = 0, _nh = 0, _nd = 0, _nw = 0; // words answered, NAME hits, and name hits that are the word itself rather than a synonym (the match count below)
+    if (q) {
+      // A NAME-SHAPED ASK IS ALSO ITS WORDS (2026-09-12). Agents search the name they guess (list_meta_campaigns,
+      // update_meta_ad, edit_meta): kept as one literal token it matched nothing and filed a dead end, while its parts
+      // (meta + campaigns, update + meta) name real tools. The literal still scores first when it exists.
+      const words = splitQueryWords(query, ctx).flatMap((r) => (r.includes('_') ? [r, ...r.split('_').filter((p) => p.length >= 2)] : [r])).map(expandQueryWord).filter(Boolean);
+      const _sqIds = squashedIdentifiers(h);
+      const _fieldHits = q.split(/[\s,]+/).map((r) => r.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((r) => r.length >= 6 && _sqIds.has(r)).length;
+      if (_fieldHits) score += 4 * _fieldHits;
+      const descLc = desc.toLowerCase();
+      const nameTokens = name.split('_');
+      let nameHits = 0, covered = 0, directHits = 0;
+      for (const { w, alts, literal } of words) {
+        if (literal) { if (name.includes(w)) { score += 5; nameHits++; directHits++; covered++; } continue; } // "find_tools" typed as-is
+        const exactTok = nameTokens.find((t) => t === w);
+        // A GENERIC VERB SAYS HOW, THE NOUN SAYS WHAT (2026-10-25). `ReadTranscript` pointed call_tool at read_meta_conversation
+        // (its NAME has `read`, its description mentions transcripts) over analyze_video, the tool that returns a transcript.
+        // When the ask also carries a content word, a bare verb hit on a name counts half.
+        // …AND A READ IS NOT A MAKE (2026-11-03). `ReadTranscript` then pointed at repurpose_transcript (its noun IS
+        // `transcript`) over analyze_video, which reads one back. When the ask is a reading verb and the tool's own leading
+        // verb MAKES something the ask never named, the noun hit counts half: that tool turns the thing into something else.
+        const _makesOther = nameTokens.length > 1 && exactTok !== nameTokens[0] && MAKE_VERB_RE.test(nameTokens[0]) && !words.some((o) => o.w === nameTokens[0]) && words.some((o) => !o.literal && GENERIC_VERB_RE.test(o.w));
+        if (exactTok) { score += 4 * tokenWeight(exactTok) * (GENERIC_VERB_RE.test(w) && words.some((o) => !o.literal && !GENERIC_VERB_RE.test(o.w)) ? 0.5 : 1) * (_makesOther ? 0.5 : 1); nameHits++; directHits++; covered++; continue; }  // the word IS a name token
+        // the best-weighted synonym/stem that is a name token — "tweet" must land on post_to_x's `x` (rare), not its `post` (everywhere)
+        // A synonym that names TWO tokens of one tool (transcript → analyze + video) is a phrase pointing at that tool, so
+        // each further token it lands on adds half its weight, and the word itself in the description confirms it (+1).
+        let synBest = 0, synMore = 0;
+        for (const t of nameTokens) {
+          let tb = 0;
+          for (const a of alts) if (a !== w && (t === a || (a.length >= 4 && t.startsWith(a) && t.length - a.length <= 2))) tb = Math.max(tb, 3 * stemAwareWeight(ctx, tokenWeight, t, a));
+          if (tb > synBest) { synMore += synBest; synBest = tb; } else synMore += tb;
+        }
+        if (synBest) { score += synBest + synMore / 2 + (synMore && w.length >= 4 && descLc.includes(w) ? 1 : 0); nameHits++; covered++; continue; }
+        if (w.length >= 4 && name.includes(w)) { score += 2; nameHits++; directHits++; covered++; continue; }  // the literal word inside a name token
+        const typoTok = nameTokens.find((t) => withinOneEdit(w, t));
+        if (typoTok) { score += 2 * tokenWeight(typoTok); nameHits++; directHits++; covered++; continue; }    // a typo of a name token
+        // …AND THE SAME VERB IN A DESCRIPTION ONLY (2026-11-09). `ReadTranscript` pointed call_tool at analyze_campaigns once it
+        // joined the twins: `transcript` reached its `analyze` by synonym, as it reaches analyze_video's, and a bare "read" in its
+        // prose ("can still be read on CTR") outscored analyze_video's `video`. Half, exactly as a bare verb hit on a name.
+        if (alts.some((a) => a.length >= 3 && descLc.includes(a))) { score += GENERIC_VERB_RE.test(w) && words.some((o) => !o.literal && !GENERIC_VERB_RE.test(o.w)) ? 0.5 : 1; covered++; continue; } // any form in the description
+        if (alts.some((a) => grp.includes(a))) { score += 1; covered++; }
+      }
+      if (!score) return null;
+      if (words.length > 1) score += covered; // coverage: a tool that answers MORE of the words outranks one that answers one of them loudly
+      if (words.length > 1 && nameHits === words.length) score += 2; // every word landed in the NAME: a phrase hit
+      _cov = covered; _nh = nameHits; _nd = directHits; _nw = words.length;
+    }
+    return { score, _cov, _nh, _nd, _nw };
+  };
+  TOOL_QUERY_SCORER = { score: scoreToolQuery, matchCount: findToolsMatchCount }; // published for rankToolsByQuery (module level)
   const makeFindToolsHandler = (ctx, { quiet = false } = {}) => async ({ query = '', group = '', limit = 12, onlyHealthy = false } = {}) => {
     const _digest = quiet ? null : await priceDigestFor(ctx); // every row's price, read live (see priceDigestFor); the did-you-mean lookup only wants names
     const q = String(query || '').toLowerCase().trim();
@@ -5606,7 +5703,6 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const cap = Math.max(1, Math.min(40, Number(limit) || 12));
     if (g && !TOOL_GROUP_NAMES.includes(g)) return { content: [{ type: 'text', text: `Unknown group "${g}". Groups: ${TOOL_GROUP_NAMES.join(', ')}.` }], isError: true };
     const rows = [];
-    const tokenWeight = tokenWeightFor(ctx);
     const _offGroup = new Map(); // name → { grp, h } for tools the group filter excluded (see below)
     // A JOB ANOTHER HERMOSO APP DOES IS NOT A JOB HERMOSO CANNOT DO (2026-11-07, measured in claude.ai on Hermoso Social):
     // asked "what did my Meta ads spend this week", find_tools found nothing in the app and the model told the user
@@ -5635,53 +5731,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // returned WITH their real group so the caller learns which group to enable instead of giving up.
       if (g && grp !== g) { if (!_otherApp && !_offGroup.has(name)) _offGroup.set(name, { grp, h }); continue; }
       const desc = String(h.description || '');
-      let score = 0, _cov = 0, _nh = 0, _nd = 0, _nw = 0; // words answered, NAME hits, and name hits that are the word itself rather than a synonym (the match count below)
-      if (q) {
-        // A NAME-SHAPED ASK IS ALSO ITS WORDS (2026-09-12). Agents search the name they guess (list_meta_campaigns,
-        // update_meta_ad, edit_meta): kept as one literal token it matched nothing and filed a dead end, while its parts
-        // (meta + campaigns, update + meta) name real tools. The literal still scores first when it exists.
-        const words = splitQueryWords(query, ctx).flatMap((r) => (r.includes('_') ? [r, ...r.split('_').filter((p) => p.length >= 2)] : [r])).map(expandQueryWord).filter(Boolean);
-        const _sqIds = squashedIdentifiers(h);
-        const _fieldHits = q.split(/[\s,]+/).map((r) => r.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((r) => r.length >= 6 && _sqIds.has(r)).length;
-        if (_fieldHits) score += 4 * _fieldHits;
-        const descLc = desc.toLowerCase();
-        const nameTokens = name.split('_');
-        let nameHits = 0, covered = 0, directHits = 0;
-        for (const { w, alts, literal } of words) {
-          if (literal) { if (name.includes(w)) { score += 5; nameHits++; directHits++; covered++; } continue; } // "find_tools" typed as-is
-          const exactTok = nameTokens.find((t) => t === w);
-          // A GENERIC VERB SAYS HOW, THE NOUN SAYS WHAT (2026-10-25). `ReadTranscript` pointed call_tool at read_meta_conversation
-          // (its NAME has `read`, its description mentions transcripts) over analyze_video, the tool that returns a transcript.
-          // When the ask also carries a content word, a bare verb hit on a name counts half.
-          // …AND A READ IS NOT A MAKE (2026-11-03). `ReadTranscript` then pointed at repurpose_transcript (its noun IS
-          // `transcript`) over analyze_video, which reads one back. When the ask is a reading verb and the tool's own leading
-          // verb MAKES something the ask never named, the noun hit counts half: that tool turns the thing into something else.
-          const _makesOther = nameTokens.length > 1 && exactTok !== nameTokens[0] && MAKE_VERB_RE.test(nameTokens[0]) && !words.some((o) => o.w === nameTokens[0]) && words.some((o) => !o.literal && GENERIC_VERB_RE.test(o.w));
-          if (exactTok) { score += 4 * tokenWeight(exactTok) * (GENERIC_VERB_RE.test(w) && words.some((o) => !o.literal && !GENERIC_VERB_RE.test(o.w)) ? 0.5 : 1) * (_makesOther ? 0.5 : 1); nameHits++; directHits++; covered++; continue; }  // the word IS a name token
-          // the best-weighted synonym/stem that is a name token — "tweet" must land on post_to_x's `x` (rare), not its `post` (everywhere)
-          // A synonym that names TWO tokens of one tool (transcript → analyze + video) is a phrase pointing at that tool, so
-          // each further token it lands on adds half its weight, and the word itself in the description confirms it (+1).
-          let synBest = 0, synMore = 0;
-          for (const t of nameTokens) {
-            let tb = 0;
-            for (const a of alts) if (a !== w && (t === a || (a.length >= 4 && t.startsWith(a) && t.length - a.length <= 2))) tb = Math.max(tb, 3 * stemAwareWeight(ctx, tokenWeight, t, a));
-            if (tb > synBest) { synMore += synBest; synBest = tb; } else synMore += tb;
-          }
-          if (synBest) { score += synBest + synMore / 2 + (synMore && w.length >= 4 && descLc.includes(w) ? 1 : 0); nameHits++; covered++; continue; }
-          if (w.length >= 4 && name.includes(w)) { score += 2; nameHits++; directHits++; covered++; continue; }  // the literal word inside a name token
-          const typoTok = nameTokens.find((t) => withinOneEdit(w, t));
-          if (typoTok) { score += 2 * tokenWeight(typoTok); nameHits++; directHits++; covered++; continue; }    // a typo of a name token
-          // …AND THE SAME VERB IN A DESCRIPTION ONLY (2026-11-09). `ReadTranscript` pointed call_tool at analyze_campaigns once it
-          // joined the twins: `transcript` reached its `analyze` by synonym, as it reaches analyze_video's, and a bare "read" in its
-          // prose ("can still be read on CTR") outscored analyze_video's `video`. Half, exactly as a bare verb hit on a name.
-          if (alts.some((a) => a.length >= 3 && descLc.includes(a))) { score += GENERIC_VERB_RE.test(w) && words.some((o) => !o.literal && !GENERIC_VERB_RE.test(o.w)) ? 0.5 : 1; covered++; continue; } // any form in the description
-          if (alts.some((a) => grp.includes(a))) { score += 1; covered++; }
-        }
-        if (!score) continue;
-        if (words.length > 1) score += covered; // coverage: a tool that answers MORE of the words outranks one that answers one of them loudly
-        if (words.length > 1 && nameHits === words.length) score += 2; // every word landed in the NAME: a phrase hit
-        _cov = covered; _nh = nameHits; _nd = directHits; _nw = words.length;
-      }
+      const _sc = scoreToolQuery(name, h, grp, query, ctx); // the ONE scorer, shared with GET /v1/tools?search= (rankToolsByQuery)
+      if (!_sc) continue;
+      const { score, _cov, _nh, _nd, _nw } = _sc;
       if (_otherApp) { _otherAppRows.push({ name, score, full: _cov >= _nw }); continue; } // scored, never shown (see _otherAppRows)
       const hold = toolHoldReason(name, ctx);
       const health = toolHealth(name);
@@ -16848,30 +16900,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/attribution/revenue', a); return ok(attribReportText(d), d); }));
   server.registerTool('set_tracking_links', {
-    title: 'Tracking links on or off',
-    description: "Turn TRACKING LINKS on or off for this brand, or read the setting (call with no arguments). When on, every link to the brand's OWN site that Hermoso publishes or sends (posts on every channel, scheduled posts, email sequences and new emails) gets utm_source (the channel), utm_medium (social, email or organic), utm_campaign (\"hermoso\" or yours) and an id in utm_content, so revenue_by_source can tie a sale to the exact post or email. A link that already has utm_ tags, a link to another site, a short link and a link inside the brand's own blog are never changed; Instagram and TikTok captions have no tappable link, so nothing is tagged there; ads already carry their platform's UTM template. Every publish that tagged a link says so in its reply. Brands created from 2026-11-18 get it on by default after one notice; older brands keep links exactly as written until this turns it on. domains adds sites beyond the brand profile's website. Free.",
+    title: 'Tracking links: setting, or one tagged link',
+    description: "TRACKING LINKS, two jobs in one tool. (1) The brand setting: call with no arguments to read it, enabled:true/false to turn it on or off, campaign for the utm_campaign, domains for more sites that are the brand's own. When on, every link to the brand's OWN site that Hermoso publishes or sends (posts on every channel, scheduled posts, email sequences and new emails) gets utm_source (the channel), utm_medium (social, email or organic), utm_campaign (\"hermoso\" or yours) and an id in utm_content, so revenue_by_source can tie a sale to the exact post or email. A link that already has utm_ tags, a link to another site, a short link and a link inside the brand's own blog are never changed; Instagram and TikTok captions have no tappable link, so nothing is tagged there; ads already carry their platform's UTM template. Every publish that tagged a link says so in its reply. Brands created from 2026-11-18 get it on by default after one notice; older brands keep links exactly as written until this turns it on. (2) ONE tagged link for a place the user puts it themselves (a bio link, a QR code, a newsletter, an ad made elsewhere): pass url (+ channel, campaign, medium, label, kind) and get it back with Hermoso's tags; a Stripe payment link also gets the id as client_reference_id. That works whether or not the setting is on, on any site; a link already carrying utm_ tags is returned unchanged. Free.",
     inputSchema: {
       enabled: z.boolean().optional().describe('true to tag links to the brand site, false to publish links exactly as written; omit to read'),
-      campaign: z.string().optional().describe('the utm_campaign to use instead of hermoso; empty string resets it'),
+      campaign: z.string().optional().describe('the utm_campaign (for the setting, or for the one link with url); empty string resets the setting to hermoso'),
       domains: z.array(z.string()).optional().describe('more domains that are the brand’s own site, e.g. shop.example.com'),
+      url: z.string().optional().describe('ONE link to tag now, https://…; returns the tagged link instead of the setting'),
+      channel: z.string().optional().describe('with url: where it will be clicked (instagram_bio, newsletter, qr, facebook …); becomes utm_source'),
+      medium: z.string().optional().describe('with url: utm_medium; default social (email for channel email)'),
+      label: z.string().optional().describe('with url: what this link is, shown in revenue_by_source'),
+      kind: z.enum(['link', 'post', 'email', 'ad']).optional().describe('with url: what carries it; default link'),
     },
-    outputSchema: { note: z.string().optional(), state: z.string().optional(), source: z.string().nullable().optional(), campaign: z.string().optional(), hosts: z.array(z.string()).optional(), recent: z.array(z.any()).nullable().optional(), costCredits: z.number().optional() },
+    outputSchema: { note: z.string().optional(), state: z.string().optional(), source: z.string().nullable().optional(), campaign: z.string().optional(), hosts: z.array(z.string()).optional(), recent: z.array(z.any()).nullable().optional(), url: z.string().optional(), tagged: z.boolean().optional(), id: z.string().optional(), utm: z.any().optional(), reason: z.string().optional(), costCredits: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => { const has = a && (a.enabled != null || a.campaign != null || a.domains != null); const d = has ? await apiPost('/api/attribution/settings', a) : await apiGet('/api/attribution/settings', {}); return ok(d.note, d); }));
-  server.registerTool('make_tracking_link', {
-    title: 'Make a tracking link',
-    description: "Tag ONE link with Hermoso's tracking parameters for a place you put it yourself (a bio link, a QR code, a partner's newsletter, a link in an ad or post made elsewhere): utm_source (channel), utm_medium, utm_campaign and an id in utm_content that revenue_by_source matches orders against. A Stripe payment link (buy.stripe.com) also gets the id as client_reference_id, the field Stripe keeps on the checkout. Works whether or not tracking links are on, on any site; a link that already has utm_ tags is returned unchanged. Free.",
-    inputSchema: {
-      url: z.string().describe('the full web address to tag, https://…'),
-      channel: z.string().optional().describe('where it will be clicked: instagram_bio, newsletter, qr, facebook …; becomes utm_source'),
-      campaign: z.string().optional().describe('utm_campaign; default hermoso'),
-      medium: z.string().optional().describe('utm_medium; default social (email for channel email)'),
-      label: z.string().optional().describe('what this link is, shown in revenue_by_source'),
-      kind: z.enum(['link', 'post', 'email', 'ad']).optional().describe('what carries it; default link'),
-    },
-    outputSchema: { note: z.string().optional(), url: z.string().optional(), tagged: z.boolean().optional(), id: z.string().optional(), utm: z.any().optional(), reason: z.string().optional(), costCredits: z.number().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, wrap(async (a) => { const d = await apiPost('/api/attribution/link', a); return ok(d.note, d); }));
+  }, wrap(async (a) => {
+    if (a && a.url) { const d = await apiPost('/api/attribution/link', { url: a.url, channel: a.channel, campaign: a.campaign, medium: a.medium, label: a.label, kind: a.kind }); return ok(d.note, d); }
+    const has = a && (a.enabled != null || a.campaign != null || a.domains != null); const d = has ? await apiPost('/api/attribution/settings', a) : await apiGet('/api/attribution/settings', {}); return ok(d.note, d);
+  }));
   // ---------- HubSpot (2026-09-09): the brand's OWN CRM — contacts, an upsert by email, lead forms → contacts, deals ----------
   server.registerTool('list_hubspot_contacts', {
     title: 'List or search HubSpot contacts',

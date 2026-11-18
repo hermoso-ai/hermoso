@@ -97,7 +97,10 @@ const ALIASES = {
   network: ['platform', 'target', 'channel'],
   channel: ['channels', 'platform', 'target'],
   count: ['limit', 'max', 'n'], max: ['limit'], max_results: ['limit'], maxResults: ['limit'], page_size: ['limit'], pageSize: ['limit'],
-  page: ['cursor'], next: ['cursor'], nextCursor: ['cursor'], after: ['cursor'],
+  page: ['cursor', 'starting_after'], next: ['cursor', 'starting_after'], nextCursor: ['cursor', 'starting_after'], after: ['cursor', 'starting_after'], offset: ['starting_after', 'cursor'], cursor: ['starting_after'],
+  // the /v1 names (2026-11-17): a REST caller reaches for the word it knows from other APIs
+  query: ['search', 'q'], q: ['query', 'search'], search: ['query', 'q'],
+  publish_at: ['scheduled_at', 'scheduledAt', 'at'], schedule_at: ['scheduled_at', 'scheduledAt', 'at'], send_at: ['scheduled_at', 'scheduledAt', 'at'],
   text: ['message', 'caption', 'body'], message: ['text', 'caption'], caption: ['message', 'text'],
   url: ['imageUrl', 'videoUrl', 'link', 'image', 'video'], image: ['imageUrl'], video: ['videoUrl'],
   id: ['postId', 'mediaId', 'commentId', 'videoId', 'conversationId'],
