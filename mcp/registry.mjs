@@ -17,7 +17,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { registerTools, MCP_INSTRUCTIONS, TOOL_GROUP_NAMES, TOOL_GROUPS, canonToolGroups } from './tools.mjs';
+import { registerTools, MCP_INSTRUCTIONS, TOOL_GROUP_NAMES, TOOL_GROUPS, canonToolGroups, toolPriceOf } from './tools.mjs';
 
 export { TOOL_GROUP_NAMES, TOOL_GROUPS };
 
@@ -85,6 +85,9 @@ function rosterFor(only) {
 // (`mcp-tool-scope-check` fails if one ever is), so the branch is unreachable through `inventory()` and a check
 // that could only assert it through the roster would be asserting nothing.
 export const groupLabel = (g) => (g === undefined || g === null ? '?' : g);
+// WHAT ONE CALL SPENDS, OFFLINE (2026-11-17): 'free', or the get_cost sentence for a paying tool. The numbers need the live
+// catalog, so `tools <name>` (no network) prints the class and find_tools (live) prints the figures.
+export const offlinePrice = (name, group) => (group && group !== '?' ? toolPriceOf(name, group, null) : null);
 
 /**
  * The whole inventory in one pass-set: every registered name, its group, its title/description.

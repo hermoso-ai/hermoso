@@ -27,7 +27,11 @@ export const TRAVERSAL_MESSAGE = 'That path is not a file Hermoso serves. Pass a
 
 // The param NAMES that carry a media reference. Anchored at the END so fileName / imageId / mediaType / videoTitle
 // never match; `path` is deliberately absent (upload_file's own stdio `path`, Drive folder paths, /api/sc/run's __path).
-export const MEDIA_KEY_RE = /(?:^|[a-z0-9_])(?:url|urls|uri|src|video|videos|image|images|img|audio|media|clip|clips|photo|photos|picture|pictures|logo|logos|thumb|thumbnail|thumbnails|cover|poster|asset|assets|music|still|stills|frame|frames|file|files|ref|refs|slide|slides|track|voiceover|source|sources|attachment|attachments|avatar|portrait|background|reference|references)$/i;
+// `mask` / `markup` and the rest of that list (2026-11-17, tools/media-arg-sweep-check.mjs derives them from the live
+// roster: every param a tool describes as taking a URL or upload_file is named here or exempted there with a reason).
+// edit_image's region and annotation images: a Windows temp path in `mask` reached the
+// renderer and came back as "the mask could not be read", which named neither the argument nor upload_file.
+export const MEDIA_KEY_RE = /(?:^|[a-z0-9_])(?:url|urls|uri|src|video|videos|image|images|img|audio|media|clip|clips|photo|photos|picture|pictures|logo|logos|thumb|thumbnail|thumbnails|cover|poster|asset|assets|music|still|stills|frame|frames|file|files|ref|refs|slide|slides|track|voiceover|source|sources|attachment|attachments|avatar|portrait|background|reference|references|mask|masks|markup|hero|moodboard|frontal|presenter|product|products|screen|screens|sheet|imagelink|hook|location)$/i;
 export const isMediaKey = (k) => typeof k === 'string' && MEDIA_KEY_RE.test(k);
 
 const LOCAL_SCHEME_RE = /^(sandbox|file|blob|content|ph|assets-library):/i;
@@ -71,9 +75,29 @@ export function mediaRefRefusal(raw, opts = {}) {
   if (kind !== 'local' && kind !== 'traversal') return null;
   const shown = String(raw).trim().slice(0, 160);
   const message = kind === 'local'
-    ? `${LOCAL_FILE_MESSAGE} ${LOCAL_FILE_HOW} (\`${shown}\` is a path on your machine or sandbox, which Hermoso cannot open. Nothing was queued and nothing was charged.)`
-    : `${TRAVERSAL_MESSAGE} (\`${shown}\`. Nothing was queued and nothing was charged.)`;
+    ? `\`${shown}\` is a file path on your machine or sandbox, which Hermoso cannot open. ${LOCAL_FILE_MESSAGE} ${LOCAL_FILE_HOW} Nothing was queued and nothing was charged.`
+    : `\`${shown}\` is not a file Hermoso serves. ${TRAVERSAL_MESSAGE} Nothing was queued and nothing was charged.`;
   return { kind, value: shown, message, code: kind === 'local' ? 'local_file_path' : 'bad_media_path' };
+}
+
+// A local path the caller's OWN machine can open (stdio / CLI, where a render tool reads it itself). `exists` is the
+// caller's file check; only plain paths are asked about (a sandbox: / blob: reference is never a file here).
+const PLAIN_PATH_RE = /^(?:\/(?!\/)|~(?:[\\/]|$)|\.{1,2}[\\/]|[a-z]:[\\/]|\\\\[^\\])/i;
+const fileUriPath = (s) => { try { const p = decodeURIComponent(s.replace(/^file:\/\//i, '')); return /^\/[a-z]:[\\/]/i.test(p) ? p.slice(1) : p; } catch { return ''; } };
+
+/**
+ * THE ONE SENTENCE FOR A HIT (2026-11-17): it names the argument, says what is wrong with its value, and gives the one
+ * next step with the same argument named again, so an agent knows exactly which field to change and to what. Agents
+ * read `refImages[0]` and act on it; the bare "That file is on your side" sent several to retry the same path.
+ */
+export function localMediaSentence(hit) {
+  const p = String(hit?.path || hit?.key || 'that argument');
+  const v = String(hit?.value ?? '').slice(0, 160);
+  const none = 'Nothing was queued and nothing was charged.';
+  if (hit?.kind === 'traversal') return `\`${p}\` is \`${v}\`, which is not a file Hermoso serves. Pass a public https URL, or the URL upload_file returns, as \`${p}\`. ${none}`;
+  if (hit?.kind === 'missing') return `\`${p}\` is \`${v}\`, and there is no such file on this machine. If the file is in your own sandbox or chat (ChatGPT's /mnt/data, an attachment), call upload_file with its bytes as \`dataUri\` first, then pass the URL it returns as \`${p}\`. If the file is on this machine, fix the path. ${none}`;
+  if (hit?.kind === 'fileuri') return `\`${p}\` is a file: URI (\`${v}\`). Pass the plain path \`${hit.localPath}\` as \`${p}\` instead, or call upload_file with it and pass the URL it returns. ${none}`;
+  return `\`${p}\` is \`${v}\`, a file path on your machine or sandbox, and Hermoso cannot open it. Call upload_file with this file first (its bytes as \`dataUri\`, or a public \`url\`), then pass the URL it returns as \`${p}\`. ${none}`;
 }
 
 /**
@@ -88,7 +112,15 @@ export function findClientLocalMedia(value, opts = {}) {
     if (typeof v === 'string') {
       if (!media) return null;
       const r = mediaRefRefusal(v, opts);
-      return r ? { key, path: trail, ...r } : null;
+      if (!r) return null;
+      // On a caller that can read its own disk (opts.exists), a real file is the tool's to read; a missing one is said
+      // as missing, and a file: URI to a real file is answered with its plain path.
+      if (r.kind === 'local' && typeof opts.exists === 'function') {
+        const t = v.trim();
+        if (/^file:\/\//i.test(t)) { const lp = fileUriPath(t); if (lp && opts.exists(lp)) return { key, path: trail, ...r, kind: 'fileuri', localPath: lp }; return { key, path: trail, ...r, kind: 'missing' }; }
+        if (PLAIN_PATH_RE.test(t)) return opts.exists(t) ? null : { key, path: trail, ...r, kind: 'missing' };
+      }
+      return { key, path: trail, ...r };
     }
     if (Array.isArray(v)) {
       for (let i = 0; i < v.length && i < 500; i++) { const h = walk(v[i], key, `${trail}[${i}]`, depth + 1, media); if (h) return h; }
@@ -96,7 +128,8 @@ export function findClientLocalMedia(value, opts = {}) {
     }
     if (typeof v === 'object') {
       if (typeof Buffer !== 'undefined' && Buffer.isBuffer?.(v)) return null;
-      for (const k of Object.keys(v)) { const h = walk(v[k], k, trail ? `${trail}.${k}` : k, depth + 1, isMediaKey(k)); if (h) return h; }
+      // A field inside a media-named object is media too (render_ad's foundationImages.location / .hero).
+      for (const k of Object.keys(v)) { const h = walk(v[k], k, trail ? `${trail}.${k}` : k, depth + 1, media || isMediaKey(k)); if (h) return h; }
     }
     return null;
   };
@@ -128,5 +161,5 @@ export function flattenOpenAIFiles(value) {
 
 /** The Error a caller throws for a hit: status 400 + _userInput, so the ledger files it as the caller's. */
 export function clientLocalMediaError(hit) {
-  return Object.assign(new Error(`\`${hit.path || hit.key}\`: ${hit.message}`), { status: 400, _userInput: true, code: hit.code, param: hit.path || hit.key });
+  return Object.assign(new Error(localMediaSentence(hit)), { status: 400, _userInput: true, code: hit.code, param: hit.path || hit.key });
 }

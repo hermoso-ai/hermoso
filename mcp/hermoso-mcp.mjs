@@ -42,7 +42,7 @@ if (_scope.error) { console.error(`[hermoso-mcp] ${_scope.error}`); process.exit
 // ([[failed-read-is-not-empty]]). Awaited before registerTools because the gate reads it at registration time —
 // wiring it after would leave `readOk:false`, the gate would fail open, and the change would be silently inert.
 const _conn = await connectedProviders();
-registerTools(server, { only: _scope.groups, connectors: _conn });
+registerTools(server, { only: _scope.groups, lean: !!_scope.lean, connectors: _conn }); // HERMOSO_TOOLS=lean: the core-first list
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

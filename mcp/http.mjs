@@ -415,10 +415,11 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // was the right instinct for a scope the SERVER changes silently, and the wrong one for a change the CLIENT
   // asked for and is told about.
   function scopeFor(req, res) {
-    const { groups, error, directory, app } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
+    const { groups, error, directory, app, lean } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
     if (error) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: error }, id: null }); return false; }
     // `app` = one of the focused Hermoso apps (APP_SCOPE_TOKENS in tools.mjs); set ONLY by those tokens, so it is absent
     // on every other connection and nothing below changes for them.
+    if (lean) return { groups: null, directory: false, lean: true }; // `?tools=lean`: the core-first list on any host (parseToolScope)
     return app ? { groups, directory: directory || false, app } : { groups, directory: directory || false }; // `directory` = the Claude Connectors Directory cage (see DIRECTORY_GROUPS in tools.mjs)
   }
   // `?src=<surface>` on the published URL (registry / glama / smithery / cursor / readme …) — attribution only. It may
@@ -603,7 +604,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       }
       firstRun = firstRun && typeof firstRun === 'object' && firstRun.fresh === true ? { ...firstRun, offer: firstRunOffers(baseInstructions) } : null;
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: withFirstRunLine(baseInstructions, firstRun) });
-      registerTools(server, { only: scope.groups, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, hosted: true, ext: extAsked(req, scope), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, lean: !!scope.lean, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, hosted: true, ext: extAsked(req, scope), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),

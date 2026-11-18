@@ -8,9 +8,9 @@
 // per MODEL RUN, and what a run costs depends on the model, the resolution and the length — which is why the only
 // exact numbers live in the live catalog `/api/generate/status` serves and `hermoso_capabilities` prints. A number
 // written into this file would be a second, stale answer to a question the server already answers correctly
-// ([[unsourced-capability-comments]]). So: THIS MODULE CLASSIFIES, IT NEVER PRICES. Every digit find_tools shows
-// comes from that same live catalog, fetched once per process and quoted as a range; when the catalog has not been
-// read the row says the class and no number, which is honest rather than guessed.
+// ([[unsourced-capability-comments]]). So: THIS MODULE CLASSIFIES AND FORMATS, IT NEVER PRICES. Every digit find_tools
+// shows comes from that same live catalog, read per session (see `toolPriceText` below); when the catalog has not
+// been read the row names get_cost and no number, which is honest rather than guessed.
 //
 // THE CLASSIFICATION IS THE SERVER'S OWN ONE SENTENCE, MAPPED ONTO THE GROUP MARKERS. `COST_MODEL_SENTENCE` in
 // server.js — the one copy every surface prints — says credits are spent on exactly two things, running an AI
@@ -73,40 +73,100 @@ export function toolCostClass(name, group, provider = null) {
   return 'free';
 }
 
-// The sentence each class prints. NO DIGITS HERE — see the header. `range` is filled in by the caller from the
-// live catalog when it has read one.
-export function costLabel(cls, range = '') {
-  if (cls === 'percall') return 'credits per call at X’s per-request price, a post with a link far more than one without (hermoso_credits has the exact figures)';
-  if (cls === 'research') return 'credits (Ad Spy research)';
-  if (cls === 'model') return range ? `credits — ${range}` : 'credits (runs a model; hermoso_capabilities has the exact per-model figure)';
-  return 'free';
+// ── ONE SHORT PRICE PER TOOL (2026-11-17, owner-approved: "an agent knows the price before it runs") ──────────────
+// find_tools, get_instructions and GET /v1/tools each print `price`: one short string an agent can read at a glance,
+// in one of four shapes, and every digit in it is read off the live catalog (`GET /api/generate/status`):
+//
+//     'free'                                      the class says so (publishing, campaigns, analytics, lookups…)
+//     '<lo>-<hi> credits by model'                a raw generation tool, spanned over the whole model catalog
+//     '<n> credits' / '<n> credits per second'    one catalog figure prices it outright
+//     'from <n> credits'                          it scales with length, model or how much work it does
+//
+// The same rule as the header above: NO DIGIT LIVES IN THIS FILE. A tool the catalog does not price yet (or a
+// catalog that has not been read) says 'credits vary: get_cost prices it' — the exact, nothing-billed quote every
+// paying tool already takes — never a guessed number ([[failed-read-is-not-empty]]).
+//
+// THE DIGEST IS SMALL ON PURPOSE. The status payload is ~125 KB; a hosted session keeps only these few numbers. And
+// it spans BOTH rates (standardCredits and memberCredits) for the catalog ranges, so a range read by one account is
+// still true for another — a member pays the low end, a Free account the high end, and both are inside it.
+const _pos = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+function _span(models) {
+  const nums = [];
+  const eat = (v) => {
+    if (_pos(v) != null) nums.push(v);
+    else if (v && typeof v === 'object') for (const x of Object.values(v)) eat(x);
+  };
+  for (const m of models || []) {
+    if (!m || typeof m !== 'object' || m.deprecated) continue;
+    for (const k of ['credits', 'standardCredits', 'memberCredits', 'creditsBySize', 'creditsByRes']) eat(m[k]);
+  }
+  return nums.length ? [Math.min(...nums), Math.max(...nums)] : null;
 }
+const _min = (vals) => { const ok = vals.map(_pos).filter((v) => v != null); return ok.length ? Math.min(...ok) : null; };
+
+// The flat figures the status payload already publishes for one tool each, by the payload's own key.
+export const PRICE_KEYS = Object.freeze(['editCredits', 'reframeCredits', 'upscaleCredits', 'dubCredits', 'voiceSwapCredits',
+  'clipCredits', 'subtitleCredits', 'explainCredits', 'editVideoCredits', 'postEditCredits', 'avatarCreditsPerSecond']);
+
+/** The handful of numbers `toolPriceText` reads, from one /api/generate/status payload. null when there is none. */
+export function priceDigestFrom(status) {
+  if (!status || typeof status !== 'object') return null;
+  const o = status.options || {};
+  const flat = {};
+  for (const k of PRICE_KEYS) { const v = _pos(status[k]); if (v != null) flat[k] = v; }
+  const tp = status.toolPrices && typeof status.toolPrices === 'object' ? status.toolPrices : {};
+  return {
+    image: _span(o.image?.models),
+    video: _span(o.video?.models),
+    flat,
+    voicePer1k: _pos(o.voice?.creditsPer1k),
+    sfxFrom: _min((o.sfx?.engines || []).flatMap((e) => Object.values(e?.creditsBySeconds || {}))),
+    musicFrom: _min((o.music?.models || []).flatMap((m) => [m?.credits15s, m?.credits])),
+    meteredFrom: _pos(tp.meteredFloor),        // the least a metered step (a writing model, a lookup) can bill
+    researchFrom: _pos(tp.researchLookup),     // one Ad Spy data lookup
+  };
+}
+
+const _n = (v) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 10) / 10));
+const _cr = (v) => `${_n(v)} credit${v === 1 ? '' : 's'}`;
+const _range = (r, by) => (r ? (r[0] === r[1] ? _cr(r[0]) : `${_n(r[0])}-${_n(r[1])} credits by ${by}`) : '');
+
+// How each tool the catalog prices outright reads its figure. A name not here falls back to its class (below).
+// `from` marks a figure that is the start of a scale (by length, by sections); `per` names the unit it is quoted in.
+export const TOOL_PRICE_SPECS = Object.freeze({
+  generate_image: { range: 'image', by: 'model and size' },
+  generate_video: { range: 'video', by: 'model, length and resolution' },
+  edit_image: { flat: 'editCredits' },
+  reframe_video: { flat: 'reframeCredits', from: true },
+  upscale_video: { flat: 'upscaleCredits', from: true },
+  dub_video: { flat: 'dubCredits', from: true },
+  change_voice: { flat: 'voiceSwapCredits', from: true },
+  clip_video: { flat: 'clipCredits', from: true },
+  add_subtitles: { flat: 'subtitleCredits', from: true },
+  make_explainer: { flat: 'explainCredits', from: true },
+  edit_video: { flat: 'editVideoCredits', from: true },
+  post_edit: { flat: 'postEditCredits', from: true },
+  generate_avatar: { flat: 'avatarCreditsPerSecond', per: 'second' },
+  generate_voice: { digest: 'voicePer1k', per: '1,000 characters' },
+  generate_sfx: { digest: 'sfxFrom', from: true },
+  generate_music: { digest: 'musicFrom', from: true },
+});
+export const PRICE_UNKNOWN = 'credits vary: get_cost prices it';
 
 /**
- * The one range find_tools quotes, built from the SAME payload hermoso_capabilities prints
- * (`GET /api/generate/status`). Returns '' when the catalog has not been read — an absent number is never
- * replaced by a guessed one ([[failed-read-is-not-empty]]).
- *
- * `kind` picks which catalog to read: a video tool is priced by the video models, an image tool by the image ones.
- * Anything else gets the whole span, which is the honest answer for a tool that could route to either.
+ * The one short price string for a tool. `cls` is toolCostClass's answer (after the caller has applied any
+ * spend-exemption); `digest` is priceDigestFrom's. PURE.
  */
-export function creditRangeFrom(status, kind = 'any') {
-  if (!status || typeof status !== 'object') return '';
-  const nums = [];
-  const eat = (rows) => { for (const m of rows || []) {
-    if (typeof m?.credits === 'number') nums.push(m.credits);
-    else if (m?.credits && typeof m.credits === 'object') for (const v of Object.values(m.credits)) if (typeof v === 'number') nums.push(v);
-    if (m?.creditsBySize) for (const v of Object.values(m.creditsBySize)) if (typeof v === 'number') nums.push(v);
-  } };
-  if (kind === 'image' || kind === 'any') eat(status.options?.image?.models);
-  if (kind === 'video' || kind === 'any') eat(status.options?.video?.models);
-  const ok = nums.filter((n) => Number.isFinite(n) && n > 0);
-  if (!ok.length) return '';
-  const lo = Math.min(...ok), hi = Math.max(...ok);
-  return lo === hi ? `${lo} credits` : `${lo}-${hi} credits by model/length/resolution`;
+export function toolPriceText(name, cls, digest) {
+  if (cls === 'free') return 'free';
+  if (cls === 'percall') return 'per call at X’s rate (hermoso_credits xCost)';
+  const d = digest || null;
+  if (cls === 'research') return d?.researchFrom ? `from ${_cr(d.researchFrom)}` : PRICE_UNKNOWN;
+  const spec = TOOL_PRICE_SPECS[String(name || '')];
+  if (spec && d) {
+    if (spec.range) { const t = _range(d[spec.range], spec.by); if (t) return t; }
+    const v = spec.flat ? d.flat?.[spec.flat] : spec.digest ? d[spec.digest] : null;
+    if (_pos(v) != null) return `${spec.from ? 'from ' : ''}${_cr(v)}${spec.per ? ` per ${spec.per}` : ''}`;
+  }
+  return d?.meteredFrom ? `from ${_cr(d.meteredFrom)}` : PRICE_UNKNOWN;
 }
-
-// Which catalog a generation tool is priced from. Deliberately tiny and name-shaped: a tool it does not recognise
-// gets the class label with no number, which is the safe direction.
-export const costKindOf = (name) => (/video|avatar|sizzle|explainer|stitch|reframe|upscale|recast|dub|clip|subtitle|beat|finish|multiply|motion/i.test(String(name || '')) ? 'video'
-  : /image|thumbnail|photo|static|render_ad|template/i.test(String(name || '')) ? 'image' : 'any');

@@ -263,12 +263,13 @@ async function main() {
           try {
             const r = await client.callTool({ name: 'find_tools', arguments: { query: q, limit: 8, ...(wantGroup ? { group: wantGroup } : {}) } }, undefined, { timeout: cliCallTimeoutMs(process.env.HERMOSO_CALL_TIMEOUT_MS) });
             const hits = (r.structuredContent?.tools || []).map((t) => t.name);
+            const priceOf = new Map((r.structuredContent?.tools || []).map((t) => [t.name, t.price || '']));
             if (hits.length) {
               if (flags.names) return console.log(hits.join('\n'));
               if (flags.json === true) return console.log(JSON.stringify(hits.map((n) => inv.find((t) => t.name === n)).filter(Boolean), null, 2));
               const byName = new Map(inv.map((t) => [t.name, t]));
               console.log(`No tool contains "${q}" word for word; closest by meaning:`);
-              for (const n of hits) { const t = byName.get(n); console.log(`  ${n}${t ? `  (${t.group})  ${String(t.title || t.description || '').split(/(?<=[.!?])\s/)[0].slice(0, 110)}` : ''}`); }
+              for (const n of hits) { const t = byName.get(n); console.log(`  ${n}${t ? `  (${t.group})  ${String(t.title || t.description || '').split(/(?<=[.!?])\s/)[0].slice(0, 110)}` : ''}${priceOf.get(n) ? `  · ${priceOf.get(n)}` : ''}`); }
               console.log(`\nRead one with: hermoso tools <name>`);
               return;
             }
@@ -376,6 +377,8 @@ async function printToolSchema(reg, name, flags) {
     const group = reg.inventory().find((t) => t.name === name)?.group || '?';
     if (flags.json === true) return console.log(JSON.stringify({ ...tool, group }, null, 2));
     console.log(`${tool.name}   [${group}]${tool.title ? '  ·  ' + tool.title : ''}`);
+    const price = reg.offlinePrice?.(name, group);
+    if (price) console.log(`Price: ${price}`);
     console.log(`\n${tool.description || ''}\n`);
     const fields = reg.schemaFields(tool.inputSchema);
     if (!fields.length) console.log('Arguments: none.');

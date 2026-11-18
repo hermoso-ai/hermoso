@@ -248,19 +248,22 @@ export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(na
 // creator marketplace trio while META_CREATOR_MARKETPLACE_SCOPE is off). ONE server flag decides it, so flipping the
 // env var lights every surface back up with no code change. Absent or unreadable = nothing withheld (fail open, like
 // every other read of this set); a withheld tool is held like a connector-gated one and answered as 'unavailable'.
-// ── SHOPIFY IS AN ACCOUNT TYPE, NOT A CONNECTOR (2026-10-27) ────────────────────────────────────────────────────────
-// The Shopify tools (list_shopify_products, publish_to_shopify_product, the marketing-activity tools) work only for an
-// account created by installing Hermoso from the Shopify App Store: the store is derived server-side from the verified
-// account and there is no "connect Shopify" tile. So they cannot ride TOOL_PROVIDER_RULES — every provider there must
+// ── SHOPIFY: AN ACCOUNT TYPE, AND SINCE 2026-11-17 A CONNECTOR TOO ─────────────────────────────────────────────────
+// The Shopify tools work for the store an App Store account was installed on, or the store connected to the brand in
+// Connectors ▸ Shopify (connect_shopify_store). Either way the store is derived server-side, never taken from a caller.
+// (2026-10-27, still true of the hold below:) the store is derived server-side from the verified account. So they cannot ride TOOL_PROVIDER_RULES — every provider there must
 // be a CONNECTOR_INFO key (property 3), and "connect it under Connectors" would be a dead end. Instead the
 // same /api/connectors/providers read answers `shopifyStore`: true (this account has a live store), false (it does not,
 // or Shopify is off on this deployment), or absent when the server could not tell. ONLY a definite false holds them
 // back — an unreadable answer keeps them, like every other read of this set (property 1). Held, they are answered by
 // their own reason ('shopify_store'), never as "not available in Hermoso yet".
 export const SHOPIFY_STORE_TOOL_RE = /shopify/;
-export const toolNeedsShopifyStore = (name) => SHOPIFY_STORE_TOOL_RE.test(String(name || ''));
+// THE TWO TOOLS THAT CONNECT A STORE (2026-11-17) carry `shopify` in their names and must reach a brand with NO store:
+// holding them for "no store" would hide the only way to get one.
+export const SHOPIFY_CONNECT_TOOLS = Object.freeze(['connect_shopify_store', 'list_shopify_stores']);
+export const toolNeedsShopifyStore = (name) => SHOPIFY_STORE_TOOL_RE.test(String(name || '')) && !SHOPIFY_CONNECT_TOOLS.includes(String(name || ''));
 export function toolHeldForNoShopifyStore(name, conn) { return !!(conn && conn.shopifyStore === false && toolNeedsShopifyStore(name)); }
-export const SHOPIFY_STORE_NOTE = 'works only for a Shopify store that installed Hermoso from the Shopify App Store, and this account has no linked store. An existing Hermoso account cannot be linked to a store from here; a merchant who did install it opens Hermoso once from their Shopify admin (Apps \u2192 Hermoso).';
+export const SHOPIFY_STORE_NOTE = 'works with a Shopify store, and no store is connected to this brand. connect_shopify_store hands over the one Shopify link that connects one (or Connectors \u25b8 Shopify in the app); a store that installed Hermoso from the Shopify App Store opens Hermoso from its Shopify admin (Apps \u2192 Hermoso).';
 // ── A TOOL THAT SHIPS DARK (2026-11-03, owner: "reangle_video can't stay offered while it fails its one promise") ──
 // The opposite polarity of `withheld`: a tool here is OFF unless the server's providers read names it in `flagsOn`
 // (server.js reangleOffered(), env REANGLE_VIDEO=on). FAIL CLOSED: no read, a failed read or an older server all keep
@@ -291,7 +294,7 @@ export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 
 // that already holds a Gmail or Outlook connection, and for the gates' team pass. They are tied to NO single provider
 // in TOOL_PROVIDER_RULES on purpose: one tool serves both mailbox kinds, and the lead list is useful before a mailbox
 // is connected.
-export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts']);
+export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts', 'save_email_attachment', 'label_email_reply', 'email_pipeline', 'draft_email_reply', 'list_reply_drafts', 'review_reply_draft', 'find_lead_facts', 'test_inbox_placement', 'sync_email_replies_to_hubspot', 'set_email_reply_settings']);
 // THE WECHAT TOOLS SHIP DARK WITH THE WECHAT CONNECTOR (2026-11-15, owner: "okay I guess we can skip wechat for now").
 // CONNECTOR_GATES.wechat is shut (WECHAT_ENABLED unset) because WeChat refuses every call from an address that is not on
 // the Service Account's IP whitelist and this deployment sends from a shared, changing pool. Three tools for a channel
