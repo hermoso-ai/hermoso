@@ -38,7 +38,7 @@ export function phoneToolText(name, d = {}) {
     case 'list_sms_consents': {
       const r = Array.isArray(x.records) ? x.records : [];
       if (!r.length) return 'No consent records or opt-outs kept for this brand.';
-      return `${r.length} number(s):\n` + r.slice(0, 50).map((y) => `• ${y.phone}${y.consent ? ` · consent: ${y.consent.source} (${s(y.consent.at).slice(0, 10)})${y.consent.marketing === false ? ', not marketing' : ''}` : ''}${y.optedOut ? ` · opted out ${s(y.optedOutAt).slice(0, 10)}${y.keyword ? ` (${y.keyword})` : ''}` : ''}`).join('\n');
+      return `${r.length} number(s):\n` + r.slice(0, 50).map((y) => `• ${y.phone}${y.consent ? ` · consent: ${y.consent.source} (${s(y.consent.at).slice(0, 10)})${y.consent.marketing === false ? ', not marketing' : ''}` : ''}${y.optedOut ? ` · opted out ${s(y.optedOutAt).slice(0, 10)}${y.keyword ? ` (${y.keyword})` : ''}` : ''}${!y.optedOut && y.optedBackInAt ? ` · opted back in ${s(y.optedBackInAt).slice(0, 10)}` : ''}`).join('\n');
     }
     case 'list_provider_opt_outs': {
       if (x.available === false) return note;
