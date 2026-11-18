@@ -33,8 +33,23 @@ directory. Press Install plugin and sign in with your Hermoso account, no key ne
 opens Claude's *Add custom connector* dialog with Hermoso already filled in. Press Continue, choose **Sign in now**
 if Claude asks about Authentication, then sign in with your Hermoso account.
 
-**Grok Bot:** one prompt, no key. Send this to your Bot in a new chat; it runs Hermoso on its own cloud computer and sends
-you a sign-in link with a short code to approve on your phone or computer:
+**Grok Bot, Meta Muse, Claude Code, Cursor, Codex and any other agent that can read a link and run a command:** one line,
+no key. Paste this into a new chat and the agent reads [hermoso.ai/SKILL.md](https://hermoso.ai/SKILL.md), which gives
+each host its own steps, signs you in and makes your first 3 ad ideas:
+
+```text
+Follow https://hermoso.ai/SKILL.md to set up Hermoso for me, then make 3 ad ideas for my brand and show me the best one as an image.
+```
+
+**Grok Bot and Muse** each run on their own cloud computer, so they set Hermoso up there and send you a sign-in link to
+approve. **OpenClaw and Hermes** usually run on a server you chat with on Telegram, Discord or WhatsApp, so there is no browser for
+the sign-in. Paste the same line there: the agent sends you a sign-in link with a short code, you approve it on your phone,
+and it carries on. No key needed.
+
+<details>
+<summary>Set it up by hand</summary>
+
+**Grok Bot's full setup prompt**, the same steps spelled out for a Bot that does not open the link:
 
 ```text
 Set up Hermoso for me so I can research ads, find creators, generate images and videos, and publish from here.
@@ -42,22 +57,6 @@ Set up Hermoso for me so I can research ads, find creators, generate images and 
 2. Add an MCP server of type stdio (a command), not a URL. Command: `npx -y hermoso mcp`. It uses the sign-in from step 1, so it needs no key.
 3. Then run one real tool call: list my brands.
 ```
-
-Prefer a ready-made Bot? The [Hermoso Marketing Bot](https://x.ai/bot/THQqogUKuhn1whWU0hrmb) asks for a key instead.
-
-**Claude Code, Cursor, Codex and other coding agents:** one line. Paste this into a new chat and the agent reads
-[hermoso.ai/SKILL.md](https://hermoso.ai/SKILL.md), runs its own install, opens the sign-in and makes your first 3 ad ideas:
-
-```text
-Follow https://hermoso.ai/SKILL.md to set up Hermoso for me, then make 3 ad ideas for my brand and show me the best one as an image.
-```
-
-**OpenClaw and Hermes** usually run on a server you chat with on Telegram, Discord or WhatsApp, so there is no browser for
-the sign-in. Paste the same line there: the agent sends you a sign-in link with a short code, you approve it on your phone,
-and it carries on. No key needed.
-
-<details>
-<summary>Set it up by hand</summary>
 
 **The full setup prompt**, the same setup spelled out for an agent that cannot open a link (this is Claude Code's install
 line; each agent's own is in the app under MCP & CLI):
@@ -183,10 +182,9 @@ gemini extensions install https://github.com/hermoso-ai/hermoso
 
 - **grok.com and the Grok apps** take the hosted connector: open **Plugins → Connectors → New Connector → Custom**
   (or go straight to grok.com/connectors), paste `https://app.hermoso.ai/mcp` and sign in with your Hermoso account.
-- **Grok Bot**: send it the prompt above. It signs in from its own cloud computer with
+- **Grok Bot**: send it the one line above. It signs in from its own cloud computer with
   `npx -y hermoso auth login --device` (a link and a short code you approve on your phone), then runs the stdio server
-  `npx -y hermoso mcp`. No key. The [Hermoso Marketing Bot template](https://x.ai/bot/THQqogUKuhn1whWU0hrmb) asks
-  for a key instead, which you create in the app under **MCP & CLI → Terminal & API keys**.
+  `npx -y hermoso mcp`. No key.
 - **Grok Build**, xAI's terminal agent, runs a local MCP server. Sign in once, then add it:
 
   ```bash
