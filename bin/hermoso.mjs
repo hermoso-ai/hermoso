@@ -178,6 +178,21 @@ async function main() {
         // read as an empty account rather than a missing sign-in (2026-09-25).
         if (bal == null && api.signedOut()) return die(api.SIGN_IN_HINT);
         return out(`Balance: ${bal ?? '—'} credits`, d); }
+      case 'limits': {
+        // MONTHLY CREDIT LIMITS PER BRAND AND MEMBER (2026-11-18): the get_credit_limits / set_credit_limit tools, through the
+        // same handlers the MCP twins run. `hermoso limits` reads; `hermoso limits set --limit N [--brand id] [--member email]`
+        // sets (the account owner only); `--limit none` removes it.
+        const reg = await import('../mcp/registry.mjs');
+        if (sub === 'set') {
+          const lim = flags.limit;
+          if (lim === undefined || lim === true) return die('usage: hermoso limits set --limit <credits|none> [--brand <id>] [--member <email>]');
+          const n = /^(none|null|off|remove)$/i.test(String(lim)) ? null : Number(lim);
+          if (n !== null && !(Number.isInteger(n) && n >= 0)) return die('--limit is a whole number of credits, or none to remove the limit.');
+          const { limit: _l, ...rest } = flags; return await runTool(reg, 'set_credit_limit', { ...rest, args: JSON.stringify({ limit: n }) }, []); // `limit` rides --args: null (remove) is not a flag value
+        }
+        if (sub && sub !== 'get') return die('usage: hermoso limits [--brand <id>]   ·   hermoso limits set --limit <credits|none> [--brand <id>] [--member <email>]');
+        return await runTool(reg, 'get_credit_limits', flags, []);
+      }
       case 'brand': {
         // BARE `hermoso brand` SHOWS THE SAVED BRAND (2026-09-25). The docs have always listed it as "the saved brand
         // profile" and it printed the `brand draft` usage line instead — the first command a new user copies off
@@ -344,6 +359,7 @@ async function main() {
         }
         console.log(`hermoso <command>
   auth login [--url <base>] [--token <t>]   credits          capabilities
+  limits   ·   limits set --limit <credits|none> [--brand] [--member]   monthly credit limits per brand / member
   auth login --device [--no-wait | --resume]   no browser here: sign in with a link + code on any device
   brand   ·   brand draft (--domain|--description|--social …)  create --brand --product [--format]
   generate image --prompt [--ref] [--model] [--aspect]        generate video|avatar|stitch … [--wait]

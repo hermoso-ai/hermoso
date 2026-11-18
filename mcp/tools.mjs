@@ -1078,6 +1078,8 @@ const wrap = (fn) => {
       // THE PER-ACCOUNT YOUTUBE LIMIT LIFTS AT MIDNIGHT PACIFIC, NOT IN A MINUTE (2026-11-13): the server's sentence already says when, so the
       // generic "wait N seconds" below would contradict it. Read from the structured code, never the prose.
       if (e?.apiCode === 'youtube_account_limit') _hints.push({ do: 'stop calling YouTube tools that upload or change anything for this account until midnight Pacific, and tell the user in the words of this message; reading videos and comments still works', why: 'this account has used its share of the shared YouTube allowance for today, so a retry before the reset is refused the same way and nothing is lost by waiting' });
+      // A BRAND'S MONTHLY CREDIT LIMIT (2026-11-18) lifts on the 1st of next month (UTC) or when the account owner raises it; topping up does nothing.
+      else if (e?.apiCode === 'credit_limit') _hints.push({ do: 'stop running paid tools on this brand, and tell the user in the words of this message; free tools (publishing, scheduling, reading) still work, and get_credit_limits shows the numbers', why: 'the account owner set a monthly credit limit on this brand (or on this person), so a retry is refused the same way until the month resets or the owner raises it with set_credit_limit; buying credits does not lift it' });
       else if (Number(e?.status) === 429 && e?.retryAfter > 0) { const _w = Number(e.retryAfter), _ww = _w < 90 ? `${Math.round(_w)} seconds` : `${Math.round(_w / 60)} minutes`; msg = `${msg} Do not call ${_tool} again yet: wait ${_ww} first. Calling it sooner is refused the same way and can make the limit last longer.`; _hints.push({ do: `wait ${_ww}, then call ${_tool} once`, why: 'the platform is rate-limiting this call, so an immediate retry cannot succeed' }); }
       { const _ig = metaAdsSetupNote(_tool, e); if (_ig) { msg += `\n${_ig.text}`; _hints.push(_ig.hint); } }
       if (Number(e?.status) === 401 && e?.connector) _hints.push({ do: `have the user connect "${e.connector}" (Connectors, or the one-click link in this message)`, why: `${e.connector} is not connected in this workspace, so this tool can only answer 401 until it is` });
@@ -3343,6 +3345,9 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   delete_location: 'a place is removed in the Hermoso app (the location picker) or the CLI; here list_elements reads the saved places',
   layerize_image: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-12); a picture is split into layers in the Hermoso app or on any other MCP host',
   product_move: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-12); generate_video makes a product clip from a photo on this host, and every other MCP host runs this tool',
+  // MONTHLY CREDIT LIMITS (2026-11-18): the same reason as layerize_image. The list stood at 984 of its family budget, so two more would have pushed WordPress off it.
+  get_credit_limits: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-18); a brand\'s monthly credit limit is read in the Hermoso app (Settings ▸ Monthly credit limit) or on any other MCP host, and hermoso_credits states it here',
+  set_credit_limit: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-18); the account owner sets a brand\'s monthly credit limit in the Hermoso app (Settings ▸ Monthly credit limit) or on any other MCP host',
   get_instructions: 'every tool description on this host is already the full one (SLIM_TOOL_DESCRIPTIONS is never applied here), so there is nothing to fetch',
   // X ACTIONS (2026-11-15): the same reason as layerize_image and product_move. The list stood at 999 of 1,000, so three more would have pushed Reddit Ads off it.
   repost_on_x: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-15); a repost is made in the Hermoso app or on any other MCP host',
@@ -3658,7 +3663,7 @@ export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images']); // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it
+export const ON_DEMAND_TOOLS = new Set(['get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images']); // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -3893,6 +3898,8 @@ export const WITHHELD_FROM_DIRECTORY = new Set([
   'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches',
   // 2026-11-17: find_proven_formats is on demand too, and its examples hand off to clone_video (a generation lane).
   'find_proven_formats',
+  // 2026-11-18: the monthly credit limits are on demand, and an on-demand tool is never reachable through a cage's call_tool.
+  'get_credit_limits', 'set_credit_limit',
 ]);
 // TWO DIRECTORY MODES (2026-09-02, after the directory turned out to list Tofu Ads — an AI ad-image generator
 // (RETIRED 2026-09-25: `directory-full` now parses to the cage — see parseToolScope. The 'full' mode below is kept only
@@ -7461,8 +7468,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     let recent = ''; try { const u = await apiGet('/api/billing/usage', { limit: 10 }); if (u?.items?.length) recent = `\nRecent charges (newest first):\n${u.items.map((r) => `• ${String(r.at).slice(0, 16).replace('T', ' ')} UTC · ${r.label} · ${r.credits} credits`).join('\n')}`; } catch {}
     const _mr = d.memberRate === true ? ' This account\'s plan has no markup on models.' : d.planUpsell === true && !hostRendersWidgets() ? ' Starter, Pro and Studio have no markup on models, so credits go twice as far (upgrade_plan); Basic, Free and top-up credits use standard prices.' : '';
     const _po = d.posting?.line ? ` Posting: ${d.posting.line}` : '';
+    // THIS BRAND'S MONTHLY CREDIT LIMIT, when the owner set one (2026-11-18): the balance alone would say "plenty" to a brand that is capped.
+    let _cl = ''; try { const L = await apiGet('/api/credit-limits', { current: '1' }); const b = (L?.brands || [])[0]; const me = (b?.members || []).find((m) => m.limit != null && (L.owner === false)); if (b && b.limit != null) _cl = ` This brand's monthly credit limit: ${b.used} of ${b.limit} used, ${b.remaining} left until ${String(L.resetAt || '').slice(0, 10)} (UTC; get_credit_limits shows every limit${L.canEdit ? ', set_credit_limit changes one' : ''}).`; if (me) _cl += ` Your own limit on it: ${me.used} of ${me.limit} used.`; } catch {}
     const _wc = d.welcome?.claimable && Number(d.welcome.credits) > 0 && d.welcome.url ? ` This account has not received its ${d.welcome.credits} free credits yet: the user opens ${d.welcome.url} once in a browser (one click, no sign-in and no card) and they arrive in a few seconds after a quick check that a person is there.` : ''; // the welcome waits behind a one-time check (2026-10-25)
-    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}.${_mr}${_po}${_wc} ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'}${d.xCost?.sentence ? ` ${d.xCost.sentence}` : ''} ${d.costEstimate || PRICE_ESTIMATE_LINE}${recent}`, d);
+    return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}.${_mr}${_po}${_cl}${_wc} ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'}${d.xCost?.sentence ? ` ${d.xCost.sentence}` : ''} ${d.costEstimate || PRICE_ESTIMATE_LINE}${recent}`, d);
   }));
 
   // AGENT BILLING: out of credits → top up. With a saved card + billing-admin rights this is the SAME one-click
@@ -30234,6 +30243,39 @@ function memoryNoteVerdict(text) {
     // report is the one the workspace NOW HOLDS (server read-back), not the one that was requested.
     const d = await apiPost('/api/team/role', { email: a.email, role: a.role });
     return ok(d.message || `${d.email || a.email} is now ${d.role || a.role}.`, { ok: true, email: d.email || a.email, role: d.role || a.role });
+  }));
+
+  // MONTHLY CREDIT LIMITS PER BRAND AND PER MEMBER (2026-11-18, lib/brand-credit-limits.mjs). Credits belong to the account and
+  // every brand spends them; the owner can cap what one brand, or one invited person on it, spends in a UTC calendar month.
+  const creditLimitLines = (d) => (d.brands || []).map((b) => {
+    const head = `• ${b.name || b.brand} (${b.brand})${b.current ? ' ← this connection' : ''}: ${b.limit == null ? `no limit · ${b.used} credits used this month` : `${b.used} of ${b.limit} credits used this month${b.held > 0 ? `, ${b.held} held for work in flight` : ''} · ${b.remaining} left`}`;
+    const ms = (b.members || []).map((m) => `    – ${m.email}${m.role ? ` (${m.role})` : ''}: ${m.limit == null ? `no limit · ${m.used} used` : `${m.used} of ${m.limit} used · ${m.remaining} left`}`);
+    return [head, ...ms].join('\n');
+  }).join('\n');
+  server.registerTool('get_credit_limits', {
+    title: 'Credit limits',
+    description: 'Monthly credit limits and this month’s usage, per brand and per member of a shared brand. Credits belong to the account and every brand spends the same balance; the account owner can cap what one brand, or one invited person, spends in a calendar month (UTC, resets on the 1st). The owner sees every brand; inside a shared brand an admin sees that brand and its members, a member sees the brand and their own limit. Free.',
+    inputSchema: { brand: z.string().optional().describe('one brand id (list_brands); omit for every brand you can see') },
+    outputSchema: { month: z.string().optional(), resetAt: z.string().optional(), owner: z.boolean().optional().describe('true when you are the account owner, the only one who can change a limit'), canEdit: z.boolean().optional(), brands: z.array(z.any()).optional().describe('[{brand, name, limit (null = none), used, held, remaining, members?: [{email, role, limit, used, remaining}]}]') },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/credit-limits', a.brand ? { brand: a.brand } : {});
+    const tail = d.canEdit ? 'Change one with set_credit_limit.' : 'Only the account owner can change a limit.';
+    return ok(`Monthly credit limits (${d.month}, UTC; resets ${String(d.resetAt || '').slice(0, 10)}):\n${creditLimitLines(d) || '  (no brands)'}\n${tail}`, d);
+  }));
+  server.registerTool('set_credit_limit', {
+    title: 'Set a credit limit',
+    description: 'Set, change or remove a monthly credit limit on one brand, or on one member of a shared brand (ACCOUNT OWNER ONLY: a brand’s admins and members are refused). When a brand or member would go over its limit this month, paid work there is refused with the numbers and the reset date; free work keeps going and other brands are unaffected. The month is the UTC calendar month. Free.',
+    inputSchema: {
+      brand: z.string().optional().describe('the brand id or name (list_brands); omit for the brand this connection acts on'),
+      member: z.string().optional().describe('a member’s email (list_team) to limit that person on this brand; omit to limit the whole brand'),
+      limit: z.number().int().min(0).nullable().describe('credits per month; null removes the limit; 0 allows no paid work'),
+    },
+    outputSchema: { applied: z.boolean().optional(), line: z.string().optional(), brands: z.array(z.any()).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiPut('/api/credit-limits', { brand: a.brand, member: a.member, limit: a.limit ?? null });
+    return ok(`${d.line || 'Done.'}\n${creditLimitLines(d)}`, d);
   }));
 
   server.registerTool('list_jobs', {
