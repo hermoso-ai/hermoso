@@ -26427,14 +26427,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // WHICH PRODUCT THE AD IS FOR (2026-11-17, server.js agentAdProduct): `product` is a saved product's name, a photo URL,
   // a product page link, or (CLI) a local photo, sent as `adProduct`; the server resolves it and reports what rode.
   const productArg = async (p) => {
+    if (p === null || /^\s*(?:none|no(?:\s+product)?|null)\s*$/i.test(typeof p === 'string' ? p : '')) return null; // no product: a brand ad
+    if (Array.isArray(p)) { const list = []; for (const x of p.slice(0, 3)) { const v = await productArg(x); if (v) list.push(v); } return list.length > 1 ? list : (list[0] || ''); } // several products in one ad (a range, a bundle)
     const v = String(p || '').trim(); if (!v) return '';
     if (/^(https?:|data:)/i.test(v) || /^\/generated\//.test(v)) return v;
     if (/^(\/|~\/|\.{1,2}\/|[A-Za-z]:[\\/]|file:)/.test(v) && /\.(png|jpe?g|webp|gif|heic|avif)$/i.test(v)) return (await toRef(v)) || v;
     return v;
   };
-  const adForText = (p) => (p && p.name ? `\nAd for: ${p.name}${p.source === 'missing' ? ' (no photo of it on file)' : ''}` : '');
-  const PRODUCT_Z = z.string().optional().describe("the product the ad is for: a saved product's name, or its photo or page URL");
+  const adForText = (p, ps, none) => (none ? '\nNo product: a brand ad, no product photo used' : Array.isArray(ps) && ps.length > 1 ? `\nAd for: ${ps.map((x) => x && x.name).filter(Boolean).join(', ')}` : p && p.name ? `\nAd for: ${p.name}${p.source === 'missing' ? ' (no photo of it on file)' : ''}` : '');
+  const PRODUCT_Z = z.union([z.string(), z.array(z.string()).max(3)]).nullable().optional().describe("the product: a saved product's name, or its photo or page URL; 2-3 = all in one ad; null = none (a brand ad)");
   const PRODUCT_OUT = z.any().optional().describe('the product used: {name, image, source}');
+  const PRODUCTS_OUT = z.any().optional();
   const insertsResolved = async (list) => {
     if (!Array.isArray(list)) return undefined;
     let lib = null; const out = [];
@@ -26873,6 +26876,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       preview: z.string().optional().describe('an SVG\'s PNG preview, for places that cannot show a vector'),
       frames: z.number().optional().describe('an animated GIF\'s frame count, read off the delivered file'),
       product: PRODUCT_OUT,
+      products: PRODUCTS_OUT,
+      noProduct: z.boolean().optional(),
       labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -26905,14 +26910,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (!_wctx || (_wctx.waitMs !== undefined && _wctx.waitMs !== null)) {
       const q = await apiPost('/api/generate/image', { ..._imgBody, queue: true });
       const r = await awaitRenderJob({ id: q.jobId });
-      if (r.stillRendering) return { content: [{ type: 'text', text: `Image queued as job ${r.jobId}. It is rendering; read it with get_job.${adForText(q.product)}${q.productNote ? `\n${q.productNote}` : ''}` }], structuredContent: { jobId: r.jobId, stillRendering: true, ...(q.productNote ? { productNote: q.productNote } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}), ...(q.product ? { product: q.product } : {}) } };
+      if (r.stillRendering) return { content: [{ type: 'text', text: `Image queued as job ${r.jobId}. It is rendering; read it with get_job.${adForText(q.product, q.products, q.noProduct)}${q.productNote ? `\n${q.productNote}` : ''}` }], structuredContent: { jobId: r.jobId, stillRendering: true, ...(q.productNote ? { productNote: q.productNote } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}), ...(q.noProduct ? { noProduct: true } : {}), ...(q.products ? { products: q.products } : {}), ...(q.product ? { product: q.product } : {}) } };
       const img = await imageBlock(r.raw?.preview ? abs(r.raw.preview) : r.url); // an SVG shows its PNG preview inline
       const _qNote = joinQueuedImageNote(q.productNote, r.raw); // the route's note (logo, lineup) + the worker's (crop, the product check); a logo the worker moved is said once, where it landed
-      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${adForText(q.product)}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...(q.product ? { product: q.product } : {}), image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(r.raw?.format ? { format: r.raw.format } : {}), ...(r.raw?.preview ? { preview: abs(r.raw.preview) } : {}), ...(r.raw?.frames ? { frames: r.raw.frames, frameMs: r.raw.frameMs } : {}), ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
+      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${adForText(q.product, q.products, q.noProduct)}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...(q.noProduct ? { noProduct: true } : {}), ...(q.products ? { products: q.products } : {}), ...(q.product ? { product: q.product } : {}), image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(r.raw?.format ? { format: r.raw.format } : {}), ...(r.raw?.preview ? { preview: abs(r.raw.preview) } : {}), ...(r.raw?.frames ? { frames: r.raw.frames, frameMs: r.raw.frameMs } : {}), ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
     }
     const d = await apiPost('/api/generate/image', _imgBody); // explicit boolean so the server's saved-brand hydration default is unambiguous
     const img = await imageBlock(abs(d.preview || d.image)); // show the actual creative inline in Claude, not just a URL (an SVG shows its PNG preview: an agent's image block takes no vector)
-    return { content: [{ type: 'text', text: `${_imgHead(d.productCheck)}${abs(d.image)}${d.model ? `  (${d.model})` : ''}${switchNote({ raw: d })}${adForText(d.product)}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
+    return { content: [{ type: 'text', text: `${_imgHead(d.productCheck)}${abs(d.image)}${d.model ? `  (${d.model})` : ''}${switchNote({ raw: d })}${adForText(d.product, d.products, d.noProduct)}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
 
   // ---------- Static-ad edits + variants (2026-09-18) ----------
@@ -27244,6 +27249,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
       jobType: z.string().optional().describe("the routing decision — 'video' (single pass) or 'stitch' (acts)"),
       creator: z.any().optional().describe('the saved creator this render RESOLVED to — {id, name, source, consented}. The read-back, not what you typed'),
       product: PRODUCT_OUT,
+      products: PRODUCTS_OUT,
+      noProduct: z.boolean().optional(),
       input: z.any().optional().describe('the assembled render input (dry run only — resolved model, duration, scenes)'),
       credits: z.number().optional().describe('dry run only: the credits the real render reserves (the same worker computes it)'),
       quote: z.any().optional().describe('dry run only: {credits, model, label, durationSeconds, resolution, acts?} or {refused} when the real render would be refused'),
@@ -27263,13 +27270,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // needsAppScreens: an app on a device screen with nothing to lay there, held before anything was cast, painted or
     // billed (lib/app-screen-hold.mjs); a dry run too, since there is nothing to price until the user answers.
     { const { product: _prod, ...rest } = a; a = { ...rest, adProduct: await productArg(_prod) }; } // which product: resolved server-side (agentAdProduct)
-    const { input, jobType, notes, needsProductPhoto, needsAppScreens, appScreens, creator, ownRefNotice, quote, brandPhoto, product: adProduct } = await apiPost('/api/render/assemble', a); // a passes wholesale — creator/resolution/captions/endCard/music/lockup/ttsVoice ride the body
+    const { input, jobType, notes, needsProductPhoto, needsAppScreens, appScreens, creator, ownRefNotice, quote, brandPhoto, product: adProduct, products: adProducts, noProduct } = await apiPost('/api/render/assemble', a); // a passes wholesale — creator/resolution/captions/endCard/music/lockup/ttsVoice ride the body
     if (needsAppScreens) return ok(notes || '', { needsAppScreens: true, appScreens });
     // THE CAST IS THE READ-BACK, NEVER THE ASK. `creator` is the row the SERVER resolved out of this workspace's own
     // roster; a half-remembered name that matched nobody, matched two people, or belongs to an unconsented real
     // person never reaches here at all (the assemble route refuses, free, before a job exists). So this line names
     // who is actually in the ad, and it names them from the resolution — the same law the ads tree follows.
-    const _castLine = adForText(adProduct) + (await appScreensSaved(appScreens)) + (creator ? `\nCast: ${creator.name} (${creator.id}) — ${creator.source === 'generated' ? 'AI creator' : creator.source === 'social' ? 'from a social profile' : 'uploaded photo'}${creator.source !== 'generated' ? (creator.consentVia === 'api-implied' ? ', likeness consent confirmed by this call and recorded' : creator.consented ? ', likeness consent on file' : '') : ''}.` : '') + (ownRefNotice ? `\n⚠ ${ownRefNotice.text} ${ownRefNotice.fix}` : ''); // a creator's own photo too poor to cast is never cast silently (lowQualityRef) — say so and name the fix
+    const _castLine = adForText(adProduct, adProducts, noProduct) + (await appScreensSaved(appScreens)) + (creator ? `\nCast: ${creator.name} (${creator.id}) — ${creator.source === 'generated' ? 'AI creator' : creator.source === 'social' ? 'from a social profile' : 'uploaded photo'}${creator.source !== 'generated' ? (creator.consentVia === 'api-implied' ? ', likeness consent confirmed by this call and recorded' : creator.consented ? ', likeness consent on file' : '') : ''}.` : '') + (ownRefNotice ? `\n⚠ ${ownRefNotice.text} ${ownRefNotice.fix}` : ''); // a creator's own photo too poor to cast is never cast silently (lowQualityRef) — say so and name the fix
     // LAW 8: render_ad honors render_plan.structure/duration — a >single-clip creative assembles as stitched ACTS
     // (jobType 'stitch': the server packs the scenes into the fewest ≤model-max acts, filled to the max via the shared
     // acts-packing.mjs) instead of the old silent clamp that time-compressed a 30s board into one 15s clip.
@@ -27278,7 +27285,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // are the ones it prices (the belt may re-route an auto pick). A refusal the real run would throw is said as one.
     const _q = quote && typeof quote === 'object' ? quote : null;
     const _qLine = _q ? (Number.isFinite(+_q.credits) && _q.credits != null ? `\nESTIMATED COST: about ${_q.priceCredits > _q.credits ? _q.priceCredits : _q.credits} credits for the whole job (${_q.label || _q.model}, ${_q.durationSeconds}s${_q.resolution ? ` at ${_q.resolution}` : ''}${_q.priceCredits > _q.credits ? `; ${_q.credits} reserved for the video and ${_q.priceCredits - _q.credits} to lay your screens in after it` : ', reserved when it renders'}). ${PRICE_ESTIMATE_LINE}` : _q.refused ? `\nThe real render would be refused before it starts: ${_q.refused}` : '') : '\nCOST: not quoted for this render; hermoso_capabilities lists per-model credit costs.';
-    if (a.dryRun) return ok(`DRY RUN — routing decision (no job submitted, nothing charged): jobType=${jobType || 'video'}, model=${_q?.model || input.model}, durationSeconds=${_q?.durationSeconds || input.durationSeconds}${Array.isArray(input.scenes) ? `, acts=[${(_q?.acts || input.scenes.map(s => Math.round(s.seconds * 10) / 10)).join(', ')}]s` : ' (single pass)'}${input.modelExplicit ? ', modelExplicit (ask-don’t-swap)' : ''}.${_qLine}${_clampNote}${_castLine}\n${notes || ''}`, { dryRun: true, jobType: jobType || 'video', ...(adProduct ? { product: adProduct } : {}), ...(_q && _q.credits != null ? { credits: _q.priceCredits > _q.credits ? _q.priceCredits : _q.credits } : {}), ...(_q ? { quote: _q } : {}), ...(creator ? { creator } : {}), appScreens, input });
+    if (a.dryRun) return ok(`DRY RUN — routing decision (no job submitted, nothing charged): jobType=${jobType || 'video'}, model=${_q?.model || input.model}, durationSeconds=${_q?.durationSeconds || input.durationSeconds}${Array.isArray(input.scenes) ? `, acts=[${(_q?.acts || input.scenes.map(s => Math.round(s.seconds * 10) / 10)).join(', ')}]s` : ' (single pass)'}${input.modelExplicit ? ', modelExplicit (ask-don’t-swap)' : ''}.${_qLine}${_clampNote}${_castLine}\n${notes || ''}`, { dryRun: true, jobType: jobType || 'video', ...(adProduct ? { product: adProduct } : {}), ...(adProducts ? { products: adProducts } : {}), ...(noProduct ? { noProduct: true } : {}), ...(_q && _q.credits != null ? { credits: _q.priceCredits > _q.credits ? _q.priceCredits : _q.credits } : {}), ...(_q ? { quote: _q } : {}), ...(creator ? { creator } : {}), appScreens, input });
     // ASK BEFORE SPENDING (2026-07-28: "ask the user BEFORE the render is dispatched — never after money is
     // spent"). `notes` alone was not enough here: on the real path it only reaches the model AFTER renderJob has
     // polled to completion, i.e. after the credits are gone. So when the ad features a product this brand has no
@@ -27287,7 +27294,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // photo, or the caller re-calls with allowGenericProduct:true once they have actually said they are fine with a
     // stand-in. (dryRun already returns before this — it charges nothing either way.)
     if (needsProductPhoto && !a.allowGenericProduct) {
-      return ok(`NOTHING WAS RENDERED and nothing was charged.${notes || ''}\n\nDo this now: tell the user in ONE short line that you have no photo of their product and the packaging would be invented, then either (a) lock a real photo with set_product_image and call render_ad again, or (b) if they say a generic stand-in is fine, call render_ad again with allowGenericProduct:true. Do NOT describe or claim any render — none happened.`, { needsProductPhoto: true, jobType: jobType || 'video', ...(adProduct ? { product: adProduct } : {}) });
+      return ok(`NOTHING WAS RENDERED and nothing was charged.${notes || ''}\n\nDo this now: tell the user in ONE short line that you have no photo of their product and the packaging would be invented, then either (a) lock a real photo with set_product_image and call render_ad again, or (b) if they say a generic stand-in is fine, call render_ad again with allowGenericProduct:true. Do NOT describe or claim any render — none happened.`, { needsProductPhoto: true, jobType: jobType || 'video', ...(adProduct ? { product: adProduct } : {}), ...(adProducts ? { products: adProducts } : {}), ...(noProduct ? { noProduct: true } : {}) });
     }
     const r = await renderJob(jobType === 'stitch' ? 'stitch' : 'video', a.faceRoute === 'face_lane' ? { ...input, faceRoute: 'face_lane' } : input, 'MCP ad render');
     // THE NOTES RIDE A STILL-RENDERING REPLY TOO (2026-10-04). okVideo answers a job that outlived the wait with the
@@ -27296,11 +27303,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // catalog pick, the cast) were dropped, and get_job cannot say them later: they are not on the job. `brandPhoto`
     // rides structuredContent on both paths, so a surface shows the left-out photo as its own line.
     const _bp = brandPhoto && typeof brandPhoto === 'object' && brandPhoto.note ? brandPhoto : null;
-    if (r?.stillRendering) return ok(`${stillMsg(r)}${insertsLine(input?.layInserts, 'are laid in by this same job before it is delivered, so the file get_job returns already has them')}${_bp ? `\nALSO TELL THE USER, in one short line: ${_bp.note}` : ''}${_clampNote}${_castLine}${notes ? `\nNOTES: ${String(notes).trim()}` : ''}`, { ...r, ...(creator ? { creator } : {}), ...(adProduct ? { product: adProduct } : {}), ...(_bp ? { brandPhoto: _bp } : {}), ...(notes ? { notes: String(notes).trim() } : {}) });
+    if (r?.stillRendering) return ok(`${stillMsg(r)}${insertsLine(input?.layInserts, 'are laid in by this same job before it is delivered, so the file get_job returns already has them')}${_bp ? `\nALSO TELL THE USER, in one short line: ${_bp.note}` : ''}${_clampNote}${_castLine}${notes ? `\nNOTES: ${String(notes).trim()}` : ''}`, { ...r, ...(creator ? { creator } : {}), ...(adProduct ? { product: adProduct } : {}), ...(adProducts ? { products: adProducts } : {}), ...(noProduct ? { noProduct: true } : {}), ...(_bp ? { brandPhoto: _bp } : {}), ...(notes ? { notes: String(notes).trim() } : {}) });
     // FOUNDATIONS ONLY (foundations:'choose'): no video was rendered — hand back the pictures to pick from.
     const _fd = renderPayload(r);
     if (_fd && _fd.foundationsOnly) { const F = _fd.foundations || {}; return ok(`Foundations painted (${_fd.boardCreditsUsed || 0} credits, billed as images) [job ${r.jobId}]:\n${Object.entries(F).filter(([, v]) => typeof v === 'string').map(([k, v]) => `• ${k}: ${abs(v)}`).join('\n')}\n${_fd.note || ''}`, { ...r, foundations: F }); }
-    return okVideo(`Ad video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${_fd?.inserts?.laid ? insertsLine(_fd.inserts.windows) : ''}${_fd?.inserts?.failed && _fd.note ? `\nTELL THE USER: ${_fd.note}` : ''}${_clampNote}${switchNote(r)}${_castLine}${Array.isArray(_fd?.boards) && _fd.boards.length ? `\nStoryboard: ${_fd.boards.map((u) => abs(u)).join(' , ')}${_fd.boardCreditsUsed ? ` (${_fd.boardCreditsUsed} credits of image paints)` : ''}` : ''}\n${notes || ''}`, { ...r, ...(creator ? { creator } : {}), ...(adProduct ? { product: adProduct } : {}), ...(_bp ? { brandPhoto: _bp } : {}), ...(appScreens ? { appScreens } : {}) });
+    return okVideo(`Ad video ready: ${r.url}${r.model ? `  (${r.model})` : ''}  [job ${r.jobId}]${_fd?.inserts?.laid ? insertsLine(_fd.inserts.windows) : ''}${_fd?.inserts?.failed && _fd.note ? `\nTELL THE USER: ${_fd.note}` : ''}${_clampNote}${switchNote(r)}${_castLine}${Array.isArray(_fd?.boards) && _fd.boards.length ? `\nStoryboard: ${_fd.boards.map((u) => abs(u)).join(' , ')}${_fd.boardCreditsUsed ? ` (${_fd.boardCreditsUsed} credits of image paints)` : ''}` : ''}\n${notes || ''}`, { ...r, ...(creator ? { creator } : {}), ...(adProduct ? { product: adProduct } : {}), ...(adProducts ? { products: adProducts } : {}), ...(noProduct ? { noProduct: true } : {}), ...(_bp ? { brandPhoto: _bp } : {}), ...(appScreens ? { appScreens } : {}) });
   }));
 
 
