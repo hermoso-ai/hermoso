@@ -3276,10 +3276,12 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   // per-tool record that exists; nothing records a successful call per host), and its own description sends callers to the
   // typed tools first. make_tracking_link was folded into set_tracking_links (url) the same day for the same reason.
   store_get: 'each store it reads has a typed tool here that reads it better: get_brand, list_memory, list_skills, list_playbooks, list_creators, list_elements, list_library and list_swipefile; store_get itself runs on every other MCP host',
-  // THE SHOPIFY STORE CONNECTOR (2026-11-17): no single connector, so on this host the two would count as always-listed and
-  // push the WordPress family off the reviewed list. Connecting is done in the app there anyway (connect_connector is withheld too).
-  connect_shopify_store: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a Shopify store is connected in the Hermoso app (Connectors \u25b8 Shopify) and on every other MCP host',
-  list_shopify_stores: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); the connected Shopify store is shown in the Hermoso app (Connectors \u25b8 Shopify) and on every other MCP host',
+  // A SECRET DOES NOT BELONG IN THE CONVERSATION (2026-11-17; the manage_analytics_measurement_protocol_secret precedent above).
+  // These two print a live secret into the reply, and withholding them here is also what makes room for the Shopify store
+  // connector (connect_shopify_store, list_shopify_stores), which a ChatGPT user needs to connect a store at all. Both had 0
+  // rows in the 30-day error ledger (the only per-tool record; nothing records a successful call per host).
+  rotate_webhook_signing_secret: 'it returns the alert webhook signing secret, which is created and copied in the Hermoso app (Settings, Alerts) rather than in a conversation; every other MCP host runs it',
+  get_x_stream_key: 'it returns an X stream key, a live secret that belongs in the encoder, not in a conversation; the key is read in X Media Studio or on any other MCP host',
   // EMAIL FROM YOUR OWN MAILBOX (2026-11-15): fifteen tools that need no single connector, so on this host they would count as
   // always-listed and push a whole ranked family off the reviewed list (the layerize_image precedent above).
   ...Object.fromEntries(EMAIL_DARK_TOOLS.map((n) => [n, 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-15); email from your own mailbox runs in the Hermoso app (Automations, Email) and on every other MCP host'])),
@@ -3406,7 +3408,7 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('cancel_x_broadcast', { action: 'cancel' }, ['id!', 'confirm'], splitW(true, true), 'Cancel a scheduled X broadcast', 'Use this when a scheduled X broadcast should be deleted. Cannot be undone; needs confirm:true.' + X_BILLED, { confirm: 'must be true to cancel' }),
   ],
   manage_x_stream_source: [
-    splitOp('list_x_stream_sources', { action: 'list' }, [], SPLIT_RO, 'List the X stream sources', 'Use this when you need the brand’s RTMP stream sources on X: id, RTMPS URL, region, whether video is arriving. X leaves the stream key out; get_x_stream_key reads it. Read-only.' + X_BILLED),
+    splitOp('list_x_stream_sources', { action: 'list' }, [], SPLIT_RO, 'List the X stream sources', 'Use this when you need the brand’s RTMP stream sources on X: id, RTMPS URL, region, whether video is arriving. X leaves the stream key out, and on this host the key is not read into the conversation (it is a live secret): it is shown in X Media Studio. Read-only.' + X_BILLED),
     splitOp('get_x_stream_source', { action: 'get' }, ['id!'], SPLIT_RO, 'Read one X stream source', 'Use this when you need one stream source’s RTMPS URL, region and whether video is arriving. Read-only.' + X_BILLED),
     splitOp('get_x_stream_key', { action: 'stream_key' }, ['id!'], SPLIT_RO, 'Read an X stream source’s stream key', 'Use this when an encoder needs the stream key of one of the brand’s X stream sources. The key is a secret: put it in the encoder, never in a post. Read-only.' + X_BILLED),
     splitOp('get_x_ingest_region', { action: 'region' }, [], SPLIT_RO, 'Read the nearest X ingest region', 'Use this when you need the ingest region nearest X’s server, to pass when creating a stream source. Read-only.' + X_BILLED),
@@ -4587,14 +4589,21 @@ function connectionBrandNote(b) {
   const why = b.source === 'app-active-brand' ? ', the brand last opened in the Hermoso app' : b.source === 'sibling-connector' ? ', the brand your other Hermoso connection is on' : '';
   return ` This connection is on ${who}${b.shared ? ', a profile shared with you' : ''}${why}. If the user meant a different profile, call list_brands, then use_brand with it (that moves every Hermoso connector they signed in from this app).`;
 }
+// EVERY HOLD THAT COMES FROM THE SNAPSHOT IS RE-READ, NOT ONLY "not connected" (2026-11-17, measured on prod the day the
+// Shopify connector shipped: a store connected from an open claude.ai session's own connect_shopify_store link was still
+// "no store is connected" to list_shopify_orders on that session until use_brand re-read it). Four answers come from the
+// connector read the session took at `initialize`: not_connected and not_offered (its providers/offered sets),
+// shopify_store (its shopifyStore flag) and unavailable (its withheld set). A host, cage or app hold does not depend on
+// the workspace and is never re-read.
+export const SNAPSHOT_HOLDS = Object.freeze(new Set(['not_connected', 'not_offered', 'shopify_store', 'unavailable']));
 async function holdReasonRechecked(name, ctx, args = null) {
   let why = holdReasonFor(name, ctx);
-  if (why !== 'not_connected') return why;
+  if (!SNAPSHOT_HOLDS.has(why)) return why;
   // A PER-CALL BRAND IS NOT THE PIN (2026-09-21). The connection snapshot above is the PINNED brand's; a tool that
   // takes `brand` runs against the brand the caller NAMED, which may have the connector the pin lacks. Refusing it
   // here answered "not connected" for an account that was connected. Run it: the route gates the named brand itself
   // and answers the one "not connected" shape (401 + connector) when it really is missing.
-  if (callNamesOwnBrand(name, ctx, args)) return null;
+  if (why !== 'unavailable' && callNamesOwnBrand(name, ctx, args)) return null; // a server-wide withhold is not a brand's
   // The re-read must be a GOOD read before it replaces the snapshot: regateForWorkspace fails OPEN on a failed read
   // (right for use_brand, wrong here — it would turn "not connected" into "run it and 401"), so a read that did not
   // succeed keeps the snapshot's answer and the refusal it already earned.
