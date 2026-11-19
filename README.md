@@ -5,7 +5,7 @@ scripts. Research the ads already winning in a market, generate image & video ad
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
-**Start free: 160+ free credits, no card. No markup on models on Starter, Pro and Studio.** Sign up at [app.hermoso.ai](https://app.hermoso.ai); plans at [hermoso.ai/pricing](https://hermoso.ai/pricing).
+**Start free: 160+ free credits, no card. No markup on models.** Sign up at [app.hermoso.ai](https://app.hermoso.ai); plans at [hermoso.ai/pricing](https://hermoso.ai/pricing).
 
 ## What it does
 
