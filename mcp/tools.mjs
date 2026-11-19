@@ -3309,7 +3309,7 @@ export const widgetHostScope = (scope, widgetHost, env = process.env) => (widget
 // account, not a transfer (an Apple budget order is a cap and spends nothing). The other Stripe writes (product, price,
 // coupon, customer) create records and move nothing; tools/chatgpt-no-money-movement-check.mjs makes a NEW Stripe
 // write fail until somebody classifies it.
-export const WIDGET_MONEY_MOVEMENT_TOOLS = Object.freeze(['refund_stripe_charge', 'create_stripe_subscription', 'cancel_stripe_subscription', 'create_stripe_payment_link', 'update_stripe_payment_link']);
+export const WIDGET_MONEY_MOVEMENT_TOOLS = Object.freeze(['refund_stripe_charge', 'create_stripe_subscription', 'cancel_stripe_subscription', 'create_stripe_payment_link', 'update_stripe_payment_link', 'pay_campaign_creators']); // pay_campaign_creators (2026-11-18): charges a brand and pays creators
 // THE 2026-10-25 SCAN, the tools a widget host is not offered for a reason of their own (the sentence a direct call gets):
 //   submit_tiktok_ads_verification — "appears to solicit a government-issued identifier": its INDIVIDUAL form takes the
 //     government ID number (identityNo) and a legal name. Entered in TikTok Ads Manager instead.
@@ -3335,7 +3335,20 @@ export const storyFilmsWithheldWhy = (env = process.env) => `story films are in 
 // Tools a widget host withholds from the all-in-one roster but a FOCUSED ChatGPT app lists, by app (APP_SCOPE_TOKENS).
 export const WIDGET_APP_OFFERS = Object.freeze({ create: new Set(STORY_FILM_TOOLS) });
 export const widgetAppOffers = (name, app) => !!app && !!WIDGET_APP_OFFERS[app] && WIDGET_APP_OFFERS[app].has(name);
+// CREATOR CAMPAIGNS (2026-11-18): ten new tools that need no connection would be CORE on ChatGPT and push two whole
+// families (openai_ads, wordpress) off a list already at its cap (tools/chatgpt-full-roster-check.mjs refuses that), so they
+// wait for a ranking decision on ChatGPT; every other host lists all ten.
+const CC_WIDGET_WHY = 'creator campaigns are run from the Hermoso app or another connected agent for now; the ChatGPT tool list is at its 1,000-tool limit';
 export const WIDGET_WITHHELD_WHY = Object.freeze({
+  create_creator_campaign: CC_WIDGET_WHY,
+  read_creator_campaigns: CC_WIDGET_WHY,
+  update_creator_campaign: CC_WIDGET_WHY,
+  creator_campaign_link: CC_WIDGET_WHY,
+  review_campaign_creator: CC_WIDGET_WHY,
+  list_campaign_posts: CC_WIDGET_WHY,
+  review_campaign_post: CC_WIDGET_WHY,
+  add_campaign_post: CC_WIDGET_WHY,
+  refresh_campaign_views: CC_WIDGET_WHY,
   submit_tiktok_ads_verification: 'it sends a legal name and a government ID or business licence number, which are entered in TikTok Ads Manager instead',
   merchant_issue_help: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
   trigger_merchant_issue_action: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
@@ -15534,9 +15547,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       siteUrl: z.string().describe('the exact property string from list_search_console_sites — "sc-domain:example.com" or "https://example.com/", never a bare domain, and it must be one SHARED with this profile'),
       startDate: z.string().describe('YYYY-MM-DD, required, Pacific time, inclusive'),
       endDate: z.string().describe('YYYY-MM-DD, required, Pacific time, inclusive'),
-      dimensions: z.array(z.string()).optional().describe('group by any of query, page, country, device, searchAppearance, date, hour. Omit for one total row. An unknown name is refused by name rather than dropped.'),
-      type: z.string().optional().describe('web (default), image, video, news, discover or googleNews'),
-      dimensionFilterGroups: z.array(z.record(z.any())).optional().describe('narrow the report, e.g. [{"filters":[{"dimension":"query","operator":"contains","expression":"buy"}]}]. dimension is one of query/page/country/device/searchAppearance — date and hour are NOT filterable, they are the date range. operator is equals/notEquals/contains/notContains/includingRegex/excludingRegex. An empty expression is refused: Google matches it literally, so it would silently return nothing.'),
+      dimensions: z.array(z.string()).optional().describe('group by any of query, page, country, device, searchAppearance, brandedClassification (branded vs non-branded queries), date, hour. Omit for one total row. An unknown name is refused by name rather than dropped.'),
+      type: z.string().optional().describe('web (default), image, video, news, discover, googleNews or webMultimodal'),
+      dimensionFilterGroups: z.array(z.record(z.any())).optional().describe('narrow the report, e.g. [{"filters":[{"dimension":"query","operator":"contains","expression":"buy"}]}]. dimension is one of query/page/country/device/searchAppearance/brandedClassification (expression BRANDED or NON_BRANDED) — date and hour are NOT filterable, they are the date range. operator is equals/notEquals/contains/notContains/includingRegex/excludingRegex. An empty expression is refused: Google matches it literally, so it would silently return nothing.'),
       aggregationType: z.string().optional().describe('auto (default), byPage, byProperty or byNewsShowcasePanel'),
       dataState: z.string().optional().describe('final (default, lags 2-3 days), all (includes fresh partial data that WILL change), or hourlyAll'),
       rowLimit: z.number().optional().describe('1-25000, default 1000'),
@@ -17781,6 +17794,118 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = Object.keys(a || {}).length ? await apiPost('/api/email/reply-settings', a) : await apiGet('/api/email/reply-settings', {}); return ok(d.note, d); }));
+  // ---------- Creator campaigns (2026-11-18): brands pay creators for posts, Hermoso is the platform ----------
+  // lib/creator-campaigns-server.mjs answers every one of these; the creator side is a web page reached by link (no
+  // Hermoso account). Reading a post's numbers costs the brand credits (a data lookup); payouts move money only in
+  // Stripe test mode until switched on, and pay_campaign_creators recordOnly covers a creator paid another way meanwhile.
+  server.group('channel_admin');
+  const ccMoney = (c) => `$${((c || 0) / 100).toFixed(2)}`;
+  const ccLine = (c) => `• ${c.name} [${c.id}] ${c.status} · ${c.payout} · ${c.platforms.join(', ')}${c.budgetCents ? ` · ${ccMoney(c.earnedCents)} of ${ccMoney(c.budgetCents)} budget earned` : ''} · ${c.creators.active} creators${c.creators.pending ? ` (+${c.creators.pending} waiting)` : ''} · ${c.posts.total} posts (${c.posts.pendingReview} to review, ${c.posts.approved} approved, ${c.posts.views.toLocaleString('en-US')} approved views) · held ${ccMoney(c.money.held)}, payable ${ccMoney(c.money.payable)}, paid ${ccMoney(c.money.paid)}`;
+  const ccPost = (s) => `• [${s.id}] ${s.status.replace('_', ' ')} · ${s.platform} @${s.handle || '?'} · ${s.metrics?.views != null ? `${s.metrics.views.toLocaleString('en-US')} views` : 'views hidden'}${s.authenticity ? ` · authenticity ${s.authenticity.score}/100` : ''}${(s.flags || []).length ? ` · flags: ${s.flags.join(', ')}` : ''}${s.creator ? ` · ${s.creator}` : ''}${s.earnedCents ? ` · earned ${ccMoney(s.earnedCents)}` : ''} · ${s.url}${s.readError ? ` (last read failed: ${s.readError})` : ''}`;
+  const CC_ECON = z.object({
+    type: z.enum(['cpm', 'flat', 'pool']).describe('cpm = per 1,000 verified views; flat = per approved post; pool = a fixed amount split by views at close'),
+    ratePer1kUsd: z.number().optional().describe('cpm: what 1,000 verified views earn, e.g. 1.5'),
+    perPostUsd: z.number().optional().describe('flat: what each approved post earns; cpm: an optional bonus per approved post'),
+    poolUsd: z.number().optional().describe('pool: the amount split among approved posts by their views'),
+    minViewsToEarn: z.number().optional().describe('cpm / pool: views a post needs before it earns'),
+    maxPayoutPerPostUsd: z.number().optional().describe('cpm: the most one post can earn'),
+  });
+  const CC_FIELDS = {
+    name: z.string().optional().describe('what creators see the campaign called'),
+    brief: z.string().optional().describe('what to post: the product, the angle, do and do not, links'),
+    brandName: z.string().optional(),
+    platforms: z.array(z.enum(['tiktok', 'instagram', 'youtube', 'facebook', 'x', 'threads'])).optional().describe('where posts may be published; fixed once live'),
+    economics: CC_ECON.optional().describe('the payout model; fixed once live'),
+    budgetUsd: z.number().optional().describe('the most all creators together can earn (required for cpm); can be raised while live'),
+    trackingDays: z.number().optional().describe('how long after submission a post\'s views keep counting, 1 to 365 (default 30)'),
+    holdDays: z.number().optional().describe('how long approved earnings wait before they can be paid, 0 to 60 (default 10): your window to reject a bad post'),
+    maxPostAgeHours: z.number().optional().describe('how old a post may be when submitted (default 72)'),
+    joinApproval: z.enum(['open', 'manual']).optional().describe('open = anyone with the link joins; manual = you approve each one'),
+    startsAt: z.string().optional().describe('date posts must be published after (default: when it goes live)'),
+    endsAt: z.string().optional(),
+    landingUrl: z.string().optional().describe('an https link creators can point people to'),
+    caps: z.object({ maxParticipants: z.number().optional(), maxAccountsPerParticipant: z.number().optional(), maxSubmissionsPerParticipant: z.number().optional() }).optional(),
+    requirements: z.object({ disclosure: z.boolean().optional().describe('flag posts with no #ad / paid-partnership label (default true)'), hashtags: z.array(z.string()).optional(), mentions: z.array(z.string()).optional() }).optional().describe('what each post should carry; a missing one is flagged for you, never auto-rejected'),
+  };
+  server.registerTool('create_creator_campaign', {
+    title: 'Create a creator campaign',
+    description: 'Start a creator (UGC / clipping) campaign where the brand pays creators for posts about it, with Hermoso as the platform: pick platforms (TikTok, Instagram, YouTube, Facebook, X, Threads) and a payout model: cpm (per 1,000 verified views, with a budget), flat (per approved post) or pool (a fixed amount split by views at close). Creators join by link with no Hermoso account, list the accounts they post from, and submit post links; Hermoso reads each post\'s platform-reported views (each read costs the brand credits), scores how real they look, and you approve or reject. Approved earnings are held (default 10 days), then payable. Created as a DRAFT: set it live with update_creator_campaign status "active", then share creator_campaign_link.',
+    inputSchema: { ...CC_FIELDS, name: z.string().describe('what creators see the campaign called'), platforms: CC_FIELDS.platforms.unwrap(), economics: CC_ECON },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns', a); return ok(`${d.note}\n${ccLine(d.campaign)}`, d); }));
+  server.registerTool('update_creator_campaign', {
+    title: 'Change a creator campaign or set it live, paused or closed',
+    description: 'Change a campaign\'s brief, budget (raise only once live), dates, caps, requirements or hold, and/or move it with status: active (live: creators can join and submit), paused (no new posts; tracking continues), closed (final: nothing new counts; a pool campaign splits its pool among approved posts by views). The payout model and platforms are fixed once live.',
+    inputSchema: { campaignId: z.string(), status: z.enum(['active', 'paused', 'closed']).optional(), ...CC_FIELDS },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const { status, campaignId, ...rest } = a; const notes = []; let d = null;
+    if (Object.keys(rest).length) { d = await apiPost('/api/creator-campaigns/update', { campaignId, ...rest }); notes.push(d.note); }
+    if (status) { d = await apiPost('/api/creator-campaigns/status', { campaignId, status }); notes.push(d.note); }
+    if (!d) return ok('Nothing to change: pass status or a field.');
+    return ok(`${notes.join(' ')}\n${ccLine(d.campaign)}`, d);
+  }));
+  server.registerTool('read_creator_campaigns', {
+    title: 'List creator campaigns, or read one in full',
+    description: 'The brand\'s creator campaigns with their payout model, budget used, creators, posts to review, approved views and money held / payable / paid. With campaignId: that campaign\'s creators, latest posts and payout batches too. Also says whether payouts through Hermoso are switched on and the fee.',
+    inputSchema: { campaignId: z.string().optional(), status: z.enum(['draft', 'active', 'paused', 'closed']).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    if (a.campaignId) {
+      const d = await apiGet('/api/creator-campaigns/detail', { campaignId: a.campaignId });
+      const cr = d.creators.map((p) => `• ${p.displayName} [${p.id}] ${p.status}${p.accounts.length ? ` · ${p.accounts.map((x) => `${x.platform} @${x.handle}`).join(', ')}` : ' · no accounts yet'} · ${p.posts} posts · held ${ccMoney(p.money.held)}, payable ${ccMoney(p.money.payable)}, paid ${ccMoney(p.money.paid)} · payout setup ${p.payoutSetup}`);
+      return ok(`${ccLine(d.campaign)}\nBrief: ${d.campaign.brief || '(none)'}\nCreators:\n${cr.join('\n') || '(none yet)'}\nLatest posts:\n${d.submissions.slice(0, 20).map(ccPost).join('\n') || '(none yet)'}`, d);
+    }
+    const d = await apiGet('/api/creator-campaigns', a.status ? { status: a.status } : {});
+    return ok(`${d.campaigns.length ? d.campaigns.map(ccLine).join('\n') : 'No creator campaigns yet (create_creator_campaign).'}\nPayouts through Hermoso: ${d.payouts.on ? `on (${d.payouts.mode} mode)` : d.payouts.why} Fee ${d.terms.feePercent}% per creator payment (at least $${d.terms.feeMinUsd.toFixed(2)}), added on top; card payments held ${d.terms.cardHoldDays} days. Each post read costs ${d.terms.readCredits} credit${d.terms.readCredits === 1 ? '' : 's'}.`, d);
+  }));
+  server.registerTool('creator_campaign_link', {
+    title: 'Get a creator campaign link',
+    description: 'Without displayName: a fresh OPEN join link for the campaign (anyone with it can join; making a new one turns the old one off). With displayName (and optional email and accounts): invites ONE creator and returns their PERSONAL link, where they add accounts, submit posts and see earnings; a personal invite skips approval. Send the link yourself; Hermoso does not message creators.',
+    inputSchema: { campaignId: z.string(), displayName: z.string().optional(), email: z.string().optional(), accounts: z.array(z.object({ platform: z.enum(['tiktok', 'instagram', 'youtube', 'facebook', 'x', 'threads']), handle: z.string() })).optional().describe('the accounts they post from, if you know them') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const d = a.displayName ? await apiPost('/api/creator-campaigns/creators', a) : await apiPost('/api/creator-campaigns/invite-link', { campaignId: a.campaignId }); return ok(`${d.note}${a.displayName ? '' : `\n${d.url}`}`, d); }));
+  server.registerTool('review_campaign_creator', {
+    title: 'Approve, deny, suspend, reinstate or remove a campaign creator',
+    description: 'Decide on a creator in a campaign: approve or deny one waiting to join (joinApproval manual), suspend (their posts stop counting and they are skipped by payouts) or reinstate one, or remove one (earnings already approved stay theirs). read_creator_campaigns with campaignId shows the ids.',
+    inputSchema: { participantId: z.string(), action: z.enum(['approve', 'deny', 'suspend', 'reinstate', 'remove']), reason: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/creators/review', a); return ok(d.note, d); }));
+  server.registerTool('list_campaign_posts', {
+    title: 'List posts submitted to creator campaigns',
+    description: 'Submitted posts with their platform-reported views, authenticity score (0-100, with the reasons points were taken off), flags (no_disclosure, missing_hashtag, missing_mention, views_hidden, low_authenticity), status and what each has earned. Filter by campaign and status (pending_review to see what needs a decision).',
+    inputSchema: { campaignId: z.string().optional(), status: z.enum(['pending_review', 'approved', 'rejected']).optional(), limit: z.number().optional(), offset: z.number().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet('/api/creator-campaigns/submissions', a); return ok(`${d.total} post${d.total === 1 ? '' : 's'}.${d.submissions.length ? `\n${d.submissions.map(ccPost).join('\n')}` : ''}${d.nextOffset ? `\nMore: offset ${d.nextOffset}.` : ''}`, d); }));
+  server.registerTool('review_campaign_post', {
+    title: 'Approve or reject a submitted campaign post',
+    description: 'Approve a submitted post (it earns under the campaign\'s payout model; earnings are held, then payable) or reject it with a reason the creator sees (anything it earned and was not yet paid is cancelled). Hermoso never rejects on its own; the score and flags are there to help you decide.',
+    inputSchema: { submissionId: z.string(), action: z.enum(['approve', 'reject']), reason: z.string().optional().describe('required to reject; the creator sees it') },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/submissions/review', a); return ok(d.note, d); }));
+  server.registerTool('add_campaign_post', {
+    title: 'Submit a post for a campaign creator',
+    description: 'Submit a post link on a creator\'s behalf (e.g. one they emailed you). Same checks as their own submission: the campaign\'s platforms, a post published after the campaign started, from one of the creator\'s listed accounts, not already submitted. Reads its numbers once (costs credits).',
+    inputSchema: { participantId: z.string(), url: z.string().describe('the public post link') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/submissions/add', a); return ok(`${d.note}\n${ccPost(d.submission)}`, d); }));
+  server.registerTool('refresh_campaign_views', {
+    title: 'Re-read campaign posts\' views now',
+    description: 'Read the latest platform-reported numbers for tracked posts now (they are read twice a day on their own while their window is open). One campaign\'s posts, or the submissionIds given; up to 50 per call; each read costs credits. Approved posts earn on the new views.',
+    inputSchema: { campaignId: z.string().optional(), submissionIds: z.array(z.string()).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/submissions/refresh', a); return ok(d.note, d); }));
+  server.registerTool('pay_campaign_creators', {
+    title: 'Preview or pay what campaign creators are owed',
+    description: 'Default (no confirm): a PREVIEW of what a payout would charge, nothing charged: each creator with payable earnings and a finished payout setup, what they get (the full amount) and the fee added on top. confirm:true with acceptTerms:true creates the payout: one card payment by the brand for all of it (a link to pay, with bank-level card authentication), held 7 days, then each creator is paid through Stripe. Card-funded payouts are capped per account while they can still be disputed; a disputed payment freezes every campaign and payout on the account. recordOnly with participantId: mark a creator as paid outside Hermoso (moves no money). If payouts through Hermoso are not switched on yet, use recordOnly.',
+    inputSchema: { campaignId: z.string(), participantIds: z.array(z.string()).optional().describe('only these creators; default everyone payable'), excludeParticipantIds: z.array(z.string()).optional(), confirm: z.boolean().optional().describe('true = create the payout and its payment link, after the user agreed to the previewed total'), acceptTerms: z.boolean().optional().describe('REQUIRED true with confirm: the user accepts the creator-campaign terms for this payment (it pays creators on their instruction, is non-refundable once paid out, and they bear any dispute); recorded with the time'), recordOnly: z.boolean().optional(), participantId: z.string().optional().describe('with recordOnly: the creator paid outside Hermoso'), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    if (a.recordOnly) { const d = await apiPost('/api/creator-campaigns/payouts/record', { participantId: a.participantId, note: a.note }); return ok(d.note, d); }
+    if (a.confirm !== true) { const d = await apiPost('/api/creator-campaigns/payouts/preview', a); return ok(`PREVIEW, nothing charged. ${d.note}${d.items.length ? `\n${d.items.map((i) => `• ${i.displayName} [${i.participantId}]: ${ccMoney(i.cents)} + ${ccMoney(i.feeCents)} fee`).join('\n')}` : ''}${d.skipped.length ? `\nSkipped: ${d.skipped.map((s) => `${s.participantId} (${ccMoney(s.cents)}, ${s.why})`).join('; ')}` : ''}${d.mode.on ? '\nTo pay, call again with confirm:true once the user agrees to the total.' : `\n${d.mode.why} Mark a creator paid another way with recordOnly.`}`, d); }
+    const d = await apiPost('/api/creator-campaigns/payouts', a);
+    return ok(`${d.note}${d.url ? `\nPay here: ${d.url}` : ''}`, d);
+  }));
   // ---------- Intercom (2026-10-19): the brand's OWN support inbox, the same routes the Studio tools call ----------
   // Studio had these ten tools from 2026-10-12 and MCP/CLI had none (find_tools "intercom" found nothing): web-only is a
   // defect. Each tool calls the app's /api/intercom route, whose worker is the one the Studio handler calls, so the
