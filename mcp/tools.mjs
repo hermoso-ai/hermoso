@@ -1079,6 +1079,9 @@ const wrap = (fn) => {
       // generic "wait N seconds" below would contradict it. Read from the structured code, never the prose.
       if (e?.apiCode === 'youtube_account_limit') _hints.push({ do: 'stop calling YouTube tools that upload or change anything for this account until midnight Pacific, and tell the user in the words of this message; reading videos and comments still works', why: 'this account has used its share of the shared YouTube allowance for today, so a retry before the reset is refused the same way and nothing is lost by waiting' });
       // A BRAND'S MONTHLY CREDIT LIMIT (2026-11-18) lifts on the 1st of next month (UTC) or when the account owner raises it; topping up does nothing.
+      // THE CREATOR-PAYOUT DECLINE GUARD (2026-11-19): five declined card payments for a brand in 24 hours pauses new payouts
+      // until the time the message names. It is a fixed window, not a rate limit a retry extends, so the generic 429 line is wrong here.
+      else if (e?.apiCode === 'payment_attempts_limited') _hints.push({ do: 'stop starting creator payouts for this brand until the time in this message, and ask the user to check the card with its bank (or pay by bank debit after that time)', why: 'five card payments for this brand were declined within 24 hours, so new payouts are paused for 24 hours; nothing was charged and the earnings stay payable' });
       else if (e?.apiCode === 'credit_limit') _hints.push({ do: 'stop running paid tools on this brand, and tell the user in the words of this message; free tools (publishing, scheduling, reading) still work, and get_credit_limits shows the numbers', why: 'the account owner set a monthly credit limit on this brand (or on this person), so a retry is refused the same way until the month resets or the owner raises it with set_credit_limit; buying credits does not lift it' });
       else if (Number(e?.status) === 429 && e?.retryAfter > 0) { const _w = Number(e.retryAfter), _ww = _w < 90 ? `${Math.round(_w)} seconds` : `${Math.round(_w / 60)} minutes`; msg = `${msg} Do not call ${_tool} again yet: wait ${_ww} first. Calling it sooner is refused the same way and can make the limit last longer.`; _hints.push({ do: `wait ${_ww}, then call ${_tool} once`, why: 'the platform is rate-limiting this call, so an immediate retry cannot succeed' }); }
       { const _ig = metaAdsSetupNote(_tool, e); if (_ig) { msg += `\n${_ig.text}`; _hints.push(_ig.hint); } }
@@ -3340,6 +3343,9 @@ export const widgetAppOffers = (name, app) => !!app && !!WIDGET_APP_OFFERS[app] 
 // wait for a ranking decision on ChatGPT; every other host lists all ten.
 const CC_WIDGET_WHY = 'creator campaigns are run from the Hermoso app or another connected agent for now; the ChatGPT tool list is at its 1,000-tool limit';
 export const WIDGET_WITHHELD_WHY = Object.freeze({
+  // contact_support (2026-11-19) is newer than the reviewed ChatGPT list, and one more ungated tool would push the last ranked
+  // family (WordPress) over CHATGPT_TOOL_CAP. Held for the next ChatGPT review, with the address said.
+  contact_support: 'it is newer than the reviewed ChatGPT tool list; until it is added, the user can write to hello@hermoso.ai or press Help in the Hermoso app, and a defect can go through report_bug',
   create_creator_campaign: CC_WIDGET_WHY,
   read_creator_campaigns: CC_WIDGET_WHY,
   update_creator_campaign: CC_WIDGET_WHY,
@@ -7602,6 +7608,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
     return ok(d.message || 'Sent — thanks. The team reads every one of these.', d);
   }));
 
+  // contact_support (2026-11-19), a message to the people behind Hermoso. The app's Help box and this tool post to the SAME route, /api/support/message: stored on the admin dashboard's
+  // Support tab and emailed to hello@ with Reply-To the account's email, so the answer arrives as an ordinary email.
+  // report_bug / request_feature stay the channel for a defect or a missing capability; this is for a PERSON's
+  // question (billing, an account problem, how to do something) that needs a human answer. Free, rate-limited.
+  server.registerTool('contact_support', {
+    title: 'Contact Hermoso support',
+    description: "Message Hermoso's human support team for the user: billing, account or sign-in problems, a connector that will not connect, or a question the tools cannot answer. Use the user's words. The team replies by email to the account's address (the result names it). Defects you found: report_bug. Missing capabilities: request_feature. Free.",
+    inputSchema: {
+      message: z.string().describe("the user's question, in their words, with what they tried"),
+      page: z.string().optional().describe('where it happened: a tool, page or job id'),
+    },
+    outputSchema: { ok: z.boolean().optional(), id: z.string().optional(), replyTo: z.string().nullable().optional(), emailed: z.boolean().optional(), message: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async ({ message, page }) => {
+    const d = await apiPost('/api/support/message', { message, source: 'mcp', context: { page: page || '' } });
+    return ok(d.message || 'Sent to Hermoso support.', d);
+  }));
+
   server.registerTool('billing_status', {
     title: 'Billing status',
     description: "Show this account's billing at a glance: current plan (quote plan.priceUsd per plan.period), credit balance, whether auto-reload is on, whether a card is on file, and whether YOU (this key) have ADMIN rights to change billing. Read-only, free. Call it before upgrade_plan / set_auto_reload to know what's possible — members have read-only billing. IN A SHARED TEAM WORKSPACE A MEMBER SEES THE PLAN AND THE BALANCE ONLY: the workspace owner's payment card and auto-reload belong to them and are not reported (billingScope:'member'). Never tell a member there is no card on file — the honest answer is that you cannot see it. plan.memberRate: media models at cost + 10%; plan.legacy: an older plan kept at its price. posting: this month's posting allowance (\"N of 5 posts used this month\" on Free, unlimited on every paid plan).",
@@ -8414,7 +8438,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiGet('/api/threads/mentions', { limit: a.limit });
-    const lines = (d.mentions || []).map(m => `• @${m.author}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 90)} — ${m.permalink || m.id}`);
+    const lines = (d.mentions || []).map(m => `• @${m.author}${m.isReply === true ? ' [reply]' : ''}${m.isQuotePost === true ? ' [quote]' : ''}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 90)} — ${m.permalink || m.id}`);
     // THE NOTE LEADS, and on the empty branch it IS the answer. `0 mention(s)` reads as a fact about the market
     // ("nobody is talking about the brand") when it is a fact about our app's approval state — the route computes
     // the real reason (lib/nonads-connector-truth.mjs §2) and dropping it here would put the falsehood back.
@@ -8440,7 +8464,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('search_threads_keyword', {
     title: 'Search Threads by keyword',
-    description: 'Search PUBLIC Threads posts for a keyword or topic — competitor listening, finding what people say about a product, or sourcing real customer language for ad copy. Distinct from search_threads, which reads a specific profile.',
+    description: 'Search PUBLIC Threads posts for a keyword or topic — competitor listening, finding what people say about a product, or sourcing real customer language for ad copy. Distinct from search_threads, which reads a specific profile. Each post carries Meta’s is_reply, has_replies, is_quote_post and media_type. excludeReplies:true keeps original posts only; Threads has no reply filter, so replies are removed from its page, the result can be shorter than limit, and repliesExcluded counts them.',
     inputSchema: {
       searchMode: z.enum(['KEYWORD', 'TAG']).optional().describe('KEYWORD (default) or TAG — TAG searches a TOPIC TAG (what is being said under #skincare)'),
       mediaType: z.enum(['TEXT', 'IMAGE', 'VIDEO']).optional().describe('TEXT, IMAGE or VIDEO — only that kind of post'),
@@ -8448,14 +8472,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       until: z.string().optional().describe('only posts on/before this date'),
       limit: z.number().int().min(1).max(100).optional().describe('how many results (1–100, default 25)'),
       authorUsername: z.string().optional().describe("only posts by this Threads account (exact username, no @) — 'what has @competitor said about X'"),
+      excludeReplies: z.boolean().optional().describe('true = original posts only'),
       q: z.string().describe('keyword or phrase'),
       searchType: z.enum(['TOP', 'RECENT']).optional().describe('TOP (default) or RECENT'),
     },
-    outputSchema: { count: z.number().optional(), posts: z.array(z.any()).optional() },
+    outputSchema: { q: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional(), excludeReplies: z.boolean().optional(), repliesExcluded: z.number().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/threads/search', { q: a.q, searchType: a.searchType, ...Object.fromEntries(['searchMode', 'mediaType', 'since', 'until', 'limit', 'authorUsername'].filter(k => a[k] != null && a[k] !== '').map(k => [k, a[k]])) });
-    const lines = (d.posts || []).map(p => `• @${p.username}: ${String(p.text || '').replace(/\s+/g, ' ').slice(0, 90)} — ${p.permalink || p.id}`);
+    const d = await apiGet('/api/threads/search', { q: a.q, searchType: a.searchType, ...Object.fromEntries(['searchMode', 'mediaType', 'since', 'until', 'limit', 'authorUsername', 'excludeReplies'].filter(k => a[k] != null && a[k] !== '').map(k => [k, a[k]])) });
+    const lines = (d.posts || []).map(p => `• @${p.username}${p.is_reply === true ? ' [reply]' : ''}${p.is_quote_post === true ? ' [quote]' : ''}: ${String(p.text || '').replace(/\s+/g, ' ').slice(0, 90)} — ${p.permalink || p.id}`);
     // Same rule as the locations renderer above: a caution that arrives after the results is not a caution. Until
     // Meta approves threads_keyword_search this searches only the connected account's own posts, so presenting the
     // rows as public listening — or an empty set as "nobody is talking about this" — is the falsehood to avoid.
@@ -17845,6 +17870,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (!d) return ok('Nothing to change: pass status or a field.');
     return ok(`${notes.join(' ')}\n${ccLine(d.campaign)}`, d);
   }));
+  // one payout batch in words (2026-11-19): its state, total and, while it waits for the brand's payment, the link to pay
+  const CC_BATCH_WORDS = { creating: 'starting', review: 'waiting for Hermoso review, nothing charged', awaiting_payment: 'waiting for payment', settling: 'bank debit clearing', held: 'paid, on hold', paid: 'creators paid', partly_paid: 'partly paid', failed: 'did not go through', cancelled: 'cancelled (checkout not completed)', disputed: 'disputed: payouts frozen', review_declined: 'declined at review, nothing charged', refunded: 'refunded' };
+  const ccBatch = (b) => `• [${b.id}] ${b.kind === 'recorded' ? 'marked paid outside Hermoso' : CC_BATCH_WORDS[b.status] || b.status} · ${ccMoney(b.totalCents)}${b.kind === 'recorded' ? '' : ` by ${b.method === 'bank' ? 'bank debit' : 'card'}`} · ${b.creators} creator${b.creators === 1 ? '' : 's'}${b.status === 'held' && b.releasesAt ? ` · creators paid after ${new Date(b.releasesAt).toISOString().slice(0, 10)}` : ''}${b.status === 'awaiting_payment' && b.checkoutUrl ? ` · pay here: ${b.checkoutUrl}` : ''}`;
   server.registerTool('read_creator_campaigns', {
     title: 'List creator campaigns, or read one in full',
     description: 'The brand\'s creator campaigns with their payout model, budget used, creators, posts to review, approved views and money held / payable / paid. With campaignId: that campaign\'s creators, latest posts and payout batches too. Also says whether payouts through Hermoso are switched on and the fee.',
@@ -17854,10 +17882,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (a.campaignId) {
       const d = await apiGet('/api/creator-campaigns/detail', { campaignId: a.campaignId });
       const cr = d.creators.map((p) => `• ${p.displayName} [${p.id}] ${p.status}${p.accounts.length ? ` · ${p.accounts.map((x) => `${x.platform} @${x.handle}`).join(', ')}` : ' · no accounts yet'} · ${p.posts} posts · held ${ccMoney(p.money.held)}, payable ${ccMoney(p.money.payable)}, paid ${ccMoney(p.money.paid)} · payout setup ${p.payoutSetup}`);
-      return ok(`${ccLine(d.campaign)}\nBrief: ${d.campaign.brief || '(none)'}\nCreators:\n${cr.join('\n') || '(none yet)'}\nLatest posts:\n${d.submissions.slice(0, 20).map(ccPost).join('\n') || '(none yet)'}`, d);
+      return ok(`${ccLine(d.campaign)}\nBrief: ${d.campaign.brief || '(none)'}\nCreators:\n${cr.join('\n') || '(none yet)'}\nLatest posts:\n${d.submissions.slice(0, 20).map(ccPost).join('\n') || '(none yet)'}\nPayments:\n${(d.batches || []).slice().sort((x, y) => y.createdAt - x.createdAt).slice(0, 10).map(ccBatch).join('\n') || '(none yet)'}`, d);
     }
     const d = await apiGet('/api/creator-campaigns', a.status ? { status: a.status } : {});
-    return ok(`${d.campaigns.length ? d.campaigns.map(ccLine).join('\n') : 'No creator campaigns yet (create_creator_campaign).'}\nPayouts through Hermoso: ${d.payouts.on ? `on (${d.payouts.mode} mode)` : d.payouts.why} Fee ${d.terms.feePercent}% per creator payment (at least $${d.terms.feeMinUsd.toFixed(2)}), added on top; card payments held ${d.terms.cardHoldDays} days. Each post read costs ${d.terms.readCredits} credit${d.terms.readCredits === 1 ? '' : 's'}.`, d);
+    return ok(`${d.campaigns.length ? d.campaigns.map(ccLine).join('\n') : 'No creator campaigns yet (create_creator_campaign).'}\nPayouts through Hermoso: ${d.payouts.on ? `on (${d.payouts.mode} mode)` : d.payouts.why} Fee ${d.terms.feePercent}% per creator payment (at least $${d.terms.feeMinUsd.toFixed(2)}), plus Stripe's costs, each shown before you pay: one payment processing line whatever you pay with; card held ${d.terms.cardHoldDays} days, or bank debit from a Canadian business bank account at a discount, held ${d.terms.bankHoldDays ?? 14} days once it clears. Each post read costs ${d.terms.readCredits} credit${d.terms.readCredits === 1 ? '' : 's'}.`, d);
   }));
   server.registerTool('creator_campaign_link', {
     title: 'Get a creator campaign link',
@@ -17897,12 +17925,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/submissions/refresh', a); return ok(d.note, d); }));
   server.registerTool('pay_campaign_creators', {
     title: 'Preview or pay what campaign creators are owed',
-    description: 'Default (no confirm): a PREVIEW of what a payout would charge, nothing charged: each creator with payable earnings and a finished payout setup, what they get (the full amount) and the fee added on top. confirm:true with acceptTerms:true creates the payout: one card payment by the brand for all of it (a link to pay, with bank-level card authentication), held 7 days, then each creator is paid through Stripe. Card-funded payouts are capped per account while they can still be disputed; a disputed payment freezes every campaign and payout on the account. recordOnly with participantId: mark a creator as paid outside Hermoso (moves no money). If payouts through Hermoso are not switched on yet, use recordOnly.',
-    inputSchema: { campaignId: z.string(), participantIds: z.array(z.string()).optional().describe('only these creators; default everyone payable'), excludeParticipantIds: z.array(z.string()).optional(), confirm: z.boolean().optional().describe('true = create the payout and its payment link, after the user agreed to the previewed total'), acceptTerms: z.boolean().optional().describe('REQUIRED true with confirm: the user accepts the creator-campaign terms for this payment (it pays creators on their instruction, is non-refundable once paid out, and they bear any dispute); recorded with the time'), recordOnly: z.boolean().optional(), participantId: z.string().optional().describe('with recordOnly: the creator paid outside Hermoso'), note: z.string().optional() },
+    description: 'Default (no confirm): a PREVIEW, nothing charged: each payable creator gets the full amount, plus the Hermoso fee (3%, min $2 per creator), Stripe\'s payout costs at cost and one payment processing line (the same whatever pays; bank debit gets a discount), totals by card and by bank debit. confirm:true with acceptTerms:true creates one payment link: card (held 7 days) or method "bank" (pre-authorized debit, Canadian business bank account, held 14 days once it clears), then Stripe pays each creator. A disputed payment freezes every campaign and payout on the account. recordOnly with participantId: mark a creator paid outside Hermoso (moves no money).',
+    inputSchema: { campaignId: z.string(), participantIds: z.array(z.string()).optional().describe('only these creators; default everyone payable'), excludeParticipantIds: z.array(z.string()).optional(), method: z.enum(['card', 'bank']).optional().describe('card (default) or bank'), expectTotalCents: z.number().optional().describe('with confirm: the previewed total the user agreed to; a moved total charges nothing'), confirm: z.boolean().optional().describe('true = create the payout and its payment link, after the user agreed to the previewed total'), acceptTerms: z.boolean().optional().describe('REQUIRED true with confirm: the user accepts the creator-campaign terms for this payment (it pays creators on their instruction, is non-refundable once paid out, and they bear any dispute); recorded with the time'), recordOnly: z.boolean().optional(), participantId: z.string().optional().describe('with recordOnly: the creator paid outside Hermoso'), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     if (a.recordOnly) { const d = await apiPost('/api/creator-campaigns/payouts/record', { participantId: a.participantId, note: a.note }); return ok(d.note, d); }
-    if (a.confirm !== true) { const d = await apiPost('/api/creator-campaigns/payouts/preview', a); return ok(`PREVIEW, nothing charged. ${d.note}${d.items.length ? `\n${d.items.map((i) => `• ${i.displayName} [${i.participantId}]: ${ccMoney(i.cents)} + ${ccMoney(i.feeCents)} fee`).join('\n')}` : ''}${d.skipped.length ? `\nSkipped: ${d.skipped.map((s) => `${s.participantId} (${ccMoney(s.cents)}, ${s.why})`).join('; ')}` : ''}${d.mode.on ? '\nTo pay, call again with confirm:true once the user agrees to the total.' : `\n${d.mode.why} Mark a creator paid another way with recordOnly.`}`, d); }
+    if (a.confirm !== true) { const d = await apiPost('/api/creator-campaigns/payouts/preview', a); return ok(`PREVIEW, nothing charged. ${d.note}${d.items.length ? `\n${d.items.map((i) => `• ${i.displayName} [${i.participantId}]: ${ccMoney(i.cents)} + ${ccMoney(i.feeCents)} Hermoso fee + ${ccMoney(i.costCents || 0)} Stripe costs`).join('\n')}` : ''}${d.skipped.length ? `\nSkipped: ${d.skipped.map((s) => `${s.participantId} (${ccMoney(s.cents)}, ${s.why})`).join('; ')}` : ''}${d.mode.on ? `\nTo pay, call again with confirm:true, acceptTerms:true, method "${d.method || 'card'}" and expectTotalCents ${d.totalCents} once the user agrees to that total.` : `\n${d.mode.why} Mark a creator paid another way with recordOnly.`}`, d); }
     const d = await apiPost('/api/creator-campaigns/payouts', a);
     return ok(`${d.note}${d.url ? `\nPay here: ${d.url}` : ''}`, d);
   }));

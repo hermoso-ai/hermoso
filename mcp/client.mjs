@@ -125,6 +125,11 @@ function headers(extra = {}) {
   // reliable discriminator here. Forgeable, and harmlessly so: the worst a caller achieves is under-reporting
   // their own activity, which is why this decides bookkeeping and nothing else.
   if (ctx) h['x-hermoso-inproc'] = '1';
+  // THE CALLER'S OWN IP AND BROWSER ON A SELF-CALL (2026-11-19). An in-process call arrives from 127.0.0.1, so a creator payout
+  // confirmed over MCP or /v1 recorded the SERVER's loopback as the brand's acceptance IP, and that went into the dispute
+  // evidence. The server reads these two only when the request's socket peer IS loopback (a self-call), never from outside.
+  if (ctx?.clientIp && /^[0-9a-fA-F.:]{3,64}$/.test(String(ctx.clientIp))) h['x-hermoso-client-ip'] = String(ctx.clientIp);
+  if (ctx?.ua) h['x-hermoso-client-ua'] = String(ctx.ua).replace(/[^\x20-\x7e]/g, '').slice(0, 300);
   // A REQUEST FROM THE CALLER'S OWN MACHINE SAYS SO (2026-11-18): the stdio twin and `hermoso call` are the only senders with no
   // ctx. It names the surface on a key's first use (the connect signal, lib/connect-signal.mjs), whose first request is often
   // the roster's own connector read and carries no tool name. Bookkeeping only: it authorises nothing.
