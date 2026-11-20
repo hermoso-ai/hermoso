@@ -3380,7 +3380,7 @@ export const storyFilmsWithheldWhy = (env = process.env) => `story films are in 
 const APP_ACCOUNT_OFFERS = ['get_credit_limits', 'set_credit_limit', 'contact_support'];
 export const WIDGET_APP_OFFERS = Object.freeze({
   create: new Set([...STORY_FILM_TOOLS, 'search_companies', 'find_proven_formats', 'find_ad_formats', 'layerize_image', 'product_move', 'save_location', 'delete_location', ...APP_ACCOUNT_OFFERS]),
-  ads: new Set(APP_ACCOUNT_OFFERS),
+  ads: new Set([...APP_ACCOUNT_OFFERS, 'get_linkedin_boost', 'update_linkedin_boost', 'list_linkedin_boost_audiences', 'manage_linkedin_boost_audience']),
   social: new Set(['repost_on_x', 'bookmark_x_post', 'follow_x_account', ...APP_ACCOUNT_OFFERS]),
   creators: new Set(APP_ACCOUNT_OFFERS),
 });
@@ -3391,8 +3391,16 @@ export const widgetAppOffers = (name, app) => !!app && ((!!WIDGET_APP_OFFERS[app
 // CREATOR CAMPAIGNS (2026-11-18): ten new tools that need no connection would be CORE on ChatGPT and push two whole
 // families (openai_ads, wordpress) off a list already at its cap (tools/chatgpt-full-roster-check.mjs refuses that), so they
 // wait for a ranking decision on ChatGPT; every other host lists all ten.
+const LI_BOOST_WIDGET_WHY = 'reading back, re-targeting and saved audiences for LinkedIn boosts are newer than the ChatGPT tool list, which is at its 1,000-tool limit; boost_linkedin_post, linkedin_boost_status and end_linkedin_boost work here, and the rest from the Hermoso app or another connected agent';
 const CC_WIDGET_WHY = 'creator campaigns are run from the Hermoso app or another connected agent for now; the ChatGPT tool list is at its 1,000-tool limit';
 export const WIDGET_WITHHELD_WHY = Object.freeze({
+  // LINKEDIN BOOST API 202611 (2026-11-20): four tools in the linkedin family, which is listed on ChatGPT; one more listed tool
+  // pushes the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses.
+  // Held for the next ChatGPT ranking; the Ads focused app lists them, and boost_linkedin_post previews and creates there.
+  get_linkedin_boost: LI_BOOST_WIDGET_WHY,
+  update_linkedin_boost: LI_BOOST_WIDGET_WHY,
+  list_linkedin_boost_audiences: LI_BOOST_WIDGET_WHY,
+  manage_linkedin_boost_audience: LI_BOOST_WIDGET_WHY,
   // contact_support (2026-11-19) is newer than the reviewed ChatGPT list, and one more ungated tool would push the last ranked
   // family (WordPress) over CHATGPT_TOOL_CAP. Held for the next ChatGPT review, with the address said.
   contact_support: 'it is newer than the reviewed ChatGPT tool list; until it is added, the user can write to hello@hermoso.ai or press Help in the Hermoso app, and a defect can go through report_bug',
@@ -26457,9 +26465,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // An OPT-IN on the LinkedIn connection (?grant=boost): a connection without it is refused for free with the link.
   server.registerTool('linkedin_boost_status', {
     title: 'Can a LinkedIn post be boosted?',
-    description: 'Can a LinkedIn post be BOOSTED (turned into an ad), or is it boosted already? Checks up to 50 posts: ELIGIBLE, INELIGIBLE (with LinkedIn’s reason), IN_REVIEW, SCHEDULED, CURRENTLY_BOOSTED or PREVIOUSLY_BOOSTED, plus the boost campaign and account of a boosted one. Pass organization (Company Page id or name) for a Page post; omit it for the user’s own personal post. Read-only and free. Needs post boosting turned on for the LinkedIn connection; when it is off the reply carries the one-click link to turn it on.',
+    description: 'Can a LinkedIn post be BOOSTED (turned into an ad), or is it boosted already? Checks up to 50 posts: ELIGIBLE, INELIGIBLE (with LinkedIn’s reason), IN_REVIEW, SCHEDULED, CURRENTLY_BOOSTED or PREVIOUSLY_BOOSTED, plus the boost campaign and account of a boosted one. OMIT posts to list this brand’s recently published LinkedIn posts with their boost status (“which of my posts are boosted?”). Pass organization (Company Page id or name) for a Page post; omit it for the user’s own personal post. Read-only and free. Needs post boosting turned on for the LinkedIn connection; when it is off the reply carries the one-click link to turn it on.',
     inputSchema: {
-      posts: z.array(z.string()).describe('post URNs (urn:li:share:… or urn:li:ugcPost:…) or linkedin.com/feed/update/ links, up to 50'),
+      posts: z.array(z.string()).optional().describe('post URNs (urn:li:share:… or urn:li:ugcPost:…) or linkedin.com/feed/update/ links, up to 50; omit to list this brand’s recent LinkedIn posts'),
       organization: z.string().optional().describe('Company Page id or name for a Page post; omit for a personal post'),
     },
     outputSchema: { context: z.string().optional(), organization: z.string().nullable().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
@@ -26470,7 +26478,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('boost_linkedin_post', {
     title: 'Boost a LinkedIn post (preview, or create with confirm)',
-    description: 'BOOST an existing LinkedIn post — the user’s own personal post, or a Company Page post they administer (pass organization) — into an ad, through LinkedIn’s native boost flow. WITHOUT confirm it is a free PREVIEW: the sponsored account LinkedIn would bill and whether it has a payment method, the objectives LinkedIn offers for the post, LinkedIn’s suggested audience, suggested total budgets, the maximum budget and (with budget) a forecast. Nothing is created. WITH confirm:true and a total budget it CREATES the boost, which LAUNCHES PAID DELIVERY — LinkedIn has no paused or draft state for a boost — so show the user the preview (budget, schedule, goal) and get an explicit yes first. Goals: ENGAGEMENT, BRAND_AWARENESS, WEBSITE_VISIT, VIDEO_VIEW, LEAD_GENERATION (LinkedIn decides which are available per post). Targeting is LinkedIn’s suggested audience; custom targeting is not offered for boosts. A personal-post boost starts today; a Company Page boost may start later. A schedule covers at least 2 UTC days. A button (ctaLabel + ctaUrl) exists only on LEAD_GENERATION. If the boost account has no payment method the reply gives LinkedIn’s billing link and nothing is created. The result is read back from LinkedIn; end_linkedin_boost stops a boost.',
+    description: 'BOOST an existing LinkedIn post — the user’s own personal post, or a Company Page post they administer (pass organization) — into an ad, through LinkedIn’s native boost flow. WITHOUT confirm it is a free PREVIEW: the sponsored account LinkedIn would bill and whether it has a payment method, the objectives LinkedIn offers for the post, LinkedIn’s suggested audience, suggested total budgets, the maximum budget and (with budget) a forecast. Nothing is created. WITH confirm:true and a total budget it CREATES the boost, which LAUNCHES PAID DELIVERY — LinkedIn has no paused or draft state for a boost — so show the user the preview (budget, schedule, goal) and get an explicit yes first. Goals: ENGAGEMENT, BRAND_AWARENESS, WEBSITE_VISIT, VIDEO_VIEW, LEAD_GENERATION (LinkedIn decides which are available per post). Audience: LinkedIn’s suggested one, or your own — locations (urn:li:geo:…), targeting {includeAll, excludeAny} with a location (the preview lists targetingOptions), or a saved audienceId. LinkedIn tools may not be used to discriminate based on personal characteristics like gender, age, race, or ethnicity. Unless the preview says LinkedIn confirmed no political declaration is needed, creating needs notPolitical:true after the user confirms “I confirm this is not political advertising.” A personal-post boost starts today; a Company Page boost may start later. A schedule covers at least 2 UTC days. A button (ctaLabel + ctaUrl) exists only on LEAD_GENERATION. If the boost account has no payment method the reply gives LinkedIn’s billing link and nothing is created. The result is read back from LinkedIn; end_linkedin_boost stops a boost.',
     inputSchema: {
       post: z.string().describe('urn:li:share:… / urn:li:ugcPost:… or a linkedin.com/feed/update/ link'),
       organization: z.string().optional().describe('Company Page id or name for a Page post; omit for a personal post'),
@@ -26485,6 +26493,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
       ctaUrl: z.string().optional().describe('LEAD_GENERATION only, https://'),
       adAccountId: z.string().optional().describe('paying ad account (a ticked one)'),
       createAccount: z.boolean().optional().describe('none ticked: LinkedIn creates one'),
+      locations: z.array(z.string()).optional().describe('audience locations, urn:li:geo:…'),
+      targeting: z.record(z.any()).optional().describe('{includeAll:[{facetUrn, anyOf:[{urn}]}], excludeAny}'),
+      audienceId: z.string().optional().describe('saved boost audience id'),
+      notPolitical: z.boolean().optional().describe('user confirmed: not political advertising'),
       confirm: z.boolean().optional().describe('true to CREATE (launches paid delivery); omit to preview'),
     },
     outputSchema: { ok: z.boolean().optional(), preview: z.boolean().optional(), context: z.string().optional(), post: z.string().optional(), account: z.string().optional(), billingConfigured: z.boolean().nullable().optional(), billingUrl: z.string().optional(), campaign: z.string().nullable().optional(), campaignGroup: z.string().nullable().optional(), creative: z.string().nullable().optional(), status: z.string().nullable().optional(), goal: z.string().optional(), totalBudget: z.any().optional(), runSchedule: z.any().optional(), suggestedBudgets: z.array(z.any()).optional(), forecast: z.any().optional(), audience: z.any().optional(), note: z.string().optional() },
@@ -26507,6 +26519,72 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/linkedin/boost/end', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('get_linkedin_boost', {
+    title: 'Read a LinkedIn boost',
+    description: 'Read ONE existing LinkedIn boost back from LinkedIn: status, objective, total budget, schedule, audience, political declaration and forecast. Name the boosted post (pass organization for a Page post). Read-only and free.',
+    inputSchema: {
+      post: z.string().describe('the boosted post URN or link'),
+      organization: z.string().optional().describe('Company Page id or name, for a Page post'),
+      campaign: z.string().optional().describe('urn:li:sponsoredCampaign:…'),
+      account: z.string().optional().describe('urn:li:sponsoredAccount:…'),
+    },
+    outputSchema: { context: z.string().optional(), campaign: z.string().optional(), account: z.string().optional(), post: z.string().optional(), status: z.string().nullable().optional(), objective: z.string().nullable().optional(), totalBudget: z.any().optional(), runSchedule: z.any().optional(), targetingCriteria: z.any().optional(), politicalIntent: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/linkedin/boost/get', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('update_linkedin_boost', {
+    title: 'Change a LinkedIn boost’s audience',
+    description: 'Change a RUNNING LinkedIn boost’s audience and/or political declaration, the only two things LinkedIn lets you change (budget, objective and schedule are fixed; there is no pause, end_linkedin_boost stops it). Without confirm it previews the new audience and changes nothing; confirm:true applies it and reads it back. Send the COMPLETE audience: locations, targeting or audienceId.',
+    inputSchema: {
+      post: z.string().describe('the boosted post URN or link'),
+      organization: z.string().optional().describe('Company Page id or name, for a Page post'),
+      locations: z.array(z.string()).optional().describe('urn:li:geo:…'),
+      targeting: z.record(z.any()).optional().describe('{includeAll, excludeAny}'),
+      audienceId: z.string().optional().describe('saved boost audience id'),
+      notPolitical: z.boolean().optional().describe('user confirmed: not political advertising'),
+      confirm: z.boolean().optional().describe('true to apply; omit to preview'),
+    },
+    outputSchema: { ok: z.boolean().optional(), preview: z.boolean().optional(), updated: z.boolean().optional(), campaign: z.string().optional(), account: z.string().optional(), post: z.string().optional(), audienceSize: z.number().nullable().optional(), politicalDeclarationRequired: z.boolean().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/linkedin/boost/update', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('list_linkedin_boost_audiences', {
+    title: 'Saved LinkedIn boost audiences',
+    description: 'The SAVED boost audiences on a LinkedIn ad account (reusable as boost_linkedin_post audienceId), most recently used first, with their criteria. Uses the ad account this brand ticked (adAccountId when several are). Read-only and free.',
+    inputSchema: {
+      adAccountId: z.string().optional().describe('a ticked LinkedIn ad account'),
+      organization: z.string().optional().describe('Company Page id or name, to read with the Page admin’s connection'),
+    },
+    outputSchema: { account: z.string().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/linkedin/boost/audiences', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('manage_linkedin_boost_audience', {
+    title: 'Create, edit or delete a saved LinkedIn boost audience',
+    description: 'Create (name + locations/targeting, must include a location), update (id + name, description or the whole audience) or delete (id; confirm:true deletes, without it says what would be) a SAVED LinkedIn boost audience. Read back from LinkedIn.',
+    inputSchema: {
+      action: z.enum(['create', 'update', 'delete']),
+      id: z.string().optional().describe('saved audience id (update / delete)'),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      locations: z.array(z.string()).optional().describe('urn:li:geo:…'),
+      targeting: z.record(z.any()).optional().describe('{includeAll, excludeAny}'),
+      adAccountId: z.string().optional().describe('a ticked LinkedIn ad account'),
+      organization: z.string().optional().describe('Company Page id or name'),
+      confirm: z.boolean().optional().describe('delete only: true to delete'),
+    },
+    outputSchema: { ok: z.boolean().optional(), preview: z.boolean().optional(), id: z.string().nullable().optional(), account: z.string().optional(), deleted: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/linkedin/boost/audience', a);
     return ok(d.note, d);
   }));
   server.registerTool('linkedin_boost_analytics', {
