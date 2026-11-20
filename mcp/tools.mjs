@@ -558,7 +558,7 @@ export const MCP_INSTRUCTIONS_WIDGET = [
 // truncates near there). The directory pair (Claude) also names no generation tool.
 // The all-in-one ChatGPT app (the unscoped server) is "Hermoso: AI Marketing Agent"; these are the three focused apps
 // beside it, named by Keyword Planner volume (the owner, 2026-11-06; evidence in memory mcp-directory-listings.md).
-export const APP_TITLES = Object.freeze({ create: 'Hermoso: AI Ad Generator', ads: 'Hermoso: Ads Manager', social: 'Hermoso: Social Media Manager' });
+export const APP_TITLES = Object.freeze({ create: 'Hermoso: AI Ad Generator', ads: 'Hermoso: Ads Manager', social: 'Hermoso: Social Media Manager', creators: 'Hermoso: Creator Campaigns' });
 const APP_CONFIRM = 'CONFIRM with the user before posting or scheduling, messaging customers, turning on a campaign or changing a budget, deleting anything, or replacing a saved profile.';
 const APP_WORKSPACE = 'WORKSPACE: get_brand, list_brands, use_brand, create_brand, list_connectors (accounts are connected in the Hermoso app, Connectors), hermoso_credits, report_bug, request_feature.';
 const APP_ADS_LINES = [
@@ -588,6 +588,16 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
   ].join('\n'),
   ads: [...APP_ADS_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
   social: [...APP_SOCIAL_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
+  creators: [
+    "Hermoso Creator Campaigns runs the brand's creator (UGC / clipping) campaigns, where the brand pays creators for posts about it: set up a campaign, invite creators, review their posts and read the results.",
+    '• CAMPAIGNS: create_creator_campaign (made as a draft), update_creator_campaign (edit, or set it active, paused or closed), read_creator_campaigns, preview_creator_campaign.',
+    '• CREATORS: creator_campaign_link (join link, or invite one or many), email_campaign_creator, review_campaign_creator; find_creators, find_instagram_marketplace_creators and discover_tiktok_creators find creators to invite.',
+    '• POSTS: list_campaign_posts, review_campaign_post (approve, reject or request changes, with feedback), add_campaign_post, refresh_campaign_views; promote_campaign_post previews or builds a paused ad from an approved post.',
+    '• RESULTS: creator_campaign_report (CSV too).',
+    'PAYMENTS: this app shows what creators are owed and never pays them; the brand pays from the Hermoso app. Creators join through their own link and sign-in; their agreements are their own clicks.',
+    APP_WORKSPACE,
+    'CONFIRM with the user before setting a campaign live or closing it, approving or rejecting a post, removing a creator, emailing a creator, building an ad, or deleting anything.',
+  ].join('\n'),
 });
 // The Claude directory pair: no generation tool is named, and Ads Manager also carries the research tools there.
 export const MCP_INSTRUCTIONS_APP_DIRECTORY = Object.freeze({
@@ -2420,6 +2430,22 @@ function registerAppResources(server, opts = {}) {
 // returned another brand's memory/skills/Library; writes corrupted the default brand. storeSuffix() asks
 // /api/workspace, where resolveWs re-authorizes the pin per request, so hosted and stdio now resolve identically.
 const pk = async (base) => { const s = await storeSuffix(); return s ? `${base}.${s}` : base; };
+// WHEN A LIBRARY ROW WAS MADE, AS ISO 8601 (2026-11-19). list_library is the one reader every surface goes through (MCP,
+// POST /v1/tools/list_library, GET /v1/library), and it handed out only `ageHours`, so the REST `created_at` was always
+// null and an automation could not sort or filter by date. The row's `at` (ms) is the stored time; a row without one is
+// dated from its file name, which persistAsset stamps `[upload-]<kind>-<base36 ms>-<rand>.<ext>`. Anything else (an
+// implausible or missing time, a foreign url) is null, never a guess. tools/library-created-at-check.mjs runs this.
+function libraryCreatedAt(row, now = Date.now()) {
+  const plausible = (ms) => Number.isFinite(ms) && ms >= 1.5e12 && ms <= now + 864e5;
+  let at = row?.at;
+  if (typeof at === 'string') at = /^\s*\d+(\.\d+)?\s*$/.test(at) ? Number(at) : Date.parse(at);
+  if (typeof at === 'number' && at > 0 && at < 1e11) at *= 1000; // a seconds stamp
+  if (plausible(at)) return new Date(at).toISOString();
+  const file = String(row?.url || '').split(/[?#]/)[0].split('/').pop() || '';
+  const m = /^(?:upload-)?[a-z]+-([0-9a-z]{8})-[0-9a-z]+(?:-[a-z0-9]+)*\.[a-z0-9]+$/i.exec(file);
+  const ms = m ? parseInt(m[1], 36) : NaN;
+  return plausible(ms) ? new Date(ms).toISOString() : null;
+}
 async function readStore(base) {
   // A SIGNED-OUT READ IS NOT AN EMPTY STORE (2026-09-25). /api/store/bootstrap answers an anonymous caller 200 with
   // nothing in it, so with no key list_library said "The Library is empty for this workspace" — measured over stdio
@@ -3344,7 +3370,10 @@ export const storyFilmsWithheldWhy = (env = process.env) => `story films are in 
   + (chatgptCreatePublished(env) ? `; the user adds it from ChatGPT's apps and asks for a story film there` : `, which is not published yet; until it is, story films run in the Hermoso web app (Studio, Story films) and on every other MCP host`);
 // Tools a widget host withholds from the all-in-one roster but a FOCUSED ChatGPT app lists, by app (APP_SCOPE_TOKENS).
 export const WIDGET_APP_OFFERS = Object.freeze({ create: new Set(STORY_FILM_TOOLS) });
-export const widgetAppOffers = (name, app) => !!app && !!WIDGET_APP_OFFERS[app] && WIDGET_APP_OFFERS[app].has(name);
+// The Creator Campaigns app lists the creator tools the all-in-one ChatGPT list holds for its cap (CC_WIDGET_WHY), by
+// that reason rather than by name, so a creator tool held for any OTHER reason (money, sensitive data) stays held there.
+export const widgetAppOffers = (name, app) => !!app && ((!!WIDGET_APP_OFFERS[app] && WIDGET_APP_OFFERS[app].has(name))
+  || (app === 'creators' && WIDGET_WITHHELD_WHY[name] === CC_WIDGET_WHY && toolSection(name) === 'creator_campaigns'));
 // CREATOR CAMPAIGNS (2026-11-18): ten new tools that need no connection would be CORE on ChatGPT and push two whole
 // families (openai_ads, wordpress) off a list already at its cap (tools/chatgpt-full-roster-check.mjs refuses that), so they
 // wait for a ranking decision on ChatGPT; every other host lists all ten.
@@ -4113,11 +4142,16 @@ export function defForDirectory(def, directory, name) {
 // connectors, team), files (Drive, Sheets, Docs, OneDrive, Notion, Canva) and the Library/upload tools every job
 // hands media through. COVERAGE IS A LAW (the owner: "i dont want us to leave any tools out"): every registered tool
 // is in at least one app, by construction (every group maps somewhere) and pinned by tools/app-scope-check.mjs.
-export const APP_NAMES = Object.freeze(['create', 'ads', 'social']);
+// creators (2026-11-20, the owner: "a focused ChatGPT plugin for all our new creator tools") — a brand running creator
+//            (UGC / clipping) campaigns: the tools written in the creator campaigns section (server.section), the
+//            read-only creator searches, and find_creators. Nothing that moves money: paying creators stays on the full
+//            connection (and its own app pages), so this app only ever quotes.
+export const APP_NAMES = Object.freeze(['create', 'ads', 'social', 'creators']);
 export const APP_SCOPE_TOKENS = Object.freeze({
   'chatgpt-create': { app: 'create' }, 'app-create': { app: 'create' },
   'chatgpt-ads': { app: 'ads' }, 'app-ads': { app: 'ads' },
   'chatgpt-social': { app: 'social' }, 'app-social': { app: 'social' },
+  'chatgpt-creators': { app: 'creators' }, 'app-creators': { app: 'creators' },
   'directory-ads': { app: 'ads', directory: 'scoped' }, 'directory-social': { app: 'social', directory: 'scoped' },
 });
 // THE FOCUSED CONNECTIONS, TOLD TO AN AI THAT ASKS (2026-11-10, the owner approved it). hermoso_capabilities' RESULT
@@ -4188,6 +4222,10 @@ export const APP_WIDGET_HINTS = Object.freeze({
   update_voice_agent: { destructiveHint: true },
   // and the next rescan: an SMS opt-out stops all messages to that number; a LinkedIn reaction is public on the post.
   set_sms_opt_out: { destructiveHint: true }, react_to_linkedin_post: { destructiveHint: true },
+  // 2026-11-20, the Creator Campaigns app: closing a campaign is final and going live publishes its public page; a fresh
+  // open link or personal link turns the old one off; a post decision emails the creator.
+  update_creator_campaign: { destructiveHint: true, openWorldHint: true }, creator_campaign_link: { destructiveHint: true },
+  email_campaign_creator: { destructiveHint: true }, review_campaign_post: { openWorldHint: true }, review_campaign_creator: { openWorldHint: true },
 });
 const APP_WIDGET_DESC_EDITS = Object.freeze({
   bing_webmaster_traffic: [/ Bing is a smaller share of search than Google, but its index is what Copilot and ChatGPT web search read from, so this is the answer-engine visibility read rather than a second traffic report\./, ''],
@@ -4225,7 +4263,15 @@ const APP_WIDGET_DESC_EDITS = Object.freeze({
   stitch_video: [[/ A multi-beat ad that FITS one clip renders better and cheaper as ONE single-pass generate_video\/render_ad \(a single generation carries the whole hook->demo->payoff arc\) — never stitch those\./, ' Do not use it for a spot that fits in one clip of the chosen model: generate_video or render_ad make that in a single generation.']],
   list_creators: [[/ \(and skips the character-portrait render, so it costs less than not casting anyone\)/, '']],
   find_competitors: [[/inspiration \(best relevant ads incl\. it\)/, 'inspiration (relevant ads, including the searched company)']],
+  // 2026-11-20, the Creator Campaigns app.
+  promote_campaign_post: [[/the creator's Spark authorization code/, "the Spark Ads code the creator shares from that post"]],
 });
+// ARGUMENTS A FOCUSED CHATGPT APP DOES NOT OFFER (2026-11-20). creator_campaign_link's embed (widget code) and signup
+// (submits a creator's sign-up answers on their behalf) are developer surfaces for a brand's own sign-up page; on the
+// Creator Campaigns app the tool makes join links and invites only. Every other host keeps both.
+export const APP_WIDGET_PARAM_DROPS = Object.freeze({ creator_campaign_link: Object.freeze(['embed', 'signup']) });
+// and the sentence that describes the dropped arguments, on the ChatGPT app only.
+const APP_WIDGET_DROP_DESC = Object.freeze({ creator_campaign_link: [/ HEADLESS SIGN-UP \(your own sign-up page\):[^)]*\)[^.]*\. /, ' '] });
 // THE LEADING WORDS OF THE HEADLINE TOOLS ON A FOCUSED APP (2026-11-06, OpenAI's metadata guide: "Start descriptions
 // with 'Use this when…'"), phrased the way people ask for that job. Each names the explicit intent only.
 export const APP_DESC_LEADS = Object.freeze({
@@ -4242,6 +4288,11 @@ export const APP_DESC_LEADS = Object.freeze({
   list_scheduled: 'Use this when the user asks what posts are scheduled.',
   list_inbox: 'Use this when the user asks for their unanswered comments, messages or reviews.',
   post_performance: 'Use this when the user asks which of their social posts did best.',
+  create_creator_campaign: 'Use this when the user asks to start a creator, UGC or clipping campaign that pays creators for posts about their brand.',
+  list_campaign_posts: 'Use this when the user asks which creator posts are waiting for review, or how submitted posts are doing.',
+  review_campaign_post: 'Use this when the user approves, rejects or gives feedback on a creator\'s submitted post.',
+  creator_campaign_report: 'Use this when the user asks how a creator campaign is performing or for its report.',
+  creator_campaign_link: 'Use this when the user asks for a campaign join link or to invite one or more creators.',
 });
 // 2026-11-19 (OpenAI review of the AI Ad Generator: "dynamic tools to execute operations that were not individually
 // exposed for review"): the skills tools load workflow instructions by name at run time for the model to follow, which
@@ -4261,18 +4312,36 @@ export const APP_WIDGET_UNLISTED = new Set(['microsoft_ads_bulk_download', 'micr
   // registration or tax id, ID-document requirements). Set up in the Hermoso app; the all-in-one app keeps them.
   'register_sms_brand', 'register_sms_campaign', 'submit_tollfree_verification', 'attach_voice_agent_number', 'manage_pinterest_catalog_feed',
   'share_onedrive_file', 'send_openai_ads_conversions', 'create_reddit_ads_product_feed', 'update_reddit_ads_catalog_object',
-  'create_tiktok_ads_account', 'list_tiktok_ads_verification_documents']);
+  'create_tiktok_ads_account', 'list_tiktok_ads_verification_documents',
+  // 2026-11-20 (the Creator Campaigns app): campaign_drafts lists drafts and reviews one through the same `action`
+  // argument; review_campaign_post is the reviewed one-job tool on the focused app.
+  'campaign_drafts']);
 const appWidgetUnlisted = (name) => Object.prototype.hasOwnProperty.call(APP_WIDGET_RENAMES, name) || APP_WIDGET_UNLISTED.has(name);
 const appBaseName = (name) => APP_WIDGET_ALIAS_OF[name] || WIDGET_HOST_ALIAS_OF[name] || WIDGET_HOST_RETIRED_NAMES[name] || WIDGET_SPLIT_OF[name] || name;
 export function appScopeHas(app, name, group, directory = false) {
   if (!app) return true;
   const n = appBaseName(name);
   const prov = toolProvider(n);
+  if (app === 'creators' && WIDGET_MONEY_MOVEMENT_TOOLS.includes(n)) return false;
   if (APP_SHARED_GROUPS.has(group) || APP_SHARED_TOOLS.has(n)) return true;
   if (app === 'create') return group === 'create' || group === 'research';
   if (app === 'social') return group === 'channels' || (group === 'channel_admin' && !APP_ADS_CHANNEL_ADMIN_PROVIDERS.has(prov)) || (group === 'analytics' && APP_SOCIAL_ANALYTICS_PROVIDERS.has(prov)) || APP_SOCIAL_FROM_CREATE.has(n);
   if (app === 'ads') return group === 'ads' || (group === 'analytics' && !APP_SOCIAL_ANALYTICS_PROVIDERS.has(prov)) || (group === 'channel_admin' && (APP_ADS_CHANNEL_ADMIN_PROVIDERS.has(prov) || APP_ADS_ALSO.test(n))) || (!!directory && group === 'research');
+  if (app === 'creators') return appCreatorsHas(n, group);
   return false;
+}
+// THE CREATOR CAMPAIGNS APP, BY CATEGORY (2026-11-20). Every tool written in the creator campaigns block joins it (a new
+// one added there needs no second edit), and so does a read-only creator search on a connected platform (a name with
+// "creator" or "marketplace" in research, channel_admin or ads: the Instagram creator marketplace, TikTok One) and the
+// research group's find_creators. Money movement is held out on every host (WIDGET_MONEY_MOVEMENT_TOOLS): the brand
+// pays creators from the Hermoso app or the full connection, never from this app.
+// A creator search: a plural "creators" name, a creator marketplace, or TikTok One's creator labels, leaderboard and
+// status. tiktok_creator_info (the connected account's own posting options) is a Social tool and does not match.
+const APP_CREATORS_FINDER = /creators(_|$)|marketplace|creator_(labels|leaderboard|status)$/;
+function appCreatorsHas(n, group) {
+  if (WIDGET_MONEY_MOVEMENT_TOOLS.includes(n)) return false;
+  if (toolSection(n) === 'creator_campaigns') return true;
+  return (group === 'research' || group === 'channel_admin' || group === 'ads') && APP_CREATORS_FINDER.test(n) && (group === 'research' || toolReadOnly(n));
 }
 export const toolHeldBackByApp = (name, group, ctx) => !!ctx?.app && (!appScopeHas(ctx.app, name, group, ctx.directory) || (!!ctx.widgetHost && appWidgetUnlisted(name)));
 // On a ChatGPT app a description that points at a tool of ANOTHER app would send the model to a tool it does not hold
@@ -4322,6 +4391,28 @@ export function appWidgetPlainCase(text) {
     return starts ? out.charAt(0).toUpperCase() + out.slice(1) : out;
   });
 }
+// A FOCUSED APP NEVER HANDS OUT A PAYMENT LINK (2026-11-20, the Creator Campaigns app: nothing on a focused app moves
+// money or opens a checkout). A creator campaign tool's reply can name a payout batch's checkout link while it waits for
+// the brand's payment (read_creator_campaigns); on a focused app the batch keeps its state and total, the link is dropped
+// from the text and from structuredContent, and the line says the payment is made in the Hermoso app. The all-in-one
+// connection keeps the link. Only creator campaign tools are wrapped (toolSection), so every other handler is untouched.
+export const APP_PAY_LINK_NOTE = ' · paid from the Hermoso app (Creator campaigns, Payouts)';
+export function appScrubPayLinks(result) {
+  if (!result || typeof result !== 'object') return result;
+  const strip = (v) => (Array.isArray(v) ? v.map(strip) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'checkoutUrl').map(([k, x]) => [k, strip(x)])) : v);
+  const content = Array.isArray(result.content) ? result.content.map((c) => (c && c.type === 'text' && typeof c.text === 'string' ? { ...c, text: c.text.replace(/ · pay here: \S+/g, APP_PAY_LINK_NOTE) } : c)) : result.content;
+  return { ...result, content, ...(result.structuredContent ? { structuredContent: strip(result.structuredContent) } : {}) };
+}
+const _appScrubbed = new WeakMap();
+function appHandlerFor(name, handler, app) {
+  if (!app || typeof handler !== 'function' || toolSection(name) !== 'creator_campaigns') return handler;
+  let fn = _appScrubbed.get(handler);
+  if (fn) return fn;
+  fn = async (args, extra) => appScrubPayLinks(await handler(args, extra));
+  try { fn._hermosoTool = handler._hermosoTool; } catch {}
+  _appScrubbed.set(handler, fn);
+  return fn;
+}
 export function defForApp(def, app, directory, name, widget = false) {
   if (!app || directory || !def || typeof def !== 'object') return def;
   const nz = appNeutral(app);
@@ -4333,7 +4424,9 @@ export function defForApp(def, app, directory, name, widget = false) {
   const { neutral } = nz;
   const renamed = (txt) => { let x = String(txt); for (const [from, to] of Object.entries(APP_WIDGET_RENAMES)) x = x.replace(new RegExp('\\b' + from + '\\b', 'g'), to); return x; };
   const edit = APP_WIDGET_DESC_EDITS[name]; // on every host of a focused app: these sentences compare or point at another app
-  const d0 = typeof def.description === 'string' ? (edit ? (Array.isArray(edit[0]) ? edit : [edit]).reduce((x, [re, to]) => x.replace(re, to), def.description) : def.description) : def.description;
+  const dropEdit = widget && APP_WIDGET_DROP_DESC[name];
+  const d00 = typeof def.description === 'string' && dropEdit ? def.description.replace(dropEdit[0], dropEdit[1]) : def.description;
+  const d0 = typeof d00 === 'string' ? (edit ? (Array.isArray(edit[0]) ? edit : [edit]).reduce((x, [re, to]) => x.replace(re, to), d00) : d00) : d00;
   const d1 = typeof d0 === 'string' ? neutral(renamed(d0), name, typeof def.title === 'string' ? def.title : undefined) : d0;
   const lead = APP_DESC_LEADS[appBaseName(name)];
   const d2 = typeof d1 === 'string' && lead && !/^Use this (when|to)\b/i.test(d1) ? `${lead} ${d1}` : d1; // a description that already leads with its use keeps it
@@ -4353,6 +4446,8 @@ export function defForApp(def, app, directory, name, widget = false) {
     for (const [k, v] of Object.entries(shape.shape)) { const nv = fix(k, v); if (nv) { over[k] = nv; shapeChanged = true; } }
     if (shapeChanged) shape = shape.extend(over);
   }
+  const drop = widget && APP_WIDGET_PARAM_DROPS[name];
+  if (drop && shape && typeof shape === 'object' && !shape._zod) { const next = Object.fromEntries(Object.entries(shape).filter(([k]) => !drop.includes(k))); if (Object.keys(next).length !== Object.keys(shape).length) { shape = next; shapeChanged = true; } }
   const t2 = widget && APP_WIDGET_TITLE_EDITS[name];
   o = d === def.description && !shapeChanged && !hint && !t2 ? def : { ...def, description: d, ...(t2 ? { title: t2 } : {}), ...(shapeChanged ? { inputSchema: shape } : {}), ...((hint || t2) ? { annotations: { ...(def.annotations || {}), ...(hint || {}), ...(t2 ? { title: t2 } : {}) } } : {}) };
   memo.set(def, o);
@@ -4633,6 +4728,11 @@ function renamedForWidgetHost(def, name) {
 // declares itself with `sessionBound()` and `tools/mcp-tool-canon-check.mjs` fails any handler that reaches for
 // session state without it.
 let TOOL_CANON = null; // [{ name, group, def, handler, factory }] — the one canonical roster, built on first use
+// Per tool, from its registration: the server.section() block it was written in (null outside one) and whether it is
+// annotated read-only. Filled on every build, so a focused app reads it without a hand-kept list (appScopeHas 'creators').
+const TOOL_META = new Map();
+export const toolSection = (name) => TOOL_META.get(name)?.section ?? null;
+const toolReadOnly = (name) => TOOL_META.get(name)?.readOnly === true;
 let CANON_HOSTED = false;   // which surface TOOL_CANON was built for — see registerTools
 // THE GROUP EACH TOOL WAS WRITTEN UNDER, read off the canon the last complete build recorded (2026-09-24). The CLI
 // inventory used to infer it by registering one group at a time and asking which tools came back ENABLED, which
@@ -5113,7 +5213,7 @@ function replayTools(rawServer, opts, canon) {
     // proxy stamps at first registration only, so every later session's factory tools (hermoso_capabilities,
     // get_instructions) were recorded under no name at all.
     if (e.factory && handler) { try { handler._hermosoTool = e.name; } catch {} }
-    const h = rawServer.registerTool(e.name, defForApp(defForDirectory(defForHost(e.name, e.def, opts.widgetHost), ctx.directory, e.name), ctx.app, ctx.directory, e.name, ctx.widgetHost), handler);
+    const h = rawServer.registerTool(e.name, defForApp(defForDirectory(defForHost(e.name, e.def, opts.widgetHost), ctx.directory, e.name), ctx.app, ctx.directory, e.name, ctx.widgetHost), appHandlerFor(e.name, handler, ctx.app));
     ctx.handleOf[e.name] = h;
     ctx.srcOf[e.name] = { def: e.def, handler };
     applyToolGates(h, e.name, e.group, ctx, opts);
@@ -5517,11 +5617,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const ctx = newToolScope(opts);
   const enabledGroups = ctx.enabledGroups;
   let group = null;
+  let section = null; // a named block inside a group (server.section): reset by the next server.group()
   const groupOf = ctx.groupOf;   // tool name → group, for the check and for hermoso_capabilities
   const handleOf = ctx.handleOf; // tool name → SDK handle, so a group can be enabled without re-registering
   const server = new Proxy(rawServer, {
     get(t, p) {
-      if (p === 'group') return (g) => { group = g; };
+      if (p === 'group') return (g) => { group = g; section = null; };
+      if (p === 'section') return (s) => { section = s || null; };
       if (p === '_hermosoGroups') return groupOf;
       if (p === '_hermosoHandles') return handleOf;
       if (p === '_hermosoEnabled') return enabledGroups;
@@ -5533,6 +5635,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // no canon entry, no find_tools hit and no count. An inert handle keeps the 7 call sites below unchanged.
         if (toolUnoffered(name)) return { enabled: false, enable() {}, disable() {}, remove() {}, update() {} };
         groupOf[name] = group;
+        TOOL_META.set(name, { section, readOnly: def?.annotations?.readOnlyHint === true });
         try { if (handler) handler._hermosoTool = name; } catch {}
         try { noteBrandKeys(name, def); } catch {} // which arg names the Hermoso brand, for the after-reply notes
         def = withAccountArg(name, def); // a multi-account channel's tool names WHICH account (see MULTI_ACCOUNT_CHANNELS)
@@ -5566,7 +5669,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // from it (WeakMap-cached per def) are the same objects on the build path and on every replay.
         const canonDef = stripOutputSchema(finalDef);
         if (sink) sink.push({ name, group, def: canonDef, handler, factory: handler && handler._hermosoFactory || null });
-        const h = t.registerTool(name, defForApp(defForDirectory(defForHost(name, finalDef, opts.widgetHost), ctx.directory, name), ctx.app, ctx.directory, name, ctx.widgetHost), handler);
+        const h = t.registerTool(name, defForApp(defForDirectory(defForHost(name, finalDef, opts.widgetHost), ctx.directory, name), ctx.app, ctx.directory, name, ctx.widgetHost), appHandlerFor(name, handler, ctx.app));
         handleOf[name] = h;
         ctx.srcOf[name] = { def: canonDef, handler };
         // DISABLED, NOT SKIPPED — see (1) above. `disable()` is the SDK's own call and removes it from tools/list.
@@ -17927,7 +18030,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // lib/creator-campaigns-server.mjs answers every one of these; the creator side is a web page reached by link (no
   // Hermoso account). Reading a post's numbers costs the brand credits (a data lookup); payouts move money only in
   // Stripe test mode until switched on, and pay_campaign_creators recordOnly covers a creator paid another way meanwhile.
+  // server.section names the block: the Creator Campaigns app (appScopeHas 'creators') lists what is written here.
   server.group('channel_admin');
+  server.section('creator_campaigns');
   const ccMoney = (c) => `$${((c || 0) / 100).toFixed(2)}`;
   const ccLine = (c) => `• ${c.name} [${c.id}] ${c.status}${c.unread ? ` · ${c.unread} new` : ''} · ${c.payout} · ${c.platforms.join(', ')}${c.pageUrl ? ` · page ${c.pageUrl}` : ''}${c.visibility && c.visibility !== 'unlisted' ? ` · ${c.visibility}${c.listing ? ` (marketplace: ${c.listing.state})` : ''}` : ''}${c.budgetCents ? ` · ${ccMoney(c.earnedCents)} of ${ccMoney(c.budgetCents)} budget earned` : ''} · ${c.creators.active} creators${c.creators.pending ? ` (+${c.creators.pending} waiting)` : ''} · ${c.posts.total} posts (${c.posts.pendingReview} to review, ${c.posts.approved} approved, ${c.posts.views.toLocaleString('en-US')} approved views) · held ${ccMoney(c.money.held)}, payable ${ccMoney(c.money.payable)}, paid ${ccMoney(c.money.paid)}`;
   const ccPost = (s) => `• [${s.id}] ${s.status.replace('_', ' ')} · ${s.platform} @${s.handle || '?'} · ${s.metrics?.views != null ? `${s.metrics.views.toLocaleString('en-US')} views` : 'views hidden'}${s.authenticity ? ` · authenticity ${s.authenticity.score}/100` : ''}${(s.flags || []).length ? ` · flags: ${s.flags.join(', ')}` : ''}${s.creator ? ` · ${s.creator}` : ''}${s.earnedCents ? ` · earned ${ccMoney(s.earnedCents)}` : ''} · ${s.url}${s.readError ? ` (last read failed: ${s.readError})` : ''}${(s.comments || []).length ? `\n    last in thread (${s.comments.at(-1).by}): ${String(s.comments.at(-1).text).slice(0, 160)}` : ''}`;
@@ -31033,7 +31138,7 @@ function memoryNoteVerdict(text) {
   server.registerTool('search_meta_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching Meta ads…', 'Found Meta ads'),
     title: 'Search Meta ads',
-    description: "Structured Meta (Facebook/Instagram) Ad Library pull — use when you know exactly WHAT to fetch: a keyword (query) OR one advertiser (companyName / pageId). Returns compact JSON {page_name, body, cta, link, dates, media} per ad. For open-ended research that needs judgment across platforms, use research_ads instead. Spends credits on each ad-library read it makes: one for a keyword; for a brand name, the page lookup and its ads. An advertiser search returns ONLY that advertiser's ads: when no page can be confirmed as the brand it returns none, plus the similarly named pages (pass one's pageId, or the brand's domain).",
+    description: "Structured Meta (Facebook/Instagram) Ad Library pull — use when you know exactly WHAT to fetch: a keyword (query) OR one advertiser (companyName / pageId). Returns compact JSON {page_name, body, cta, link, dates, media} per ad. For open-ended research across platforms, use research_ads instead. Spends credits on each ad-library read it makes: one for a keyword; for a brand name, the page lookup and its ads. An advertiser search returns only that advertiser's ads, or none plus similarly named pages to retry by pageId.",
     inputSchema: {
       query: z.string().optional().describe('keyword search across ALL advertisers (use INSTEAD of companyName/pageId)'),
       companyName: z.string().optional().describe('one advertiser’s ads by brand name — resolved to the brand’s own page only on evidence (its Instagram, its domain, or ads that land on its domain); pass domain too for the best match'),
@@ -31793,7 +31898,7 @@ function memoryNoteVerdict(text) {
       query: z.string().optional().describe('only assets whose title or original file name contains this text (case-insensitive), e.g. an ad headline the user quoted or "1.png"'),
       limit: z.number().optional().describe('max assets to return (default 20, max 60)'),
     },
-    outputSchema: { assets: z.array(z.object({ id: z.string().optional(), url: z.string(), title: z.string().optional(), kind: z.string().optional(), model: z.string().optional(), source: z.string().optional(), name: z.string().optional(), ageHours: z.number().optional(), durationSeconds: z.number().optional(), width: z.number().optional(), height: z.number().optional() })).optional() },
+    outputSchema: { assets: z.array(z.object({ id: z.string().optional(), url: z.string(), title: z.string().optional(), kind: z.string().optional(), model: z.string().optional(), source: z.string().optional(), name: z.string().optional(), ageHours: z.number().optional(), createdAt: z.string().optional(), durationSeconds: z.number().optional(), width: z.number().optional(), height: z.number().optional() })).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     let list = await readStore('heist.assets.v1'); // via /api/store/bootstrap — there is no GET /api/store/:key route
@@ -31813,7 +31918,7 @@ function memoryNoteVerdict(text) {
     };
     const q = String(a.query || '').trim().toLowerCase();
     const assets = list.filter(x => x && x.url).map((x, i) => ({ x, id: 'L' + i, title: titleOf(x) })).filter(({ x, title }) => (!kind || x.kind === kind) && (!up || x.source === 'upload') && (!q || (title + ' ' + _clean(x.concept) + ' ' + _clean(x.name)).toLowerCase().includes(q))).slice(0, lim)
-      .map(({ x, id, title }) => ({ id, url: abs(x.url), ...(title ? { title } : {}), kind: x.kind || '', model: x.model || '', ...(x.source === 'upload' ? { source: 'upload', ...(x.name ? { name: String(x.name).slice(0, 120) } : {}) } : {}), ageHours: x.at ? Math.round((Date.now() - x.at) / 36e5) : undefined }));
+      .map(({ x, id, title }) => ({ id, url: abs(x.url), ...(title ? { title } : {}), kind: x.kind || '', model: x.model || '', ...(x.source === 'upload' ? { source: 'upload', ...(x.name ? { name: String(x.name).slice(0, 120) } : {}) } : {}), ageHours: x.at ? Math.round((Date.now() - x.at) / 36e5) : undefined, createdAt: libraryCreatedAt(x) || undefined }));
     if (!assets.length && q) return ok(`No Library asset has a title containing “${a.query}”. Call list_library without query to see every title.`, { assets: [] });
     if (!assets.length) return ok(up ? 'Nothing uploaded to this workspace\'s Library yet — upload_file keeps an image, video or PDF there.' : 'The Library is empty for this workspace — render something or upload_file a file first.', { assets: [] });
     // A VIDEO'S LENGTH AND A FILE'S SIZE ON EVERY ROW (2026-11-08): "upload the shortest video" was unanswerable. A row the
