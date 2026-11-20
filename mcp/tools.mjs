@@ -4208,7 +4208,7 @@ export const ALL_IN_ONE_CHATGPT_TITLE = 'Hermoso: AI Marketing Agent';
 // The ChatGPT app ids (platform.openai.com/plugins ▸ app ▸ Copy link). A focused app is linked only once it is
 // PUBLISHED: nobody can add an app still in review. HERMOSO_CHATGPT_APPS_PUBLISHED=create,ads,social names the published
 // ones (HERMOSO_CHATGPT_CREATE_PUBLISHED=1 still counts for create); read per call, so publishing needs no code change.
-export const CHATGPT_APP_IDS = Object.freeze({ all: 'plugin_asdk_app_6abde87d08048191b2ee7cda76721749', create: 'plugin_asdk_app_6aee494d54448191bfce04e45210a487', ads: 'plugin_asdk_app_6aee41978fe081919e59d8dfa9397a39', social: 'plugin_asdk_app_6aee41bde0788191a780b26d39df18af', creators: null }); // creators: not created on platform.openai.com yet (2026-11-20); its id goes here when it is
+export const CHATGPT_APP_IDS = Object.freeze({ all: 'plugin_asdk_app_6abde87d08048191b2ee7cda76721749', create: 'plugin_asdk_app_6aee494d54448191bfce04e45210a487', ads: 'plugin_asdk_app_6aee41978fe081919e59d8dfa9397a39', social: 'plugin_asdk_app_6aee41bde0788191a780b26d39df18af', creators: 'plugin_asdk_app_6affb6dffac48191a1a3219f64785726' }); // creators: submitted 2026-11-20 (1.0.0)
 export const CHATGPT_APPS_PUBLISHED_ENV = 'HERMOSO_CHATGPT_APPS_PUBLISHED';
 export const chatgptAppPublished = (app, env = process.env) => app === 'all' || (app === 'create' && chatgptCreatePublished(env)) || String(env?.[CHATGPT_APPS_PUBLISHED_ENV] ?? '').split(/[,\s]+/).map((s) => s.trim().toLowerCase()).includes(app);
 export const chatgptAppLink = (app) => (CHATGPT_APP_IDS[app] ? `https://chatgpt.com/plugins/${CHATGPT_APP_IDS[app]}` : null);
