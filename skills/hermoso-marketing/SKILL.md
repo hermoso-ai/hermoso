@@ -50,7 +50,7 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 - Show the exact caption and the exact target account before publishing, and get a yes. Never rewrite or truncate what the user wrote: a channel that cannot take it refuses and says so.
 
 ### 4. Paid campaigns
-- Twelve ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads. Find the tool with `hermoso tools --group ads --search <platform>`.
+- Thirteen ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads, Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads, AppLovin Ads and Amazon Ads. Find the tool with `hermoso tools --group ads --search <platform>`.
 - Campaigns are created **paused** and read back from the platform. Report what the platform returned, never what you sent. Activating one spends real money, so it is confirm-gated and the user has to say yes.
 - `check_ad_policy` before you spend, and `score_ad` on the creative, so a rejection costs nothing.
 
