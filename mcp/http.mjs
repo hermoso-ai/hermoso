@@ -636,7 +636,9 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // connect every time, and a plain page reload — with ZERO further requests from ChatGPT to us — lists every
       // tool. The panel is rendered before ChatGPT's own background sync finishes and never re-reads it. So the
       // nudge is back on, as it had been since 2026-09-14; MCP_LIST_CHANGED_NUDGE=0 turns it off.
-      if (process.env.MCP_LIST_CHANGED_NUDGE !== '0' && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
+      // NOT ON A FOCUSED APP (2026-11-19): OpenAI's review of the AI Ad Generator read a changing roster as "dynamic tools";
+      // a focused app's list is fixed for every session (no connector gate, no snapshot to heal), so it never announces a change.
+      if (process.env.MCP_LIST_CHANGED_NUDGE !== '0' && !scope?.app && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
       // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
       // objects are otherwise reachable only from this request's still-open response — close them explicitly
       // rather than leaving a session pinned by a dead socket.

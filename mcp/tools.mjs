@@ -3362,6 +3362,10 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   review_campaign_post: CC_WIDGET_WHY,
   add_campaign_post: CC_WIDGET_WHY,
   refresh_campaign_views: CC_WIDGET_WHY,
+  creator_campaign_report: CC_WIDGET_WHY,
+  promote_campaign_post: CC_WIDGET_WHY,
+  email_campaign_creator: CC_WIDGET_WHY,
+  campaign_drafts: CC_WIDGET_WHY,
   submit_tiktok_ads_verification: 'it sends a legal name and a government ID or business licence number, which are entered in TikTok Ads Manager instead',
   merchant_issue_help: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
   trigger_merchant_issue_action: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
@@ -4162,6 +4166,8 @@ export const APP_WIDGET_RENAMES = Object.freeze({});
 export const APP_WIDGET_ALIAS_OF = Object.freeze({});
 const APP_WIDGET_TITLES = Object.freeze({});
 const APP_WIDGET_DESCRIPTIONS = Object.freeze({});
+// A title OpenAI's scan read as inconsistent with the tool (2026-11-19: create_tiktok_ads_rule, "(created turned OFF)").
+export const APP_WIDGET_TITLE_EDITS = Object.freeze({ create_tiktok_ads_rule: 'Create a TikTok automated rule', create_tiktok_ads_campaign: 'Create a TikTok campaign (paused)', bing_webmaster_keywords: 'Bing keyword research' });
 // OPENAI'S FIRST SCAN OF THE TWO NEW APPS (2026-11-06) gave stated reasons on tools ChatGPT had never listed before. On a
 // ChatGPT app (widget host) only: the hint OpenAI read as wrong is corrected, a sentence that compares us with other
 // products is dropped, and the three bulk tools that take an operations list ("operations that are not individually
@@ -4175,14 +4181,33 @@ export const APP_WIDGET_HINTS = Object.freeze({
   // 2026-11-09 read of the 11-06 findings: the Microsoft report call SUBMITS a report job at Microsoft (pending:true +
   // reportRequestId), and list_products' refresh re-reads product pages and overwrites the stored rows.
   microsoft_ads_report: { readOnlyHint: false, idempotentHint: false }, list_products: { destructiveHint: true },
+  // 2026-11-19 scan of Ads Manager: Amazon builds a report job at Amazon on the first call (reportId), like Microsoft's.
+  amazon_ads_report: { readOnlyHint: false, idempotentHint: false }, manage_x_ads_conversion_events: { destructiveHint: true },
 });
 const APP_WIDGET_DESC_EDITS = Object.freeze({
   bing_webmaster_traffic: [/ Bing is a smaller share of search than Google, but its index is what Copilot and ChatGPT web search read from, so this is the answer-engine visibility read rather than a second traffic report\./, ''],
-  bing_webmaster_query_stats: [/ Worth reading BESIDE Search Console rather than instead of it[^.]*\./, ''],
+  bing_webmaster_query_stats: [[/The Bing twin of search_console_performance, split by what you want pinned\./, 'Use this when the user asks what people searched on Bing to reach their site, or which pages those searches landed on.'], [/, so it lags Search Console and will not move day to day/, ', so it does not move day to day'], [/ Worth reading BESIDE Search Console rather than instead of it[^.]*\./, '']],
   openai_ads_bulk: [/ — the only way to build a whole tree in one call\./, '.'],
   list_tiktok_ads_blocked_words: [/ NOTHING ELSE IN HERMOSO DOES THIS:[^.]*\./, ''],
   import_from_cloud: [/ OneDrive has no such limit\./, ''],
   linkedin_page_analytics: [/ It is NOT linkedin_ads_report — that covers PAID campaigns; LinkedIn excludes/, ' LinkedIn excludes'],
+  // 2026-11-19 review of the AI Ad Generator ("descriptions ... without comparative, biased, or preferential language"):
+  // the sentences that ranked one tool over another, praised a source, or named a vendor's endpoint path.
+  list_meta_pixels: [[/ Without this tool that id could only be read off a screen in Events Manager\./, '']],
+  submit_bing_webmaster_urls: [[/ — the fastest way to get a new or changed page crawled by Bing, and therefore into Copilot and ChatGPT web search\./, ': asks Bing to crawl new or changed pages.']],
+  linkedin_audience_count: [[/ — the cheapest sanity check there is on a B2B audience, and it needs no ad account\./, '. It needs no ad account.']],
+  // 2026-11-19 second Ads Manager scan.
+  bing_webmaster_keywords: [[/^Real search demand for any term, free\./i, 'Bing search impressions for any term.'], [/ This is the closest thing in Hermoso to a free keyword planner: google_ads_keyword_ideas needs Google Ads Basic access, and this needs only the Bing connection anyone can set up in two minutes\./i, '']],
+  list_microsoft_merchant_stores: [[/ — the product-feed side of Microsoft Advertising, the exact twin of Google Merchant Center\./i, ', the product-feed side of Microsoft Advertising.'], [/ and there is no other way to discover it \(Content API.s own Store resource is closed-beta only, so Hermoso reads the list from Campaign Management instead, which is open to everyone\)/i, '']],
+  create_openai_ads_feed: [[/ inventoryType 'hotel' asks for a hotel property feed instead, which OpenAI accepts only for advertisers in its hotel beta and refuses for everyone else\./i, " inventoryType 'hotel' requests a hotel property feed; OpenAI only accepts it for advertisers it has admitted to hotel feeds."]],
+  create_tiktok_ads_campaign: [[/ Created PAUSED and there is no override, and TikTok is the one platform where that is not the vendor.s own behaviour: TikTok creates ENABLED by default, so Hermoso forces operation_status DISABLE and overrides a caller who asks for ENABLE\./i, ' It is created paused (operation_status DISABLE), also when the caller asks for ENABLE.'], [/ and is TikTok.s restriction rather than a Hermoso fault/i, " and is TikTok's restriction"]],
+  delete_tiktok_ads_object: [[/ — removal is modelled as a status, exactly like Reddit — so this posts/i, ': removal is a status, so this posts']],
+  search_reddit: [[/ \(\/v1\/reddit\/search, top-ranked\) — a goldmine for the customer's OWN words/, " (top-ranked posts), to find the customer's own words"]],
+  search_tiktok: [[/ \(there is NO TikTok ad library\)/, '']],
+  make_thumbnail: [[/ Use it for any "thumbnail", "video cover" or MrBeast-style packaging ask INSTEAD of generate_image\./, ' Use this when the user asks for a video thumbnail or a video cover.']],
+  stitch_video: [[/ A multi-beat ad that FITS one clip renders better and cheaper as ONE single-pass generate_video\/render_ad \(a single generation carries the whole hook->demo->payoff arc\) — never stitch those\./, ' Do not use it for a spot that fits in one clip of the chosen model: generate_video or render_ad make that in a single generation.']],
+  list_creators: [[/ \(and skips the character-portrait render, so it costs less than not casting anyone\)/, '']],
+  find_competitors: [[/inspiration \(best relevant ads incl\. it\)/, 'inspiration (relevant ads, including the searched company)']],
 });
 // THE LEADING WORDS OF THE HEADLINE TOOLS ON A FOCUSED APP (2026-11-06, OpenAI's metadata guide: "Start descriptions
 // with 'Use this when…'"), phrased the way people ask for that job. Each names the explicit intent only.
@@ -4201,7 +4226,19 @@ export const APP_DESC_LEADS = Object.freeze({
   list_inbox: 'Use this when the user asks for their unanswered comments, messages or reviews.',
   post_performance: 'Use this when the user asks which of their social posts did best.',
 });
-export const APP_WIDGET_UNLISTED = new Set(['microsoft_ads_bulk_download', 'microsoft_ads_bulk_upload', 'pinterest_ads_bulk']);
+// 2026-11-19 (OpenAI review of the AI Ad Generator: "dynamic tools to execute operations that were not individually
+// exposed for review"): the skills tools load workflow instructions by name at run time for the model to follow, which
+// the plugin guidelines' rule against discovery and operation selection covers (the ChatGPT apps ship their skills in
+// the plugin package instead), and onedrive_file_permissions does a read and a removal through one `action` argument.
+// Not listed on a focused ChatGPT app; the all-in-one app and every other host keep them.
+export const APP_WIDGET_UNLISTED = new Set(['microsoft_ads_bulk_download', 'microsoft_ads_bulk_upload', 'pinterest_ads_bulk', 'list_skills', 'get_skill', 'save_skill', 'delete_skill', 'onedrive_file_permissions',
+  // and the multi-operation `action` dispatchers (read, write and delete through one argument) that the all-in-one app's
+  // WIDGET_HOST_SPLITS have not split: the focused app lists only tools that do one thing.
+  'manage_merchant_settings', 'manage_google_ads_budget_networks', 'manage_google_ads_negative_list', 'manage_google_ads_asset_groups',
+  'manage_google_ads_labels', 'manage_google_ads_bid_strategy', 'manage_google_ads_recommendations', 'manage_google_ads_assets',
+  'manage_google_ads_audience', 'upload_google_ads_video', 'manage_google_ads_seasonality', 'manage_microsoft_ads_negative_keyword_list',
+  'manage_x_ads_conversion_events', 'manage_pinterest_ads_keywords', 'manage_pinterest_ads_targeting_template', 'manage_pinterest_ads_promotion',
+  'manage_tiktok_ads_negative_keywords', 'manage_snapchat_ads_lead_webhook']);
 const appWidgetUnlisted = (name) => Object.prototype.hasOwnProperty.call(APP_WIDGET_RENAMES, name) || APP_WIDGET_UNLISTED.has(name);
 const appBaseName = (name) => APP_WIDGET_ALIAS_OF[name] || WIDGET_HOST_ALIAS_OF[name] || WIDGET_HOST_RETIRED_NAMES[name] || WIDGET_SPLIT_OF[name] || name;
 export function appScopeHas(app, name, group, directory = false) {
@@ -4230,6 +4267,34 @@ function appNeutral(app) {
   _appNeutral.set(app, nz);
   return nz;
 }
+// NO SHOUTING ON A FOCUSED CHATGPT APP (2026-11-19, OpenAI's review of the AI Ad Generator asked for description
+// quality). The canonical descriptions use capitals for emphasis ("NEVER", "THE RULE:", "ONLY for"), which reads as
+// pressure on the model. On a focused ChatGPT app an all-capitals word is written in ordinary case unless it is an
+// acronym (URL, UGC, CSV...) or a value the caller passes (quoted, after "=", or a known vendor enum such as ACTIVE),
+// and a word that starts a sentence keeps its capital. Every other host reads the canonical text.
+const APP_CASE_KEEP = new Set(('AI API APIS CLI MCP SDK URL URLS ID IDS UGC PDF CSV JSON HTML XML MP4 MP3 JPEG JPG PNG GIF SVG WEBP SRT VTT '
+  + 'USD EUR GBP CAD AUD US USA UK EU CTA DM DMS SMS RSS SEO SEM OAUTH OK FAQ ISO UTC GMT PST EST AM PM HD UHD HDR SDR KB MB GB TB FPS '
+  + 'LLM CPU GPU HEVC AAC CTR CPC CPM CPA CPV CPL ROAS ROI KPI KPIS QR POV ASMR AR VR LTV SKU SKUS SAAS USP PR CEO CMO IP NSFW VO SFX '
+  + 'DTC LUT RGB HEX DPI HTTP HTTPS WWW TTS OCR TOS GDPR CCPA PII IAB ISBN EAN UPC GTIN ASIN UTM GA GTM TV ' 
+  + 'ACTIVE PAUSED ARCHIVED DELETED ENABLED ENABLE DISABLE DISABLED REMOVED PENDING DRAFT LIVE INACTIVE PUBLIC PRIVATE UNLISTED '
+  + 'DAILY LIFETIME CAROUSEL NONE ON OFF GET POST PUT PATCH DELETE AUTO MANUAL').split(' '));
+// A brand name written in capitals for emphasis comes back in its own spelling, not lowered.
+const APP_CASE_PROPER = Object.freeze({ youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', meta: 'Meta', google: 'Google', linkedin: 'LinkedIn', reddit: 'Reddit', pinterest: 'Pinterest', threads: 'Threads', snapchat: 'Snapchat', hermoso: 'Hermoso', chatgpt: 'ChatGPT', openai: 'OpenAI', shopify: 'Shopify', canva: 'Canva', notion: 'Notion', onedrive: 'OneDrive', drive: 'Drive', bing: 'Bing', microsoft: 'Microsoft', amazon: 'Amazon', apple: 'Apple', stripe: 'Stripe', hubspot: 'HubSpot' });
+const APP_CASE_ALWAYS = new Set(['OR', 'AND', 'NOT']); // emphasis words that are also enum-ish: lowered only inside a capitals run
+export function appWidgetPlainCase(text) {
+  const s = String(text);
+  return s.replace(/\b[A-Z][A-Z’']*[A-Z]\b(?:[ -][A-Z](?:[A-Z’']*[A-Z])?\b)*/g, (run, off) => {
+    const prev = s[off - 1] || '', next = s[off + run.length] || '';
+    if (/['"`=]/.test(prev) || /['"`]/.test(next)) return run; // a value the caller passes
+    const words = run.split(/([ -])/);
+    const inRun = words.filter((w) => /[A-Z]/.test(w)).length > 1;
+    const out = words.map((w) => (/^[ -]$/.test(w) ? w : (APP_CASE_KEEP.has(w.replace(/[’']S$/, '')) && !(inRun && APP_CASE_ALWAYS.has(w)) ? w : (APP_CASE_PROPER[w.toLowerCase().replace(/[’']s$/, '')] ? APP_CASE_PROPER[w.toLowerCase().replace(/[’']s$/, '')] + (/[’']S$/.test(w) ? w.slice(-2).toLowerCase() : '') : w.toLowerCase())))).join('');
+    if (out === run) return run;
+    const before = s.slice(0, off);
+    const starts = off === 0 || /(?:[.!?:]\s+|\n\s*|^\s*)$/.test(before);
+    return starts ? out.charAt(0).toUpperCase() + out.slice(1) : out;
+  });
+}
 export function defForApp(def, app, directory, name, widget = false) {
   if (!app || directory || !def || typeof def !== 'object') return def;
   const nz = appNeutral(app);
@@ -4241,10 +4306,12 @@ export function defForApp(def, app, directory, name, widget = false) {
   const { neutral } = nz;
   const renamed = (txt) => { let x = String(txt); for (const [from, to] of Object.entries(APP_WIDGET_RENAMES)) x = x.replace(new RegExp('\\b' + from + '\\b', 'g'), to); return x; };
   const edit = APP_WIDGET_DESC_EDITS[name]; // on every host of a focused app: these sentences compare or point at another app
-  const d0 = typeof def.description === 'string' ? (edit ? def.description.replace(edit[0], edit[1]) : def.description) : def.description;
+  const d0 = typeof def.description === 'string' ? (edit ? (Array.isArray(edit[0]) ? edit : [edit]).reduce((x, [re, to]) => x.replace(re, to), def.description) : def.description) : def.description;
   const d1 = typeof d0 === 'string' ? neutral(renamed(d0), name, typeof def.title === 'string' ? def.title : undefined) : d0;
   const lead = APP_DESC_LEADS[appBaseName(name)];
-  const d = typeof d1 === 'string' && lead && !/^Use this (when|to)\b/i.test(d1) ? `${lead} ${d1}` : d1; // a description that already leads with its use keeps it
+  const d2 = typeof d1 === 'string' && lead && !/^Use this (when|to)\b/i.test(d1) ? `${lead} ${d1}` : d1; // a description that already leads with its use keeps it
+  // A vendor endpoint path is plumbing, not a description ("Organic YouTube keyword search (/v1/youtube/search)").
+  const d = widget && typeof d2 === 'string' ? appWidgetPlainCase(d2.replace(/ \(\/v\d+\/[^)\s]*\)/g, '')) : d2;
   const hint = widget && APP_WIDGET_HINTS[name];
   let shape = def.inputSchema, shapeChanged = false;
   const fix = (k, v) => { const pd = v && typeof v.description === 'string' ? v.description : null; const nd = pd === null ? null : neutral(pd, name, paramFallback(k)); return nd !== null && nd !== pd && typeof v.describe === 'function' ? v.describe(nd) : null; };
@@ -4257,7 +4324,8 @@ export function defForApp(def, app, directory, name, widget = false) {
     for (const [k, v] of Object.entries(shape.shape)) { const nv = fix(k, v); if (nv) { over[k] = nv; shapeChanged = true; } }
     if (shapeChanged) shape = shape.extend(over);
   }
-  o = d === def.description && !shapeChanged && !hint ? def : { ...def, description: d, ...(shapeChanged ? { inputSchema: shape } : {}), ...(hint ? { annotations: { ...(def.annotations || {}), ...hint } } : {}) };
+  const t2 = widget && APP_WIDGET_TITLE_EDITS[name];
+  o = d === def.description && !shapeChanged && !hint && !t2 ? def : { ...def, description: d, ...(t2 ? { title: t2 } : {}), ...(shapeChanged ? { inputSchema: shape } : {}), ...((hint || t2) ? { annotations: { ...(def.annotations || {}), ...(hint || {}), ...(t2 ? { title: t2 } : {}) } } : {}) };
   memo.set(def, o);
   return o;
 }
@@ -17832,8 +17900,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // Stripe test mode until switched on, and pay_campaign_creators recordOnly covers a creator paid another way meanwhile.
   server.group('channel_admin');
   const ccMoney = (c) => `$${((c || 0) / 100).toFixed(2)}`;
-  const ccLine = (c) => `• ${c.name} [${c.id}] ${c.status} · ${c.payout} · ${c.platforms.join(', ')}${c.pageUrl ? ` · page ${c.pageUrl}` : ''}${c.budgetCents ? ` · ${ccMoney(c.earnedCents)} of ${ccMoney(c.budgetCents)} budget earned` : ''} · ${c.creators.active} creators${c.creators.pending ? ` (+${c.creators.pending} waiting)` : ''} · ${c.posts.total} posts (${c.posts.pendingReview} to review, ${c.posts.approved} approved, ${c.posts.views.toLocaleString('en-US')} approved views) · held ${ccMoney(c.money.held)}, payable ${ccMoney(c.money.payable)}, paid ${ccMoney(c.money.paid)}`;
-  const ccPost = (s) => `• [${s.id}] ${s.status.replace('_', ' ')} · ${s.platform} @${s.handle || '?'} · ${s.metrics?.views != null ? `${s.metrics.views.toLocaleString('en-US')} views` : 'views hidden'}${s.authenticity ? ` · authenticity ${s.authenticity.score}/100` : ''}${(s.flags || []).length ? ` · flags: ${s.flags.join(', ')}` : ''}${s.creator ? ` · ${s.creator}` : ''}${s.earnedCents ? ` · earned ${ccMoney(s.earnedCents)}` : ''} · ${s.url}${s.readError ? ` (last read failed: ${s.readError})` : ''}`;
+  const ccLine = (c) => `• ${c.name} [${c.id}] ${c.status}${c.unread ? ` · ${c.unread} new` : ''} · ${c.payout} · ${c.platforms.join(', ')}${c.pageUrl ? ` · page ${c.pageUrl}` : ''}${c.visibility && c.visibility !== 'unlisted' ? ` · ${c.visibility}${c.listing ? ` (marketplace: ${c.listing.state})` : ''}` : ''}${c.budgetCents ? ` · ${ccMoney(c.earnedCents)} of ${ccMoney(c.budgetCents)} budget earned` : ''} · ${c.creators.active} creators${c.creators.pending ? ` (+${c.creators.pending} waiting)` : ''} · ${c.posts.total} posts (${c.posts.pendingReview} to review, ${c.posts.approved} approved, ${c.posts.views.toLocaleString('en-US')} approved views) · held ${ccMoney(c.money.held)}, payable ${ccMoney(c.money.payable)}, paid ${ccMoney(c.money.paid)}`;
+  const ccPost = (s) => `• [${s.id}] ${s.status.replace('_', ' ')} · ${s.platform} @${s.handle || '?'} · ${s.metrics?.views != null ? `${s.metrics.views.toLocaleString('en-US')} views` : 'views hidden'}${s.authenticity ? ` · authenticity ${s.authenticity.score}/100` : ''}${(s.flags || []).length ? ` · flags: ${s.flags.join(', ')}` : ''}${s.creator ? ` · ${s.creator}` : ''}${s.earnedCents ? ` · earned ${ccMoney(s.earnedCents)}` : ''} · ${s.url}${s.readError ? ` (last read failed: ${s.readError})` : ''}${(s.comments || []).length ? `\n    last in thread (${s.comments.at(-1).by}): ${String(s.comments.at(-1).text).slice(0, 160)}` : ''}`;
   const CC_ECON = z.object({
     type: z.enum(['cpm', 'flat', 'pool']).describe('cpm = per 1,000 verified views; flat = per approved post; pool = a fixed amount split by views at close'),
     ratePer1kUsd: z.number().optional().describe('cpm: what 1,000 verified views earn, e.g. 1.5'),
@@ -17859,9 +17927,17 @@ function buildTools(rawServer, opts = {}, sink = null) {
     caps: z.object({ maxParticipants: z.number().optional(), maxAccountsPerParticipant: z.number().optional(), maxSubmissionsPerParticipant: z.number().optional() }).optional(),
     requirements: z.object({ disclosure: z.boolean().optional().describe('flag posts with no #ad / paid-partnership label (default true)'), hashtags: z.array(z.string()).optional(), mentions: z.array(z.string()).optional(), dos: z.array(z.string()).optional(), donts: z.array(z.string()).optional() }).optional().describe('what each post should carry; a missing hashtag, mention or label is flagged for you, never auto-rejected'),
     // THE SIGN-UP PAGE (2026-11-19): what creators see at the join link and app.hermoso.ai/join/<slug>.
-    page: z.object({ logoUrl: z.string().optional(), coverUrl: z.string().optional(), accentColor: z.string().optional().describe('hex, e.g. #1a73e8'), tagline: z.string().optional(), examples: z.array(z.object({ url: z.string(), note: z.string().optional() })).optional().describe('up to 8 example posts, images or videos') }).optional().describe('sign-up page look: https image links (upload_file makes one); starts with the brand\'s logo and colour; only sent fields change'),
+    page: z.object({ logoUrl: z.string().optional(), coverUrl: z.string().optional(), accentColor: z.string().optional().describe('hex, e.g. #1a73e8'), tagline: z.string().optional(), examples: z.array(z.object({ url: z.string(), note: z.string().optional() })).optional().describe('up to 8 example posts, images or videos'), blocks: z.array(z.object({ type: z.enum(['section', 'image', 'video', 'faq', 'html']), title: z.string().optional(), body: z.string().optional(), url: z.string().optional().describe('image: https; video: a YouTube/Vimeo/TikTok/Loom/Instagram link or an mp4'), alt: z.string().optional(), caption: z.string().optional(), items: z.array(z.object({ q: z.string(), a: z.string() })).optional().describe('faq'), html: z.string().optional().describe('sanitized: no scripts, forms, styles or event handlers; iframes only for the video players above') })).optional().describe('up to 20 page blocks in order; replaces the list'), theme: z.object({ font: z.enum(['system', 'geist', 'inter', 'dm-sans', 'manrope', 'space-grotesk', 'playfair', 'lora']).optional(), radius: z.number().optional().describe('0-28 px'), pageColor: z.string().optional(), cardColor: z.string().optional(), textColor: z.string().optional() }).optional() }).optional().describe('sign-up page look: https image links (upload_file makes one); starts with the brand\'s logo and colour; only sent fields change'),
     questions: z.array(z.object({ id: z.string().optional().describe('keep to keep its answers'), label: z.string(), type: z.enum(['short_text', 'long_text', 'single_choice', 'multi_choice', 'yes_no', 'url', 'number']).optional(), required: z.boolean().optional(), options: z.array(z.string()).optional() })).optional().describe('up to 10 questions creators answer when joining; replaces the list'),
     slug: z.string().optional().describe('page address app.hermoso.ai/join/<slug>; "" removes it'),
+    usageRights: z.object({ adsDays: z.number().describe('1 to 730 days after approval; 0 removes'), platforms: z.array(z.enum(['meta', 'tiktok'])).optional(), note: z.string().optional() }).optional().describe('how long you may run approved posts as ads; shown on the join page and accepted by each creator on joining'),
+    requireDraftApproval: z.boolean().optional().describe('creators upload a draft (up to 500 MB) for your approval before posting'),
+    notifyCreators: z.boolean().optional().describe('email a creator when their post or draft is approved, rejected or sent back'),
+    visibility: z.enum(['private', 'unlisted', 'public']).optional().describe('private = personal invites only; unlisted (default) = anyone with the link; public = also listed in the creator marketplace (needs a payment method on file; a brand\'s first public campaign is reviewed by Hermoso)'),
+    requireConnected: z.boolean().optional().describe('creators must connect each account by signing in on the platform (TikTok, Instagram, X, Threads); typed handles refused'),
+    autoAccept: z.object({ minFollowers: z.number().optional().describe('on a connected account'), platforms: z.array(z.string()).optional() }).nullable().optional().describe('with joinApproval manual: creators who match the campaign\'s niches and countries and reach minFollowers join automatically; null turns it off'),
+    niches: z.array(z.string()).optional().describe('up to 5 categories the campaign is for (marketplace listing, filters, auto-accept), e.g. beauty, fitness, tech, food, gaming'),
+    countries: z.array(z.string()).optional().describe('2-letter countries the campaign is for (marketplace, auto-accept); empty = anywhere'),
   };
   server.registerTool('create_creator_campaign', {
     title: 'Create a creator campaign',
@@ -17896,14 +17972,21 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return ok(`${ccLine(d.campaign)}\nBrief: ${d.campaign.brief || '(none)'}\nCreators:\n${cr.join('\n') || '(none yet)'}\nLatest posts:\n${d.submissions.slice(0, 20).map(ccPost).join('\n') || '(none yet)'}\nPayments:\n${(d.batches || []).slice().sort((x, y) => y.createdAt - x.createdAt).slice(0, 10).map(ccBatch).join('\n') || '(none yet)'}`, d);
     }
     const d = await apiGet('/api/creator-campaigns', a.status ? { status: a.status } : {});
-    return ok(`${d.campaigns.length ? d.campaigns.map(ccLine).join('\n') : 'No creator campaigns yet (create_creator_campaign).'}\nPayouts through Hermoso: ${d.payouts.on ? `on (${d.payouts.mode} mode)` : d.payouts.why} Fee ${d.terms.feePercent}% per creator payment (at least $${d.terms.feeMinUsd.toFixed(2)}), plus Stripe's costs, each shown before you pay: one payment processing line whatever you pay with; card held ${d.terms.cardHoldDays} days, or bank debit from a Canadian business bank account at a discount, held ${d.terms.bankHoldDays ?? 14} days once it clears. Each post read costs ${d.terms.readCredits} credit${d.terms.readCredits === 1 ? '' : 's'}.`, d);
+    const tt = d.totals; const tl = tt && tt.campaigns ? `All campaigns: ${tt.live} live of ${tt.campaigns} · ${ccMoney(tt.earnedCents)} earned${tt.budgetCents ? ` of ${ccMoney(tt.budgetCents)} open budget` : ''} · ${tt.approvedViews.toLocaleString('en-US')} approved views${tt.costPer1kViewsCents != null ? ` (${ccMoney(tt.costPer1kViewsCents)} per 1,000)` : ''} · ${tt.postsToReview} posts${tt.draftsToReview ? ` + ${tt.draftsToReview} drafts` : ''} to review · ${tt.creatorsActive} creators${tt.creatorsPending ? ` (+${tt.creatorsPending} waiting)` : ''} · held ${ccMoney(tt.held)}, payable ${ccMoney(tt.payable)}, paid ${ccMoney(tt.paid)}\n` : '';
+    return ok(`${tl}${d.campaigns.length ? d.campaigns.map(ccLine).join('\n') : 'No creator campaigns yet (create_creator_campaign).'}\nPayouts through Hermoso: ${d.payouts.on ? 'on.' : d.payouts.why} Fee ${d.terms.feePercent}% per creator payment (at least $${d.terms.feeMinUsd.toFixed(2)}), plus Stripe's costs, each shown before you pay: one payment processing line whatever you pay with; card held ${d.terms.cardHoldDays} days, or bank debit from a Canadian business bank account at a discount, held ${d.terms.bankHoldDays ?? 14} days once it clears. Each post read costs ${d.terms.readCredits} credit${d.terms.readCredits === 1 ? '' : 's'}.`, d);
   }));
   server.registerTool('creator_campaign_link', {
     title: 'Get a creator campaign link',
-    description: 'Without displayName: a fresh OPEN join link for the campaign (anyone with it can join; making a new one turns the old one off). With displayName (and optional email and accounts): invites ONE creator and returns their PERSONAL link, where they add accounts, submit posts and see earnings; a personal invite skips approval. Send the link yourself; Hermoso does not message creators.',
-    inputSchema: { campaignId: z.string(), displayName: z.string().optional(), email: z.string().optional(), accounts: z.array(z.object({ platform: z.enum(['tiktok', 'instagram', 'youtube', 'facebook', 'x', 'threads']), handle: z.string() })).optional().describe('the accounts they post from, if you know them') },
+    description: 'Without displayName: a fresh OPEN join link for the campaign (anyone with it can join; making a new one turns the old one off). With displayName (and optional email and accounts): invites ONE creator and returns their PERSONAL link, where they add accounts, submit posts and see earnings; a personal invite skips approval, and a creator with a Hermoso creator portal sees it there. With creators (up to 25, e.g. find_creators results as they come back): a personal link and a ready-to-send message for each; one already in the campaign is skipped by name. HEADLESS SIGN-UP (your own sign-up page): embed:true returns the widget script, an iframe and the public sign-up endpoint; signup { displayName, email, accounts, answers } returns a confirmUrl where the creator agrees and joins (agreements are always the creator\'s own clicks, never sent). Hermoso sends nothing itself (email_campaign_creator emails one when asked).',
+    inputSchema: { campaignId: z.string(), creators: z.array(z.object({ displayName: z.string().optional(), name: z.string().optional(), platform: z.string().optional(), handle: z.string().optional(), email: z.string().optional() })).optional().describe('invite several at once, e.g. find_creators rows'), displayName: z.string().optional(), email: z.string().optional(), accounts: z.array(z.object({ platform: z.enum(['tiktok', 'instagram', 'youtube', 'facebook', 'x', 'threads']), handle: z.string() })).optional().describe('the accounts they post from, if you know them'), embed: z.boolean().optional().describe('the widget / iframe / endpoint to put the sign-up on your own site'), signup: z.object({ displayName: z.string(), email: z.string(), accounts: z.array(z.object({ platform: z.string(), handle: z.string() })).optional(), answers: z.record(z.string(), z.any()).optional() }).optional().describe('sign a creator up from your own form: returns the confirmUrl they finish on') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, wrap(async (a) => { const d = a.displayName ? await apiPost('/api/creator-campaigns/creators', a) : await apiPost('/api/creator-campaigns/invite-link', { campaignId: a.campaignId }); return ok(`${d.note}${a.displayName ? '' : `\n${d.url}${d.pageUrl ? `\nSign-up page: ${d.pageUrl}` : ''}`}`, d); }));
+  }, wrap(async (a) => {
+    if (a.embed) { const d = await apiGet('/api/creator-campaigns/embed', { campaignId: a.campaignId }); return ok(`${d.note}\nWidget: ${d.widget}\nIframe: ${d.iframe}\nEndpoint: POST ${d.endpoint.url} with ${JSON.stringify(d.endpoint.body)} → ${d.endpoint.answers}\nPage: ${d.pageUrl}`, d); }
+    if (a.signup) { const d = await apiPost('/api/creator-campaigns/signup', { campaignId: a.campaignId, ...a.signup }); return ok(`${d.note}\nconfirmUrl: ${d.confirmUrl}`, d); }
+    if (Array.isArray(a.creators)) { const d = await apiPost('/api/creator-campaigns/creators', a); return ok(`${d.note}${d.invited.map((i) => `\n• ${i.displayName}: ${i.url}\n  Message: ${i.inviteText}`).join('')}`, d); }
+    const d = a.displayName ? await apiPost('/api/creator-campaigns/creators', a) : await apiPost('/api/creator-campaigns/invite-link', { campaignId: a.campaignId });
+    return ok(`${d.note}${a.displayName ? '' : `\n${d.url}${d.pageUrl ? `\nSign-up page: ${d.pageUrl}` : ''}\nA message to share it with: ${d.inviteText}`}`, d);
+  }));
   server.registerTool('review_campaign_creator', {
     title: 'Approve, deny, suspend, reinstate or remove a campaign creator',
     description: 'Decide on a creator in a campaign: approve or deny one waiting to join (joinApproval manual), suspend (their posts stop counting and they are skipped by payouts) or reinstate one, or remove one (earnings already approved stay theirs). read_creator_campaigns with campaignId shows the ids.',
@@ -17917,9 +18000,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiGet('/api/creator-campaigns/submissions', a); return ok(`${d.total} post${d.total === 1 ? '' : 's'}.${d.submissions.length ? `\n${d.submissions.map(ccPost).join('\n')}` : ''}${d.nextOffset ? `\nMore: offset ${d.nextOffset}.` : ''}`, d); }));
   server.registerTool('review_campaign_post', {
-    title: 'Approve or reject a submitted campaign post',
-    description: 'Approve a submitted post (it earns under the campaign\'s payout model; earnings are held, then payable) or reject it with a reason the creator sees (anything it earned and was not yet paid is cancelled). Hermoso never rejects on its own; the score and flags are there to help you decide.',
-    inputSchema: { submissionId: z.string(), action: z.enum(['approve', 'reject']), reason: z.string().optional().describe('required to reject; the creator sees it') },
+    title: 'Approve, reject or give feedback on a campaign post',
+    description: 'Approve a submitted post (it earns under the campaign\'s payout model; earnings are held, then payable), reject it with a reason (anything it earned and was not yet paid is cancelled), request_changes (say what to change; atSecond points at a moment in the video; the creator replies when it is done and it comes back for review), or comment. Everything lands in the post\'s feedback thread on the creator\'s page, and the creator is emailed (several updates within a few minutes go as one email). Hermoso never rejects on its own.',
+    inputSchema: { submissionId: z.string(), action: z.enum(['approve', 'reject', 'request_changes', 'comment']), reason: z.string().optional().describe('required to reject; the creator sees it'), comment: z.string().optional().describe('what to change, or the comment'), atSecond: z.number().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/submissions/review', a); return ok(d.note, d); }));
   server.registerTool('add_campaign_post', {
@@ -17944,6 +18027,34 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (a.confirm !== true) { const d = await apiPost('/api/creator-campaigns/payouts/preview', a); return ok(`PREVIEW, nothing charged. ${d.note}${d.items.length ? `\n${d.items.map((i) => `• ${i.displayName} [${i.participantId}]: ${ccMoney(i.cents)} + ${ccMoney(i.feeCents)} Hermoso fee + ${ccMoney(i.costCents || 0)} Stripe costs`).join('\n')}` : ''}${d.skipped.length ? `\nSkipped: ${d.skipped.map((s) => `${s.participantId} (${ccMoney(s.cents)}, ${s.why})`).join('; ')}` : ''}${d.mode.on ? `\nTo pay, call again with confirm:true, acceptTerms:true, method "${d.method || 'card'}" and expectTotalCents ${d.totalCents} once the user agrees to that total.` : `\n${d.mode.why} Mark a creator paid another way with recordOnly.`}`, d); }
     const d = await apiPost('/api/creator-campaigns/payouts', a);
     return ok(`${d.note}${d.url ? `\nPay here: ${d.url}` : ''}`, d);
+  }));
+  server.registerTool('creator_campaign_report', {
+    title: 'Creator campaign report (CSV too)',
+    description: 'One campaign\'s report: spend against budget, posts, approved views, cost per 1,000 views, each creator\'s posts, views, earnings and payout status, top posts and the authenticity spread. format "csv" returns it as CSV (rows "creators" or "posts", money in US dollars) plus a download link. Read-only, free.',
+    inputSchema: { campaignId: z.string(), format: z.enum(['text', 'csv']).optional(), rows: z.enum(['creators', 'posts']).optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet('/api/creator-campaigns/report', a); return ok(d.format === 'csv' ? `${d.note} Download (signed in): ${d.downloadUrl}\n\n${d.csv}` : d.text, d); }));
+  server.registerTool('promote_campaign_post', {
+    title: 'Run an approved creator post as a paused ad',
+    description: 'Run an APPROVED campaign post as an ad, from the creator\'s own code. Instagram / Facebook post: a Meta partnership ad on a new paused campaign + ad set (adCode = the creator\'s partnership ad code: post ▸ ⋯ ▸ Partnership label and ads ▸ Ad code). TikTok post: a Spark Ad in an existing ad group (adCode = the creator\'s Spark authorization code; adgroupId required). Created PAUSED and read back; nothing spends until switched on. Without confirm:true, a preview that builds nothing. Says whether the usage rights the creator accepted cover it.',
+    inputSchema: { submissionId: z.string(), adCode: z.string().optional(), confirm: z.boolean().optional(), name: z.string().optional(), adAccountId: z.string().optional().describe('Meta'), dailyBudgetUsd: z.number().optional().describe('Meta, in the ad account\'s currency (default 10)'), country: z.string().optional().describe('Meta: 2-letter country'), objective: z.string().optional(), link: z.string().optional(), cta: z.string().optional(), advertiserId: z.string().optional().describe('TikTok'), adgroupId: z.string().optional().describe('TikTok: the ad group to add it to'), adText: z.string().optional(), landingPageUrl: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/submissions/promote', a); return ok(d.note, d); }));
+  server.registerTool('email_campaign_creator', {
+    title: 'Email a campaign creator their invite or a fresh link',
+    description: 'Email ONE campaign creator from Hermoso\'s address, only when the user asks: kind "invite" (the invite with their personal link) or "link" (a fresh personal link; the old one stops working). Needs their email (pass email to add one). At most 3 a day to one creator; one who unsubscribed is refused.',
+    inputSchema: { participantId: z.string(), kind: z.enum(['invite', 'link']).optional(), email: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/creators/email', a); return ok(d.note, d); }));
+  server.registerTool('campaign_drafts', {
+    title: 'Review creator drafts before they post',
+    description: 'Drafts creators uploaded for approval before posting (a campaign with requireDraftApproval). No action: lists them with file links and comments. With draftId + action: approve, request_changes (comment required; atSecond points at a moment in the video), reject (reason) or comment. The creator sees comments on their link.',
+    inputSchema: { campaignId: z.string().optional(), status: z.enum(['pending_review', 'changes_requested', 'approved', 'rejected']).optional(), draftId: z.string().optional(), action: z.enum(['approve', 'request_changes', 'reject', 'comment']).optional(), comment: z.string().optional(), atSecond: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const line = (x) => { const v = x.versions.at(-1); return `• [${x.id}] ${x.status.replace('_', ' ')} · ${x.creator} · version ${v?.n ?? 0}${v ? ` (${v.kind}, ${(v.bytes / 1048576).toFixed(1)} MB${v.deleted ? ', file deleted after 30 days' : v.url ? `, ${v.url}` : ''})` : ''}${x.comments.length ? ` · last comment (${x.comments.at(-1).by}): ${x.comments.at(-1).text.slice(0, 160)}` : ''}`; };
+    if (a.action) { const d = await apiPost('/api/creator-campaigns/drafts/review', a); return ok(`${d.note}\n${line(d.draft)}`, d); }
+    const d = await apiGet('/api/creator-campaigns/drafts', a); return ok(d.drafts.length ? d.drafts.map(line).join('\n') : 'No drafts.', d);
   }));
   // ---------- Intercom (2026-10-19): the brand's OWN support inbox, the same routes the Studio tools call ----------
   // Studio had these ten tools from 2026-10-12 and MCP/CLI had none (find_tools "intercom" found nothing): web-only is a
@@ -29797,6 +29908,7 @@ function memoryNoteVerdict(text) {
         watch: z.boolean().optional().describe('weekly competitor-watch email'),
         autopilot: z.boolean().optional().describe('posts ready for review'),
         weeklyPosts: z.boolean().optional().describe('weekly email about your posts'),
+        creatorActivity: z.boolean().optional().describe('creator campaign digest'),
         all: z.boolean().optional().describe('master switch; off = only sign-in and billing emails arrive'),
       }).optional().describe('email switches by group; pass only the ones you are changing'),
     },
@@ -30400,7 +30512,7 @@ function memoryNoteVerdict(text) {
       confirm: z.boolean().optional().describe('REQUIRED true'),
     },
     outputSchema: { ok: z.boolean().optional(), email: z.string().optional(), role: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } /* own workspace only (2026-11-19) */,
   }, wrap(async (a) => {
     if (a.confirm !== true) return ok(`This will set ${a.email || '(no email)'} to ${a.role}. Confirm with the user, then call again with confirm:true.`, { ok: false });
     // Naming somebody who is not a member 404s server-side and surfaces as an error here. On success the role we
@@ -31031,7 +31143,7 @@ function memoryNoteVerdict(text) {
     if (!(d.creators || []).length) return ok(`${d.summary} Nobody passed the floors — widen the niche, lower minAvgViews / minEngagement, or add platforms.`, d);
     const lines = d.creators.map(c => `• @${c.handle} (${c.platform})${c.name && c.name !== c.handle ? ` — ${c.name}` : ''}: ${c.posts} post${c.posts === 1 ? '' : 's'} in this niche, median ${fmt(c.medianPlays)} views, ${c.engagementRate == null ? 'engagement unknown' : `${(100 * c.engagementRate).toFixed(1)}% engagement`}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}, score ${c.score}${c.top?.link ? ` — top: ${c.top.link}` : ''}${c.profileUrl ? ` — ${c.profileUrl}` : ''}`);
     const mk = d.marketplace && (d.marketplace.creators || []).length ? `\nInstagram creator marketplace:\n${d.marketplace.creators.map(c => `• @${c.handle}${c.followers != null ? `, ${fmt(c.followers)} followers` : ''}${c.country ? `, ${c.country}` : ''}${c.email ? `, ${c.email}` : ''}`).join('\n')}` : '';
-    return ok(`${d.note}\n${lines.join('\n')}${mk}`, d);
+    return ok(`${d.note}\n${lines.join('\n')}${mk}\nTo invite any of them to a creator campaign: creator_campaign_link with campaignId and creators (these rows: displayName, platform, handle).`, d);
   }));
   // TOPIC SEARCH (2026-09-15: search a named brand, "but not their ads themselves, just posts about them … similarly
   // just broad things like coffee"): the posts ABOUT a subject from anyone, all three organic platforms in one call.
@@ -32522,7 +32634,7 @@ function memoryNoteVerdict(text) {
     description: "Before any paid render: does a picture or video contain a face, and which video models refuse it (they cannot take a real person's face; a render there fails after it starts) or were measured to take one, plus the model a face-bearing render is routed to. A local detector, no model call, 0 credits. It cannot tell a photo from a drawing, so a drawn face counts. Takes a picture or video URL, a Library item or a public post link. A file or Library item is free; a TikTok / Reel / Facebook / X post link is opened through one paid lookup (1 credit), refused when the account has no credits.",
     inputSchema: { url: z.string().describe('the picture or video to check') },
     outputSchema: { face: z.string().optional(), best: z.number().nullable().optional(), refuse: z.array(z.any()).optional(), accept: z.array(z.any()).optional(), route: z.any().optional(), summary: z.string().optional() },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false /* a post link is one paid lookup (2026-11-19) */, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async ({ url }) => {
     const r = await apiPost('/api/face/check', { url });
     const d = r?.data || r;
@@ -32749,7 +32861,7 @@ function memoryNoteVerdict(text) {
     title: 'List the product catalog',
     description: "The brand's product catalog: each product's id, title, page link, price (and whether it is current), photos, its own selling points and audience, and when it was last checked against its live page. Free. `refresh:'stale'` re-reads rows older than a day first, `refresh:'all'` re-reads every page. Use the ids with make_static_ads.",
     inputSchema: { refresh: z.enum(['stale', 'all']).optional().describe("re-read product pages before listing: 'stale' (older than a day) or 'all'"), brandId: z.string().optional().describe('a profile id/name from list_brands; omit for the active profile') },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true /* refresh overwrites the stored rows (2026-11-19) */, idempotentHint: true, openWorldHint: true },
   }, wrap(async ({ refresh, brandId }) => {
     if (brandId) await activeBrand(brandId);
     const d = await apiGet(`/api/products${refresh ? `?refresh=${refresh}` : ''}`);
