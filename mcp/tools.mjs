@@ -591,7 +591,7 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
   creators: [
     "Hermoso Creator Campaigns runs the brand's creator (UGC / clipping) campaigns, where the brand pays creators for posts about it: set up a campaign, invite creators, review their posts and read the results.",
     '• CAMPAIGNS: create_creator_campaign (made as a draft), update_creator_campaign (edit, or set it active, paused or closed), read_creator_campaigns, preview_creator_campaign.',
-    '• CREATORS: creator_campaign_link (join link, or invite one or many), email_campaign_creator, review_campaign_creator; find_creators, find_instagram_marketplace_creators and discover_tiktok_creators find creators to invite.',
+    '• CREATORS: creator_campaign_link (join link, or invite one or many), email_campaign_creator, review_campaign_creator; find_instagram_marketplace_creators and discover_tiktok_creators search the creator marketplaces of connected accounts.',
     '• POSTS: list_campaign_posts, review_campaign_post (approve, reject or request changes, with feedback), add_campaign_post, refresh_campaign_views; promote_campaign_post previews or builds a paused ad from an approved post.',
     '• RESULTS: creator_campaign_report (CSV too).',
     'PAYMENTS: this app shows what creators are owed and never pays them; the brand pays from the Hermoso app. Creators join through their own link and sign-in; their agreements are their own clicks.',
@@ -4332,8 +4332,9 @@ export function appScopeHas(app, name, group, directory = false) {
 }
 // THE CREATOR CAMPAIGNS APP, BY CATEGORY (2026-11-20). Every tool written in the creator campaigns block joins it (a new
 // one added there needs no second edit), and so does a read-only creator search on a connected platform (a name with
-// "creator" or "marketplace" in research, channel_admin or ads: the Instagram creator marketplace, TikTok One) and the
-// research group's find_creators. Money movement is held out on every host (WIDGET_MONEY_MOVEMENT_TOOLS): the brand
+// "creators" or "marketplace" in channel_admin or ads: the Instagram creator marketplace, TikTok One). find_creators
+// (research: scrapes public posts and returns contact details) stays out, after OpenAI's first scan held it with the
+// marketplace tools for further review (2026-11-20); the full connection keeps it. Money movement is held out on every host (WIDGET_MONEY_MOVEMENT_TOOLS): the brand
 // pays creators from the Hermoso app or the full connection, never from this app.
 // A creator search: a plural "creators" name, a creator marketplace, or TikTok One's creator labels, leaderboard and
 // status. tiktok_creator_info (the connected account's own posting options) is a Social tool and does not match.
@@ -4341,7 +4342,7 @@ const APP_CREATORS_FINDER = /creators(_|$)|marketplace|creator_(labels|leaderboa
 function appCreatorsHas(n, group) {
   if (WIDGET_MONEY_MOVEMENT_TOOLS.includes(n)) return false;
   if (toolSection(n) === 'creator_campaigns') return true;
-  return (group === 'research' || group === 'channel_admin' || group === 'ads') && APP_CREATORS_FINDER.test(n) && (group === 'research' || toolReadOnly(n));
+  return (group === 'channel_admin' || group === 'ads') && APP_CREATORS_FINDER.test(n) && toolReadOnly(n);
 }
 export const toolHeldBackByApp = (name, group, ctx) => !!ctx?.app && (!appScopeHas(ctx.app, name, group, ctx.directory) || (!!ctx.widgetHost && appWidgetUnlisted(name)));
 // On a ChatGPT app a description that points at a tool of ANOTHER app would send the model to a tool it does not hold
