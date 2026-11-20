@@ -4186,6 +4186,8 @@ export const APP_WIDGET_HINTS = Object.freeze({
   amazon_ads_report: { readOnlyHint: false, idempotentHint: false }, manage_x_ads_conversion_events: { destructiveHint: true },
   // 2026-11-20 scan of Social Media Manager: an update overwrites the agent's live prompt and voice.
   update_voice_agent: { destructiveHint: true },
+  // and the next rescan: an SMS opt-out stops all messages to that number; a LinkedIn reaction is public on the post.
+  set_sms_opt_out: { destructiveHint: true }, react_to_linkedin_post: { destructiveHint: true },
 });
 const APP_WIDGET_DESC_EDITS = Object.freeze({
   bing_webmaster_traffic: [/ Bing is a smaller share of search than Google, but its index is what Copilot and ChatGPT web search read from, so this is the answer-engine visibility read rather than a second traffic report\./, ''],
@@ -4216,6 +4218,7 @@ const APP_WIDGET_DESC_EDITS = Object.freeze({
   save_creator: [[/ — the headless twin of the app.s \+ > Pick a creator > save\./i, '.']],
   reply_to_inbox_item: [[/X is the one exception and says so: a reply there/i, 'On X a reply']],
   post_to_meta: [[/Works with any media, an ad made here or the user.s own file: imageUrl/i, 'imageUrl']],
+  post_to_pinterest: [[/ from any finished visual they have — image/i, ': an image'], [/ The link is what makes a Pin drive traffic, so ask for it rather than omitting it, and the description is the text Pinterest search actually reads\./i, ' Ask the user for the destination link; Pinterest search reads the description.']],
   search_reddit: [[/ \(\/v1\/reddit\/search, top-ranked\) — a goldmine for the customer's OWN words/, " (top-ranked posts), to find the customer's own words"]],
   search_tiktok: [[/ \(there is NO TikTok ad library\)/, '']],
   make_thumbnail: [[/ Use it for any "thumbnail", "video cover" or MrBeast-style packaging ask INSTEAD of generate_image\./, ' Use this when the user asks for a video thumbnail or a video cover.']],
@@ -31006,7 +31009,7 @@ function memoryNoteVerdict(text) {
   // different products depending on which tool filled it. It is a parameter rather than a per-call-site edit
   // so a new source cannot forget it silently; a row that already carries its own platform keeps it, because
   // research_ads legitimately mixes FACEBOOK and TIKTOK in one answer.
-  const adsOut = async (label, total, items, note = '', platform = '') => {
+  const adsOut = async (label, total, items, note = '', platform = '', extra = null) => {
     // THE CARD IS THE PICTURE ON A WIDGET HOST, AND THE MODEL STOPS CARRYING THE URLs (2026-08-24). imageBlock
     // already answers null on a widget host, so the base64 blocks were gone and NOTHING replaced them — a wall of
     // numbered links and no images. Now the ad-spy card shows the creative, and the two places the giant signed CDN
@@ -31021,16 +31024,16 @@ function memoryNoteVerdict(text) {
     const blocks = [];
     for (const [r, blk] of await Promise.all(pictureRows(items).map(async (r) => [r, await imageBlock(r.url).catch(() => null)]))) if (blk) blocks.push({ type: 'text', text: r.caption }, blk);
     const links = widget ? [] : items.slice(0, 6).map((x, i) => (x && (x.media || x.image || x.cover)) ? `ad ${i + 1}: ${x.media || x.image || x.cover}` : null).filter(Boolean);
-    const guide = items.length ? '' : '\n\nNo advertiser matched that name. Product LINES are usually advertised by their PARENT brand\u2019s page \u2014 resolve the parent company first (the product\u2019s website footer, or your web search) and retry with that companyName; also try `query` (keyword search across ALL advertisers\u2019 ad copy) and status \u201cALL\u201d (includes past ads). Never conclude a brand runs no ads from a single name miss.';
+    const guide = typeof extra?.guide === 'string' ? extra.guide : items.length ? '' : '\n\nNo advertiser matched that name. Product LINES are usually advertised by their PARENT brand\u2019s page \u2014 resolve the parent company first (the product\u2019s website footer, or your web search) and retry with that companyName; also try `query` (keyword search across ALL advertisers\u2019 ad copy) and status \u201cALL\u201d (includes past ads). Never conclude a brand runs no ads from a single name miss.';
     const rows = widget ? stripAdMedia(items) : items;
     const text = JSON.stringify({ found: total, showing: items.length, [label]: rows }) + (links.length ? '\n\nTop creative URLs (give the user these as clickable links):\n' + links.join('\n') : '') + note + guide;
-    return { content: [{ type: 'text', text }, ...blocks], structuredContent: { found: total, [label]: rows, ...(widget ? adSpyBlock(label, total, cards) : {}) } };
+    return { content: [{ type: 'text', text }, ...blocks], structuredContent: { found: total, [label]: rows, ...(extra?.structured || {}), ...(widget ? adSpyBlock(label, total, cards) : {}) } };
   };
 
   server.registerTool('search_meta_ads', {
     _meta: openaiMeta(AD_SPY_URI, 'Searching Meta ads…', 'Found Meta ads'),
     title: 'Search Meta ads',
-    description: "Structured Meta (Facebook/Instagram) Ad Library pull — use when you know exactly WHAT to fetch: a keyword (query) OR one advertiser (companyName / pageId). Returns compact JSON {page_name, body, cta, link, dates, media} per ad. For open-ended research that needs judgment across platforms, use research_ads instead. Spends credits on each ad-library read it makes: one for a keyword; for a brand name, the page lookup and its ads (plus a keyword search when that page has none).",
+    description: "Structured Meta (Facebook/Instagram) Ad Library pull — use when you know exactly WHAT to fetch: a keyword (query) OR one advertiser (companyName / pageId). Returns compact JSON {page_name, body, cta, link, dates, media} per ad. For open-ended research that needs judgment across platforms, use research_ads instead. Spends credits on each ad-library read it makes: one for a keyword; for a brand name, the page lookup and its ads. An advertiser search returns ONLY that advertiser's ads: when no page can be confirmed as the brand it returns none, plus the similarly named pages (pass one's pageId, or the brand's domain).",
     inputSchema: {
       query: z.string().optional().describe('keyword search across ALL advertisers (use INSTEAD of companyName/pageId)'),
       companyName: z.string().optional().describe('one advertiser’s ads by brand name — resolved to the brand’s own page only on evidence (its Instagram, its domain, or ads that land on its domain); pass domain too for the best match'),
@@ -31044,6 +31047,7 @@ function memoryNoteVerdict(text) {
     outputSchema: {
       found: z.number().optional().describe('total ads found upstream'),
       ads: z.array(z.any()).optional().describe('the compact ad objects ({page_name, body, cta, link, dates, media})'),
+      advertiser: z.any().optional().describe('companyName searches only: {name, pageId, confirmed:true} for the page whose ads these are, or {confirmed:false, candidates:[{pageId, name, instagram, likes}]} when none could be confirmed (no ads returned)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   }, wrap(async (a) => {
@@ -31052,17 +31056,28 @@ function memoryNoteVerdict(text) {
     // ADVERTISER-MISS AUTO-FALLBACK (2026-07-21, the "Flourish Pancakes" case): the page resolver demands a
     // high-confidence match and refuses ambiguous names — but the ads are usually findable by KEYWORD search
     // across ad copy. A name miss now retries as query automatically instead of dead-ending the agent.
-    let d = null, note = '';
+    let d = null, note = '', guide, advertiser;
     if (a.query) d = await apiGet('/api/fb/search', { query: a.query, ...common });
     else {
       // resolve:'1' — the server resolves the name through the SAME evidence-gated resolver as pull_competitor_ads, so a
       // name can no longer land on a stranger's page ("Buffer" → "BufferMoney", 2026-10-19). Unconfirmed → zero results.
-      try { d = await apiGet('/api/fb/company-ads', qp({ companyName: a.companyName, pageId: a.pageId, domain: a.pageId ? undefined : a.domain, resolve: a.pageId ? undefined : '1', ...common })); } catch (e) { d = null; }
-      if (!((d && (d.results || d.searchResults)) || []).length && a.companyName) {
-        d = await apiGet('/api/fb/search', { query: a.companyName, ...common });
-        if (((d && d.searchResults) || []).length) note = '\n\nNote: no advertiser PAGE matched that name confidently, so these are KEYWORD-search results across all advertisers (verify the page_name matches the brand you meant; a product line often advertises under its parent brand).';
+      d = (await apiGet('/api/fb/company-ads', qp({ companyName: a.companyName, pageId: a.pageId, domain: a.pageId ? undefined : a.domain, resolve: a.pageId ? undefined : '1', ...common }))) || {};
+      // AN ADVERTISER SEARCH ANSWERS WITH THAT ADVERTISER'S ADS OR WITH NOTHING (2026-11-20). "Olipop" through the
+      // Activepieces piece came back with Whirlpool's ads first: the page WAS found, it had no ads under the step's
+      // filters, and the empty answer fell through to a keyword search across every advertiser, labelled "no page
+      // matched". A found page with no ads is now said to be exactly that, and an unconfirmed name lists the pages
+      // it could be. A keyword search runs only when the caller asks for one with `query`.
+      const m = d.matched || null;
+      if (m && a.companyName && !a.pageId) advertiser = qp({ name: m.name, pageId: m.pageId, confirmed: !!m.confident, evidence: m.evidence || undefined });
+      const filt = [a.status && a.status !== 'ALL' ? `status ${a.status}` : '', a.mediaType && a.mediaType !== 'ALL' ? `media ${a.mediaType}` : '', a.country && a.country.toUpperCase() !== 'ALL' ? `country ${a.country.toUpperCase()}` : ''].filter(Boolean);
+      if (!(d.results || []).length && a.companyName && !a.pageId) {
+        if (m && m.confident) guide = `\n\nFound ${m.name}'s Meta page (pageId ${m.pageId}), and it has no ads${filt.length ? ` matching ${filt.join(', ')}` : ''}. Widen ${filt.length ? 'those filters (status ALL, mediaType ALL, country ALL)' : 'to status ALL'} to see more. These results are only ever that advertiser's own ads.`;
+        else {
+          const cands = ((m && m.candidates) || []).map((c) => qp({ pageId: c.pageId, name: c.name, instagram: c.igUsername || undefined, likes: c.likes || undefined }));
+          if (advertiser) advertiser = { confirmed: false, candidates: cands };
+          guide = `\n\nNo Meta page could be confirmed as “${a.companyName}”${a.domain ? ` (${a.domain})` : ''}, so no ads are returned: another advertiser's ads are never shown under that name.${cands.length ? ` Pages with a similar name: ${cands.map((c) => `${c.name}${c.instagram ? ` (@${c.instagram})` : ''} pageId ${c.pageId}`).join('; ')}.` : ''} To get one brand's ads, retry with its pageId, or pass the brand's website as domain so its own page can be confirmed. To search ad COPY across all advertisers instead, pass query (every row says which advertiser ran it).`;
+        }
       }
-      if (!d) d = {};
     }
     const raw = d.results || d.searchResults || []; // company-ads → results[], keyword search → searchResults[]
     // SAY WHICH PAGE A NAME RESOLVED TO. companyName is a free-text match on the ad-library side: "Okara" resolved to a
@@ -31079,7 +31094,7 @@ function memoryNoteVerdict(text) {
     // the reply gave no way to tell them apart. Each row now says whether its advertiser page IS the searched name, the
     // brand's own pages sort first, and the note says how many are other advertisers. Rows are never dropped: a
     // collab or a reseller's ad can be exactly what the user wants.
-    const kwQuery = a.query || (note ? a.companyName : '');
+    const kwQuery = a.query || ''; // an advertiser search never runs one (above), so only `query` is ever a keyword search
     const { ordered, otherCount } = kwQuery ? orderKeywordAds(raw, kwQuery) : { ordered: raw, otherCount: 0 };
     if (otherCount) note += `\n\nNote: this is a KEYWORD search across ALL advertisers' ad copy — ${otherCount} of the ${raw.length} ads fetched were run by OTHER advertisers (rows with from_other_advertiser:true), not by “${kwQuery}”. Their pictures show THEIR creative; always attribute an ad to its page_name. For ${kwQuery}'s own ads use companyName/pageId.`;
     const ads = ordered.slice(0, nAds(a.limit)).map((x) => {
@@ -31092,7 +31107,7 @@ function memoryNoteVerdict(text) {
         thumb: s.videos?.[0]?.video_preview_image_url || s.images?.[0]?.resized_image_url || s.cards?.[0]?.resized_image_url, // always an IMAGE url when one exists — feeds the markdown gallery (a video url can't render inline)
       });
     });
-    return adsOut('ads', d.searchResultsCount ?? raw.length, ads, note, 'facebook');
+    return adsOut('ads', d.searchResultsCount ?? raw.length, ads, note, 'facebook', { guide, structured: advertiser ? { advertiser } : {} });
   }));
 
   server.registerTool('search_google_ads', {
