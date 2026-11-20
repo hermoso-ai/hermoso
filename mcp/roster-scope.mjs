@@ -299,7 +299,7 @@ export const CANVA_DARK_TOOLS = Object.freeze(['save_to_canva', 'list_canva_desi
 // approved Hermoso's Amazon Ads API access, so CONNECTOR_GATES.amazon_ads is shut (AMAZON_ADS_API_APPROVED unset) and these
 // are no capability for a customer yet: not counted, not documented, not on a roster. Lit PER CALLER exactly like Canva:
 // server.js flagsOnNow names them for a workspace already holding an Amazon Ads connection and for the gate's team pass.
-export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 'list_amazon_ads_campaigns', 'create_amazon_ads_campaign', 'create_amazon_ads_ad_group', 'add_amazon_ads_keywords', 'create_amazon_ads_product_ads', 'set_amazon_ads_status', 'set_amazon_ads_budget', 'update_amazon_ads_object', 'delete_amazon_ads_object', 'amazon_ads_report']);
+export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 'list_amazon_ads_campaigns', 'create_amazon_ads_campaign', 'create_amazon_ads_ad_group', 'add_amazon_ads_keywords', 'create_amazon_ads_product_ads', 'set_amazon_ads_status', 'set_amazon_ads_budget', 'update_amazon_ads_object', 'delete_amazon_ads_object', 'amazon_ads_report', 'add_amazon_ads_targets', 'create_amazon_ads_portfolio', 'amazon_ads_recommendations', 'check_amazon_ads_product_eligibility']);
 // THE EMAIL TOOLS SHIP DARK WITH THE TWO MAILBOX CONNECTORS (2026-11-15). Email from the customer's own mailbox is
 // built. CONNECTOR_GATES.gmail waits on Google verifying the gmail.send scope; CONNECTOR_GATES.outlook OPENED in production
 // on 2026-11-15 (OUTLOOK_MAIL_ENABLED=1, after a live send, a real reply and a real bounce were each watched), so the
