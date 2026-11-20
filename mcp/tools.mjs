@@ -18261,11 +18261,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     poolUsd: z.number().optional(),
     minViewsToEarn: z.number().optional(),
     maxPayoutPerPostUsd: z.number().optional().describe('the most one post earns'),
+    minPayoutPerPostUsd: z.number().optional(),
+    maxPayoutPerCreatorUsd: z.number().optional(),
     platformRatesUsd: z.record(z.string(), z.number()).optional().describe('a per-1,000 rate per platform, e.g. {"tiktok": 3}'),
     // THE MONEY PASS (2026-11-20): parts that combine with the ones above (never with a pool); each needs budgetUsd
     retainer: z.object({ monthlyUsd: z.number(), months: z.number().optional().describe('how many months; none = while they stay in'), minPostsPerMonth: z.number().optional().describe('approved posts a month needs to pay') }).optional().describe('a fixed amount per creator per month, paid after each month ends, prorated for a partial month'),
     commission: z.object({ percent: z.number().optional().describe('of each sale the creator brings in'), perSaleUsd: z.number().optional(), windowDays: z.number().optional().describe('1-90, default 30: how long after a click on their link a sale counts (a code always counts)'), lockDays: z.number().optional().describe('0-90, default 30: your return window before commission is payable'), attribution: z.enum(['both', 'code', 'link']).optional() }).optional().describe('a share of each sale credited to the creator: their code at checkout, else their tracking link on the last visit (Shopify and Stripe are read automatically; record other sales with creator_campaign_sales)'),
     adSpendShare: z.object({ percent: z.number() }).optional().describe('a share of what you spend running the creator\'s approved post as an ad (promote_campaign_post)'),
+    platformBudgetsUsd: z.record(z.string(), z.number()).optional(),
   });
   const CC_FIELDS = {
     name: z.string().optional().describe('what creators see the campaign called'),
