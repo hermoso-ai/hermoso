@@ -294,7 +294,10 @@ const isTransport = (e) => !!e && e.name === 'TypeError' && TRANSPORT_RE.test(St
 // plain-text 502/503/504 (a rollover seen from outside); a write does not, because those can come back after the app
 // already had the request. Waits are env-tunable so a check can run the real loop in milliseconds.
 export const FRONT_DOOR_WAITS_MS = [2000, 5000, 10000];
-const frontDoorWaits = () => { const v = String(process.env.HERMOSO_FRONT_DOOR_WAITS_MS || '').split(',').map(Number).filter((n) => Number.isFinite(n) && n >= 0); return v.length ? v : FRONT_DOOR_WAITS_MS; };
+// AN UNSET VARIABLE IS NOT A ZERO-MS WAIT (2026-11-19, oa:4948a78cd254). ''.split(',') is [''] and Number('') is 0, so with
+// the variable unset this returned [0] — one immediate resend instead of the 2s/5s/10s above, in every real process
+// (only the checks set it). Measured on prod: a user's CLI resent a read 140ms after the first answer and gave up.
+export const frontDoorWaits = (raw = process.env.HERMOSO_FRONT_DOOR_WAITS_MS) => { const s = String(raw ?? '').trim(); if (!s) return FRONT_DOOR_WAITS_MS; const v = s.split(',').map((x) => x.trim()).filter((x) => x !== '').map(Number).filter((n) => Number.isFinite(n) && n >= 0); return v.length ? v : FRONT_DOOR_WAITS_MS; };
 /** Did the PLATFORM refuse this before it reached the app? Pure: our routes always answer JSON. */
 export function isFrontDoorRefusal(status, contentType, { read = false } = {}) {
   const st = Number(status);

@@ -3366,6 +3366,7 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   promote_campaign_post: CC_WIDGET_WHY,
   email_campaign_creator: CC_WIDGET_WHY,
   campaign_drafts: CC_WIDGET_WHY,
+  preview_creator_campaign: CC_WIDGET_WHY,
   submit_tiktok_ads_verification: 'it sends a legal name and a government ID or business licence number, which are entered in TikTok Ads Manager instead',
   merchant_issue_help: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
   trigger_merchant_issue_action: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
@@ -4167,7 +4168,7 @@ export const APP_WIDGET_ALIAS_OF = Object.freeze({});
 const APP_WIDGET_TITLES = Object.freeze({});
 const APP_WIDGET_DESCRIPTIONS = Object.freeze({});
 // A title OpenAI's scan read as inconsistent with the tool (2026-11-19: create_tiktok_ads_rule, "(created turned OFF)").
-export const APP_WIDGET_TITLE_EDITS = Object.freeze({ create_tiktok_ads_rule: 'Create a TikTok automated rule', create_tiktok_ads_campaign: 'Create a TikTok campaign (paused)', bing_webmaster_keywords: 'Bing keyword research' });
+export const APP_WIDGET_TITLE_EDITS = Object.freeze({ reply_to_inbox_item: 'Reply to an inbox item', create_tiktok_ads_rule: 'Create a TikTok automated rule', create_tiktok_ads_campaign: 'Create a TikTok campaign (paused)', bing_webmaster_keywords: 'Bing keyword research' });
 // OPENAI'S FIRST SCAN OF THE TWO NEW APPS (2026-11-06) gave stated reasons on tools ChatGPT had never listed before. On a
 // ChatGPT app (widget host) only: the hint OpenAI read as wrong is corrected, a sentence that compares us with other
 // products is dropped, and the three bulk tools that take an operations list ("operations that are not individually
@@ -4183,6 +4184,8 @@ export const APP_WIDGET_HINTS = Object.freeze({
   microsoft_ads_report: { readOnlyHint: false, idempotentHint: false }, list_products: { destructiveHint: true },
   // 2026-11-19 scan of Ads Manager: Amazon builds a report job at Amazon on the first call (reportId), like Microsoft's.
   amazon_ads_report: { readOnlyHint: false, idempotentHint: false }, manage_x_ads_conversion_events: { destructiveHint: true },
+  // 2026-11-20 scan of Social Media Manager: an update overwrites the agent's live prompt and voice.
+  update_voice_agent: { destructiveHint: true },
 });
 const APP_WIDGET_DESC_EDITS = Object.freeze({
   bing_webmaster_traffic: [/ Bing is a smaller share of search than Google, but its index is what Copilot and ChatGPT web search read from, so this is the answer-engine visibility read rather than a second traffic report\./, ''],
@@ -4202,6 +4205,17 @@ const APP_WIDGET_DESC_EDITS = Object.freeze({
   create_openai_ads_feed: [[/ inventoryType 'hotel' asks for a hotel property feed instead, which OpenAI accepts only for advertisers in its hotel beta and refuses for everyone else\./i, " inventoryType 'hotel' requests a hotel property feed; OpenAI only accepts it for advertisers it has admitted to hotel feeds."]],
   create_tiktok_ads_campaign: [[/ Created PAUSED and there is no override, and TikTok is the one platform where that is not the vendor.s own behaviour: TikTok creates ENABLED by default, so Hermoso forces operation_status DISABLE and overrides a caller who asks for ENABLE\./i, ' It is created paused (operation_status DISABLE), also when the caller asks for ENABLE.'], [/ and is TikTok.s restriction rather than a Hermoso fault/i, " and is TikTok's restriction"]],
   delete_tiktok_ads_object: [[/ — removal is modelled as a status, exactly like Reddit — so this posts/i, ': removal is a status, so this posts']],
+  // 2026-11-20 review of Social Media Manager: ranking and "twin" wording.
+  like_instagram: [[/The cheapest engagement a brand does: /i, '']],
+  list_youtube_captions: [[/Downloading is also the fastest way to get an existing video.s full script back for repurposing\./i, "Downloading also returns an existing video's full script for repurposing."]],
+  search_linkedin_ad_library: [[/ That last one is the cheapest way to learn what not to write\./i, '']],
+  x_user: [[/The research twin of `x_account` \(which reads your connected account\): use this/i, 'Reads any public X account (x_account reads the connected one): use this']],
+  reply_to_tiktok_comment: [[/ — TikTok.s twin of reply_to_meta_comment and reply_to_youtube_comment\./i, '.']],
+  tiktok_account_insights: [[/ This is TikTok.s twin of instagram_insights and youtube_channel_report\./i, '']],
+  save_to_swipefile: [[/ — the headless twin of the heart on every ad card in the web app\./i, '.']],
+  save_creator: [[/ — the headless twin of the app.s \+ > Pick a creator > save\./i, '.']],
+  reply_to_inbox_item: [[/X is the one exception and says so: a reply there/i, 'On X a reply']],
+  post_to_meta: [[/Works with any media, an ad made here or the user.s own file: imageUrl/i, 'imageUrl']],
   search_reddit: [[/ \(\/v1\/reddit\/search, top-ranked\) — a goldmine for the customer's OWN words/, " (top-ranked posts), to find the customer's own words"]],
   search_tiktok: [[/ \(there is NO TikTok ad library\)/, '']],
   make_thumbnail: [[/ Use it for any "thumbnail", "video cover" or MrBeast-style packaging ask INSTEAD of generate_image\./, ' Use this when the user asks for a video thumbnail or a video cover.']],
@@ -4238,7 +4252,13 @@ export const APP_WIDGET_UNLISTED = new Set(['microsoft_ads_bulk_download', 'micr
   'manage_google_ads_labels', 'manage_google_ads_bid_strategy', 'manage_google_ads_recommendations', 'manage_google_ads_assets',
   'manage_google_ads_audience', 'upload_google_ads_video', 'manage_google_ads_seasonality', 'manage_microsoft_ads_negative_keyword_list',
   'manage_x_ads_conversion_events', 'manage_pinterest_ads_keywords', 'manage_pinterest_ads_targeting_template', 'manage_pinterest_ads_promotion',
-  'manage_tiktok_ads_negative_keywords', 'manage_snapchat_ads_lead_webhook']);
+  'manage_tiktok_ads_negative_keywords', 'manage_snapchat_ads_lead_webhook',
+  // 2026-11-20 (OpenAI review of Social Media Manager 1.0.2: "solicits sensitive personal data"): tools whose arguments are
+  // credentials (a SIP password, a feed or link password, an API key) or identity and tax records (an EIN, a business
+  // registration or tax id, ID-document requirements). Set up in the Hermoso app; the all-in-one app keeps them.
+  'register_sms_brand', 'register_sms_campaign', 'submit_tollfree_verification', 'attach_voice_agent_number', 'manage_pinterest_catalog_feed',
+  'share_onedrive_file', 'send_openai_ads_conversions', 'create_reddit_ads_product_feed', 'update_reddit_ads_catalog_object',
+  'create_tiktok_ads_account', 'list_tiktok_ads_verification_documents']);
 const appWidgetUnlisted = (name) => Object.prototype.hasOwnProperty.call(APP_WIDGET_RENAMES, name) || APP_WIDGET_UNLISTED.has(name);
 const appBaseName = (name) => APP_WIDGET_ALIAS_OF[name] || WIDGET_HOST_ALIAS_OF[name] || WIDGET_HOST_RETIRED_NAMES[name] || WIDGET_SPLIT_OF[name] || name;
 export function appScopeHas(app, name, group, directory = false) {
@@ -4281,6 +4301,10 @@ const APP_CASE_KEEP = new Set(('AI API APIS CLI MCP SDK URL URLS ID IDS UGC PDF 
 // A brand name written in capitals for emphasis comes back in its own spelling, not lowered.
 const APP_CASE_PROPER = Object.freeze({ youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', meta: 'Meta', google: 'Google', linkedin: 'LinkedIn', reddit: 'Reddit', pinterest: 'Pinterest', threads: 'Threads', snapchat: 'Snapchat', hermoso: 'Hermoso', chatgpt: 'ChatGPT', openai: 'OpenAI', shopify: 'Shopify', canva: 'Canva', notion: 'Notion', onedrive: 'OneDrive', drive: 'Drive', bing: 'Bing', microsoft: 'Microsoft', amazon: 'Amazon', apple: 'Apple', stripe: 'Stripe', hubspot: 'HubSpot' });
 const APP_CASE_ALWAYS = new Set(['OR', 'AND', 'NOT']); // emphasis words that are also enum-ish: lowered only inside a capitals run
+export const appWidgetNoConnectPointer = (t) => String(t)
+  .replace(/,? or you call connect_connector with provider \w+ \([^)]*\)/g, '')
+  .replace(/,? or with connect_connector,? with/g, ' with')
+  .replace(/connect_connector with provider \w+ and no fields returns the (?:install )?link/g, 'the user reconnects it under Connectors in the Hermoso app');
 export function appWidgetPlainCase(text) {
   const s = String(text);
   return s.replace(/\b[A-Z][A-Z’']*[A-Z]\b(?:[ -][A-Z](?:[A-Z’']*[A-Z])?\b)*/g, (run, off) => {
@@ -4311,7 +4335,9 @@ export function defForApp(def, app, directory, name, widget = false) {
   const lead = APP_DESC_LEADS[appBaseName(name)];
   const d2 = typeof d1 === 'string' && lead && !/^Use this (when|to)\b/i.test(d1) ? `${lead} ${d1}` : d1; // a description that already leads with its use keeps it
   // A vendor endpoint path is plumbing, not a description ("Organic YouTube keyword search (/v1/youtube/search)").
-  const d = widget && typeof d2 === 'string' ? appWidgetPlainCase(d2.replace(/ \(\/v\d+\/[^)\s]*\)/g, '')) : d2;
+  // connect_connector is not on a focused ChatGPT app and takes credentials, so no description sends the model to it
+  // (2026-11-20 review: "solicits sensitive personal data"): an account is connected under Connectors in the Hermoso app.
+  const d = widget && typeof d2 === 'string' ? appWidgetPlainCase(appWidgetNoConnectPointer(d2.replace(/ \(\/v\d+\/[^)\s]*\)/g, ''))) : d2;
   const hint = widget && APP_WIDGET_HINTS[name];
   let shape = def.inputSchema, shapeChanged = false;
   const fix = (k, v) => { const pd = v && typeof v.description === 'string' ? v.description : null; const nd = pd === null ? null : neutral(pd, name, paramFallback(k)); return nd !== null && nd !== pd && typeof v.describe === 'function' ? v.describe(nd) : null; };
@@ -18028,6 +18054,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/creator-campaigns/payouts', a);
     return ok(`${d.note}${d.url ? `\nPay here: ${d.url}` : ''}`, d);
   }));
+  server.registerTool('preview_creator_campaign', {
+    title: 'Preview a creator campaign as creators see it',
+    description: 'Short-lived, brand-only preview links (30 minutes) for every screen a creator sees: the join page, the invited creator\'s page, the creator\'s campaign view (with a sample post, feedback and a draft) and the marketplace card. Built from the saved campaign plus any unsaved settings in overrides (the same fields as update_creator_campaign). Nothing in a preview can be submitted, joined or agreed to; no creator, consent or email is made. Free.',
+    inputSchema: { campaignId: z.string(), view: z.enum(['join', 'invited', 'creator', 'market']).optional(), overrides: z.record(z.string(), z.any()).optional().describe('unsaved settings to try, e.g. { page: { theme: { font: "lora" } }, visibility: "public" }') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/preview', a); return ok(`${d.note}\n${Object.entries(d.views).map(([k, u]) => `${k}: ${u}`).join('\n')}`, d); }));
   server.registerTool('creator_campaign_report', {
     title: 'Creator campaign report (CSV too)',
     description: 'One campaign\'s report: spend against budget, posts, approved views, cost per 1,000 views, each creator\'s posts, views, earnings and payout status, top posts and the authenticity spread. format "csv" returns it as CSV (rows "creators" or "posts", money in US dollars) plus a download link. Read-only, free.',
