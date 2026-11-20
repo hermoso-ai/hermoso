@@ -607,11 +607,14 @@ export const MCP_INSTRUCTIONS_APP_DIRECTORY = Object.freeze({
 const APP_HOME_TEXT = (name, ctx) => {
   const g = ctx?.groupOf?.[name];
   const homes = APP_NAMES.filter((a) => !(ctx?.directory && a === 'create') && appScopeHas(a, name, g, ctx?.directory));
-  return homes.length ? homes.map((a) => APP_TITLES[a]).join(' or ') : 'the full Hermoso connection';
+  // Off ChatGPT the answer carries the connection URL too (2026-11-20): a title alone gave the user nothing to add.
+  const url = (a) => (!ctx?.widgetHost && appMcpUrl(a, ctx?.directory === 'scoped' ? 'scoped' : false)) || null;
+  return homes.length ? homes.map((a) => (url(a) ? `${APP_TITLES[a]} (${url(a)})` : APP_TITLES[a])).join(' or ') + (ctx?.widgetHost ? '' : `; every tool is on ${MCP_PUBLIC_URL}`) : (ctx?.widgetHost ? 'the full Hermoso connection' : `the full Hermoso connection, ${MCP_PUBLIC_URL}`);
 };
 // `opts.widgetHost` is the transport's own host decision (mcp/http.mjs isWidgetHost), the same one registerTools gets.
 // A focused app (scope.app) reads its own instructions on every host; nothing else changes.
-export const instructionsFor = (scope, opts = {}) => (scope && scope.app && MCP_INSTRUCTIONS_APP[scope.app] ? (scope.directory === 'scoped' ? (MCP_INSTRUCTIONS_APP_DIRECTORY[scope.app] || MCP_INSTRUCTIONS_DIRECTORY) : MCP_INSTRUCTIONS_APP[scope.app]) : (scope && scope.directory === 'scoped' ? MCP_INSTRUCTIONS_DIRECTORY : (opts && opts.widgetHost ? MCP_INSTRUCTIONS_WIDGET : MCP_INSTRUCTIONS)));
+// A focused app's instructions end with appHandoffLine: where a request outside the app is covered (2026-11-20).
+export const instructionsFor = (scope, opts = {}) => (scope && scope.app && MCP_INSTRUCTIONS_APP[scope.app] ? (scope.directory === 'scoped' ? (MCP_INSTRUCTIONS_APP_DIRECTORY[scope.app] || MCP_INSTRUCTIONS_DIRECTORY) : MCP_INSTRUCTIONS_APP[scope.app]) + '\n' + appHandoffLine(scope.app, { widgetHost: !!(opts && opts.widgetHost), directory: scope.directory === 'scoped' ? 'scoped' : false }, (opts && opts.env) || process.env) : (scope && scope.directory === 'scoped' ? MCP_INSTRUCTIONS_DIRECTORY : (opts && opts.widgetHost ? MCP_INSTRUCTIONS_WIDGET : MCP_INSTRUCTIONS)));
 // Inline the finished image so Claude RENDERS it in chat instead of just linking it (MCP image content block).
 // Skipped silently for huge files / fetch errors — the URL in the text always works.
 // Claude can't play video inline — attach the FIRST FRAME as an image block next to the link so the spot is
@@ -3463,6 +3466,9 @@ const executorLike = (name) => EXECUTOR_TOOLS.has(name) || WIDGET_GENERIC_PROXIE
 //      caller's own credits is metering, not a change to the environment the tool acts on, so a research read that
 //      bills stays read-only. destructiveHint is TRUE on draft_brand: save:true replaces the saved brand profile.
 export const EXECUTOR_TOOLS = new Set(['find_tools', 'call_tool', 'enable_tools']);
+// Listed on a FOCUSED APP (2026-11-20, see handoffAnswer): never on the all-in-one ChatGPT list (widgetHostHides), and held
+// out of the default list elsewhere on demand (ON_DEMAND_TOOLS: a focused app and ?tools=all enable every group, so they list it).
+export const APP_ONLY_TOOLS = new Set(['hermoso_other_capabilities']);
 export const WIDGET_HOST_RENAMES = Object.freeze({ clone_video: 'plan_video_remake', click_to_ad: 'plan_video_ad_from_product_link', delete_openai_ads_object: 'archive_openai_ads_object', make_from_preset: 'plan_video_from_preset', make_short: 'plan_short_video' }); // make_from_preset + make_short (2026-11-09 scan, "name appears promotional, exaggerated, or inconsistent with its behavior"): both PLAN and render nothing, render_ad makes the video // delete_openai_ads_object (2026-11-03 scan, "name … inconsistent with its behavior"): OpenAI has no delete, the tool ARCHIVES // click_to_ad: the scan (2026-10-27) read the name as promotional / not what it does — it PLANS the ad, render_ad makes it
 export const WIDGET_HOST_ALIAS_OF = Object.freeze(Object.fromEntries(Object.entries(WIDGET_HOST_RENAMES).map(([from, to]) => [to, from])));
 // A WIDGET-HOST NAME THAT WAS REPLACED, and the canonical tool it still runs. ChatGPT keeps the roster it last published
@@ -3717,13 +3723,13 @@ export const WIDGET_SPLIT_OF = Object.freeze(Object.fromEntries(Object.entries(W
 // Every name a widget host is never LISTED, whatever its scope. Pure, so the checks run it.
 // `app` (optional) is the focused app of the session: a tool that app offers (WIDGET_APP_OFFERS) is not hidden there.
 export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
-  ? ((WITHHELD_FROM_WIDGET_HOSTS.has(name) && !widgetAppOffers(name, app)) || EXECUTOR_TOOLS.has(name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RENAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RETIRED_NAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_SPLITS, name))
+  ? ((APP_ONLY_TOOLS.has(name) && !app) || (WITHHELD_FROM_WIDGET_HOSTS.has(name) && !widgetAppOffers(name, app)) || EXECUTOR_TOOLS.has(name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RENAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_RETIRED_NAMES, name) || Object.prototype.hasOwnProperty.call(WIDGET_HOST_SPLITS, name))
   : (Object.prototype.hasOwnProperty.call(WIDGET_HOST_ALIAS_OF, name) || Object.prototype.hasOwnProperty.call(WIDGET_SPLIT_OF, name)));
 // HELD OUT OF THE DEFAULT LIST ON SIZE, ALWAYS CALLABLE (2026-09-24): the open edit primitive carries a full
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images']); // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
+export const ON_DEMAND_TOOLS = new Set(['hermoso_other_capabilities', 'get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images']); // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -4180,6 +4186,151 @@ export const focusedConnectionsText = (ctx, widget = false) => {
     + rows.map((r) => `• ${APP_TITLES[r.a]}, ${r.url}: ${focusedConnectionLine(r.a)}`).join('\n')
     + `\nThey load fewer tools, which uses less of the AI's context. The user adds one as a separate connector in their AI app; this full connection keeps everything.`;
 };
+// ── WHERE THE REST OF HERMOSO IS, SAID INSIDE A FOCUSED APP (2026-11-20, the owner: "do we properly tell them how to get
+// the right plugin or MCP so they can get everything?") ───────────────────────────────────────────────────────────────
+// Measured before this: a focused ChatGPT app's instructions named no other app, no link and no URL, and it lists no
+// find_tools / call_tool (OpenAI's 2026-11-19 review removed the dynamic tools), so "post this to Instagram" inside Ads
+// Manager met a model that had never heard of Social Media Manager or the all-in-one app. On other hosts a guessed name
+// got "it is in Hermoso: Social Media Manager" with no way to add it.
+// Now every focused app lists hermoso_other_capabilities (static, read-only, runs nothing) and its instructions carry one
+// derived line. The answer is computed from the REAL rosters (replayTools over the canon, once per process): per area
+// (tool group), which surface lists it; on ChatGPT the order is a focused app that is PUBLISHED -> the all-in-one app
+// "Hermoso: AI Marketing Agent" (it does not hold every tool: ChatGPT caps a list at 1,000, and some tools are held out
+// of ChatGPT on policy) -> for what no ChatGPT app lists, https://app.hermoso.ai/mcp as a ChatGPT custom connector where
+// the plan allows one, or Claude / Cursor / Codex / the CLI / the web app, where every tool works. Pinned by
+// tools/app-handoff-check.mjs.
+// A tool kept under an OLD NAME beside its new one (same inputs and result): covered wherever the new name is.
+export const TOOL_OLD_NAMES = Object.freeze({ remix_static: 'clone_static' });
+// Registered tools that are not a feature to send anyone to: one that can only refuse (the vendor retired the endpoint)
+// and the generic store reader (each store has a typed tool).
+export const HANDOFF_NOT_A_FEATURE = new Set(['set_openai_ads_negative_keywords', 'store_get']);
+export const ALL_IN_ONE_CHATGPT_TITLE = 'Hermoso: AI Marketing Agent';
+// The ChatGPT app ids (platform.openai.com/plugins ▸ app ▸ Copy link). A focused app is linked only once it is
+// PUBLISHED: nobody can add an app still in review. HERMOSO_CHATGPT_APPS_PUBLISHED=create,ads,social names the published
+// ones (HERMOSO_CHATGPT_CREATE_PUBLISHED=1 still counts for create); read per call, so publishing needs no code change.
+export const CHATGPT_APP_IDS = Object.freeze({ all: 'plugin_asdk_app_6abde87d08048191b2ee7cda76721749', create: 'plugin_asdk_app_6aee494d54448191bfce04e45210a487', ads: 'plugin_asdk_app_6aee41978fe081919e59d8dfa9397a39', social: 'plugin_asdk_app_6aee41bde0788191a780b26d39df18af', creators: null }); // creators: not created on platform.openai.com yet (2026-11-20); its id goes here when it is
+export const CHATGPT_APPS_PUBLISHED_ENV = 'HERMOSO_CHATGPT_APPS_PUBLISHED';
+export const chatgptAppPublished = (app, env = process.env) => app === 'all' || (app === 'create' && chatgptCreatePublished(env)) || String(env?.[CHATGPT_APPS_PUBLISHED_ENV] ?? '').split(/[,\s]+/).map((s) => s.trim().toLowerCase()).includes(app);
+export const chatgptAppLink = (app) => (CHATGPT_APP_IDS[app] ? `https://chatgpt.com/plugins/${CHATGPT_APP_IDS[app]}` : null);
+// One short phrase per tool group, for the answer's "by area" lines. tools/app-handoff-check.mjs fails on a group without one.
+export const AREA_LABELS = Object.freeze({
+  core: 'account, credits, jobs and support', research: 'competitor ad and social research', create: 'AI image, video and voice ads',
+  channels: 'posting and scheduling', channel_admin: 'inbox, comments and channel analytics', analytics: 'website and business analytics',
+  ads: 'paid ad campaigns', files: 'Drive, Sheets, Docs, OneDrive, Notion and Canva files', workspace: 'brands, memory, saved creators, connectors and team',
+});
+// The groups an app is the home of (shared groups excluded): read off appScopeHas with a name no rule names, so a tool
+// carried by a per-tool exception (Spark Ads on Ads Manager) does not make the group the app's.
+export const appHomeGroups = (app, directory = false) => TOOL_GROUP_NAMES.filter((g) => !APP_SHARED_GROUPS.has(g) && appScopeHas(app, '__no_tool__', g, directory));
+// An app scoped by section rather than group (creators: the creator campaigns block) is home to no whole group; its own
+// title says what it covers.
+const appAreaWords = (app, directory = false) => appHomeGroups(app, directory).map((g) => AREA_LABELS[g]).join('; ') || APP_TITLES[app].replace(/^Hermoso:\s*/, '').toLowerCase();
+// The connection URL of an app on a host with no ChatGPT app: the app-* token, or the Claude directory token on the cage.
+const appMcpUrl = (app, directory) => {
+  if (!directory) return focusedConnectionUrl(app);
+  const tok = Object.keys(APP_SCOPE_TOKENS).find((k) => APP_SCOPE_TOKENS[k].app === app && APP_SCOPE_TOKENS[k].directory === directory);
+  return tok ? `${MCP_PUBLIC_URL}?tools=${tok}` : null;
+};
+export const HANDOFF_ELSEWHERE = `every Hermoso tool works in Claude, Cursor, Codex and other AI apps that add ${MCP_PUBLIC_URL}, from the Hermoso CLI (npx hermoso), in the Hermoso web app (https://app.hermoso.ai), and in ChatGPT itself on plans that allow adding a custom connector (developer mode), with ${MCP_PUBLIC_URL}`;
+// THE LINE IN EACH FOCUSED APP'S INSTRUCTIONS (instructionsFor). Pure: names, areas and links only, no roster.
+export const appHandoffLine = (app, { widgetHost = false, directory = false } = {}, env = process.env) => {
+  if (!app || !APP_NAMES.includes(app)) return '';
+  const others = APP_NAMES.filter((a) => a !== app && (widgetHost ? chatgptAppPublished(a, env) : !directory || appMcpUrl(a, directory)));
+  const lead = 'OUTSIDE THIS APP, tell the user which Hermoso app covers it (hermoso_other_capabilities lists all, with links).';
+  if (widgetHost) return [lead, ...others.map((a) => `${APP_TITLES[a]}: ${appAreaWords(a)}.`), `${ALL_IN_ONE_CHATGPT_TITLE} holds most of Hermoso in one ChatGPT app.`].join(' ');
+  // Off ChatGPT each sibling is the same URL plus its ?tools= token, so the base is said once (the line must fit ~2 KB).
+  return ['OUTSIDE THIS APP, tell the user which Hermoso connection covers it.', `Every tool: ${MCP_PUBLIC_URL}. Or the same URL plus:`, ...others.map((a) => `?tools=${appMcpUrl(a, directory).split('?tools=')[1]} (${APP_TITLES[a].replace(/^Hermoso:\s*/, '')}): ${appAreaWords(a, directory)}.`)].join(' ');
+};
+// The rosters each surface lists, from the canon this process already built (replayTools on a recording stub, no
+// network, no new canon). Memoized per kind + published set; null before the canon exists (it always does once a
+// session runs a tool).
+const _handoffCache = new Map();
+function handoffRosterNames(opts) {
+  const off = new Set(), all = [];
+  const stub = { registerTool: (n) => { all.push(n); return { get enabled() { return !off.has(n); }, disable() { off.add(n); }, enable() { off.delete(n); }, remove() {}, update() {} }; }, registerResource: () => ({}) };
+  replayTools(stub, { hosted: CANON_HOSTED, ...opts }, TOOL_CANON);
+  return new Set(all.filter((n) => !off.has(n)).map((n) => appBaseName(n)));
+}
+const handoffScopeOpts = (tok, widgetHost) => { const s = parseToolScope(tok); return { only: s.groups, directory: s.directory || false, ...(s.app ? { app: s.app } : {}), widgetHost }; };
+// kind: 'chatgpt' | 'mcp' | 'directory'. Returns { full:Set, surfaces:[{id, title, link, names:Set, here?}] }.
+export function handoffSurfaces(kind, env = process.env) {
+  if (!TOOL_CANON) return null;
+  const key = `${kind}|${APP_NAMES.filter((a) => chatgptAppPublished(a, env)).join(',')}`;
+  if (_handoffCache.has(key)) return _handoffCache.get(key);
+  const full = handoffRosterNames({ only: [...TOOL_GROUP_NAMES], widgetHost: false });
+  const surfaces = [];
+  if (kind === 'chatgpt') {
+    for (const a of APP_NAMES) {
+      const tok = Object.keys(APP_SCOPE_TOKENS).find((k) => k.startsWith('chatgpt-') && APP_SCOPE_TOKENS[k].app === a);
+      if (tok) surfaces.push({ id: a, title: APP_TITLES[a], link: chatgptAppPublished(a, env) ? chatgptAppLink(a) : null, published: chatgptAppPublished(a, env), names: handoffRosterNames(handoffScopeOpts(tok, true)) });
+    }
+    surfaces.push({ id: 'all', title: ALL_IN_ONE_CHATGPT_TITLE, link: chatgptAppLink('all'), published: true, names: handoffRosterNames({ only: null, widgetHost: true }) });
+  } else {
+    const directory = kind === 'directory' ? 'scoped' : false;
+    for (const a of APP_NAMES) {
+      const url = appMcpUrl(a, directory);
+      const tok = url && url.split('?tools=')[1];
+      if (tok) surfaces.push({ id: a, title: APP_TITLES[a], link: url, published: true, names: handoffRosterNames(handoffScopeOpts(tok, false)) });
+    }
+    surfaces.push({ id: 'all', title: 'the full Hermoso connection', link: MCP_PUBLIC_URL, published: true, names: full });
+  }
+  const out = { full, surfaces };
+  _handoffCache.set(key, out);
+  return out;
+}
+// THE ANSWER. A tool counts for a surface when that surface lists it (or, on ChatGPT, one of its renamed or split names).
+// On ChatGPT, unpublished focused apps are left out of the answer: the user cannot add them yet.
+export function handoffAnswer(ctx, env = process.env) {
+  const widgetHost = !!ctx?.widgetHost;
+  const kind = widgetHost ? 'chatgpt' : (ctx?.directory === 'scoped' ? 'directory' : 'mcp');
+  const S = handoffSurfaces(kind, env);
+  if (!S) return null;
+  const G = {}; for (const e of TOOL_CANON) G[e.name] = e.group;
+  const titleOf = {}; for (const e of TOOL_CANON) titleOf[e.name] = (e.def && (e.def.title || e.def.annotations?.title)) || e.name;
+  const here = ctx?.app || null;
+  const usable = S.surfaces.filter((s) => s.published || s.id === here);
+  // A second name on the SAME handler (remix_static for clone_static) is covered wherever its twin is.
+  const twins = new Map(); for (const e of TOOL_CANON) { if (!e.handler) continue; if (!twins.has(e.handler)) twins.set(e.handler, []); twins.get(e.handler).push(e.name); }
+  const twinsOf = {}; for (const e of TOOL_CANON) twinsOf[e.name] = [...((e.handler && twins.get(e.handler)) || [e.name]), ...(TOOL_OLD_NAMES[e.name] ? [TOOL_OLD_NAMES[e.name]] : [])];
+  const covers = (s, n) => twinsOf[n].some((m) => s.names.has(m) || s.names.has(appBaseName(m)));
+  const areas = [];
+  const uncovered = [];
+  for (const g of TOOL_GROUP_NAMES) {
+    const tools = [...S.full].filter((n) => G[n] === g && !APP_ONLY_TOOLS.has(n) && !HANDOFF_NOT_A_FEATURE.has(n));
+    if (!tools.length) continue;
+    const by = usable.map((s) => ({ id: s.id, title: s.id === here ? `${s.title} (this app)` : s.title, link: s.link, count: tools.filter((n) => covers(s, n)).length })).filter((x) => x.count);
+    const none = tools.filter((n) => !usable.some((s) => covers(s, n)));
+    areas.push({ area: g, label: AREA_LABELS[g] || g, tools: tools.length, surfaces: by });
+    // Core on ChatGPT is account, billing and the generic executor, which ChatGPT does not offer by rule; it is not a request
+    // a user brings to a focused app, so it is summarised rather than listed.
+    // Said by platform where the tools belong to one (leftOutLabel: "Slack", "SMS and calls (Twilio, Telnyx)"), by title otherwise.
+    if (none.length && !(widgetHost && g === 'core')) {
+      const fams = [...new Set(none.map((n) => toolProvider(n)).filter(Boolean))];
+      const famTools = (f) => tools.filter((n) => toolProvider(n) === f).length;
+      uncovered.push({ area: g, label: AREA_LABELS[g] || g, count: none.length,
+        platforms: fams.map((f) => { const k = none.filter((n) => toolProvider(n) === f).length; return k === famTools(f) ? `${leftOutLabel(f)} (all ${k})` : `${leftOutLabel(f)} (${k} of ${famTools(f)}: ${none.filter((n) => toolProvider(n) === f).map((n) => titleOf[n]).join(', ')})`; }),
+        tools: none.filter((n) => !toolProvider(n)).map((n) => titleOf[n]) });
+    }
+  }
+  const hereTitle = here ? APP_TITLES[here] : null;
+  const lines = [];
+  if (widgetHost) {
+    lines.push(`${hereTitle ? `This is ${hereTitle}. ` : ''}Where each part of Hermoso is in ChatGPT. This list runs nothing; tell the user which app to use for their request.`);
+    for (const s of usable) lines.push(`• ${s.id === here ? `${s.title} (this app)` : s.title}${s.link ? `, ${s.link}` : ''}: ${s.id === 'all' ? 'most of Hermoso in one app' : appAreaWords(s.id)}.`);
+  } else {
+    lines.push(`${hereTitle ? `This is ${hereTitle}${appMcpUrl(here, ctx?.directory || false) ? ` (${appMcpUrl(here, ctx?.directory || false)})` : ''}. ` : ''}Where each part of Hermoso is. This list runs nothing; tell the user which connection covers their request. Every tool is on the full connection, ${MCP_PUBLIC_URL}; the user adds a connection as a connector in their AI app.`);
+    for (const s of usable.filter((x) => x.id !== 'all')) lines.push(`• ${s.id === here ? `${s.title} (this app)` : s.title}, ${s.link}: ${appAreaWords(s.id, ctx?.directory || false)}.`);
+    if (ctx?.directory !== 'scoped') lines.push(`• In ChatGPT: ${ALL_IN_ONE_CHATGPT_TITLE}, ${chatgptAppLink('all')}.`);
+  }
+  lines.push('By area:');
+  for (const a of areas) lines.push(`• ${a.label} (${a.tools} tools): ${a.surfaces.map((x) => `${x.title} (${x.count < a.tools ? x.count : 'all'})`).join('; ') || 'none here'}.`);
+  if (uncovered.length) {
+    const n = uncovered.reduce((k, u) => k + u.count, 0);
+    lines.push(`Not in any Hermoso app in ChatGPT (${n} tools); ${HANDOFF_ELSEWHERE}:`);
+    for (const u of uncovered) lines.push(`• ${u.label}: ${[...u.platforms, ...u.tools].join('; ')}.`);
+  }
+  if (widgetHost) lines.push('The Hermoso account itself is managed at https://app.hermoso.ai.');
+  return { text: lines.join('\n'), data: { here: hereTitle, host: kind, surfaces: usable.map((s) => ({ title: s.title, link: s.link, tools: s.names.size, thisApp: s.id === here })), areas, notInChatGPT: widgetHost ? uncovered : [], fullConnection: MCP_PUBLIC_URL } };
+}
 const APP_SHARED_GROUPS = new Set(['core', 'workspace', 'files']);
 export const APP_SHARED_TOOLS = new Set(['upload_file', 'list_library', 'fetch_asset', 'delete_library_item', 'get_job', 'list_skills', 'get_skill', 'list_products', 'list_product_photos']);
 // Organic post readers and the week planner were written inside `create`; "how did my posts do" is a Social question.
@@ -7667,6 +7818,27 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _je = d.jobEngines; // the certified engine per job (watched side-by-side tests, 2026-10-19)
     const _jeLine = _je && _je.defaults ? `\nDefault engine per job (watched side-by-side tests): ${Object.entries(_je.defaults).map(([k, v]) => `${k} → ${v}`).join(', ')}; a talking ad is one take of up to ${_je.talkingMaxSeconds}s.${_je.image ? ` Image engine per generate_image job (used when no model is named): ${Object.entries(_je.image).filter(([, v]) => v).map(([k, v]) => `${k} → ${v}`).join(', ')}.` : ''} A model the user picks by name is kept; never switch it.` : '';
     const text = `Image: ${d.image ? img : 'unavailable'}\nVideo: ${d.video ? vid : 'unavailable'}\n${_lenLine}\nExtend a clip (generate_video extend:true + refVideo): by default it cuts to a NEW SHOT of what happens next (new angle, same scene, any i2v model, default ${d.jobEngines?.defaults?.extend || 'certified'})${_extLine ? `; extendMode:'continue' keeps the SAME take instead, on: ${_extLine}` : ''}${_shotLine ? `\nMulti-shot clips (generate_video shots): ${_shotLine}` : ''}${_rsLine ? `\nRestyle looks (restyle_video style): ${_rsLine}` : ''}${_rmLine}${_jeLine}\n${_pickLine}\n${_resLine}${d.pricing ? (hostRendersWidgets() ? `\nPRICES ABOVE ARE THIS ACCOUNT'S OWN.` : `\nPRICES ABOVE ARE THIS ACCOUNT'S OWN: ${d.pricing.memberRate ? 'no markup on image, video and voice models (exactly the model maker\'s price, 1 credit = $0.02; no fee is added to a run or at checkout)' : 'standard prices (every paid plan pays exactly the model maker\'s price on image, video and voice models; model rows carry memberCredits)'}.`) : ''}${_motionLine}${_avLine}\nMusic (generate_music, music beds): ${music}\nVoice engines (generate_voice): ${voice}${audioMore}\nWriting models (generate_text): ${llm}\nPRICES: every credit figure above is an estimate. ${PRICE_ESTIMATE_LINE}\n${START_FREE_LINE}\ncanEdit:${d.canEdit} canAvatar:${d.canAvatar}\nRecipes (${(d.recipes || []).length}): ${(d.recipes || []).slice(0, 20).map(r => r.id).join(', ')}…\n\n${CAPABILITY_MAP}`;    return ok(text + connLine + focusedConnectionsText(sctx, hostRendersWidgets()), d);
+  }), ctx));
+
+  // WHERE THE REST OF HERMOSO IS (2026-11-20) — see APP_ONLY_TOOLS / handoffAnswer. Listed on a focused app only
+  // (listedInCoreFirst), static per process, and it runs nothing: it reads the rosters this process already holds.
+  server.registerTool('hermoso_other_capabilities', {
+    title: 'Where each Hermoso feature is',
+    description: "Use this when the user asks for something this connection's tools do not cover, or asks which Hermoso app or connection does what. Returns each area of Hermoso (posting, paid ads, ad creation, research, analytics and the rest) with the Hermoso app or connection that covers it and its link, so you can tell the user where to do it. Read-only: it runs nothing and changes nothing.",
+    inputSchema: {},
+    outputSchema: {
+      here: z.string().nullable().optional().describe('the Hermoso app this connection is'),
+      host: z.string().optional().describe('chatgpt, mcp or directory: which kind of surfaces the answer names'),
+      surfaces: z.array(z.any()).optional().describe('each Hermoso app or connection the user can add here: title, link, tools'),
+      areas: z.array(z.any()).optional().describe('each area (tool group) with the surfaces that cover it and how many of its tools each lists'),
+      notInChatGPT: z.array(z.any()).optional().describe('on ChatGPT: the tools no Hermoso ChatGPT app lists, by area; they work on the full connection'),
+      fullConnection: z.string().optional().describe('the URL of the full connection, which lists every tool'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, sessionBound((sctx) => wrap(async () => {
+    const a = handoffAnswer(sctx);
+    if (!a) return ok(`Every Hermoso tool is on the full connection, ${MCP_PUBLIC_URL}; in ChatGPT, ${ALL_IN_ONE_CHATGPT_TITLE}: ${chatgptAppLink('all')}.`, { fullConnection: MCP_PUBLIC_URL });
+    return ok(a.text, a.data);
   }), ctx));
 
   server.registerTool('hermoso_credits', {
