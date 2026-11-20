@@ -3419,6 +3419,8 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   email_campaign_creator: CC_WIDGET_WHY,
   campaign_drafts: CC_WIDGET_WHY,
   bulk_invite_creators: CC_WIDGET_WHY, // 2026-11-20: listed by the Creator Campaigns focused app, like every creator tool
+  share_campaign_report: CC_WIDGET_WHY, // 2026-11-20, Whop parity: the public report link
+  creator_directory: CC_WIDGET_WHY, // 2026-11-20, Whop parity: the brand's creators across all campaigns
   preview_creator_campaign: CC_WIDGET_WHY,
   delete_creator_campaign: CC_WIDGET_WHY, // 2026-11-20: listed by the Creator Campaigns focused app, like every creator tool
   creator_campaign_sales: CC_WIDGET_WHY, // 2026-11-20 (the money pass): listed by the Creator Campaigns focused app, like every creator tool
@@ -18484,6 +18486,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { campaignId: z.string(), format: z.enum(['text', 'csv']).optional(), rows: z.enum(['creators', 'posts']).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiGet('/api/creator-campaigns/report', a); return ok(d.format === 'csv' ? `${d.note} Download (signed in): ${d.downloadUrl}\n\n${d.csv}` : d.text, d); }));
+  server.registerTool('share_campaign_report', {
+    title: 'Share a creator campaign report (public link)',
+    description: 'A public, read-only link to one campaign\'s report, or turn it off. on: make (or keep) the link; showCreators (names, posts, views; default true) and showMoney (earnings; default false) choose what it shows. Emails, handles and payout details never show. off: the link stops working for everyone.',
+    inputSchema: { campaignId: z.string(), action: z.enum(['on', 'off']), showCreators: z.boolean().optional(), showMoney: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/creator-campaigns/report/share', a); return ok(d.note, d); }));
+  server.registerTool('creator_directory', {
+    title: 'The brand\'s creators across all campaigns',
+    description: 'Every creator across the brand\'s campaigns: their campaigns, posts, approval rate, views, earnings, note and ban. action list (default; q searches); note (key + note); ban (key, optional reason: they cannot join, be invited to or submit to any of the brand\'s campaigns; earnings already made stay payable); unban (key). key comes from list.',
+    inputSchema: { action: z.enum(['list', 'note', 'ban', 'unban']).optional(), key: z.string().optional(), note: z.string().optional(), reason: z.string().optional(), q: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const act = a.action || 'list';
+    if (act === 'list') { const d = await apiGet('/api/creator-campaigns/people', a.q ? { q: a.q } : {}); return ok(`${d.total} creator${d.total === 1 ? '' : 's'}${d.banned ? ` (${d.banned} banned)` : ''}:\n${d.people.map((x) => `• ${x.displayName}${x.banned ? ' [banned]' : ''} key=${x.key} · ${x.totals.campaigns} campaign${x.totals.campaigns === 1 ? '' : 's'} · ${x.totals.approved}/${x.totals.posts} posts · ${x.totals.views.toLocaleString('en-US')} views · $${(x.totals.earnedCents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} earned${x.note ? ` · note: ${x.note}` : ''}`).join('\n')}`, d); }
+    if (!a.key) throw new Error('key: the creator\'s key from creator_directory list.');
+    const d = await apiPost('/api/creator-campaigns/people', { key: a.key, ...(act === 'note' ? { note: a.note || '' } : act === 'ban' ? { ban: true, reason: a.reason || '' } : { ban: false }) });
+    return ok(d.note, d);
+  }));
   server.registerTool('promote_campaign_post', {
     title: 'Run an approved creator post as a paused ad',
     description: 'Run an APPROVED campaign post as an ad, from the creator\'s own code. Instagram / Facebook post: a Meta partnership ad on a new paused campaign + ad set (adCode = the creator\'s partnership ad code: post > ... > Partnership label and ads > Ad code). TikTok post: a Spark Ad in an existing ad group (adCode = the creator\'s Spark authorization code; adgroupId required). Created PAUSED and read back; nothing spends until switched on. Without confirm:true, a preview that builds nothing. Usage rights never block it: if the rights this creator agreed to on the join page do not list that platform or have ended, the note carries a one-line heads-up the brand may ignore (they may have agreed elsewhere).',
