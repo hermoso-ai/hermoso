@@ -3411,6 +3411,7 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   campaign_drafts: CC_WIDGET_WHY,
   bulk_invite_creators: CC_WIDGET_WHY, // 2026-11-20: listed by the Creator Campaigns focused app, like every creator tool
   preview_creator_campaign: CC_WIDGET_WHY,
+  delete_creator_campaign: CC_WIDGET_WHY, // 2026-11-20: listed by the Creator Campaigns focused app, like every creator tool
   submit_tiktok_ads_verification: 'it sends a legal name and a government ID or business licence number, which are entered in TikTok Ads Manager instead',
   merchant_issue_help: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
   trigger_merchant_issue_action: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
@@ -5993,6 +5994,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     schedule: ['schedule'], queue: ['schedule'], calendar: ['schedule'], later: ['schedule'], slot: ['schedule'],
     comment: ['comment'], reply: ['reply', 'comment'], respond: ['reply'], dm: ['message', 'inbox', 'convo'], message: ['message', 'inbox'], inbox: ['inbox'], mention: ['mention'],
     review: ['review'], rating: ['review'], testimonial: ['review'],
+    // APPROVING A CREATOR'S POST IS A REVIEW (2026-11-20, QA): "approve or reject a creator post" ranked
+    // manage_meta_partnership_creator first and review_campaign_post fourth; a submission is a campaign post.
+    approve: ['review', 'approve'], approval: ['review', 'approve'], reject: ['review', 'reject'], submission: ['post', 'campaign'], submissions: ['post', 'campaign'], creatorpost: ['campaign', 'post', 'review'],
     team: ['team', 'member'], teammate: ['member'], seat: ['member'], colleague: ['member'], invite: ['invite', 'member'],
     workspace: ['brand'], client: ['brand'], company: ['brand'], business: ['brand', 'business'], account: ['account', 'brand', 'connector'],
     connect: ['connector'], connection: ['connector'], integration: ['connector'], integrate: ['connector'], link: ['connector'], oauth: ['connector'], login: ['connector'],
@@ -6103,7 +6107,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
   };
   // A TWO-WORD NAME FOR ONE THING (2026-11-17): "lead list" is a list of prospects, not a list of lead FORMS, and read
   // word by word every list_*_lead_forms tool outranked the tools that build one. Such a phrase is read as one word.
-  const JOINED_PHRASES = [[/\b(?:lead|leads|prospect|prospects|prospecting|sales|outbound)\s+lists?\b/gi, 'prospectlist']];
+  // …and "a creator's post" is a CAMPAIGN post (2026-11-20): read word by word, `creator` landed on every saved-creator tool.
+  const JOINED_PHRASES = [[/\b(?:lead|leads|prospect|prospects|prospecting|sales|outbound)\s+lists?\b/gi, 'prospectlist'], [/\bcreators?(?:'s|s'|’s)?\s+(?:posts?|submissions?)\b/gi, 'creatorpost']];
   const splitQueryWords = (rawQuery, ctx) => {
     const V = queryVocabFor(ctx);
     const out = [];
@@ -18309,6 +18314,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (status) { d = await apiPost('/api/creator-campaigns/status', { campaignId, status, ...(confirm === true ? { confirm: true } : {}) }); notes.push(d.preview ? `${d.impact.title}\n${d.impact.lines.map((l) => `• ${l}`).join('\n')}\nNothing changed yet: call again with status "${status}" and confirm:true once the user agrees.` : d.note); }
     if (!d) return ok('Nothing to change: pass status or a field.');
     return ok(`${notes.join(' ')}\n${ccLine(d.campaign)}`, d);
+  }));
+  server.registerTool('delete_creator_campaign', {
+    title: 'Delete a creator campaign',
+    description: 'Delete a DRAFT or CLOSED creator campaign through which no money moved: no payment made or started and no earnings standing. It removes the campaign, its creator records, posts, drafts and files, and frees its page address; it cannot be undone. A live campaign must be closed first; one with payment history stays closed instead. Without confirm it is a PREVIEW of what goes; call again with confirm:true only after the user agreed. Free.',
+    inputSchema: { campaignId: z.string(), confirm: z.boolean().optional().describe('true deletes, after the user saw the preview and agreed') },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/creator-campaigns/delete', { campaignId: a.campaignId, ...(a.confirm === true ? { confirm: true } : {}) });
+    return ok(d.preview ? `${d.impact.title}\n${d.impact.lines.map((l) => `• ${l}`).join('\n')}\nPREVIEW, nothing deleted. Call again with confirm:true once the user agrees.` : d.note, d);
   }));
   // one payout batch in words (2026-11-19): its state, total and, while it waits for the brand's payment, the link to pay
   const CC_BATCH_WORDS = { creating: 'starting', review: 'waiting for Hermoso review, nothing charged', awaiting_payment: 'waiting for payment', settling: 'bank debit clearing', held: 'paid, on hold', paid: 'creators paid', partly_paid: 'partly paid', failed: 'did not go through', cancelled: 'cancelled (checkout not completed)', disputed: 'disputed: payouts frozen', review_declined: 'declined at review, nothing charged', refunded: 'refunded' };

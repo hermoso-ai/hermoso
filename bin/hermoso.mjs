@@ -146,7 +146,14 @@ async function main() {
   await npxTip(group);
   process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
-  if (cfg.profile && cfg.profile !== 'default' && !process.env.HERMOSO_PROFILE) process.env.HERMOSO_PROFILE = cfg.profile;
+  if (cfg.profile && cfg.profile !== 'default' && !process.env.HERMOSO_PROFILE) {
+    // a saved profile the account no longer has failed EVERY call; it falls back to the default with one line (saved-profile.mjs)
+    const { resolveSavedProfile } = await import('./saved-profile.mjs');
+    const r = await resolveSavedProfile(cfg, { apiBase: process.env.HERMOSO_API_BASE, token: process.env.HERMOSO_TOKEN });
+    if (r.warning) console.error(r.warning);
+    if (r.changed) { try { await saveConfig(r.cfg); } catch {} }
+    if (r.profile) process.env.HERMOSO_PROFILE = r.profile;
+  }
   if (cfg.owner && !process.env.HERMOSO_OWNER) process.env.HERMOSO_OWNER = cfg.owner; // shared team workspace: the owning account (server re-authorizes it)
 
   // `hermoso mcp` → run the stdio MCP server (Claude Code / Cursor / Codex spawn this, e.g. `npx -y hermoso mcp`).
