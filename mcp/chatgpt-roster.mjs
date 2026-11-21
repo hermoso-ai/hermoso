@@ -6,51 +6,51 @@
 export const CHATGPT_ROSTER_FAMILIES = Object.freeze([
   'google_drive', // long tail, pinned (plugin skills)
   'intercom', // long tail, pinned (plugin skills)
-  'meta', // publishing
-  'youtube', // publishing
-  'tiktok', // publishing
-  'x', // publishing
-  'pinterest', // publishing
-  'google_business', // publishing
-  'linkedin', // publishing
-  'google_ads', // big-platform ads
-  'google_analytics', // analytics
-  'threads', // publishing
-  'tiktok_ads', // big-platform ads
+  'meta', // publishing, core channel (never cut for room)
+  'youtube', // publishing, core channel (never cut for room)
+  'tiktok', // publishing, core channel (never cut for room)
+  'pinterest', // publishing, core channel (never cut for room)
+  'google_ads', // big-platform ads, core channel (never cut for room)
+  'linkedin', // publishing, core channel (never cut for room)
+  'x', // publishing, core channel (never cut for room)
+  'telegram', // publishing, core channel (never cut for room)
+  'tiktok_ads', // big-platform ads, core channel (never cut for room)
+  'google_business', // publishing, core channel (never cut for room)
+  'wordpress', // publishing, core channel (never cut for room)
+  'bluesky', // publishing, core channel (never cut for room)
+  'openai_ads', // big-platform ads, core channel (never cut for room)
   'google_search_console', // analytics
-  'telegram', // publishing
+  'threads', // publishing
+  'google_analytics', // analytics
   'google_tag_manager', // long tail
-  'snapchat_ads', // long tail
   'microsoft_onedrive', // long tail
-  'bluesky', // publishing
-  'reddit_ads', // long tail
-  'mixpanel', // analytics
+  'slack', // publishing
 ]);
 // Left out to stay under the cap, in rank order (the first one is the next to get in when room appears).
 export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
-  'openai_ads', // big-platform ads
-  'x_ads', // long tail
+  'microsoft_ads', // big-platform ads
   'bing_webmaster', // analytics
-  'apple_ads', // long tail
-  'pinterest_ads', // long tail
+  'reddit_ads', // long tail
+  'hubspot', // analytics
+  'snapchat_ads', // long tail
+  'x_ads', // long tail
   'discord', // publishing
-  'slack', // publishing
   'twilio', // publishing
   'vapi', // publishing
-  'wordpress', // publishing
-  'microsoft_ads', // big-platform ads
   'amplitude', // analytics
-  'hubspot', // analytics
   'klaviyo', // analytics
   'mailchimp', // analytics
+  'mixpanel', // analytics
   'posthog', // analytics
   'stripe', // analytics
   'amazon_ads', // long tail
+  'apple_ads', // long tail
   'applovin_ads', // long tail
   'canva', // long tail
   'line', // long tail
   'notion', // long tail
   'outlook_calendar', // long tail
+  'pinterest_ads', // long tail
   'salesforce', // long tail
   'shopify_blog', // long tail
   'vercel', // long tail
@@ -59,4 +59,4 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'whop', // long tail
   'wix', // long tail
 ]);
-export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-03T20:25:36.816Z" });
+export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-21T01:06:10.181Z" });

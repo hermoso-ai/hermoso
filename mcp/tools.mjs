@@ -559,7 +559,7 @@ export const MCP_INSTRUCTIONS_WIDGET = [
   '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in background; poll get_job.',
   '• FILES & SCHEDULING: upload_file turns a file into a URL; schedule_post, list_scheduled, list_connectors, list_library.',
   '• PUBLISH: post_to_* (post_to_meta, post_to_tiktok...) post now; list_inbox, reply_to_inbox_item.',
-  '• PAID ADS (Meta, Google, LinkedIn, TikTok, Reddit, Snapchat, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
+  '• PAID ADS (Meta, Google, LinkedIn, TikTok, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
   '• RESULTS: post_performance, analyze_campaigns. WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
   "CREDITS: AI and research tools use the user's credits; the reply says how many. If too low, say so. Nothing is bought in this app.",
   'CONFIRM before posting or scheduling, messaging customers, turning on a campaign, changing a budget, deleting anything, or draft_brand with save:true.',
