@@ -283,6 +283,7 @@ export const TIKTOK_ACCOUNT_GRANT_TOOLS = new Set([
   'list_tiktok_brand_hashtags', 'list_tiktok_brand_hashtag_posts', 'manage_tiktok_brand_hashtags', 'tiktok_hashtag_suggestions',
   'get_tiktok_post_ad_authorization', 'set_tiktok_post_ad_authorization', 'extend_tiktok_post_ad_authorization', 'delete_tiktok_post_ad_authorization',
   'tiktok_account_insights', 'tiktok_account_status', 'tiktok_video_insights', 'tiktok_category_benchmark', 'tiktok_spark_recommendations', 'tiktok_trends',
+  'search_tiktok_locations', // 2026-11-21: /business/publish/location/ on the grant
 ]);
 // The ONE sentence every surface appends when a 'meta'-mapped tool is held and an alternative connection exists.
 export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(name || ''))
