@@ -12945,6 +12945,77 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/dm-automations/delete', a);
     return ok(d.summary, d);
   }));
+  // ── AI AUTO-REPLIES (2026-11-20): the brand's own AI answers DMs and comments after keyword automations; and Meta's own
+  //    agent on a WhatsApp number. Rules in lib/ai-autoreply.mjs and lib/meta-business-agent.mjs; the routes do the work.
+  const AIAR_CH = ['instagram', 'facebook', 'whatsapp', 'tiktok', 'threads', 'youtube', 'linkedin'];
+  server.registerTool('set_ai_replies', {
+    title: 'AI auto-replies: settings',
+    description: 'AI AUTO-REPLIES: the brand\'s AI answers people who write to it, in its voice, from its brand profile, Memory, product catalog and the FAQs and notes saved here. Covers Instagram (DMs, story replies, comments), Facebook (Messenger, Page and ad comments), WhatsApp, and comments on TikTok, Threads, YouTube and LinkedIn Pages (not X: X requires its own approval for AI replies). Keyword automations (save_dm_automation) always answer first. OFF by default; switching on starts in mode "test" (every answer is written and logged, nothing sent) until mode "live". Pass nothing to read the settings and today\'s counts. Only the fields passed change. A message goes to a person instead (handoff) on a handoff keyword, an intent in handoff.intents (default complaint, refund), confidence below handoff.minConfidence, or a neverAnswer topic. Each AI reply is charged at the model\'s real cost (standard about 1 credit, best about 4); saving is free. Email: email.autoSend is the same opt-in for email replies (set_email_reply_settings autoSend).',
+    inputSchema: {
+      enabled: z.boolean().optional().describe('true switches AI replies on for this brand, false off'),
+      mode: z.enum(['test', 'live']).optional().describe('test = written and logged, nothing sent (the default); live = sent'),
+      channels: z.record(z.string(), z.union([z.boolean(), z.object({ dm: z.boolean().optional(), comment: z.boolean().optional() })])).optional().describe(`per channel (${AIAR_CH.join(', ')}): true/false, or {dm, comment}; e.g. {"instagram": {"dm": true, "comment": true}, "whatsapp": true}`),
+      accounts: z.array(z.string()).optional().describe('only these accounts, as "instagram:<id>" (list_connector_accounts); [] = every connected account on the channels switched on'),
+      tone: z.string().optional().describe('how the replies sound, e.g. "warm, short, a little playful; never pushy"'),
+      quality: z.enum(['standard', 'best']).optional().describe('standard = fast model (about 1 credit a reply), best = strongest (about 4)'),
+      knowledge: z.object({ brand: z.boolean().optional(), memory: z.boolean().optional(), products: z.boolean().optional(), faqs: z.array(z.object({ question: z.string(), answer: z.string() })).optional().describe('replaces the FAQ list'), notes: z.string().optional().describe('anything else it should know: policies, shipping, hours, links') }).optional(),
+      hours: z.object({ mode: z.enum(['always', 'within', 'outside']).optional().describe('answer always, only within the hours, or only outside them'), tz: z.string().optional().describe('IANA zone, e.g. "America/New_York"'), days: z.array(z.string()).optional().describe('"mon".."sun"'), start: z.string().optional().describe('"09:00"'), end: z.string().optional().describe('"17:30"') }).optional(),
+      neverAnswer: z.array(z.string()).optional().describe('topics it never answers (they go to a person), e.g. ["medical advice", "legal"]'),
+      handoff: z.object({ keywords: z.array(z.string()).optional().describe('words that always go to a person, e.g. ["human", "agent", "refund"]'), intents: z.array(z.enum(['question', 'purchase', 'order_status', 'complaint', 'refund', 'support', 'booking', 'feedback', 'greeting', 'spam', 'other'])).optional(), minConfidence: z.number().optional().describe('0-1, default 0.6'), message: z.string().optional().describe('sent to the person on a DM handoff, e.g. "Thanks! Someone from our team will reply shortly."') }).optional(),
+      dailyCap: z.number().optional().describe('most AI replies sent per day across all channels (default 200)'),
+      commentReply: z.enum(['public', 'private']).optional().describe('Instagram/Facebook comments: a public reply under it (default), or Meta\'s one private message'),
+      discloseAi: z.boolean().optional().describe('default true: the first DM to a person says it is the brand\'s automated assistant (Messenger policy)'),
+      signature: z.string().optional().describe('a sign-off added to replies'),
+      email: z.object({ autoSend: z.boolean().optional() }).optional(),
+      resume: z.boolean().optional().describe('true clears a pause (after a top-up or a reconnect)'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = Object.keys(a || {}).length ? await apiPost('/api/ai-replies', a) : await apiGet('/api/ai-replies', {});
+    return ok(`${d.summary}${d.todayLine ? `\n${d.todayLine}` : ''}${d.notes?.length ? `\n${d.notes.join('\n')}` : ''}`, d);
+  }));
+  server.registerTool('list_ai_replies', {
+    title: 'AI auto-replies: log',
+    description: 'Every AI auto-reply for the brand, newest first: who wrote, what they wrote, what the AI sent (or wrote in test mode), the outcome (sent, drafted, handoff, skipped, outside_hours, capped, failed, paused), its intent and confidence and what it cost. outcome / channel filter; limit default 25. A sent public comment reply on Instagram or Facebook can be removed with undo_ai_reply. Free.',
+    inputSchema: { outcome: z.string().optional().describe('sent, drafted, handoff, skipped, outside_hours, capped, failed, paused, opted_out'), channel: z.enum(AIAR_CH).optional(), limit: z.number().optional().describe('default 25, max 200') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const d = await apiGet('/api/ai-replies/log', a);
+    return ok(`${d.note}${(d.log || []).length ? `\n${d.log.map((e) => `• [${e.id}] ${new Date(e.at).toISOString().slice(0, 16).replace('T', ' ')} ${e.channel} ${e.kind} ${e.outcome}${e.mode === 'test' ? ' (test)' : ''} from ${e.from || '?'}: "${e.text || ''}"${e.reply ? `\n  reply: "${e.reply}"` : ''}${e.detail ? `\n  ${e.detail}` : ''}${e.intent ? ` [${e.intent}${e.confidence != null ? ` ${Number(e.confidence).toFixed(2)}` : ''}]` : ''}${e.credits ? ` ${e.credits} cr` : ''}${e.undoable ? ' (undo_ai_reply can remove it)' : ''}${e.undoneAt ? ' (removed)' : ''}`).join('\n')}` : ''}`, d);
+  }));
+  server.registerTool('test_ai_reply', {
+    title: 'AI auto-replies: try a message',
+    description: 'What the brand\'s AI would answer to a sample message, with its current settings (or settings passed to try before saving): the reply, or why it would hand off or skip, with intent and confidence. Nothing is sent to anyone. Charged like one reply (about 1 credit; best quality about 4); a handoff keyword answers for free.',
+    inputSchema: { message: z.string().describe('what a customer would write'), channel: z.enum(AIAR_CH).optional().describe('default instagram'), kind: z.enum(['dm', 'comment']).optional(), settings: z.record(z.string(), z.any()).optional().describe('unsaved settings to try, same fields as set_ai_replies') },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost('/api/ai-replies/test', a); return ok(d.note, d); }));
+  server.registerTool('undo_ai_reply', {
+    title: 'AI auto-replies: remove a reply',
+    description: 'Delete one sent AI reply (an id from list_ai_replies) from the platform: public comment replies on Instagram and Facebook. A DM or WhatsApp message cannot be unsent by an app; the answer says so. Confirm with the user first. Free.',
+    inputSchema: { id: z.string().describe('the reply id from list_ai_replies') },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/ai-replies/undo', a); return ok(d.note, d); }));
+  server.registerTool('manage_whatsapp_ai_agent', {
+    title: 'Meta Business Agent on WhatsApp',
+    description: 'META\'S OWN AI AGENT on the brand\'s WhatsApp number (Meta hosts it and bills the business about 4-5 cents a message; Hermoso charges nothing). action: status (default: eligibility, on/off, knowledge counts, budget), eligibility, onboard, get_settings, update_settings {enabled, audience everyone|allowlisted, handoff {enabled, message, messageSelection}, followup {enabled, intervalSeconds, message}, neverSay[]}, get_business_info / set_business_info {businessInfo: {description, paymentMethods, returnPolicy, purchaseInfo, shipping, contact {email, hours, address}}} / clear_business_info, list_faqs / add_faq / update_faq / delete_faq {id, question, answer}, list_websites / add_website / update_website / delete_website {url, singleUrls[], includedUrlPatterns[] ...}, list_files / upload_file {url, fileName: pdf, doc, docx, png, jpg} / delete_file, list_skills / add_skill / update_skill / delete_skill {title, description, skill}, list_connectors / add_connector / update_connector / delete_connector {name, description, baseUrl, protocol HTTP|MCP, authType, authConfig}, connector_api_key / connector_oauth / refresh_connector_tools / connector_logs {id}, list_allowlist / allow {phone|bsuid} / disallow {id}, get_budget / set_budget {budgets: [{unit token|ai_turn, days 1|7|14|30, max}]}, test {message, conversationId} (not billed by Meta), send_event {to, type, description, payload}, get_event {id}, thread_control {to, control take|release|pass, metadata}, delete_agent. Deletes and turning it on for everyone need confirm:true. The business must first accept the Meta Business Agent terms in WhatsApp Manager, and add a payment method in Billing Hub before audience everyone. For Hermoso\'s own AI on WhatsApp, Instagram, Facebook and comments instead, use set_ai_replies.',
+    inputSchema: {
+      action: z.enum(['status', 'eligibility', 'onboard', 'get_settings', 'update_settings', 'get_business_info', 'set_business_info', 'clear_business_info', 'list_faqs', 'add_faq', 'update_faq', 'delete_faq', 'list_websites', 'add_website', 'update_website', 'delete_website', 'list_files', 'upload_file', 'delete_file', 'list_skills', 'add_skill', 'update_skill', 'delete_skill', 'list_connectors', 'add_connector', 'update_connector', 'delete_connector', 'connector_api_key', 'connector_oauth', 'refresh_connector_tools', 'connector_logs', 'list_allowlist', 'allow', 'disallow', 'get_budget', 'set_budget', 'test', 'send_event', 'get_event', 'thread_control', 'delete_agent']).optional(),
+      phoneNumberId: z.string().optional().describe('the WhatsApp number id (list_whatsapp_accounts); optional when the brand has one'),
+      id: z.string().optional(), enabled: z.boolean().optional(), audience: z.enum(['everyone', 'allowlisted']).optional(),
+      handoff: z.record(z.string(), z.any()).optional(), followup: z.record(z.string(), z.any()).optional(), neverSay: z.array(z.string()).optional(),
+      businessInfo: z.record(z.string(), z.any()).optional(), question: z.string().optional(), answer: z.string().optional(),
+      url: z.string().optional(), fileName: z.string().optional(), singleUrls: z.array(z.string()).optional(), includedUrlPatterns: z.array(z.string()).optional(), excludedUrlPatterns: z.array(z.string()).optional(), includedSubDomains: z.array(z.string()).optional(), excludedSubDomains: z.array(z.string()).optional(),
+      title: z.string().optional(), description: z.string().optional(), skill: z.string().optional(),
+      name: z.string().optional(), baseUrl: z.string().optional(), protocol: z.enum(['HTTP', 'MCP']).optional(), authType: z.string().optional(), authConfig: z.record(z.string(), z.any()).optional(), limit: z.number().optional(),
+      phone: z.string().optional(), bsuid: z.string().optional(),
+      budgets: z.array(z.object({ unit: z.enum(['token', 'ai_turn']), days: z.number(), max: z.number(), id: z.string().optional(), startDate: z.string().optional(), endDate: z.string().optional() })).optional(),
+      message: z.string().optional(), conversationId: z.string().optional(),
+      to: z.string().optional(), type: z.string().optional(), payload: z.any().optional(),
+      control: z.enum(['take', 'release', 'pass']).optional(), metadata: z.string().optional(), targetRole: z.string().optional(), catalogId: z.string().optional(),
+      confirm: z.boolean().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/whatsapp/ai-agent', a); return ok(d.note, d); }));
   // ── INSTAGRAM SHOPPING PRODUCT TAGS (2026-08-24, item ④). Meta's limits, coordinate rules and the
   //    approved-vs-stored distinction all live in lib/instagram-shopping.mjs and are applied by the routes.
   // ── PARTNERSHIP ADS, BRAND SIDE (2026-08-24, item ⑩). Two lists, not one; adding a creator is a REQUEST and
@@ -18573,10 +18644,11 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/email/hubspot/sync', a); return ok(d.note, d); }));
   server.registerTool('set_email_reply_settings', {
     title: 'Set what happens with email replies',
-    description: 'The brand\'s settings for email replies: modelLabels (true by default: a reply the rules cannot label is labelled by the model, 0.1 credit a reply), autoDraft (false by default: true drafts an answer for every interested or other reply, about 5 credits each, never sent on its own), hubspot (false by default: true sends every labelled reply to HubSpot, not just those of sequences with hubspot:true) and labelProperty (a HubSpot contact property you made for the label, "" for none). Pass nothing to read them. Free.',
+    description: 'The brand\'s settings for email replies: modelLabels (true by default: a reply the rules cannot label is labelled by the model, 0.1 credit a reply), autoDraft (false by default: true drafts an answer for every interested or other reply, about 5 credits each, never sent on its own), autoSend (false by default: true drafts AND SENDS that answer in the same thread, except a draft that leaves something [in brackets] for a person, a reply with one of the brand\'s AI handoff words or never-answer topics from set_ai_replies, or past 100 a day; those wait for review_reply_draft), hubspot (false by default: true sends every labelled reply to HubSpot, not just those of sequences with hubspot:true) and labelProperty (a HubSpot contact property you made for the label, "" for none). Pass nothing to read them. Free.',
     inputSchema: {
       modelLabels: z.boolean().optional(),
       autoDraft: z.boolean().optional(),
+      autoSend: z.boolean().optional().describe('true sends the automatic answer instead of leaving it as a draft'),
       hubspot: z.boolean().optional(),
       labelProperty: z.string().optional().describe('internal name of a HubSpot contact property, or ""'),
     },
