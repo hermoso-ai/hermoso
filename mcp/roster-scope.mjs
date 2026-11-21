@@ -57,6 +57,10 @@ export const PHONE_TOOL_ALSO = Object.freeze(['telnyx']);
 export const VOICE_TOOL_RE = /voice_agents?(_|$)/;
 // Filed under 'vapi'; served by a Retell AI, ElevenLabs or Telnyx connection (Telnyx AI Assistants) just as well.
 export const VOICE_TOOL_ALSO = Object.freeze(['retell', 'elevenlabs', 'telnyx']);
+// CALENDARS (2026-11-20): the brand's OWN Google Calendar or Outlook calendar. ONE tool set serves both, filed under
+// 'outlook_calendar'; toolHeldBackByConnectors offers it to a brand with either connected (CALENDAR_TOOL_ALSO).
+export const CALENDAR_TOOL_RE = /calendar_event|^list_calendars$|^calendar_free_busy$|^find_meeting_slots$/;
+export const CALENDAR_TOOL_ALSO = Object.freeze(['google_calendar']);
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
@@ -101,6 +105,8 @@ export const TOOL_PROVIDER_RULES = [
   [PHONE_TOOL_RE, 'twilio'],
   // AI VOICE AGENTS (2026-11-18): the brand's OWN Vapi, Retell AI, ElevenLabs or Telnyx AI account, one tool set filed under 'vapi'.
   [VOICE_TOOL_RE, 'vapi'],
+  // CALENDARS (2026-11-20): Google Calendar or Outlook calendar, one tool set filed under 'outlook_calendar'.
+  [CALENDAR_TOOL_RE, 'outlook_calendar'],
   // ── analytics / measurement, each its own connection ──
   [/_analytics_|^analytics_(realtime|report|data_retention)$|analytics_compatibility|analytics_stream/, 'google_analytics'],
   [/mixpanel/, 'mixpanel'],
@@ -192,7 +198,7 @@ export function toolUnoffered(name) { const p = toolProvider(name); return !!p &
 // the Studio agent's schema and executor) asks THIS function, so the answer cannot differ between them.
 // The set mirrors lib/multi-account.mjs MULTI_ACCOUNT_PROVIDERS, which the npm package cannot import;
 // tools/multi-account-arg-check.mjs fails when the two differ, and DERIVES the tool split below from server.js.
-export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'pinterest', 'instagram', 'gmail', 'outlook', 'smtp'])); // gmail + outlook (2026-11-15): several mailboxes per brand; the email tools name theirs with `mailbox`, not `account`, and map to no provider here
+export const MULTI_ACCOUNT_CHANNELS = Object.freeze(new Set(['tiktok', 'x', 'youtube', 'threads', 'bluesky', 'telegram', 'pinterest', 'instagram', 'gmail', 'outlook', 'smtp', 'google_calendar', 'outlook_calendar'])); // gmail + outlook (2026-11-15): several mailboxes per brand; the email tools name theirs with `mailbox`, not `account`, and map to no provider here
 // Filed under a multi-account channel, but routed through a connection that holds ONE grant per brand, so `account`
 // would do nothing there: these two Pinterest reads ride the ad-account (pinterest_ads) row. (The TikTok Business and
 // Ads tools are no longer filed under 'tiktok' at all — only the five posting tools are — so they need no entry.)
@@ -317,7 +323,12 @@ export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_ema
 // nobody can connect are no capability: not counted, not documented, not on a roster. Lit PER CALLER like Canva: server.js
 // flagsOnNow names them when the gate is open, for a workspace already holding a WeChat connection, and for the team pass.
 export const WECHAT_DARK_TOOLS = Object.freeze(['read_wechat_inbox', 'send_wechat_message', 'wechat_account']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS]);
+// THE CALENDAR TOOLS SHIP DARK WITH THE TWO CALENDAR CONNECTORS (2026-11-20). Google waits on Google verifying the Calendar
+// scopes (GOOGLE_CALENDAR_APPROVED), Outlook on the Entra permission and one live run (OUTLOOK_CALENDAR_ENABLED). Lit PER
+// CALLER like the email tools: server.js flagsOnNow names them when either gate is open, for a workspace already holding
+// either connection, and for the gates' team pass. Counted and documented once OUTLOOK_CALENDAR_ENABLED is on in production.
+export const CALENDAR_DARK_TOOLS = Object.freeze(['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event', 'respond_to_calendar_event', 'calendar_free_busy', 'find_meeting_slots']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS, ...CALENDAR_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
@@ -327,7 +338,7 @@ export const DARK_TOOL_GATE_FLAG = Object.freeze(Object.fromEntries([...WHOP_DAR
   // The email tools are counted and documented once OUTLOOK mail is on in production: Outlook is the mailbox kind that does
   // everything and needs no outside approval, so it is the one that goes live first. If Gmail is ever verified first,
   // point this at GMAIL_SEND_VERIFIED (the per-caller roster already lights them on either gate).
-  ...EMAIL_DARK_TOOLS.map((n) => [n, 'OUTLOOK_MAIL_ENABLED']), ...WECHAT_DARK_TOOLS.map((n) => [n, 'WECHAT_ENABLED'])]));
+  ...EMAIL_DARK_TOOLS.map((n) => [n, 'OUTLOOK_MAIL_ENABLED']), ...WECHAT_DARK_TOOLS.map((n) => [n, 'WECHAT_ENABLED']), ...CALENDAR_DARK_TOOLS.map((n) => [n, 'OUTLOOK_CALENDAR_ENABLED'])]));
 export function darkToolsUnder(flags) {
   const f = flags && typeof flags === 'object' ? flags : {};
   return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));
@@ -345,5 +356,6 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'outlook_calendar' && CALENDAR_TOOL_ALSO.some((x) => on.has(x))) return false;
   return !on.has(p);
 }

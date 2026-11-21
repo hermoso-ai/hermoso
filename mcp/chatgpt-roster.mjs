@@ -23,14 +23,14 @@ export const CHATGPT_ROSTER_FAMILIES = Object.freeze([
   'snapchat_ads', // long tail
   'microsoft_onedrive', // long tail
   'bluesky', // publishing
-  'openai_ads', // big-platform ads
+  'reddit_ads', // long tail
+  'mixpanel', // analytics
 ]);
 // Left out to stay under the cap, in rank order (the first one is the next to get in when room appears).
 export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
-  'reddit_ads', // long tail
+  'openai_ads', // big-platform ads
   'x_ads', // long tail
   'bing_webmaster', // analytics
-  'mixpanel', // analytics
   'apple_ads', // long tail
   'pinterest_ads', // long tail
   'discord', // publishing
@@ -50,6 +50,7 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'canva', // long tail
   'line', // long tail
   'notion', // long tail
+  'outlook_calendar', // long tail
   'salesforce', // long tail
   'shopify_blog', // long tail
   'vercel', // long tail

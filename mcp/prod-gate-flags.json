@@ -2,6 +2,7 @@
   "flags": {
     "AMAZON_ADS_API_APPROVED": true,
     "CANVA_APP_APPROVED": false,
+    "OUTLOOK_CALENDAR_ENABLED": false,
     "OUTLOOK_MAIL_ENABLED": true,
     "WECHAT_ENABLED": false,
     "WHOP_API_KEY": true
