@@ -50,11 +50,15 @@
 // (Business Discovery, the Threads API, TikTok's Creator Marketplace) — free to us, but impossible without the
 // connection, so gating them is correct.
 // The phone / SMS / voice tools (2026-11-18). Exact names or `sms` as a whole word, so no existing tool can match.
-export const PHONE_TOOL_RE = /(^|_)sms(_|$)|^(list|search)_phone_numbers$|^(buy|configure|release)_phone_number$|10dlc|tollfree|^list_calls$|^list_call_recordings$|^transcribe_call$|^place_call$|^call_tracking_report$|^assign_number_to_campaign$|^list_provider_opt_outs$|^(send|check)_verification_code$|^check_number_portability$|^(create|get|cancel)_port_order$|^list_port_orders$/; // + one-time codes and porting (2026-11-20, a Telnyx line: BYO or Hermoso phone). The Hermoso phone on/off/status tools are NOT here: a brand with nothing connected must reach them
+export const PHONE_TOOL_RE = /(^|_)sms(_|$)|^(list|search)_phone_numbers$|^(buy|configure|release)_phone_number$|10dlc|tollfree|^list_calls$|^list_call_recordings$|^transcribe_call$|^place_call$|^call_tracking_report$|^assign_number_to_campaign$|^list_provider_opt_outs$|^(send|check)_verification_code$|^check_number_portability$|^(create|get|cancel)_port_order$|^list_port_orders$|^set_softphone$|_sip_trunks?$|_branded_calling(_status)?$|^branded_calling_status$/; // + one-time codes and porting (2026-11-20, a Telnyx line: BYO or Hermoso phone). The Hermoso phone on/off/status tools are NOT here: a brand with nothing connected must reach them
 // A phone tool is filed under 'twilio' and served by a Telnyx connection just as well.
 export const PHONE_TOOL_ALSO = Object.freeze(['telnyx']);
 // The AI voice-agent tools (2026-11-18): every one carries `voice_agent` in its name, which nothing else does.
 export const VOICE_TOOL_RE = /voice_agents?(_|$)/;
+// iMESSAGE (2026-11-21): every tool carries `imessage` in its name, which nothing else does. Filed under 'sendblue'; served by a
+// LoopMessage connection just as well.
+export const IMSG_TOOL_RE = /imessage/;
+export const IMSG_TOOL_ALSO = Object.freeze(['loopmessage']);
 // Filed under 'vapi'; served by a Retell AI, ElevenLabs or Telnyx connection (Telnyx AI Assistants) just as well.
 export const VOICE_TOOL_ALSO = Object.freeze(['retell', 'elevenlabs', 'telnyx']);
 // CALENDARS (2026-11-20): the brand's OWN Google Calendar or Outlook calendar. ONE tool set serves both, filed under
@@ -125,6 +129,8 @@ export const TOOL_PROVIDER_RULES = [
   [PHONE_TOOL_RE, 'twilio'],
   // AI VOICE AGENTS (2026-11-18): the brand's OWN Vapi, Retell AI, ElevenLabs or Telnyx AI account, one tool set filed under 'vapi'.
   [VOICE_TOOL_RE, 'vapi'],
+  // iMESSAGE (2026-11-21): the brand's OWN Sendblue or LoopMessage account, one tool set filed under 'sendblue'.
+  [IMSG_TOOL_RE, 'sendblue'],
   // CALENDARS (2026-11-20): Google Calendar or Outlook calendar, one tool set filed under 'outlook_calendar'.
   [CALENDAR_TOOL_RE, 'outlook_calendar'],
   // ── analytics / measurement, each its own connection ──
@@ -382,6 +388,7 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'sendblue' && IMSG_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'outlook_calendar' && CALENDAR_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'meta' && CONVERSION_HUB_TOOL_RE.test(name) && CONVERSION_HUB_ALSO.some((x) => on.has(x))) return false;
   if (p === 'meta' && CAMPAIGN_PROFIT_TOOL_RE.test(name) && CAMPAIGN_PROFIT_ALSO.some((x) => on.has(x))) return false;

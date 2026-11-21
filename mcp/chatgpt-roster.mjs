@@ -52,6 +52,7 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'outlook_calendar', // long tail
   'pinterest_ads', // long tail
   'salesforce', // long tail
+  'sendblue', // long tail
   'shopify_blog', // long tail
   'vercel', // long tail
   'webflow', // long tail

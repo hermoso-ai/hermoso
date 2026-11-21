@@ -262,6 +262,8 @@ export const KEY_CONNECTORS = {
   vapi: { label: 'Vapi', route: 'vapi', fields: { apiKey: 'rs' }, how: 'the PRIVATE API key from the Vapi Dashboard \u25b8 Org \u25b8 API Keys (not the public key). AI voice agents, their numbers and calls on the brand\u2019s own Vapi account' },
   retell: { label: 'Retell AI', route: 'retell', fields: { apiKey: 'rs' }, how: 'an API key from the Retell dashboard \u25b8 Settings \u25b8 API Keys. AI voice agents, their numbers and calls on the brand\u2019s own Retell account' },
   elevenlabs: { label: 'ElevenLabs', route: 'elevenlabs', fields: { apiKey: 'rs' }, how: 'an API key from ElevenLabs \u25b8 Developers \u25b8 API Keys, with ElevenAgents read and write and Voices read. AI voice agents (ElevenAgents), their numbers and calls on the brand\u2019s own ElevenLabs account' },
+  sendblue: { label: 'Sendblue', route: 'sendblue', fields: { apiKeyId: 'rs', apiSecret: 'rs' }, how: 'the API key id and secret from the Sendblue dashboard \u25b8 API keys (or `sendblue show-keys`). iMessage with SMS fallback from the brand\u2019s own Sendblue lines; replies come into the Inbox' },
+  loopmessage: { label: 'LoopMessage', route: 'loopmessage', fields: { apiKey: 'rs', sender: '' }, how: 'the API key from the LoopMessage dashboard \u25b8 your organization \u25b8 API \u25b8 Settings, and sender (the sender name messages go out as). iMessage from the brand\u2019s own LoopMessage account; the answer gives the webhook address and Authorization value to paste into LoopMessage so replies reach the Inbox' },
   telnyx: { label: 'Telnyx', route: 'telnyx', fields: { apiKey: 'rs', publicKey: '' }, how: 'an API key from Telnyx Mission Control ▸ Account settings ▸ Keys & Credentials ▸ API Keys; publicKey (same page, Public Key) lets Hermoso verify Telnyx\u2019s webhook signatures. Phone numbers, SMS/MMS, the Inbox and calls on the brand\u2019s own Telnyx account' },
   stripe: { label: 'Stripe', route: 'stripe', fields: { apiKey: 'rs' }, how: 'a secret (sk_) or restricted (rk_) key from Stripe ▸ Developers ▸ API keys' },
   intercom: { label: 'Intercom', route: 'intercom', fields: { accessToken: 'rs', region: '' }, how: 'an access token from Intercom ▸ Settings ▸ Integrations ▸ Developer Hub ▸ your app ▸ Configure ▸ Authentication; region us, eu or au (found automatically when omitted)' },
@@ -2697,6 +2699,7 @@ export const INBOX_SOURCES = [
   // SMS (2026-11-18): texts to the brand's own Twilio or Telnyx numbers. Like LINE, the provider delivers each one on a
   // webhook, so this reads the 30-day buffer Hermoso keeps (server.js smsInboxList). The native id is `<our number>|<their
   // number>` (digits); a reply leaves from our number. Served by either provider's connection (INBOX_ALSO_SERVED_BY).
+  { source: 'imessage',        provider: 'sendblue',        read: '/api/imessage/inbox/thread',    reply: '/api/imessage/inbox/reply',        kind: 'dm',      label: 'iMessage', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the imessage item id after "imessage:")' }, readAll: '/api/imessage/inbox' },
   { source: 'sms',             provider: 'twilio',          read: '/api/sms/inbox/thread',         reply: '/api/sms/inbox/reply',             kind: 'dm',      label: 'Text message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the sms item id after "sms:")' }, readAll: '/api/sms/inbox' },
   // CALLS (2026-11-18): the brand's AI voice-agent calls on Vapi, Retell AI, ElevenLabs or Telnyx AI, read live from the platform
   // (server.js voiceInboxList). A call is read, never replied to (reply null): place_voice_agent_call calls back. The native id is
@@ -2768,7 +2771,7 @@ export const INBOX_WAIT_FOR_PROVIDERS = new Set(['x']);
 // a wasted 401 is noise, a skipped channel that had messages is a lost customer.
 export const INBOX_ALSO_SERVED_BY = Object.freeze({
   facebook: ['instagram'], instagram: ['instagram'], instagram_dm: ['meta'], instagram_mention: ['instagram'],
-  meta_webhook: ['instagram', 'whatsapp'], whatsapp: ['meta'], tiktok: ['tiktok'], email: ['gmail', 'smtp'], sms: ['telnyx'], call: ['retell', 'elevenlabs', 'telnyx'],
+  meta_webhook: ['instagram', 'whatsapp'], whatsapp: ['meta'], tiktok: ['tiktok'], email: ['gmail', 'smtp'], sms: ['telnyx'], imessage: ['loopmessage'], call: ['retell', 'elevenlabs', 'telnyx'],
 });
 export const inboxSourceProviders = (src) => [src.provider, ...(INBOX_ALSO_SERVED_BY[src.source] || [])];
 /** Split the asked-for sources into those to read and those no connection can serve. `conn` is connectedProviders(). */
@@ -18336,6 +18339,105 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { id: z.string().describe("the port order id"), confirm: z.boolean().optional().describe("true once the user agreed") },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/port/order/cancel', a); return ok(phLine('cancel_port_order', d), d); }));
+  // ---------- iMESSAGE, BROWSER SOFTPHONE, SIP TRUNKS, BRANDED CALLER ID (2026-11-21): the brand's OWN accounts ----------
+  // iMessage runs on the brand's own Sendblue or LoopMessage account; the softphone, trunks and caller ID on its own Twilio or
+  // Telnyx account. Routes in server.js (search "iMESSAGE, BROWSER SOFTPHONE"); vendor paths lib/imessage.mjs,
+  // lib/softphone-sip.mjs, lib/caller-branding.mjs. Free in Hermoso: the vendor bills the customer's own account.
+  const IM_NEEDS = " Needs the brand's own Sendblue or LoopMessage account connected (Connectors, or connect_connector).";
+  const IM_PROV = z.enum(["sendblue", "loopmessage"]).optional().describe("only when both are connected");
+  const TEL_NEEDS = " Needs Twilio or Telnyx connected (Connectors, or connect_connector).";
+  const TEL_PROV = z.enum(["twilio", "telnyx"]).optional().describe("only when both are connected");
+  server.group('channel_admin');
+  server.registerTool('send_imessage', {
+    title: "Send an iMessage",
+    description: "Send an iMessage (blue bubble) from the brand's own Sendblue line or LoopMessage sender: text, a photo or file (media: a Library id, attachment://N or an https link; Sendblue takes one, LoopMessage up to 10) and an optional screen effect. to is a phone number (+14155550123) or an Apple Account email. Sendblue sends it as an SMS by itself when the person has no iMessage. Replies arrive in the Inbox. The account and its terms are the customer's own: Sendblue's terms ban bulk and unsolicited marketing, LoopMessage's ban spam and outbound-only sending. Free in Hermoso; the provider bills its plan." + IM_NEEDS,
+    inputSchema: { to: z.string().describe("phone number (E.164) or Apple Account email"), text: z.string().optional(), media: z.array(z.string()).optional().describe("Library ids, attachment://N or https links"), from: z.string().optional().describe("Sendblue: one of the brand's lines (+E.164); LoopMessage: the sender name. Default: the only line, or the saved sender"), effect: z.enum(["celebration", "shooting_star", "fireworks", "lasers", "love", "confetti", "balloons", "spotlight", "echo", "invisible", "gentle", "loud", "slam"]).optional(), replyTo: z.string().optional().describe("the id of a message to reply to inline"), provider: IM_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/imessage/send', a); return ok(phLine('send_imessage', d), d); }));
+  server.registerTool('get_imessage_status', {
+    title: "iMessage delivery status",
+    description: "The delivery status of a message send_imessage sent (Sendblue: QUEUED, SENT, DELIVERED or ERROR, and whether it went as iMessage or fell back to SMS; LoopMessage: processing, delivered, failed or unknown), with the provider's own error words. Free." + IM_NEEDS,
+    inputSchema: { id: z.string().describe("the message id send_imessage returned"), provider: IM_PROV },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/imessage/status', a); return ok(phLine('get_imessage_status', d), d); }));
+  server.registerTool('check_imessage_support', {
+    title: "Check a number for iMessage",
+    description: "Whether a phone number (or email) can receive iMessage, through Sendblue's own lookup: iMessage, SMS only, or undetermined (Sendblue's answer when it cannot tell, which is not the same as SMS). Up to 20 at a time; Sendblue allows 30 lookups an hour and 100 a day per line by default. Sendblue only. Free." + IM_NEEDS,
+    inputSchema: { number: z.string().optional(), numbers: z.array(z.string()).optional(), provider: IM_PROV },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/imessage/check', a); return ok(phLine('check_imessage_support', d), d); }));
+  server.registerTool('imessage_typing', {
+    title: "iMessage typing and read",
+    description: "Show (or, typing:false, stop) the typing indicator in an iMessage conversation, and read:true marks it read (a read receipt). Only in a conversation that already exists, and not in group chats. Free." + IM_NEEDS,
+    inputSchema: { to: z.string().describe("the person (phone number or Apple Account email)"), from: z.string().optional(), typing: z.boolean().optional().describe("default true; false stops it (with read:true and typing:false, only marks read)"), read: z.boolean().optional(), seconds: z.number().optional().describe("LoopMessage: how long to show it, up to 60"), provider: IM_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/imessage/typing', a); return ok(phLine('imessage_typing', d), d); }));
+  server.registerTool('react_imessage', {
+    title: "React to an iMessage",
+    description: "Put a tapback on a message the person sent: love, like, dislike, laugh, emphasize or question (\"-like\" takes one back), or one emoji. Only on recent inbound iMessages. Free." + IM_NEEDS,
+    inputSchema: { messageId: z.string().describe("the id of the person's message (Inbox or imessage_conversation)"), reaction: z.string(), to: z.string().optional().describe("LoopMessage: the person"), from: z.string().optional().describe("Sendblue: the line the message came in on"), provider: IM_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/imessage/react', a); return ok(phLine('react_imessage', d), d); }));
+  server.registerTool('list_imessage_lines', {
+    title: "List iMessage lines",
+    description: "The brand's Sendblue lines (the numbers iMessages are sent from), or its saved LoopMessage sender name. Free." + IM_NEEDS,
+    inputSchema: { provider: IM_PROV },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/imessage/lines', a); return ok(phLine('list_imessage_lines', d), d); }));
+  server.registerTool('imessage_conversation', {
+    title: "Read an iMessage conversation",
+    description: "The messages with one person, oldest first: from Sendblue's own history, or for LoopMessage the 30 days the Inbox keeps. Free." + IM_NEEDS,
+    inputSchema: { with: z.string().describe("the person (phone number or Apple Account email)"), limit: z.number().optional(), provider: IM_PROV },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/imessage/history', a); return ok(phLine('imessage_conversation', d), d); }));
+  server.registerTool('set_softphone', {
+    title: "Browser softphone numbers",
+    description: "The browser softphone: the web app's Phone dialer (Messaging ▸ Phone) places and answers calls on the brand's own Twilio or Telnyx numbers from the browser. With no arguments, lists which numbers ring the browser; ringNumbers makes incoming calls to those numbers ring it (on Telnyx the number moves onto the softphone's own connection), stopRinging undoes that. The provider bills the calls. Free." + TEL_NEEDS,
+    inputSchema: { ringNumbers: z.array(z.string()).optional(), stopRinging: z.array(z.string()).optional(), replaceExisting: z.boolean().optional().describe("Twilio: take over a number whose calls another app answers"), provider: TEL_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/softphone', a); return ok(phLine('set_softphone', d), d); }));
+  server.registerTool('list_sip_trunks', {
+    title: "List SIP trunks",
+    description: "The SIP trunks on the brand's own carrier account (Twilio Elastic SIP trunks, Telnyx credential / IP / FQDN connections): termination address, where incoming calls go, credentials users, allowed IPs and numbers. id reads one in full. Free." + TEL_NEEDS,
+    inputSchema: { id: z.string().optional(), provider: TEL_PROV },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/sip-trunks', a); return ok(phLine('list_sip_trunks', d), d); }));
+  server.registerTool('create_sip_trunk', {
+    title: "Create a SIP trunk",
+    description: "Connect the business's own PBX or call-centre software to its Twilio or Telnyx numbers over SIP. originationUri is where incoming calls go (sip:pbx.example.com); outbound calls authenticate with username + password (generated when left out and shown once, never kept by Hermoso) and/or allowedIps. numbers moves those numbers' calls onto the trunk. On Twilio it is an Elastic SIP trunk with a <domain>.pstn.twilio.com termination address; on Telnyx an FQDN, IP or credential connection (sip.telnyx.com). Without confirm:true nothing is created and the answer says what would be. The carrier bills the calls. Free." + TEL_NEEDS,
+    inputSchema: { name: z.string().optional(), originationUri: z.string().optional(), allowedIps: z.array(z.string()).optional(), username: z.string().optional(), password: z.string().optional(), numbers: z.array(z.string()).optional(), domain: z.string().optional().describe("Twilio: the termination name before .pstn.twilio.com"), secure: z.boolean().optional().describe("Twilio: TLS + SRTP only"), cnamLookup: z.boolean().optional().describe("Twilio: look up caller names on incoming calls"), outboundVoiceProfileId: z.string().optional().describe("Telnyx: the outbound voice profile (default: the account's first)"), confirm: z.boolean().optional().describe("true once the user agreed"), provider: TEL_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/sip-trunks', a); return ok(phLine('create_sip_trunk', d), d); }));
+  server.registerTool('update_sip_trunk', {
+    title: "Change a SIP trunk",
+    description: "Change a SIP trunk: rename it, add an origination address (or remove one by removeOriginationId on Twilio), add or remove numbers (a removed Telnyx number goes back to Hermoso's call handling), and on Telnyx set its outbound voice profile or a new SIP password. Free." + TEL_NEEDS,
+    inputSchema: { id: z.string(), name: z.string().optional(), originationUri: z.string().optional(), removeOriginationId: z.string().optional(), addNumbers: z.array(z.string()).optional(), removeNumbers: z.array(z.string()).optional(), secure: z.boolean().optional(), cnamLookup: z.boolean().optional(), outboundVoiceProfileId: z.string().optional(), password: z.string().optional(), provider: TEL_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/sip-trunks/update', a); return ok(phLine('update_sip_trunk', d), d); }));
+  server.registerTool('delete_sip_trunk', {
+    title: "Delete a SIP trunk",
+    description: "Delete a SIP trunk from the carrier account: calls through it stop at once and its numbers are left with no call routing. Without confirm:true nothing is deleted and the answer names what would be. Cannot be undone. Free." + TEL_NEEDS,
+    inputSchema: { id: z.string(), confirm: z.boolean().optional().describe("true only after the user approved deleting this trunk"), provider: TEL_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/sip-trunks/delete', a); return ok(phLine('delete_sip_trunk', d), d); }));
+  server.registerTool('branded_calling_status', {
+    title: "Branded caller ID status",
+    description: "What the brand's numbers show when they call: on Twilio the Business Profile and every caller-ID product (caller name CNAM, Voice Integrity spam monitoring, Branded Calling, SHAKEN/STIR) with its review status and numbers; on Telnyx each number's caller name listing and every Branded Calling identity (display name, logo, call reasons) with its vetting status. Free." + TEL_NEEDS,
+    inputSchema: { provider: TEL_PROV },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/caller-id', a); return ok(phLine('branded_calling_status', d), d); }));
+  server.registerTool('register_branded_calling', {
+    title: "Register branded caller ID",
+    description: "Put the business's name on its outgoing calls, filed with its own carrier. product \"cnam\": the caller name (displayName, up to 15 characters) for numbers; on Twilio filed under the approved Business Profile (US long codes, public beta), on Telnyx set on each number at once. \"voice_integrity\" (Twilio): spam-label monitoring (useCase, employeeCount, dailyCallVolume). \"branded_calling\": on Telnyx name + logo + call reasons for Telnyx's vetting (displayName, callReasons, authorizerName, authorizerEmail, logoUrl a 256x256 BMP; enterpriseId or the enterprise details), then numbers once verified (displayIdentityId, numbers, loaUrl a signed Letter of Authorization); on Twilio registration itself is in the Twilio Console (its API is private beta), and this assigns numbers to the approved registration. Without confirm:true nothing is filed and the answer says exactly what would be. The carrier bills its fees. Free in Hermoso." + TEL_NEEDS,
+    inputSchema: { product: z.enum(["cnam", "voice_integrity", "branded_calling"]), numbers: z.array(z.string()).optional(), displayName: z.string().optional(), email: z.string().optional().describe("Twilio: where it sends notices (default the Business Profile's)"), businessProfileId: z.string().optional(), trustProductId: z.string().optional().describe("Twilio: an existing product to assign numbers to"), useCase: z.string().optional(), employeeCount: z.number().optional(), dailyCallVolume: z.number().optional(), notes: z.string().optional(), callReasons: z.array(z.string()).optional(), authorizerName: z.string().optional(), authorizerEmail: z.string().optional(), logoUrl: z.string().optional(), enterpriseId: z.string().optional(), enterprise: z.record(z.string(), z.any()).optional().describe("Telnyx: the business details in Telnyx's own field names, when the account has no enterprise yet"), displayIdentityId: z.string().optional(), loaUrl: z.string().optional(), confirm: z.boolean().optional().describe("true once the user agreed"), provider: TEL_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/caller-id', a); return ok(phLine('register_branded_calling', d), d); }));
+  server.registerTool('remove_branded_calling', {
+    title: "Remove branded caller ID",
+    description: "Take caller-ID branding off numbers: on Twilio unassign them from a product (trustProductId), on Telnyx turn their caller name listing off. Without confirm:true nothing changes. Free." + TEL_NEEDS,
+    inputSchema: { numbers: z.array(z.string()), trustProductId: z.string().optional(), confirm: z.boolean().optional(), provider: TEL_PROV },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/caller-id/remove', a); return ok(phLine('remove_branded_calling', d), d); }));
   // ---------- AI VOICE AGENTS (2026-11-18): the brand's OWN Vapi, Retell AI, ElevenLabs or Telnyx AI account ----------
   // Every route is in server.js (search "AI VOICE AGENTS ON THE CUSTOMER'S OWN"); every vendor path is lib/voice-agents.mjs. The platform
   // runs and bills the calls (no credits); draft_voice_agent and a create_voice_agent without prompt are our AI and billed.
