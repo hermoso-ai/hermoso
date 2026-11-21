@@ -417,6 +417,12 @@ export const isRemote = () => !!mcpCtx.getStore();
 // Advisory and fail-open: an unrecognised or absent client behaves exactly as before.
 const WIDGET_HOSTS = /openai|chatgpt/i;
 export const hostRendersWidgets = () => WIDGET_HOSTS.test(mcpCtx.getStore()?.client || '');
+// THE FULL CONNECTION IN CHATGPT (`?tools=full`, 2026-11-20): it renders ChatGPT's cards like any ChatGPT session, but
+// it lists buy_credits, upgrade_plan and connect_connector, so the published apps' commerce neutrality (no purchase
+// tool named, "nothing can be bought here") would be untrue on it. Presentation asks hostRendersWidgets(); every
+// commerce sentence asks this.
+export const chatgptFullConnection = () => !!mcpCtx.getStore()?.chatgptFull;
+export const hostHidesCommerce = () => hostRendersWidgets() && !chatgptFullConnection();
 
 // ── WHICH WORKSPACE'S STORE KEYS THIS CALL WRITES ──────────────────────────────────────────────────────────────
 // The suffix synced store keys carry (`` = the bare/anchor keys, `<clientSlug>` = a sub-brand). It comes from the

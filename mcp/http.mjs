@@ -415,11 +415,12 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // was the right instinct for a scope the SERVER changes silently, and the wrong one for a change the CLIENT
   // asked for and is told about.
   function scopeFor(req, res) {
-    const { groups, error, directory, app, lean } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
+    const { groups, error, directory, app, lean, full } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
     if (error) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: error }, id: null }); return false; }
     // `app` = one of the focused Hermoso apps (APP_SCOPE_TOKENS in tools.mjs); set ONLY by those tokens, so it is absent
     // on every other connection and nothing below changes for them.
     if (lean) return { groups: null, directory: false, lean: true }; // `?tools=lean`: the core-first list on any host (parseToolScope)
+    if (full) return { groups, directory: false, full: true }; // `?tools=full`: every group; from ChatGPT, the full connection (FULL_SCOPE_TOKENS)
     return app ? { groups, directory: directory || false, app } : { groups, directory: directory || false }; // `directory` = the Claude Connectors Directory cage (see DIRECTORY_GROUPS in tools.mjs)
   }
   // `?src=<surface>` on the published URL (registry / glama / smithery / cursor / readme …) — attribution only. It may
@@ -437,7 +438,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   async function serveAnonDiscovery(req, res, scope) {
     // A widget host (ChatGPT, whose plugin scanner reads this anonymous roster) gets its own instructions — see
     // MCP_INSTRUCTIONS_WIDGET. The SAME host decision as the roster below, so the two can never disagree.
-    const widgetHost = isWidgetHost(clientInfoOf(req.body), req);
+    // THE FULL CONNECTION IN CHATGPT (`?tools=full`, FULL_SCOPE_TOKENS in tools.mjs): still ChatGPT, so results render in
+    // its cards, but none of the published apps' review-driven holds apply. `widgetHost` below is the POLICY decision.
+    const chatgptFull = !!scope?.full && isWidgetHost(clientInfoOf(req.body), req);
+    const widgetHost = isWidgetHost(clientInfoOf(req.body), req) && !chatgptFull;
     scope = widgetHostScope(scope, widgetHost); // the URL our app handed ChatGPT users is the plain URL there (LEGACY_WIDGET_CONNECT_GROUPS)
     const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: instructionsFor(scope, { widgetHost }) });
     // `widgetHost` withholds the two commerce tools from ChatGPT (see registerTools). It is passed HERE as well
@@ -456,7 +460,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // default rather than to the session default; an explicit `?tools=` still wins, exactly as it does below.
     // A widget host in full mode gets every group here too, so the anonymous roster and the signed-in one agree (see
     // chatgptRosterMode in tools.mjs: ChatGPT cannot reach an unlisted tool).
-    registerTools(server, { only: scope?.groups || anonDiscoveryGroups(widgetHost), directory: scope?.directory || false, app: scope?.app || null, widgetHost, hosted: true, ext: extAsked(req, scope) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
+    registerTools(server, { only: scope?.groups || anonDiscoveryGroups(widgetHost), directory: scope?.directory || false, app: scope?.app || null, widgetHost, chatgptFull, hosted: true, ext: extAsked(req, scope) }); // metadata only — tools/list never invokes a handler, and tools/call can't reach here
     // WHO PROBES US WITHOUT A TOKEN, BY NAME (2026-09-25). A host's add-connector dialog decides "sign-in needed or
     // not" from THIS answer: ChatGPT probes with an empty body and gets the 401; claude.ai's dialog sends a real
     // tokenless initialize (UA python-httpx) and our 200 made it pre-select "No sign-in". The UA alone cannot tell
@@ -572,7 +576,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // On ChatGPT the URL our own app handed out (seven named groups, no ads or analytics) is read as the plain URL:
       // a widget host has no executor, so a group it does not list is a feature it does not have. See
       // LEGACY_WIDGET_CONNECT_GROUPS in tools.mjs. The same host decision as `widgetHost` below.
-      const scope = widgetHostScope(scope0, isWidgetHost(entry?.client || clientInfoOf(req.body), req));
+      // `?tools=full` from ChatGPT is the full connection (FULL_SCOPE_TOKENS): ChatGPT presentation, none of the published
+      // apps' holds. So the POLICY host decision below is "a widget host that did not ask for full".
+      const chatgptFull = !!scope0?.full && isWidgetHost(entry?.client || clientInfoOf(req.body), req);
+      const scope = widgetHostScope(scope0, isWidgetHost(entry?.client || clientInfoOf(req.body), req) && !chatgptFull);
       sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
       // ── WHAT THIS CALLER CAN ACTUALLY USE (2026-08-26) ────────────────────────────────────────────────────────
       // One free store read, on the ONE request per session that mints the roster, so the tools we advertise are
@@ -589,7 +596,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // connectedProviders() ([[failed-read-is-not-empty]]).
       const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
       // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
-      const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req);
+      const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req) && !chatgptFull;
       // AN ACCOUNT THAT HAS MADE NOTHING YET, ON EVERY HOST (2026-10-19 for ChatGPT; every host since 2026-11-12). Read once
       // per session, bounded so a slow read can never hold the connect: null (no guidance) is the answer to every failure.
       // Read BEFORE the server is built, because it changes what initialize says: a fresh account's `instructions` open with
@@ -604,7 +611,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       }
       firstRun = firstRun && typeof firstRun === 'object' && firstRun.fresh === true ? { ...firstRun, offer: firstRunOffers(baseInstructions) } : null;
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: withFirstRunLine(baseInstructions, firstRun) });
-      registerTools(server, { only: scope.groups, lean: !!scope.lean, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, hosted: true, ext: extAsked(req, scope), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+      registerTools(server, { only: scope.groups, lean: !!scope.lean, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, chatgptFull, hosted: true, ext: extAsked(req, scope), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
       const transport = new StreamableHTTPServerTransport({
         // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
         sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
@@ -616,7 +623,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
       // The fresh-account read (firstRun) happened above, before the server was built; the session keeps it so the first
       // successful tool reply can carry the same next ask.
-      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun };
+      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun, chatgptFull };
       if (typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
       // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
       // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
@@ -638,7 +645,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // nudge is back on, as it had been since 2026-09-14; MCP_LIST_CHANGED_NUDGE=0 turns it off.
       // NOT ON A FOCUSED APP (2026-11-19): OpenAI's review of the AI Ad Generator read a changing roster as "dynamic tools";
       // a focused app's list is fixed for every session (no connector gate, no snapshot to heal), so it never announces a change.
-      if (process.env.MCP_LIST_CHANGED_NUDGE !== '0' && !scope?.app && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
+      if (process.env.MCP_LIST_CHANGED_NUDGE !== '0' && !scope?.app && !chatgptFull && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
       // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
       // objects are otherwise reachable only from this request's still-open response — close them explicitly
       // rather than leaving a session pinned by a dead socket.
@@ -708,7 +715,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     const free = () => { for (const k of idKeys) if (inflight.get(k) === rec) inflight.delete(k); release(); };
     res.once('close', free);
     // accountId / ua / src ride for the per-call usage record only (mcp/tool-usage.mjs); nothing authorises off them.
-    try { await mcpCtx.run({ token, remote: true, client: entry.client || '', firstRun: entry.firstRun || null, accountId: entry.user?.accountId || null, ua: entry.ua || '', src: entry.src || '', clientIp: String(req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '').trim().slice(0, 64) }, () => entry.transport.handleRequest(req, res, req.body)); }
+    try { await mcpCtx.run({ token, remote: true, client: entry.client || '', chatgptFull: !!entry.chatgptFull, firstRun: entry.firstRun || null, accountId: entry.user?.accountId || null, ua: entry.ua || '', src: entry.src || '', clientIp: String(req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '').trim().slice(0, 64) }, () => entry.transport.handleRequest(req, res, req.body)); }
     finally { if (wall) clearTimeout(wall); free(); }
     // ── A CANCELLED CALL'S STREAM IS ENDED, BECAUSE THE SDK WILL NEVER WRITE TO IT (2026-11-04) ──────────────────
     // On notifications/cancelled the SDK aborts the handler and, per the spec, sends NO response for that request —

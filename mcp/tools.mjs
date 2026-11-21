@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { orderKeywordAds, pictureRows } from './ad-spy-keyword.mjs';
 import { absolutizeAssetUrl, publicOrigin } from './public-url.mjs';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, getJobSettled, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT, brandScope } from './client.mjs';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiSSE, submitJob, getJob, getJobSettled, jobResult, pollJob, jobWaitMs, toRef, localRefVerdict, apiUpload, apiUploadUrl, isRemote, API_BASE, PROFILE, ENV_PREFIX, mcpCtx, storeSuffix, forgetWorkspaceScope, toolCtx, reportToolError, reportDeadEnd, hostRendersWidgets, hostHidesCommerce, connectedProviders, setPinnedProfile, signedOut, SIGN_IN_HINT, brandScope } from './client.mjs';
 import { phoneToolText } from './phone-text.mjs';
 import { mailboxToolText } from './mailbox-text.mjs'; // the whole-mailbox tools' answer text, shared with the in-app agent (2026-11-20)
 import { calendarToolText } from './calendar-text.mjs'; // the calendar tools' answer text, shared with the in-app agent (2026-11-20)
@@ -545,9 +545,11 @@ const leftOutLabel = (f) => LEFT_OUT_LABEL[f] || String(f).split('_').map((w) =>
 // button, "Add custom MCP server", Server URL, Authentication OAuth, "Create as a plugin". One string, said everywhere a
 // ChatGPT reply meets a held capability (these instructions, each focused app's handoff line, hermoso_other_capabilities,
 // a direct call to a held tool), so a renamed menu is one edit. No price, no link to a purchase, no comparison.
-export const CHATGPT_FULL_MCP_URL = 'https://app.hermoso.ai/mcp';
-export const CHATGPT_ADD_FULL_STEPS = `Plugins > + > Add custom MCP server > Server URL ${CHATGPT_FULL_MCP_URL}, OAuth > Create as a plugin`;
-export const CHATGPT_FULL_CONNECTION_LINE = `Hermoso runs it on its full connection, which the user adds in ChatGPT itself: ${CHATGPT_ADD_FULL_STEPS} (where the ChatGPT plan or workspace allows custom MCP servers).`;
+// ITS OWN ADDRESS (2026-11-20): the plain /mcp is the published all-in-one app's reviewed roster on ChatGPT, so the full
+// connection is ?tools=full (FULL_SCOPE_TOKENS), which no published app uses.
+export const CHATGPT_FULL_MCP_URL = 'https://app.hermoso.ai/mcp?tools=full';
+export const CHATGPT_ADD_FULL_STEPS = `Plugins > + > Add custom MCP server > URL ${CHATGPT_FULL_MCP_URL}, OAuth > Create as a plugin`;
+export const CHATGPT_FULL_CONNECTION_LINE = `Hermoso runs it on its full connection, which the user adds in ChatGPT itself: ${CHATGPT_ADD_FULL_STEPS} (where the ChatGPT plan or workspace allows custom MCP servers). That connection runs every Hermoso tool.`;
 // A PAYMENT OR A ONE-TIME SETUP ALSO HAS A WEBSITE DOOR, AND NOTHING IN CHATGPT EVER SUGGESTS THE STUDIO (2026-11-20, the
 // owner: "for the chatgpt stuff we should offer them to connect the full connection or use the website if its payment or
 // one time setup, but i dont think we'd ever want to suggest the studio because thats really best in their own AI"). So a
@@ -991,7 +993,7 @@ export async function finishToolKey(claim, st, r, err) {
 }
 // A widget host (ChatGPT) never hears a plan pitch or a purchase tool's name, whatever produced the reply (tool-hints.mjs
 // withoutPlanPitch); every other host gets the reply untouched, by reference.
-const noPitchOnWidget = (r) => (hostRendersWidgets() ? withoutPlanPitch(r) : r);
+const noPitchOnWidget = (r) => (hostHidesCommerce() ? withoutPlanPitch(r) : r); // not on the full connection in ChatGPT (?tools=full), which lists the purchase tools
 // A CONNECTION THAT STOPPED WORKING IS SAID BY THE TOOLS AN AGENT ALREADY CALLS (2026-11-12, lib/connector-notice.mjs).
 // The server writes the sentence (`agentNote` on GET /api/connectors/attention: the account, the platform's own words, the
 // steps, the reconnect link and the scheduled posts it holds up), so the twins, the web banner and the Studio agent say one
@@ -1116,7 +1118,7 @@ const wrap = (fn) => {
     // A WIDGET HOST (ChatGPT) IS TOLD WHERE THE ACCOUNT IS MANAGED, NEVER HOW TO BUY (2026-09-30): its plugin guidelines
     // forbid selling credits or promoting upgrades, and it is not offered buy_credits/upgrade_plan at all. Read at CALL
     // time from the session's client, the same way a render decides whether to inline an image (hostRendersWidgets).
-    const _widget = hostRendersWidgets();
+    const _widget = hostHidesCommerce(); // commerce wording only: the full connection in ChatGPT lists buy_credits, so it is told it
     // THE REFUSAL CARRIES THE PRICED DOORS (2026-11-12, tool-hints.mjs buyDoorsText): a plan and a pack sized to the ask, each
     // with its price and a checkout link, in place of the paragraph on how buy_credits works. Never on a widget host.
     const _buy = buyDoorsOf(e, _widget);
@@ -3314,6 +3316,19 @@ export const hostTakesCoreFirst = (client, ua) => !hostKeepsFullRoster(client, u
 export const TOOL_CAPPED_HOST_RE = /^visual studio code\b|windsurf/i;
 export const hostHasToolCap = (client, ua) => TOOL_CAPPED_HOST_RE.test(String(client || '')) || /windsurf/i.test(String(ua || ''));
 export const LEAN_SCOPE_TOKENS = Object.freeze(['lean', 'core-first']);
+// ── THE FULL CONNECTION IN CHATGPT IS ITS OWN ADDRESS: /mcp?tools=full (2026-11-20) ─────────────────────────────────────
+// The owner: payments and one-time setup go to the full connection or the website, never the Studio; then (the
+// coordinator, same day) "the full connection must really be full". Measured on production first: a user-added custom
+// server at the plain https://app.hermoso.ai/mcp names itself openai-mcp exactly like the published all-in-one app, so it
+// was handed the published app's reviewed roster (984 tools, the commerce tools and find_tools/call_tool withheld) and
+// "add the full connection" bought the user nothing. The published apps' URLs are frozen by their OpenAI review, so the
+// full connection gets an address of its own that no published app uses. On a widget host `full` means: none of the
+// review-driven holds (WITHHELD_FROM_WIDGET_HOSTS, the generic-executor rule, renames, splits), find_tools/call_tool
+// reaching every tool, and a listed roster ranked by family under ChatGPT's own 1,000-tool limit (enforceFullCap), with
+// every tool that needs no connection (credits, plans, auto-reload, credit limits, connect_connector) always on it.
+// Off ChatGPT it is the same as `all`. It stands alone, like `lean`.
+export const FULL_SCOPE_TOKENS = Object.freeze(['full']);
+export const CHATGPT_FULL_MCP_PATH = '/mcp?tools=full';
 export function defaultToolGroups(env = process.env) { return coreFirstRoster(env) ? ['core'] : [...DEFAULT_TOOL_GROUPS]; }
 
 // Parse a `tools=` scope. Returns {groups} or {error} — an unknown name is REFUSED BY NAME rather than dropped,
@@ -3327,6 +3342,10 @@ export function parseToolScope(raw) {
   // everything on 2026-08-16, so a caller who genuinely wants all 436 tools needs a way to say so that is not
   // "list every group by name and hope none was added since".
   if (asked.includes('all')) return { groups: [...TOOL_GROUP_NAMES] };
+  if (asked.some((v) => FULL_SCOPE_TOKENS.includes(v))) {
+    if (asked.some((v) => !FULL_SCOPE_TOKENS.includes(v))) return { error: `full is a whole roster and is used on its own; drop ${asked.filter((v) => !FULL_SCOPE_TOKENS.includes(v)).join(', ')}.` };
+    return { groups: [...TOOL_GROUP_NAMES], full: true };
+  }
   // `lean` FORCES THE CORE-FIRST LIST on any host (2026-11-17): the `core` group, CORE_FIRST_EXTRA and find_tools /
   // call_tool for everything else, the same list a host that searches gets with no scope at all. It is not a group, so
   // it stands alone. On ChatGPT it changes nothing (a widget host has no executor and lists what it accepts).
@@ -4356,7 +4375,7 @@ export const appHandoffLine = (app, { widgetHost = false, directory = false } = 
   // spelled out in this line (the ~2 KB budget); hermoso_other_capabilities still names each published one with its link.
   // Payments and one-time setup also have a website door (2026-11-20); the addresses ride hermoso_other_capabilities, which
   // every focused app lists, because this line must keep the app's instructions inside 2,048 bytes. Never the Studio.
-  if (widgetHost && !directory) return `OUTSIDE THIS APP (buying credits, billing, paying creators, keys, the rest): Hermoso runs it on its full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}; payments and setup also work on the website. Never say Hermoso lacks it. hermoso_other_capabilities gives the pages and the Hermoso apps, including ${ALL_IN_ONE_CHATGPT_TITLE}.`;
+  if (widgetHost && !directory) return `OUTSIDE THIS APP (buying credits, billing, paying creators, keys, the rest): it runs on the full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}; payments and setup also work on the website. Never say Hermoso lacks it. hermoso_other_capabilities gives the pages and the Hermoso apps, including ${ALL_IN_ONE_CHATGPT_TITLE}.`;
   // Off ChatGPT each sibling is the same URL plus its ?tools= token, so the base is said once (the line must fit ~2 KB).
   return ['OUTSIDE THIS APP, tell the user which Hermoso connection covers it.', `Every tool: ${MCP_PUBLIC_URL}. Or the same URL plus:`, ...others.map((a) => `?tools=${appMcpUrl(a, directory).split('?tools=')[1]} (${APP_TITLES[a].replace(/^Hermoso:\s*/, '')}): ${appAreaWords(a, directory)}.`)].join(' ');
 };
@@ -5512,7 +5531,7 @@ function replayTools(rawServer, opts, canon) {
     // proxy stamps at first registration only, so every later session's factory tools (hermoso_capabilities,
     // get_instructions) were recorded under no name at all.
     if (e.factory && handler) { try { handler._hermosoTool = e.name; } catch {} }
-    const h = rawServer.registerTool(e.name, defForApp(defForDirectory(defForHost(e.name, e.def, opts.widgetHost), ctx.directory, e.name), ctx.app, ctx.directory, e.name, ctx.widgetHost), appHandlerFor(e.name, handler, ctx.app));
+    const h = rawServer.registerTool(e.name, defForApp(defForDirectory(defForHost(e.name, opts.chatgptFull ? withFileParam(e.name, e.def) : e.def, opts.widgetHost), ctx.directory, e.name), ctx.app, ctx.directory, e.name, ctx.widgetHost), appHandlerFor(e.name, handler, ctx.app));
     ctx.handleOf[e.name] = h;
     ctx.srcOf[e.name] = { def: e.def, handler };
     applyToolGates(h, e.name, e.group, ctx, opts);
@@ -5520,6 +5539,7 @@ function replayTools(rawServer, opts, canon) {
   registerWidgetHostAliases(rawServer, ctx, opts);
   registerWidgetHostSplits(rawServer, ctx, opts);
   enforceWidgetCap(ctx, opts);
+  enforceFullCap(ctx, opts);
   registerChatGPTExtensions(rawServer, ctx, opts);
   installHeldToolCalls(rawServer, ctx);
   return rawServer;
@@ -5634,6 +5654,28 @@ export function widgetSplitHandler(o, handler) {
 // handle state, so every session of a deploy reaches the same answer), drops the lowest-ranked families until the list
 // fits, and disables their tools. ChatGPT refuses a list over 1,000 outright, so a slightly short list beats a dead one.
 let _capWarned = false;
+// THE FULL CONNECTION IN CHATGPT LISTS WHAT FITS (2026-11-20, see FULL_SCOPE_TOKENS). ChatGPT refuses a tools/list over
+// 1,000 (CHATGPT_TOOL_CAP, measured), and every registered tool is 1,500+. So when the LISTED set (after the connector
+// gate, which already drops platforms this workspace has not connected) is over the cap, whole families come off in the
+// ranked order: CHATGPT_ROSTER_FAMILIES first, then the families that ranking leaves out. Every tool that needs no
+// connection stays listed, the payment and setup tools among them. A family taken off the list stays CALLABLE:
+// call_tool runs any registered tool here, and find_tools finds it. Computed per session from this session's own handles
+// and never written to the process-wide drop set the published apps read (_capDroppedFamilies).
+export function fullCapPlan(listed, cap = CHATGPT_TOOL_CAP) {
+  const byFamily = new Map(); let core = 0;
+  for (const n of listed) { const f = toolProvider(n); if (f === null) core++; else byFamily.set(f, (byFamily.get(f) || 0) + 1); }
+  const order = [...CHATGPT_ROSTER_FAMILIES, ...CHATGPT_ROSTER_LEFT_OUT, ...[...byFamily.keys()].sort()].filter((f, i, a) => a.indexOf(f) === i);
+  let total = core; const kept = [], dropped = [];
+  for (const f of order) { const k = byFamily.get(f) || 0; if (!k) continue; if (!dropped.length && total + k <= cap) { kept.push(f); total += k; } else dropped.push(f); }
+  return { core, kept, dropped, total };
+}
+function enforceFullCap(ctx, opts) {
+  if (!opts.chatgptFull) return;
+  const listed = Object.keys(ctx.handleOf).filter((n) => ctx.handleOf[n] && ctx.handleOf[n].enabled !== false);
+  if (listed.length <= CHATGPT_TOOL_CAP) return;
+  const drop = new Set(fullCapPlan(listed).dropped);
+  for (const n of listed) { const f = toolProvider(n); if (f !== null && drop.has(f)) { try { ctx.handleOf[n].disable(); } catch {} } }
+}
 function enforceWidgetCap(ctx, opts) {
   if (!opts.widgetHost || chatgptRosterMode() !== 'ranked') return;
   // A FOCUSED APP IS SIZED BY ITS JOB, NOT BY THE FAMILY RANKING, and must never write the process-wide drop set the
@@ -5968,7 +6010,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
         // from it (WeakMap-cached per def) are the same objects on the build path and on every replay.
         const canonDef = stripOutputSchema(finalDef);
         if (sink) sink.push({ name, group, def: canonDef, handler, factory: handler && handler._hermosoFactory || null });
-        const h = t.registerTool(name, defForApp(defForDirectory(defForHost(name, finalDef, opts.widgetHost), ctx.directory, name), ctx.app, ctx.directory, name, ctx.widgetHost), appHandlerFor(name, handler, ctx.app));
+        const h = t.registerTool(name, defForApp(defForDirectory(defForHost(name, opts.chatgptFull ? withFileParam(name, finalDef) : finalDef, opts.widgetHost), ctx.directory, name), ctx.app, ctx.directory, name, ctx.widgetHost), appHandlerFor(name, handler, ctx.app));
         handleOf[name] = h;
         ctx.srcOf[name] = { def: canonDef, handler };
         // DISABLED, NOT SKIPPED — see (1) above. `disable()` is the SDK's own call and removes it from tools/list.
@@ -8016,7 +8058,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE CHARGES THEMSELVES (2026-09-12): the same ledger list as Billing ▸ Usage, so "where did my credits go" has an
     // answer here too. Best effort: a reply about the balance never fails on the history read.
     let recent = ''; try { const u = await apiGet('/api/billing/usage', { limit: 10 }); if (u?.items?.length) recent = `\nRecent charges (newest first):\n${u.items.map((r) => `• ${String(r.at).slice(0, 16).replace('T', ' ')} UTC · ${r.label} · ${r.credits} credits`).join('\n')}`; } catch {}
-    const _mr = d.memberRate === true ? ' This account\'s plan has no markup on models.' : d.planUpsell === true && !hostRendersWidgets() ? ' Starter, Pro and Studio have no markup on models, so credits go twice as far (upgrade_plan); Basic, Free and top-up credits use standard prices.' : '';
+    const _mr = d.memberRate === true ? ' This account\'s plan has no markup on models.' : d.planUpsell === true && !hostHidesCommerce() ? ' Starter, Pro and Studio have no markup on models, so credits go twice as far (upgrade_plan); Basic, Free and top-up credits use standard prices.' : '';
     const _po = d.posting?.line ? ` Posting: ${d.posting.line}` : '';
     // THIS BRAND'S MONTHLY CREDIT LIMIT, when the owner set one (2026-11-18): the balance alone would say "plenty" to a brand that is capped.
     let _cl = ''; try { const L = await apiGet('/api/credit-limits', { current: '1' }); const b = (L?.brands || [])[0]; const me = (b?.members || []).find((m) => m.limit != null && (L.owner === false)); if (b && b.limit != null) _cl = ` This brand's monthly credit limit: ${b.used} of ${b.limit} used, ${b.remaining} left until ${String(L.resetAt || '').slice(0, 10)} (UTC; get_credit_limits shows every limit${L.canEdit ? ', set_credit_limit changes one' : ''}).`; if (me) _cl += ` Your own limit on it: ${me.used} of ${me.limit} used.`; } catch {}
@@ -8061,7 +8103,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // plan that beats it and by how much, measured by the server (packs[].planCompare, lib/pack-plan-compare.mjs). Not on a
     // host that renders widgets, the same rule as hermoso_credits' upsell line.
     const _cmp = new Map((cfg.packs || []).filter(p => p.planCompare).map(p => [p.id, p.planCompare]));
-    const cmpOf = (id) => (hostRendersWidgets() ? null : _cmp.get(id) || null);
+    const cmpOf = (id) => (hostHidesCommerce() ? null : _cmp.get(id) || null);
     const cmpLine = (c) => c ? `\n\nBefore paying: ${c.line} A monthly plan is the better buy here; upgrade_plan moves the account to ${c.planName} (a person pays on Stripe).` : '';
     if (!pack) {
       const lines = packs.map(p => `• ${p.id} — ${p.credits.toLocaleString()} credits · ${priceText(p)}${cmpOf(p.id) ? ` (${cmpOf(p.id).headline})` : ''}`).join('\n') || '(no packs configured)';
@@ -10329,7 +10371,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await (a.dryRun === false ? apiSSE : apiPost)('/api/schedule/refill/run', { dryRun: a.dryRun === false ? false : true, force: !!a.force }); // a live run renders for minutes: streamed past the edge's 100s limit (2026-10-06)
     const lines = (d.posts || []).map((p, i) => `  ${i + 1}. ${p.at} → ${(p.channels || []).map(c => `${c}[${(p.visibilityByChannel || {})[c] || 'public'}]`).join(', ')}\n     ${String(p.message || '').replace(/\n+/g, ' / ').slice(0, 220)}\n     new ${p.kind}: ${p.media || `(made when it runs live) ${String(p.asset?.scene || '').slice(0, 160)}`} · ${p.asset?.credits || 0} credits`);
     const q = (d.queued || []).filter(x => x && x.id).length, qFail = (d.queued || []).filter(x => x && x.error);
-    const _refillBuy = d.outOfCredits ? buyDoorsOf(d, hostRendersWidgets()) : null; // out of credits: the server's two priced doors (2026-11-12), never on a widget host
+    const _refillBuy = d.outOfCredits ? buyDoorsOf(d, hostHidesCommerce()) : null; // out of credits: the server's two priced doors (2026-11-12), never on a widget host
     return ok([
       d.summary || '',
       _refillBuy ? buyDoorsText(_refillBuy, 'run_post_refill') : '',
@@ -30891,7 +30933,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     const store = mcpCtx.getStore();
     const d = await apiPost('/api/week-plan', { confirm: a.confirm === true, decline: a.decline === true, timezone: a.timezone || '', client: store ? String(store.client || '') : 'hermoso' });
-    return ok(hostRendersWidgets() && d.neutral ? d.neutral : d.text, d);
+    return ok(hostHidesCommerce() && d.neutral ? d.neutral : d.text, d);
   }));
   server.registerTool('list_skills', {
     title: 'List skills',
@@ -31633,7 +31675,7 @@ function memoryNoteVerdict(text) {
     // A WIDGET HOST (ChatGPT) IS NOT OFFERED connect_connector, AND ITS RULES BAR ASKING FOR API KEYS IN THE CHAT
     // (2026-10-07, OpenAI plugin guidelines: restricted data includes "Access credentials and authentication secrets (such
     // as API keys …)"). So there the paste-a-key half points at the app instead of at a tool the host does not list.
-    const widget = hostRendersWidgets();
+    const widget = hostHidesCommerce(); // the full connection in ChatGPT lists connect_connector, so it gets the plain text
     const emptyWidget = '\nIf this profile should have connected accounts, check WHICH workspace this connection is on: list_brands names every profile on this account plus every one shared with you, and use_brand switches. Otherwise the user connects an account in the Hermoso app under Connectors (hand them the connect link below for a sign-in account).';
     const empty = '\nIf this profile should have connected accounts, check WHICH workspace this connection is on: list_brands names every profile on this account plus every one shared with you, and use_brand switches. Otherwise connect one: an account that connects through a sign-in screen needs a browser (hand the user its connect link, below), and a paste-a-key account can be connected right here with connect_connector or in Connectors, whichever the user prefers.';
     // AN AGENT NEVER SEES A PICKER PROVIDER'S RAW `accountLabel` (2026-08-04). It names whoever AUTHORIZED the
@@ -35156,6 +35198,7 @@ function memoryNoteVerdict(text) {
   registerWidgetHostAliases(rawServer, ctx, opts);
   registerWidgetHostSplits(rawServer, ctx, opts);
   enforceWidgetCap(ctx, opts);
+  enforceFullCap(ctx, opts);
   registerChatGPTExtensions(rawServer, ctx, opts);
   installHeldToolCalls(rawServer, ctx);
 }
