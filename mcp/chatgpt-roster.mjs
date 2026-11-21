@@ -58,5 +58,6 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'wechat', // long tail
   'whop', // long tail
   'wix', // long tail
+  'woocommerce', // long tail
 ]);
 export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-21T01:06:10.181Z" });

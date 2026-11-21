@@ -115,6 +115,9 @@ export const TOOL_PROVIDER_RULES = [
   // An EMAIL thread is not the Threads network either (get_email_thread, 2026-11-20): it reads the brand's own mailbox,
   // which is not a connector-gated family, so like search_email and every mailbox tool it matches no rule.
   [/^threads_|(?<!_email)_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
+  // RCS and the WhatsApp SANDBOX (2026-11-21) run on the brand's own TWILIO account, not on Meta: named before the Meta
+  // rule, or `whatsapp_sandbox` would be held for a brand with Twilio and offered to one with only Meta.
+  [/^(rcs_setup|whatsapp_sandbox)$/, 'twilio'],
   [/_meta_|^meta_|_meta$|instagram|whatsapp|messenger/, 'meta'], // messenger: Page marketing messages ride the Meta connector (2026-09-07)
   // PHONE / SMS / VOICE (2026-11-18): the brand's OWN Twilio or Telnyx account. ONE tool set serves both providers, filed
   // under 'twilio'; toolHeldBackByConnectors offers it to a brand with either connected (PHONE_TOOL_ALSO). `call_tool` and
@@ -152,6 +155,8 @@ export const TOOL_PROVIDER_RULES = [
   [/klaviyo/, 'klaviyo'],
   // Mailchimp (2026-11-03): the brand's OWN email marketing, offered only to a workspace that connected it.
   [/mailchimp/, 'mailchimp'],
+  // WooCommerce (2026-11-21): the brand's OWN store (orders + stock), offered only to a workspace that connected it.
+  [/woocommerce/, 'woocommerce'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
   [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],

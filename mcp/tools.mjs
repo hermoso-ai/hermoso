@@ -152,6 +152,9 @@ function adRuleText(d = {}) {
   if (Array.isArray(d.lines) && d.lines.length) out.push(...d.lines.slice(0, 40));
   if (Array.isArray(d.runs) && d.runs.length) out.push(...d.runs.slice(0, 20).map((r) => `· ${r.at || ''} ${r.mode ? `${r.mode} ` : ''}${r.outcome ? `${r.outcome} ` : ''}${r.runId ? `(${r.runId}) ` : ''}${r.note || (r.changedNothing ? 'changed nothing' : `${(r.results || []).length} result(s)`)}`));
   if (d.scopeToken && !Array.isArray(d.rules)) out.push(`scopeToken: ${d.scopeToken}`);
+  // The approval step (2026-11-21): each proposal with its changes, and the lines of the run a decision made.
+  if (Array.isArray(d.proposals) && d.proposals.length) out.push(...d.proposals.slice(0, 20).map((p) => `· ${p.proposalId} — "${p.ruleName}" — ${p.status} — expires ${p.expiresAt} (${p.onTimeout === 'apply' ? 'then APPLIED' : 'then dropped'})\n${(p.lines || []).slice(0, 10).map((l) => `  ${l}`).join('\n')}`));
+  if (d.run && Array.isArray(d.run.lines) && d.run.lines.length) out.push(...d.run.lines.slice(0, 40));
   return out.filter(Boolean).join('\n');
 }
 function rowLines(rows, max = 40) {
@@ -276,6 +279,7 @@ export const KEY_CONNECTORS = {
   amplitude: { label: 'Amplitude', route: 'amplitude', fields: { apiKey: 'rs', secretKey: 'rs', region: '', host: '' }, how: 'the project API key and secret key from Amplitude ▸ Settings ▸ Projects ▸ your project ▸ General' },
   line: { label: 'LINE', route: 'line', fields: { channelAccessToken: 'rs', channelSecret: 'rs', replaceWebhook: '' }, how: 'the channel access token (long-lived, LINE Developers console ▸ your channel ▸ Messaging API tab) and the channel secret (Basic settings tab) of a LINE Official Account. Hermoso points the channel’s webhook at itself and reports what the user still has to switch on; replaceWebhook true only when the user agreed to replace an address another tool set there' },
   wechat: { label: 'WeChat', route: 'wechat', fields: { appId: 'r', appSecret: 'rs' }, how: 'the AppID and AppSecret of a verified WeChat Service Account (WeChat Developer Platform ▸ your Service Account ▸ Basic info). The reply carries the server address, Token and EncodingAESKey the user must paste into WeChat in Safe mode, so relay all three exactly; if WeChat refuses because of its API IP whitelist, the reply names the address to add' },
+  woocommerce: { label: 'WooCommerce', route: 'woocommerce', fields: { storeUrl: 'r', consumerKey: 'rs', consumerSecret: 'rs' }, how: 'the store address (https://…) plus a REST API key and secret from WooCommerce ▸ Settings ▸ Advanced ▸ REST API ▸ Add key, with Read/Write permission (the secret is shown once). Orders, refunds and stock on the brand\u2019s own store' },
   wordpress: { label: 'WordPress', route: 'wordpress', fields: { siteUrl: 'r', username: 'r', appPassword: 'rs' }, how: 'the site address (https://…, a self-hosted site — WordPress.com cannot be connected this way), the WordPress username, and an APPLICATION password from WordPress ▸ Users ▸ Profile ▸ Application Passwords (not the login password)' },
   webflow: { label: 'Webflow', route: 'webflow', fields: { token: 'rs', siteId: '', collectionId: '' }, how: 'a SITE API token from Webflow ▸ Site settings ▸ Apps & integrations ▸ API access ▸ Generate API token, with Sites set to read-only and CMS set to read and write (siteId only when the token can see several sites; collectionId to choose the blog collection now)' },
   wix: { label: 'Wix', route: 'wix', fields: { apiKey: 'rs', siteId: 'r', memberId: '' }, how: 'an API key from the Wix API Keys Manager (manage.wix.com/account/api-keys) with the Blog and Media Manager permissions ticked, plus the site ID: the long id after /dashboard/ in the address of the site’s dashboard' },
@@ -3479,6 +3483,10 @@ const SHOPIFY_OPS_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is
 const PHONE_PLATFORM_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Hermoso phone is turned on and off from the Hermoso app or another connected agent';
 const AGENCY_WIDGET_WHY = 'it is agency administration newer than the ChatGPT tool list, which is at its 1,000-tool limit; it works from the Hermoso app, Claude, the CLI, the API or another connected agent';
 export const SHOPIFY_OPS_TOOLS = Object.freeze(['update_shopify_order', 'edit_shopify_order_items', 'fulfill_shopify_order', 'cancel_shopify_order', 'refund_shopify_order', 'list_shopify_locations', 'get_shopify_inventory', 'set_shopify_inventory']);
+// SHOPIFY STORE ADMIN (2026-11-21): seven more store tools (draft orders, collections, metafields, pages, redirects, menus,
+// markets), held from the capped ChatGPT list for the same reason as the order tools.
+export const SHOPIFY_ADMIN_TOOLS = Object.freeze(['manage_shopify_draft_orders', 'manage_shopify_collections', 'manage_shopify_metafields', 'manage_shopify_pages', 'manage_shopify_redirects', 'manage_shopify_menus', 'manage_shopify_markets']);
+const SHOPIFY_ADMIN_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; draft orders, collections, metafields, pages, redirects, menus and markets are changed from the Hermoso app or another connected agent';
 // CONVERSIONS HUB + PROFIT PER CAMPAIGN (2026-11-20): seven tools that need no connection would be CORE on the all-in-one
 // ChatGPT list and push the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs
 // refuses. Held there for the next ChatGPT ranking; they are in the `ads` group, so the Hermoso Ads app in ChatGPT lists them.
@@ -3488,6 +3496,7 @@ const SHOPIFY_CART_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which i
 export const SHOPIFY_CART_TOOLS = Object.freeze(['set_shopify_cart_recovery', 'get_shopify_cart_recovery', 'shopify_cart_recovery_report']);
 export const WIDGET_WITHHELD_WHY = Object.freeze({
   ...Object.fromEntries(SHOPIFY_OPS_TOOLS.map((n) => [n, SHOPIFY_OPS_WIDGET_WHY])),
+  ...Object.fromEntries(SHOPIFY_ADMIN_TOOLS.map((n) => [n, SHOPIFY_ADMIN_WIDGET_WHY])),
   ...Object.fromEntries(SHOPIFY_CART_TOOLS.map((n) => [n, SHOPIFY_CART_WIDGET_WHY])),
   // HERMOSO PHONE (2026-11-20): three tools no connector holds back (a brand with nothing connected must reach them), so on
   // ChatGPT they would be always-listed and push the last ranked family off a list at its cap. Held for the next ranking; every
@@ -3509,9 +3518,10 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   manage_meta_value_rules: AGENCY_WIDGET_WHY,
   list_meta_ad_studies: AGENCY_WIDGET_WHY,
   list_ad_rule_templates: AGENCY_WIDGET_WHY,
-  backtest_google_ads_rule: AGENCY_WIDGET_WHY,
+  backtest_google_ads_rule: AGENCY_WIDGET_WHY, google_ads_rule_approvals: AGENCY_WIDGET_WHY,
   send_conversion_event: CONV_WIDGET_WHY, conversion_destinations: CONV_WIDGET_WHY, conversion_events: CONV_WIDGET_WHY, conversion_insights: CONV_WIDGET_WHY,
   upload_campaign_results: CONV_WIDGET_WHY, set_profit_settings: CONV_WIDGET_WHY, campaign_profit: CONV_WIDGET_WHY,
+  post_purchase_survey: CONV_WIDGET_WHY, // POST-PURCHASE SURVEY (2026-11-21): needs no connection, so it would be always-listed on a ChatGPT list at its cap
   hermoso_tag: CONV_WIDGET_WHY, install_hermoso_tag: CONV_WIDGET_WHY, hermoso_tag_report: CONV_WIDGET_WHY, hermoso_tag_events: CONV_WIDGET_WHY, hermoso_tag_audiences: CONV_WIDGET_WHY, // THE HERMOSO TAG (2026-11-21): same cap, same family
   // LINKEDIN BOOST API 202611 (2026-11-20): four tools in the linkedin family, which is listed on ChatGPT; one more listed tool
   // pushes the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses.
@@ -6419,7 +6429,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _otherAppRows = [];
     for (const [name, h] of Object.entries(ctx.handleOf)) {
       if (!h) continue;
-      if (toolWithheldByServer(name, ctx.conn)) continue; // not offered right now: absent from search, like an unoffered provider
+      // A SHOPIFY TOOL ON A BRAND WITH NO STORE IS SEARCHABLE, HELD (journey QA 2026-11-21). Since Shopify became a connector
+      // (2026-11-17) any brand can connect a store, so its tools are a capability waiting on a connection, like not_connected:
+      // find_tools("shopify abandoned cart recovery") on a store-less brand listed connect_shopify_store and twelve unrelated
+      // tools, and never set_shopify_cart_recovery, so an agent could not tell the user Hermoso does it. Listed with its
+      // own 'shopify_store' hold (ranked after the callable rows); still absent from every roster and refused on call.
+      const _noStoreOnly = heldForNoShopifyStoreOf(canonicalToolName(name), ctx.conn) && !toolWithheldByServer(name, { ...ctx.conn, shopifyStore: null }); // held for the missing store and for nothing else
+      if (toolWithheldByServer(name, ctx.conn) && !_noStoreOnly) continue; // not offered right now: absent from search, like an unoffered provider
       // A WIDGET HOST SEARCHES ONLY ITS OWN LIST (2026-09-30, OpenAI's generic-executor rule — see EXECUTOR_TOOLS). Only
       // a host still holding find_tools from an older scan reaches this; it must not surface an operation it never listed.
       if (ctx.widgetHost && (h.enabled === false || EXECUTOR_TOOLS.has(name))) continue;
@@ -6511,6 +6527,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
         ? { do: (holdHints(best.name, best.hold, ctx)[0] || {}).do || `resolve the ${best.hold} hold on ${best.name}`, why: `${best.name} is the best match and this workspace cannot run it yet` }
         : { do: ctx.widgetHost ? `${best.name}({ … })` : `call_tool({ name: '${best.name}', args: { … } })`, why: `${best.name} is the best match${best.inRoster ? '' : ' and is not in your list, which does not stop it running'}${best.cost?.free ? ' and it is free' : ''}` });
       if (best.health?.state === 'failing') hints.push({ do: `consider the next row, or tell the user ${best.name} is currently failing`, why: `${best.failures || best.health.failures} of its last ${best.health.calls} calls on this server failed` });
+      // A store-less brand's Shopify rows are listed held (above); the way to a store is named even when the best row is callable.
+      const _shop = top.find((r) => r.hold === 'shopify_store');
+      if (_shop && best.hold !== 'shopify_store') hints.push({ do: (holdHints(_shop.name, 'shopify_store', ctx)[0] || {}).do || 'call connect_shopify_store', why: `${_shop.name} and the other rows marked shopify_store need a Shopify store connected to this brand first` });
     }
     return withHints({ content: [{ type: 'text', text: text + otherAppNote }], structuredContent: { total, related, tools: top.map(({ score, _penalty, _cov, _nh, _nd, _exact, ...r }) => r), ...(_homes.length ? { otherApps: _homes } : {}) } }, hints);
   };
@@ -9531,6 +9550,35 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const row = (f) => `• ${f.name} (${f.status}) id ${f.id}${f.validationErrors?.length ? ` · ${f.validationErrors.length} problem(s)` : ''}${f.previewUrl ? ` · preview ${f.previewUrl}` : ''}`;
     const body = d.flows ? d.flows.map(row).join('\n') : d.flow ? `${row(d.flow)}${(d.flow.validationErrors || []).map((e) => `\n    ⚠ ${e.message}${e.path ? ` (${e.path})` : ''}`).join('')}` : '';
     return ok([d.note, body].filter(Boolean).join('\n') || 'Done.', d);
+  }));
+
+  // WHATSAPP CALLING (2026-11-21): voice calls on the brand's OWN WhatsApp Business number (Meta Cloud API Calling). One
+  // tool with an `action`, like the two above. Rules on the server in lib/whatsapp-calling.mjs; settings changes, a
+  // permission request and a placed call are confirm-gated; settings are read back from Meta.
+  server.registerTool('manage_whatsapp_calling', {
+    title: 'WhatsApp calls',
+    description: 'WhatsApp CALLS on one business number. "get_settings" reads them; "update_settings" changes only what you pass: enabled (needs a messaging limit of 2,000+), callButton "show" | "hide", callButtonCountries (two-letter codes), callHours { timezone, weekly: [{ day: "MONDAY", open: "09:00", close: "17:00" }] (≤2 a day), holidays: [{ date, start, end }] (≤20) } or false for any time, callbackPermission (callers can allow you to call back), permissionMode "approved_only" | "unless_revoked", sip { hostname, port (5061), uriParams, webhooks } to hand every call to your own SIP server or AI voice agent, or false. "permission" (to): does this person allow calls, and can you ask or call now. "request_permission" (to, text): asks them inside the 24-hour window (1 a day, 2 a week). "recent_calls": calls in the last 48 hours, missed or answered, with length; each also lands in read_whatsapp_inbox and the whatsapp.call alert. "call" (to, sdp) and "accept" / "pre_accept" (callId, sdp) need your own WebRTC app\'s SDP; "reject" / "end" (callId) stop a call. update_settings, request_permission and call take confirm:true after a first call without it. Meta bills the business for calls it places (not US, Canada, Egypt, Vietnam or Nigeria numbers); calls to the business are free. 0 credits.',
+    inputSchema: {
+      phoneNumberId: z.string().describe('the number, from list_whatsapp_accounts'),
+      action: z.enum(['get_settings', 'update_settings', 'permission', 'request_permission', 'recent_calls', 'call', 'pre_accept', 'accept', 'reject', 'end']).optional().describe('get_settings (default)'),
+      enabled: z.boolean().optional(), callButton: z.enum(['show', 'hide']).optional(), callButtonCountries: z.array(z.string()).optional(),
+      callHours: z.any().optional().describe('{ timezone: "America/Toronto", weekly: [{ day, open, close }], holidays?: [{ date: "YYYY-MM-DD", start, end }] }, or false'),
+      callbackPermission: z.boolean().optional(), permissionMode: z.enum(['approved_only', 'unless_revoked']).optional(),
+      sip: z.any().optional().describe('{ hostname, port?, uriParams?, webhooks? } (TLS host of your SIP server or voice agent), or false'),
+      audioCodecs: z.array(z.string()).optional().describe('extra codecs: PCMA, PCMU (Opus is always on)'),
+      revealSipPassword: z.boolean().optional().describe('get_settings: include the SIP password your server authenticates with'),
+      to: z.string().optional().describe('permission / request_permission / call: phone in international form or business-scoped user id'),
+      text: z.string().optional().describe('request_permission: why you want to call (optional, ≤1024)'),
+      callId: z.string().optional().describe('accept / pre_accept / reject / end: the wacid. id from action recent_calls or the alert'),
+      sdp: z.string().optional().describe('call: your WebRTC SDP offer; accept / pre_accept: your SDP answer'),
+      trackingData: z.string().optional(), limit: z.number().optional(),
+      confirm: z.boolean().optional(),
+    },
+    outputSchema: { phoneNumberId: z.string().optional(), settings: z.any().optional(), permission: z.any().optional(), calls: z.array(z.any()).optional(), callId: z.string().optional(), changed: z.boolean().nullable().optional(), sent: z.boolean().optional(), placed: z.boolean().optional(), ok: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = !a.action || ['get_settings', 'permission', 'recent_calls'].includes(a.action) ? await apiGet('/api/whatsapp/calling', { phoneNumberId: a.phoneNumberId, action: a.action || 'get_settings', to: a.to, limit: a.limit, revealSipPassword: a.revealSipPassword ? 'true' : undefined }) : await apiPost('/api/whatsapp/calling', a);
+    return ok(d.text || d.note || 'Done.', d);
   }));
 
   // ── LINE (2026-11-15): a messaging channel ──────────────────────────────────────────────────────────────────────
@@ -14128,6 +14176,37 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), segments: z.array(z.any()).optional(), segment: z.any().optional(), sent: z.number().optional(), needsConfirm: z.boolean().optional(), audienceId: z.string().nullable().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = !a.action || a.action === 'list' ? await apiGet('/api/hermoso-tag/audiences', a) : await apiPost('/api/hermoso-tag/audiences', a); return ok(d.note, d); }));
+  // POST-PURCHASE SURVEY (2026-11-21, lib/post-purchase-survey.mjs): "How did you hear about us?" on Shopify's Thank you and
+  // Order status pages (the Hermoso survey app block), a hosted page any store links from its emails, and a signed webhook;
+  // each answer lands on the Shopify order (hermoso.how_did_you_hear) and the brand's contact, and the report sets what buyers
+  // said beside what tracking saw for the same orders. Free.
+  server.registerTool('post_purchase_survey', {
+    title: 'Post-purchase survey',
+    description: 'POST-PURCHASE SURVEY, "How did you hear about us?": what buyers SAY brought them, beside what tracking saw. Asked in three places: on Shopify’s Thank you and Order status pages (the "Hermoso survey" app block, placed once in Settings ▸ Checkout ▸ Customize; not on Shopify Starter), on a hosted page (pageUrl) any store links from its own order email or SMS, and through a signed webhook for answers collected anywhere else (WooCommerce, another survey app, a form). Each answer is written to the Shopify order (metafield hermoso.how_did_you_hear, shown on the order page) and to the brand’s contact (field how_did_you_hear, tag survey:<channel>), and sent as survey.answered to the brand’s Slack, Discord or webhook alerts. action get (default): settings, the page and webhook links, the answer count, whether the Shopify block has loaded. set: enabled, question, options [{ label, channel?, freeText? }] (2-20; channel such as instagram, tiktok, google, ai, word_of_mouth, creator, podcast, email, other), thankYou, shuffle, writeToOrder, writeToContact, accent (hex). link: orderId, email, value, currency → a link signed with the brand’s secret, so the answer is tied to that order. secret: the signing secret for links and the webhook (rotate:true makes a new one; old signatures stop working). record: an answer the user or agent already has (answer = an option id or label, or the buyer’s own words; otherText, orderId, email, value, currency, at). answers: the answers (days or from/to, channel, source, limit). report: answers and revenue per answer, and for each answer what tracking recorded for the same orders, including how many buyers named a channel tracking credited to direct traffic or nothing. sync: retry writing answers onto orders and contacts. Free.',
+    inputSchema: {
+      action: z.enum(['get', 'set', 'link', 'secret', 'answers', 'record', 'report', 'sync']).optional().describe('default get'),
+      enabled: z.boolean().optional().describe('set: true turns the survey on everywhere (Shopify block, hosted page, webhook)'),
+      question: z.string().optional().describe('set: the question, up to 160 characters'),
+      options: z.array(z.object({ id: z.string().optional(), label: z.string(), channel: z.string().optional(), freeText: z.boolean().optional().describe('this answer asks the buyer to type where (one option at most)') })).optional().describe('set: 2-20 answers, replaces the list'),
+      thankYou: z.string().optional().describe('set: the line shown after answering'),
+      shuffle: z.boolean().optional().describe('set: shuffle the answers per buyer (default true; a free-text answer stays last)'),
+      writeToOrder: z.boolean().optional().describe('set: write the answer onto the Shopify order (default true)'),
+      writeToContact: z.boolean().optional().describe('set: save the answer on the brand’s contact for that email (default true)'),
+      accent: z.string().nullable().optional().describe('set: the hosted page’s button colour, hex; null for the default'),
+      rotate: z.boolean().optional().describe('secret: true makes a new secret'),
+      answer: z.string().optional().describe('record: an option id or label, or the buyer’s own words'),
+      optionId: z.string().optional(), otherText: z.string().optional(),
+      orderId: z.string().optional().describe('link / record: the order (a Shopify gid, or the store’s own order number)'),
+      email: z.string().optional().describe('link / record: the buyer’s email (stored hashed; used for the contact)'),
+      value: z.number().optional().describe('link / record: the order total'), currency: z.string().optional().describe('three letters, e.g. USD'),
+      at: z.string().optional().describe('record: when it was answered, ISO time'),
+      days: z.number().optional().describe('answers / report: the last N days (default 30)'), from: z.string().optional(), to: z.string().optional(),
+      channel: z.string().optional().describe('answers: only this channel'), source: z.enum(['shopify', 'hosted', 'webhook', 'agent']).optional().describe('answers: only this door'),
+      limit: z.number().optional().describe('answers: 1-200, default 50'),
+    },
+    outputSchema: { ok: z.boolean().optional(), survey: z.any().optional(), answers: z.any().optional(), url: z.string().optional(), secret: z.string().optional(), webhookUrl: z.string().optional(), rows: z.array(z.any()).optional(), stored: z.boolean().optional(), answer: z.any().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = !a.action || ['get', 'answers', 'report'].includes(a.action) ? await apiGet('/api/survey', { ...a, ...(a.options ? { options: undefined } : {}) }) : await apiPost('/api/survey', a); return ok(d.note, d); }));
   // GOOGLE MERCHANT CENTER (2026-08-07) — rides the google_ads connection (same grant, extra `content` scope).
   // ALL FOUR SHIPPED CALLING `text(...)`, WHICH IS DECLARED NOWHERE IN THIS FILE (found 2026-08-10). Every call
   // therefore threw `ReferenceError: text is not defined`, `wrap()` caught it, and the tool answered "Error: text
@@ -14514,6 +14593,172 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { shop: z.string().optional(), needsConfirm: z.boolean().optional(), changed: z.boolean().optional(), verified: z.boolean().nullable().optional(), changes: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/shopify/inventory', a); return ok(d.note, d); }));
+
+  // SHOPIFY ▸ STORE ADMIN (2026-11-21, lib/shopify-store-admin.mjs) — draft orders, collections, metafields, Online Store
+  // pages, URL redirects, navigation menus and markets on the merchant's own store (derived server-side; no `shop` field).
+  // One tool per area, one `action` each. Buyer-facing writes (an invoice email, completing a draft, a market going live) and
+  // every delete are a preview until confirm:true; everything else applies at once and is read back from Shopify.
+  const shopifyAdminText = (d) => [d.note || 'Done.', ...(Array.isArray(d.lines) ? d.lines.slice(0, 60).map((l) => `• ${l}`) : [])].join('\n');
+  const shopifyAdminOut = { shop: z.string().optional(), action: z.string().optional(), needsConfirm: z.boolean().optional(), verified: z.boolean().nullable().optional(), count: z.number().optional(), lines: z.array(z.string()).optional(), note: z.string().optional() };
+  server.registerTool('manage_shopify_draft_orders', {
+    title: "Shopify draft orders",
+    description: "Draft orders on the merchant's Shopify store (quotes, phone, wholesale and custom orders). action list (status open, invoice_sent or completed; query), get (id), calculate (price a draft WITHOUT creating it: total, tax, shipping), create (lineItems [{variantId or sku, quantity, price?}] or custom lines {title, price, quantity}; email, customerId, shippingAddress, shippingLine {title, price}, discount {value, type percentage|fixed_amount, title}, discountCodes, note, tags, reserveInventoryUntil; nobody is emailed), update (any of those; lineItems replaces the lines), duplicate, send_invoice (emails the buyer the checkout link; to, subject, message), complete (turns it into a real order, marked as paid, or paymentPending:true), delete. send_invoice, complete and delete change nothing without confirm:true (complete also needs confirmAmount = the draft's total): show the user the reply, get a yes, then call again. Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "get", "calculate", "create", "update", "duplicate", "send_invoice", "complete", "delete"]).optional().describe("default list (get when id is passed)"),
+      id: z.string().optional().describe("the draft order: gid://shopify/DraftOrder/\u2026 or its number"),
+      status: z.enum(["open", "invoice_sent", "completed"]).optional().describe("list: only these"),
+      query: z.string().optional().describe("list: Shopify's search syntax, e.g. tag:wholesale"),
+      limit: z.number().optional().describe("list: 1-50 (default 20)"),
+      lineItems: z.array(z.object({ variantId: z.string().optional(), sku: z.string().optional(), quantity: z.number().optional(), price: z.string().optional(), title: z.string().optional(), taxable: z.boolean().optional(), requiresShipping: z.boolean().optional() })).optional().describe("variantId or sku (a product), or title + price (a custom line); quantity; price overrides a product price"),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      customerId: z.string().optional().describe("gid://shopify/Customer/\u2026 or its number"),
+      note: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      poNumber: z.string().optional(),
+      shippingAddress: z.object({ firstName: z.string().optional(), lastName: z.string().optional(), company: z.string().optional(), address1: z.string().optional(), address2: z.string().optional(), city: z.string().optional(), provinceCode: z.string().optional(), zip: z.string().optional(), countryCode: z.string().optional(), phone: z.string().optional() }).optional().describe("the whole address, countryCode required"),
+      billingAddress: z.object({ firstName: z.string().optional(), lastName: z.string().optional(), company: z.string().optional(), address1: z.string().optional(), address2: z.string().optional(), city: z.string().optional(), provinceCode: z.string().optional(), zip: z.string().optional(), countryCode: z.string().optional(), phone: z.string().optional() }).optional(),
+      shippingLine: z.object({ title: z.string().optional(), price: z.string().optional() }).optional().describe("a custom shipping charge"),
+      discount: z.object({ value: z.number().optional(), type: z.string().optional(), title: z.string().optional(), description: z.string().optional() }).optional().describe("order discount: type percentage or fixed_amount"),
+      discountCodes: z.array(z.string()).optional(),
+      reserveInventoryUntil: z.string().optional().describe("ISO date-time: hold the stock until then"),
+      taxExempt: z.boolean().optional(),
+      currency: z.string().optional().describe("for prices: default the store currency"),
+      to: z.string().optional().describe("send_invoice: the address (default the draft's email)"),
+      subject: z.string().optional(),
+      message: z.string().optional().describe("send_invoice: a note in the email"),
+      paymentPending: z.boolean().optional().describe("complete: leave payment due instead of marking it paid"),
+      confirm: z.boolean().optional().describe("true to send / complete / delete after the user saw the reply"),
+      confirmAmount: z.string().optional().describe("complete: the draft's total from the reply, e.g. \"49.00\""),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/draft-orders', a); return ok(shopifyAdminText(d), d); }));
+  server.registerTool('manage_shopify_collections', {
+    title: "Shopify collections",
+    description: "Collections on the merchant's Shopify store. action list (type manual or automatic; title), get (id, with its first products), create (title, description, handle, sortOrder, seoTitle, seoDescription, imageUrl; productIds for hand-picked products and/or conditions [{field tag|title|type|vendor|price, relation, values}] with matchType all|any for an automatic one; publish:true shows it on the Online Store at once), update (those fields, addConditions, removeSourceIds), add_products / remove_products (productIds), publish / unpublish (the Online Store, or publicationId), delete (confirm:true; the products are kept). A new collection is unpublished unless publish:true. Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "get", "create", "update", "delete", "add_products", "remove_products", "publish", "unpublish"]).optional().describe("default list (get when id is passed)"),
+      id: z.string().optional().describe("gid://shopify/Collection/\u2026 or its number"),
+      type: z.enum(["manual", "automatic"]).optional().describe("list: only these"),
+      title: z.string().optional(),
+      query: z.string().optional(),
+      limit: z.number().optional().describe("list: 1-50"),
+      description: z.string().optional().describe("HTML"),
+      handle: z.string().optional(),
+      sortOrder: z.enum(["ALPHA_ASC", "ALPHA_DESC", "BEST_SELLING", "CREATED", "CREATED_DESC", "MANUAL", "MOST_RELEVANT", "PRICE_ASC", "PRICE_DESC"]).optional(),
+      seoTitle: z.string().optional(),
+      seoDescription: z.string().optional(),
+      imageUrl: z.string().optional(),
+      imageAlt: z.string().optional(),
+      templateSuffix: z.string().optional(),
+      productIds: z.array(z.string()).optional().describe("products: gid://shopify/Product/\u2026 or their numbers"),
+      conditions: z.array(z.object({ field: z.string().optional(), relation: z.string().optional(), values: z.array(z.string()).optional(), value: z.string().optional(), matchType: z.string().optional() })).optional().describe("field tag (TAGGED_WITH, NOT_TAGGED_WITH), title/type/vendor (EQUALS, NOT_EQUALS, CONTAINS, DOES_NOT_CONTAIN, STARTS_WITH, ENDS_WITH) or price (GREATER_THAN, LESS_THAN, EQUALS, NOT_EQUALS; value)"),
+      matchType: z.enum(["all", "any"]).optional().describe("conditions: all (default) or any"),
+      addConditions: z.array(z.object({ field: z.string().optional(), relation: z.string().optional(), values: z.array(z.string()).optional(), value: z.string().optional() })).optional().describe("update: a new condition source"),
+      removeSourceIds: z.array(z.string()).optional().describe("update: sources to drop (ids from get)"),
+      publish: z.boolean().optional().describe("create: publish to the Online Store"),
+      publicationId: z.string().optional().describe("publish to this sales channel instead"),
+      confirm: z.boolean().optional().describe("delete: true after the user agreed"),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/collections', a); return ok(shopifyAdminText(d), d); }));
+  server.registerTool('manage_shopify_metafields', {
+    title: "Shopify metafields",
+    description: "Custom fields (metafields) on the merchant's Shopify store. action list (ownerId: a product, variant, collection, order, draft order, page, article or blog id, or \"shop\"; namespace), set (metafields [{ownerId, namespace, key, type, value}] up to 25, or one with ownerId, namespace, key, type, value; type e.g. single_line_text_field, multi_line_text_field, number_integer, number_decimal, boolean, json, url, date; an existing field keeps its type), delete (confirm:true), definitions (ownerType PRODUCT, ORDER, COLLECTION, \u2026), create_definition (name, namespace, key, type, ownerType, description). Customer, location and market metafields are not available: Hermoso does not ask for those permissions. Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "set", "delete", "definitions", "create_definition"]).optional().describe("default list"),
+      ownerId: z.string().optional().describe("gid://shopify/Product/123 and the like, or \"shop\""),
+      namespace: z.string().optional(),
+      key: z.string().optional(),
+      type: z.string().optional(),
+      value: z.string().optional().describe("a JSON value is stored as text"),
+      metafields: z.array(z.object({ ownerId: z.string().optional(), namespace: z.string().optional(), key: z.string().optional(), type: z.string().optional(), value: z.string().optional() })).optional().describe("set / delete: up to 25"),
+      ownerType: z.string().optional().describe("definitions: PRODUCT, PRODUCTVARIANT, COLLECTION, ORDER, DRAFTORDER, PAGE, ARTICLE, BLOG, SHOP, \u2026"),
+      name: z.string().optional().describe("create_definition"),
+      description: z.string().optional(),
+      pin: z.boolean().optional(),
+      limit: z.number().optional(),
+      confirm: z.boolean().optional().describe("delete: true after the user agreed"),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/metafields', a); return ok(shopifyAdminText(d), d); }));
+  server.registerTool('manage_shopify_pages', {
+    title: "Shopify Online Store pages",
+    description: "Online Store pages (About, FAQ, landing pages) on the merchant's Shopify store. action list (title, published), get (id, with its HTML), create (title, body as HTML, handle, published, publishDate, templateSuffix; HIDDEN unless published:true or a publishDate), update (any of those; a new handle redirects the old address), delete (confirm:true). Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "get", "create", "update", "delete"]).optional().describe("default list (get when id is passed)"),
+      id: z.string().optional().describe("gid://shopify/Page/\u2026 or its number"),
+      title: z.string().optional(),
+      body: z.string().optional().describe("the page HTML"),
+      handle: z.string().optional(),
+      published: z.boolean().optional().describe("true shows it on the store (default false on create)"),
+      publishDate: z.string().optional().describe("ISO date-time to show it"),
+      templateSuffix: z.string().optional(),
+      query: z.string().optional(),
+      limit: z.number().optional(),
+      confirm: z.boolean().optional().describe("delete: true after the user agreed"),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/pages', a); return ok(shopifyAdminText(d), d); }));
+  server.registerTool('manage_shopify_redirects', {
+    title: "Shopify URL redirects",
+    description: "URL redirects on the merchant's Shopify store (send an old address to a new one). action list (path, target), create (path + target, or redirects [{path, target}] up to 50; path is the old address on the store, target a path or a full URL), update (id, path, target), delete (id or ids, confirm:true). Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "create", "update", "delete"]).optional().describe("default list"),
+      id: z.string().optional().describe("gid://shopify/UrlRedirect/\u2026"),
+      ids: z.array(z.string()).optional().describe("delete: several"),
+      path: z.string().optional().describe("e.g. /pages/old-sale"),
+      target: z.string().optional().describe("e.g. /collections/sale"),
+      redirects: z.array(z.object({ path: z.string().optional(), target: z.string().optional() })).optional().describe("create: up to 50"),
+      query: z.string().optional(),
+      limit: z.number().optional(),
+      confirm: z.boolean().optional().describe("delete: true after the user agreed"),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/redirects', a); return ok(shopifyAdminText(d), d); }));
+  server.registerTool('manage_shopify_menus', {
+    title: "Shopify navigation menus",
+    description: "Navigation menus on the merchant's Shopify store (main menu, footer). action list, get (id: the menu as an outline with each item's id), create (title, handle, items [{title, type, url or resourceId, items}] up to three levels; type HTTP for a link, or COLLECTION, PRODUCT, PAGE, BLOG, ARTICLE, FRONTPAGE, SEARCH, CATALOG, COLLECTIONS, SHOP_POLICY, CUSTOMER_ACCOUNT_PAGE, METAOBJECT with resourceId), update (addItems [{title, type, url or resourceId, parentId?}], removeItemIds, or items = the whole new tree; title, handle). An update that REMOVES items, and delete, change nothing without confirm:true; the reply shows the menu before and after. Default menus cannot be deleted. Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "get", "create", "update", "delete"]).optional().describe("default list (get when id is passed)"),
+      id: z.string().optional().describe("gid://shopify/Menu/\u2026 or its number"),
+      title: z.string().optional(),
+      handle: z.string().optional(),
+      items: z.array(z.object({ title: z.string().optional(), type: z.string().optional(), url: z.string().optional(), resourceId: z.string().optional(), items: z.array(z.record(z.any())).optional() })).optional().describe("create, or update: the whole new tree (keep an existing item by its id)"),
+      addItems: z.array(z.object({ title: z.string().optional(), type: z.string().optional(), url: z.string().optional(), resourceId: z.string().optional(), parentId: z.string().optional() })).optional().describe("update: items to add (under parentId, or at the top)"),
+      removeItemIds: z.array(z.string()).optional().describe("update: item ids to remove"),
+      limit: z.number().optional(),
+      confirm: z.boolean().optional().describe("true after the user saw the before and after"),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/menus', a); return ok(shopifyAdminText(d), d); }));
+  server.registerTool('manage_shopify_markets', {
+    title: "Shopify markets",
+    description: "Markets on the merchant's Shopify store (countries grouped with their own currency and settings). action list (status), get (id), create (name, countries [\"CA\", \"FR\"], currency, localCurrencies, handle; created as a DRAFT, which no buyer sees), update (name, handle, addCountries, removeCountries, currency, localCurrencies, status ACTIVE or DRAFT), delete. Making a market ACTIVE, changing an active one, and delete change nothing without confirm:true. Read back from Shopify. Free.",
+    inputSchema: {
+      action: z.enum(["list", "get", "create", "update", "delete"]).optional().describe("default list (get when id is passed)"),
+      id: z.string().optional().describe("gid://shopify/Market/\u2026 or its number"),
+      name: z.string().optional(),
+      handle: z.string().optional(),
+      countries: z.array(z.string()).optional().describe("create: two-letter codes"),
+      addCountries: z.array(z.string()).optional(),
+      removeCountries: z.array(z.string()).optional(),
+      currency: z.string().optional().describe("three letters, e.g. EUR"),
+      localCurrencies: z.boolean().optional().describe("show prices in each country's own currency"),
+      status: z.enum(["ACTIVE", "DRAFT"]).optional(),
+      query: z.string().optional(),
+      limit: z.number().optional(),
+      confirm: z.boolean().optional().describe("true after the user agreed"),
+    },
+    outputSchema: shopifyAdminOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/admin/markets', a); return ok(shopifyAdminText(d), d); }));
 
   // SHOPIFY ▸ ABANDONED-CHECKOUT RECOVERY IN REAL TIME (2026-11-20, lib/shopify-cart-recovery.mjs). Shopify tells Hermoso of
   // every checkout the moment it changes (checkouts/create + checkouts/update, subscribed on the store when recovery is turned
@@ -17877,9 +18122,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/numbers/release', a); return ok(phLine('release_phone_number', d), d); }));
   server.group('channels');
   server.registerTool('send_sms', {
-    title: "Send an SMS or MMS",
-    description: "Send a text from one of the brand's own Twilio or Telnyx numbers: to (one number or a list of up to 100, E.164), text (up to 1,600 characters), media (up to 10 pictures for an MMS: a Library id, attachment://N or an https link), from (needed when the account has several numbers), sendAt (ISO time, to schedule it; on Twilio this needs a Messaging Service set with set_sms_settings). The answer has each message's id, segment count and status; delivery status follows (get_sms_status). Any optional sending settings the connection turned on (quiet hours, opt-out list) apply. On the brand's own account no credits (the provider bills it); on Hermoso phone 0.8 credit a segment, 2.5 an MMS." + PH_NEEDS,
-    inputSchema: { to: z.union([z.string(), z.array(z.string())]), text: z.string().optional(), media: z.array(z.string()).optional(), from: z.string().optional(), sendAt: z.string().optional(), recipientTimezone: z.string().optional().describe("IANA zone, only used by quiet hours when the number does not tell it"), provider: z.enum(["twilio", "telnyx"]).optional() },
+    title: "Send an SMS, MMS or RCS message",
+    description: "Send a text from one of the brand's own Twilio or Telnyx numbers: to (one number or a list of up to 100, E.164), text (up to 1,600 characters), media (up to 10 pictures for an MMS: a Library id, attachment://N or an https link), from (needed when the account has several numbers), sendAt (ISO time, to schedule it; on Twilio this needs a Messaging Service set with set_sms_settings). channel \"rcs\" sends RCS through the brand's Twilio RCS sender (rich cards via contentSid HX… + contentVariables), falling back to SMS unless fallback:false; channel \"whatsapp_sandbox\" sends through Twilio's WhatsApp Sandbox to testers who joined it (rcs_setup, whatsapp_sandbox). The answer has each message's id, segment count and status; delivery status follows (get_sms_status). Any optional sending settings the connection turned on (quiet hours, opt-out list) apply. On the brand's own account no credits (the provider bills it); on Hermoso phone 0.8 credit a segment, 2.5 an MMS." + PH_NEEDS,
+    inputSchema: { to: z.union([z.string(), z.array(z.string())]), text: z.string().optional(), media: z.array(z.string()).optional(), from: z.string().optional(), sendAt: z.string().optional(), recipientTimezone: z.string().optional().describe("IANA zone, only used by quiet hours when the number does not tell it"), channel: z.enum(["sms", "rcs", "whatsapp_sandbox"]).optional(), messagingServiceSid: z.string().optional(), fallback: z.boolean().optional(), contentSid: z.string().optional(), contentVariables: z.record(z.string()).optional(), provider: z.enum(["twilio", "telnyx"]).optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/sms/send', a); return ok(phLine('send_sms', d), d); }));
   server.group('channel_admin');
@@ -17889,6 +18134,18 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { id: z.string().describe("the message id send_sms returned"), provider: z.enum(["twilio", "telnyx"]).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/sms/status', a); return ok(phLine('get_sms_status', d), d); }));
+  server.registerTool('rcs_setup', {
+    title: "RCS business messaging setup",
+    description: "RCS on the brand's own Twilio account: which RCS senders its Messaging Services hold, whether it can send RCS yet, the ordered setup steps (Twilio creates and carriers approve a sender only in the Twilio Console, about 4 to 6 weeks), the inbound webhook URL, and, with profile, a check of the sender profile (logo 224x224 under 50 kB, banner 1440x448 under 200 kB, accent colour contrast, links) against Twilio's rules. messagingServiceSid saves the default service for send_sms channel \"rcs\". Free." + PH_NEEDS,
+    inputSchema: { messagingServiceSid: z.string().optional(), profile: z.object({ displayName: z.string().optional(), description: z.string().optional(), logoUrl: z.string().optional(), bannerUrl: z.string().optional(), accentColor: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), privacyPolicyUrl: z.string().optional(), termsUrl: z.string().optional() }).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = a.messagingServiceSid !== undefined || a.profile ? await apiPost('/api/phone/rcs', a) : await apiGet('/api/phone/rcs', {}); return ok(phLine('rcs_setup', d), d); }));
+  server.registerTool('whatsapp_sandbox', {
+    title: "WhatsApp Sandbox (try before a WhatsApp account)",
+    description: "Try WhatsApp before owning a WhatsApp Business Account: how to use Twilio's WhatsApp Sandbox on the brand's own Twilio account (testers send join <code> to +1 415 523 8886, joins last 3 days), the webhook URL that puts their messages in the Inbox, and the limits. Replies go out with send_sms channel \"whatsapp_sandbox\". Free." + PH_NEEDS,
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async () => { const d = await apiGet('/api/phone/whatsapp-sandbox', {}); return ok(phLine('whatsapp_sandbox', d), d); }));
   server.registerTool('sms_conversation', {
     title: "SMS conversation history",
     description: "Every text between the brand and one person, oldest first: on Twilio read from Twilio's own message log, on Telnyx from the messages Hermoso keeps from the Inbox (30 days). with is their number; number narrows it to one of the brand's numbers. Free." + PH_NEEDS,
@@ -18584,6 +18841,70 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { account: z.string().optional(), ok: z.boolean().optional(), dryRun: z.boolean().optional(), listId: z.string().optional(), gathered: z.number().optional(), perPlatform: z.any().optional(), unavailable: z.any().optional(), notConnected: z.array(z.string()).optional(), results: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/klaviyo/sync-leads', a); return ok(d.note, d); }));
+  // ---------- WooCommerce (2026-11-21, lib/woocommerce.mjs): the brand's OWN store through a pasted REST key ----------
+  // Every change that moves money or stock, or reaches the buyer, is a preview until confirm:true; a refund also echoes
+  // the previewed amount (confirmAmount), and a stock change the count it saw (expected), so a sale in between is refused.
+  const wooOrderOut = { store: z.string().optional(), needsConfirm: z.boolean().optional(), verified: z.boolean().nullable().optional(), order: z.any().optional(), changes: z.array(z.any()).optional(), note: z.string().optional() };
+  server.registerTool('list_woocommerce_orders', {
+    title: 'List WooCommerce orders',
+    description: "The brand's WooCommerce orders, newest first: number, date, status, total, refunded, buyer and items. Filter by status (any, pending, processing, on-hold, completed, cancelled, refunded, failed; several comma-separated), after / before (YYYY-MM-DD), search, page and perPage (up to 100). Pass id for ONE order in full: addresses, payment method, its notes and its refunds. Read-only, free.",
+    inputSchema: {
+      id: z.string().optional().describe('one order number, for the order in full'),
+      status: z.string().optional().describe('any (default), pending, processing, on-hold, completed, cancelled, refunded, failed; comma-separated for several'),
+      after: z.string().optional().describe('YYYY-MM-DD: created on or after'), before: z.string().optional().describe('YYYY-MM-DD: created on or before'),
+      search: z.string().optional(), page: z.number().optional(), perPage: z.number().optional().describe('1-100, default 20'),
+    },
+    outputSchema: { store: z.string().optional(), orders: z.array(z.any()).optional(), order: z.any().optional(), total: z.number().optional(), page: z.number().optional(), pages: z.number().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/woocommerce/orders', a); return ok(d.order ? d.note : [d.note, ...(d.orders || []).map((o) => `• #${o.number} · ${String(o.createdAt || '').slice(0, 10)} · ${o.status} · ${o.total} ${o.currency}${o.refunded ? ` (refunded ${o.refunded})` : ''} · ${o.customer?.name || o.customer?.email || 'no name'} (id ${o.id})`)].join('\n'), d); }));
+  server.registerTool('update_woocommerce_order', {
+    title: 'Update a WooCommerce order',
+    description: "Change a WooCommerce order: status (pending, processing, on-hold, completed, cancelled, refunded, failed; cancelling puts the stock back, most status changes email the buyer, and 'refunded' moves NO money: use refund_woocommerce_order), note (an internal note; noteToCustomer:true emails it to the buyer), shipping and billing details (only the fields given change), metaData [{key, value}]. An internal note and metaData apply at once and are read back. A status, address or buyer note is a preview until confirm:true: show the user what changes, get a yes, then call again with confirm:true. Free.",
+    inputSchema: {
+      id: z.string().describe('the order number'),
+      status: z.enum(['pending', 'processing', 'on-hold', 'completed', 'cancelled', 'refunded', 'failed']).optional(),
+      note: z.string().optional().describe('a note on the order'), noteToCustomer: z.boolean().optional().describe('true: the buyer sees the note and is emailed it'),
+      shipping: z.record(z.any()).optional().describe('first_name, last_name, company, address_1, address_2, city, state, postcode, country (two letters), phone'),
+      billing: z.record(z.any()).optional().describe('the same fields plus email'),
+      metaData: z.array(z.object({ key: z.string(), value: z.any() })).optional(),
+      confirm: z.boolean().optional().describe('true to apply a status, address or buyer-note change'),
+    },
+    outputSchema: { ...wooOrderOut, updated: z.boolean().optional(), noteId: z.number().nullable().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/woocommerce/order/update', a); return ok(d.note, d); }));
+  server.registerTool('refund_woocommerce_order', {
+    title: 'Refund a WooCommerce order',
+    description: "Refund a WooCommerce order: full:true (everything still refundable), lineItems [{ lineItemId, quantity }] and/or amount (a sum of money, e.g. a goodwill refund). By default the money goes back through the order's payment gateway; apiRefund:false only RECORDS the refund in WooCommerce, for money returned by hand (an order paid by bank transfer, cheque or cash on delivery can only be recorded). Refunded items go back into stock unless restock:false. Without confirm:true NOTHING is refunded and the reply shows the amount: show the user, get a yes, then call again with confirm:true and confirmAmount set to that exact amount. Retrying the same confirmed refund never refunds twice. Free.",
+    inputSchema: {
+      id: z.string().describe('the order number'),
+      full: z.boolean().optional(),
+      lineItems: z.array(z.object({ lineItemId: z.string().describe('the line id from list_woocommerce_orders with id, or its SKU'), quantity: z.number().optional() })).optional(),
+      amount: z.string().optional().describe('refund this much money instead, e.g. "10.00"'),
+      reason: z.string().optional(), apiRefund: z.boolean().optional().describe('default true: through the payment gateway'), restock: z.boolean().optional().describe('default true for refunded lines'),
+      confirm: z.boolean().optional(), confirmAmount: z.string().optional().describe('the amount the preview showed'),
+      idempotencyKey: z.string().optional().describe('only to repeat an identical refund on purpose: any new text'),
+    },
+    outputSchema: { ...wooOrderOut, refunded: z.boolean().optional(), alreadyDone: z.boolean().optional(), amount: z.number().optional(), currency: z.string().optional(), confirmAmount: z.string().optional(), refundId: z.number().nullable().optional(), refundedPayment: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/woocommerce/order/refund', a); return ok(d.note, d); }));
+  server.registerTool('get_woocommerce_stock', {
+    title: 'Get WooCommerce stock',
+    description: "Stock on the brand's WooCommerce store: pass productId (a variable product lists every variation), variationId or sku. Each item: how many are in stock, or that stock is not tracked, and its stock status. Read-only, free.",
+    inputSchema: { productId: z.string().optional(), variationId: z.string().optional(), sku: z.string().optional() },
+    outputSchema: { store: z.string().optional(), items: z.array(z.any()).optional(), lines: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet('/api/woocommerce/stock', a); return ok([d.note, ...(d.lines || []).map((x) => `• ${x}`)].join('\n'), d); }));
+  server.registerTool('set_woocommerce_stock', {
+    title: 'Set or adjust WooCommerce stock',
+    description: "Change stock on the brand's WooCommerce store. mode set (quantity becomes the count) or adjust (quantity is added; negative subtracts). changes: [{ productId, variationId or sku, quantity }], up to 100. Without confirm:true NOTHING changes and the reply shows the count now and after for each: show the user, get a yes, then call again with confirm:true and each change's expected set to its 'now' number, so a sale in between is refused instead of overwritten. An item whose stock is not tracked yet gets tracking turned on at the new count. Read back. Free.",
+    inputSchema: {
+      mode: z.enum(['set', 'adjust']).optional().describe('default set'),
+      changes: z.array(z.object({ productId: z.string().optional(), variationId: z.string().optional(), sku: z.string().optional(), quantity: z.number(), expected: z.number().nullable().optional().describe('the "now" count the preview showed') })),
+      confirm: z.boolean().optional(),
+    },
+    outputSchema: { store: z.string().optional(), needsConfirm: z.boolean().optional(), changed: z.boolean().optional(), verified: z.boolean().nullable().optional(), mode: z.string().optional(), changes: z.array(z.any()).optional(), errors: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/woocommerce/stock', a); return ok(d.note, d); }));
   // ---------- Stripe (2026-09-09): the brand's OWN revenue, read-only via a restricted key ----------
   server.registerTool('stripe_report', {
     title: 'Stripe revenue report',
@@ -26337,7 +26658,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('create_google_ads_rule', {
     title: "Create a Google Ads automated rule (created switched OFF)",
-    description: "AUTOMATED RULES ON GOOGLE ADS — \"pause ad groups whose CPA is over $50 over the last 7 days\", \"raise the budget 20% when ROAS > 4, never above $300\", on a schedule with optional quiet hours. Google's API has NO rules resource (its UI rules are not reachable by any API), so HERMOSO runs these: every run reads the metrics, applies the caps against real numbers, writes through Google's own mutates, reads the result back, and logs it (google_ads_rule_history); a live run can be undone (undo_google_ads_rule_action). EVERY RULE IS CREATED SWITCHED OFF; dry-run it with run_google_ads_rule, then switch it on with set_google_ads_rule_status. Conditions take derived metrics or any metrics.<field> Google reports; actions pause / enable / notify / change a budget (campaign) or the manual CPC bid (ad group) by percent, amount or to a value. An increase needs a limit. Free.",
+    description: "AUTOMATED RULES ON GOOGLE ADS — \"pause ad groups whose CPA is over $50 over the last 7 days\", \"raise the budget 20% when ROAS > 4, never above $300\", on a schedule with optional quiet hours. Google's API has NO rules resource (its UI rules are not reachable by any API), so HERMOSO runs these: every run reads the metrics, applies the caps against real numbers, writes through Google's own mutates, reads the result back, and logs it (google_ads_rule_history); a live run can be undone (undo_google_ads_rule_action). EVERY RULE IS CREATED SWITCHED OFF; dry-run it with run_google_ads_rule, then switch it on with set_google_ads_rule_status. OPTIONAL approval step (approval): a scheduled run then PROPOSES its changes and waits for a person (google_ads_rule_approvals, or the one-click link in the brand's alerts); off unless asked for. Conditions take derived metrics or any metrics.<field> Google reports; actions pause / enable / notify / change a budget (campaign) or the manual CPC bid (ad group) by percent, amount or to a value. An increase needs a limit. Free.",
     inputSchema: {
       customerId: z.string().optional().describe("Google Ads customer id from list_google_ads_campaigns; omit when only one is shared with this brand"),
       loginCustomerId: z.string().optional().describe("manager (MCC) id, only when the account is reached through a manager; stored on the rule"),
@@ -26350,6 +26671,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       actions: z.array(z.object({ type: z.enum(["pause", "enable", "budget", "bid", "notify"]).optional().describe("pause, enable, budget, bid or notify"), change: z.enum(["increase", "decrease", "set"]).optional().describe("increase, decrease or set"), by: z.object({ percent: z.number().optional(), amount: z.number().optional().describe("in the account currency") }).optional().describe("exactly one, for increase/decrease"), to: z.number().optional().describe("for set: the new value in the account currency"), limit: z.number().optional().describe("REQUIRED for an increase: the highest value it may ever reach. A floor for a decrease"), allowSharedBudget: z.boolean().optional().describe("allow changing a budget shared by several campaigns") })).describe("what it does on each match"),
       schedule: z.object({ everyMinutes: z.number().optional().describe("15 to 10080; default 60"), days: z.array(z.number()).optional().describe("weekdays 0-6 (0 = Sunday); default every day"), quietHours: z.object({ start: z.string().optional().describe("HH:MM"), end: z.string().optional().describe("HH:MM") }).optional().describe("a window in which it never acts, e.g. 22:00-07:00"), timezone: z.string().optional().describe("IANA name; default the ad account's") }).optional().describe("when Hermoso runs it"),
       caps: z.object({ maxChangesPerDay: z.number().optional().describe("how often this rule may change the same object in a day, 1-48 (default 1)"), maxRaisePerDay: z.number().optional().describe("the most this rule may add to budgets in a day, account currency") }).optional().describe("this rule's own caps"),
+      approval: z.object({ required: z.boolean().optional().describe("true (default when approval is given) holds every SCHEDULED change for a person's approval; false removes the step"), timeoutMinutes: z.number().optional().describe("15-10080, default 1440 (a day): how long a proposal waits"), onTimeout: z.enum(["skip", "apply"]).optional().describe("skip (default: nothing changes) or apply (applied as if approved)") }).nullable().optional().describe("OPTIONAL approval step: a scheduled run proposes instead of acting and the brand's alert channels get a one-click approval link; decide with google_ads_rule_approvals. null removes it. A run by hand is never held. Off unless set"),
     },
     annotations: {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
   }, wrap(async (a) => {
@@ -26382,6 +26704,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       actions: z.array(z.object({ type: z.enum(["pause", "enable", "budget", "bid", "notify"]).optional().describe("pause, enable, budget, bid or notify"), change: z.enum(["increase", "decrease", "set"]).optional().describe("increase, decrease or set"), by: z.object({ percent: z.number().optional(), amount: z.number().optional().describe("in the account currency") }).optional().describe("exactly one, for increase/decrease"), to: z.number().optional().describe("for set: the new value in the account currency"), limit: z.number().optional().describe("REQUIRED for an increase: the highest value it may ever reach. A floor for a decrease"), allowSharedBudget: z.boolean().optional().describe("allow changing a budget shared by several campaigns") })).optional().describe("what it does on each match"),
       schedule: z.object({ everyMinutes: z.number().optional().describe("15 to 10080; default 60"), days: z.array(z.number()).optional().describe("weekdays 0-6 (0 = Sunday); default every day"), quietHours: z.object({ start: z.string().optional().describe("HH:MM"), end: z.string().optional().describe("HH:MM") }).optional().describe("a window in which it never acts, e.g. 22:00-07:00"), timezone: z.string().optional().describe("IANA name; default the ad account's") }).optional().describe("when Hermoso runs it"),
       caps: z.object({ maxChangesPerDay: z.number().optional().describe("how often this rule may change the same object in a day, 1-48 (default 1)"), maxRaisePerDay: z.number().optional().describe("the most this rule may add to budgets in a day, account currency") }).optional().describe("this rule's own caps"),
+      approval: z.object({ required: z.boolean().optional().describe("true (default when approval is given) holds every SCHEDULED change for a person's approval; false removes the step"), timeoutMinutes: z.number().optional().describe("15-10080, default 1440 (a day): how long a proposal waits"), onTimeout: z.enum(["skip", "apply"]).optional().describe("skip (default: nothing changes) or apply (applied as if approved)") }).nullable().optional().describe("OPTIONAL approval step: a scheduled run proposes instead of acting and the brand's alert channels get a one-click approval link; decide with google_ads_rule_approvals. null removes it. A run by hand is never held. Off unless set"),
       confirm: z.boolean().optional().describe("true once the user has said yes to exactly what the refusal described"),
       confirmScope: z.string().optional().describe("the scopeToken the list tool (or the refusal) prints; required with confirm when the rule can raise spend"),
     },
@@ -26442,6 +26765,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/google-ads/rules/backtest', a); return ok(d.note || 'Done.', d); }));
+  server.registerTool('google_ads_rule_approvals', {
+    title: 'Approve or reject what a Google Ads rule proposed',
+    description: "THE APPROVAL STEP for Google Ads automated rules that have one (approval on create_google_ads_rule / update_google_ads_rule): instead of acting, a scheduled run PROPOSES its changes and waits for a person, and the brand's Slack / Discord / webhook alerts get a one-click approval link. action list (default: the pending ones; status all, approved, rejected, expired…) shows each proposal with every change before → after and when it times out (then dropped, or applied if the rule says onTimeout apply). approve applies it: each change only if the object still holds the value it had when proposed, raises re-checked against today's caps, read back from Google, logged, and undoable with undo_google_ads_rule_action. reject changes nothing. Show the user the changes and get their yes before approving. Meta and TikTok rules run inside the platform, which acts at once, so they cannot be held for approval (a notify-only rule is the way to have a person decide there). Free.",
+    inputSchema: {
+      action: z.enum(['list', 'approve', 'reject']).optional().describe('list (default), approve or reject'),
+      proposalId: z.string().optional().describe('prop_… from action list; required to approve or reject'),
+      status: z.enum(['pending', 'all', 'approved', 'applied_on_timeout', 'rejected', 'expired', 'superseded', 'cancelled']).optional().describe('list: which proposals (default pending)'),
+      ruleId: z.string().optional().describe('list: only this rule (gr_…)'),
+      note: z.string().optional().describe('why, kept with the decision'),
+      limit: z.number().optional().describe('list: 1-100, default 20'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/rules/approvals', a);
+    return ok(adRuleText(d), d);
+  }));
   server.registerTool('google_ads_rule_history', {
     title: "What Google Ads automated rules did",
     description: "Every run, newest first: when, dry/live/undo, what it measured, what it changed (read back from Google) or skipped and why, what a cap held back. Filter by ruleId, mode, or changesOnly. Read-only. Free.",
@@ -31782,19 +32121,21 @@ function memoryNoteVerdict(text) {
   // so setting it once changes what every subsequent ad, plan and answer is written in.
   server.registerTool('get_settings', {
     title: 'Read app settings',
-    description: 'Read this account\'s app settings — the LANGUAGE Hermoso writes ads and copy in (chat replies follow the language the user writes in), the app appearance (theme), and which Hermoso emails are on (tips, product news, credit and plan notices, competitor watch, autopilot reviews, weekly posts, and the all-emails switch). Same settings as the web app\'s Settings pane. Read-only, free.',
+    description: 'Read this account\'s app settings — the LANGUAGE Hermoso writes ads and copy in (chat replies follow the language the user writes in), the app appearance (theme), which Hermoso emails are on (tips, product news, credit and plan notices, competitor watch, autopilot reviews, weekly posts, and the all-emails switch), and ZERO CONTENT RETENTION (on = Hermoso keeps ids and metadata only, never message, post, prompt or transcript text once delivered). Same settings as the web app\'s Settings pane. Read-only, free.',
     inputSchema: {},
-    outputSchema: { language: z.string().optional(), theme: z.string().optional(), notifications: z.any().optional(), privacy: z.any().optional() },
+    outputSchema: { language: z.string().optional(), theme: z.string().optional(), notifications: z.any().optional(), privacy: z.any().optional(), contentRetention: z.any().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, wrap(async () => {
     const d = await apiGet('/api/settings');
     const em = d.notifications?.emails || {};
     const emLine = Object.keys(em).length ? `\nEmails: ${Object.entries(em).map(([k, v]) => `${k} ${v === false ? 'off' : 'on'}`).join(', ')}` : '';
-    return ok(`Language: ${d.language}\nAppearance: ${d.theme}\nWeekly competitor-watch email: ${d.notifications?.watchEmail === false ? 'off' : 'on'}${emLine}\n${d.privacy?.note || ''}`, d);
+    const cr = d.contentRetention;
+    const crLine = cr ? `\nZero content retention: ${cr.zeroRetention ? `on${cr.since ? ` since ${cr.since}` : ''}` : 'off'}. ${cr.note || ''}${cr.zeroRetention && Array.isArray(cr.notCovered) ? ` Not covered: ${cr.notCovered.join('; ')}.` : ''}` : '';
+    return ok(`Language: ${d.language}\nAppearance: ${d.theme}\nWeekly competitor-watch email: ${d.notifications?.watchEmail === false ? 'off' : 'on'}${emLine}${crLine}\n${d.privacy?.note || ''}`, d);
   }));
   server.registerTool('update_settings', {
     title: 'Change app settings',
-    description: 'Change this account\'s app settings. language = the language EVERY ad, script and plan is written in from now on (chat replies follow the language the user writes in) (say the language in plain English, e.g. "German", "Japanese", "Brazilian Portuguese") — it applies to renders made over MCP as well as in the app. theme = the app\'s appearance, "dark" or "light". watchEmail = the weekly competitor-watch email on/off. emails = turn Hermoso emails on or off by group, including turning back on what an unsubscribe link turned off. Only pass what you are changing. Account-wide (every profile), and it takes effect on the next call.',
+    description: 'Change this account\'s app settings. language = the language EVERY ad, script and plan is written in from now on (chat replies follow the language the user writes in) (say the language in plain English, e.g. "German", "Japanese", "Brazilian Portuguese") — it applies to renders made over MCP as well as in the app. theme = the app\'s appearance, "dark" or "light". watchEmail = the weekly competitor-watch email on/off. emails = turn Hermoso emails on or off by group, including turning back on what an unsubscribe link turned off. zeroRetention = ZERO CONTENT RETENTION: true keeps only ids, times, statuses, counts and costs, never the text of messages, posts, prompts or transcripts once delivered; turning it ON also clears what is already stored and cannot be undone, so call it first without confirm (the refusal lists every store it clears), tell the user, then pass confirm:true. Admins only. Only pass what you are changing. Account-wide (every profile), and it takes effect on the next call.',
     inputSchema: {
       language: z.string().optional().describe('language for generated ads and copy (chat replies follow the language the user writes in) — e.g. "English", "German", "Japanese"'),
       theme: z.enum(['dark', 'light']).optional().describe('app appearance'),
@@ -31809,8 +32150,10 @@ function memoryNoteVerdict(text) {
         creatorActivity: z.boolean().optional().describe('creator campaign digest'),
         all: z.boolean().optional().describe('master switch; off = only sign-in and billing emails arrive'),
       }).optional().describe('email switches by group; pass only the ones you are changing'),
+      zeroRetention: z.boolean().optional().describe('zero content retention on/off (account-wide; turning it on clears stored content and needs confirm:true)'),
+      confirm: z.boolean().optional().describe('true only after the user agreed to clear already-stored content (needed to turn zeroRetention on)'),
     },
-    outputSchema: { ok: z.boolean().optional(), changed: z.array(z.string()).optional(), language: z.string().optional(), theme: z.string().optional(), notifications: z.any().optional() },
+    outputSchema: { ok: z.boolean().optional(), changed: z.array(z.string()).optional(), language: z.string().optional(), theme: z.string().optional(), notifications: z.any().optional(), contentRetention: z.any().optional(), retentionLine: z.string().optional(), purge: z.any().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     const body = {};
@@ -31818,8 +32161,10 @@ function memoryNoteVerdict(text) {
     if (a.theme != null) body.theme = a.theme;
     if (a.watchEmail != null) body.watchEmail = a.watchEmail;
     if (a.emails && Object.keys(a.emails).length) body.emails = a.emails;
-    if (!Object.keys(body).length) return { content: [{ type: 'text', text: 'Pass at least one of: language, theme, watchEmail, emails.' }], isError: true };
+    if (a.zeroRetention != null) { body.zeroRetention = a.zeroRetention; if (a.confirm === true) body.confirm = true; }
+    if (!Object.keys(body).length) return { content: [{ type: 'text', text: 'Pass at least one of: language, theme, watchEmail, emails, zeroRetention.' }], isError: true };
     const d = await apiPost('/api/settings', body);
+    if (body.zeroRetention != null) return ok(d.retentionLine || `Zero content retention: ${d.contentRetention?.zeroRetention ? 'on' : 'off'}.`, d);
     const em = d.notifications?.emails || {};
     const emLine = body.emails && Object.keys(em).length ? ` · Emails: ${Object.entries(em).map(([k, v]) => `${k} ${v === false ? 'off' : 'on'}`).join(', ')}` : '';
     return ok(`Updated ${(d.changed || []).join(', ')}. Language: ${d.language} · Appearance: ${d.theme} · Weekly competitor-watch email: ${d.notifications?.watchEmail === false ? 'off' : 'on'}${emLine}.${body.language ? '\nEvery ad, script and answer from here on is written in ' + d.language + '.' : ''}`, d);

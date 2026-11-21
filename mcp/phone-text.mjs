@@ -22,9 +22,17 @@ export function phoneToolText(name, d = {}) {
     }
     case 'send_sms': {
       const rows = Array.isArray(x.results) ? x.results : [];
-      return [note, ...rows.filter((r) => r.sent).slice(0, 20).map((r) => `• ${r.to}: ${r.status || 'accepted'} (${r.id}, ${r.segments ?? '?'} segment(s))${r.notes?.length ? ` · ${r.notes.join(' ')}` : ''}`)].filter(Boolean).join('\n');
+      return [note, ...rows.filter((r) => r.sent).slice(0, 20).map((r) => `• ${r.to}: ${r.status || 'accepted'} (${r.id}${r.channel ? `, ${r.channel === 'pending' ? 'RCS first, SMS fallback' : r.channel}` : `, ${r.segments ?? '?'} segment(s)`})${r.notes?.length ? ` · ${r.notes.join(' ')}` : ''}`)].filter(Boolean).join('\n');
     }
     case 'get_sms_status': return note || `${s(x.message?.to)}: ${s(x.message?.status) || 'unknown'}`;
+    case 'rcs_setup': {
+      const st = Array.isArray(x.steps) ? x.steps : [];
+      return [note, ...st.map((y, i) => `${i + 1}. ${y.done ? '[done] ' : ''}${s(y.step)}`)].filter(Boolean).join('\n');
+    }
+    case 'whatsapp_sandbox': {
+      const st = Array.isArray(x.steps) ? x.steps : [], lim = Array.isArray(x.limits) ? x.limits : [];
+      return [note, ...st.map((y, i) => `${i + 1}. ${s(y)}`), lim.length ? `Limits: ${lim.join(' ')}` : '', s(x.whenReady)].filter(Boolean).join('\n');
+    }
     case 'sms_conversation': {
       const m = Array.isArray(x.messages) ? x.messages : [];
       if (!m.length) return `No texts with ${s(x.with)} ${x.source === 'inbox' ? 'kept in the Inbox (30 days)' : 'on the account'}.`;
