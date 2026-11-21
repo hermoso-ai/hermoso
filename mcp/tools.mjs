@@ -13060,7 +13060,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const AIAR_CH = ['instagram', 'facebook', 'whatsapp', 'tiktok', 'threads', 'youtube', 'linkedin'];
   server.registerTool('set_ai_replies', {
     title: 'AI auto-replies: settings',
-    description: 'AI AUTO-REPLIES: the brand\'s AI answers people who write to it, in its voice, from its brand profile, Memory, product catalog and the FAQs and notes saved here. Covers Instagram (DMs, story replies, comments), Facebook (Messenger, Page and ad comments), WhatsApp, and comments on TikTok, Threads, YouTube and LinkedIn Pages (not X: X requires its own approval for AI replies). Keyword automations (save_dm_automation) always answer first. OFF by default; switching on starts in mode "test" (every answer is written and logged, nothing sent) until mode "live". Pass nothing to read the settings and today\'s counts. Only the fields passed change. A message goes to a person instead (handoff) on a handoff keyword, an intent in handoff.intents (default complaint, refund), confidence below handoff.minConfidence, or a neverAnswer topic. Each AI reply is charged at the model\'s real cost (standard about 1 credit, best about 4); saving is free. Email: email.autoSend is the same opt-in for email replies (set_email_reply_settings autoSend).',
+    description: 'AI AUTO-REPLIES: the brand\'s AI answers people who write to it, in its voice, from its brand profile, Memory, product catalog and the FAQs and notes saved here. Covers Instagram (DMs, story replies, comments), Facebook (Messenger, Page and ad comments), WhatsApp, and comments on TikTok, Threads, YouTube and LinkedIn Pages (not X: X requires its own approval for AI replies). Keyword automations (save_dm_automation) always answer first. OFF by default; switching on starts in mode "test" (every answer is written and logged, nothing sent) until mode "live". Pass nothing to read the settings and today\'s counts. Only the fields passed change. A message goes to a person instead (handoff) on a handoff keyword, an intent in handoff.intents (default complaint, refund), confidence below handoff.minConfidence, or a neverAnswer topic. Each AI reply is charged at the model\'s real cost (standard about 1 credit, best about 4); saving is free. Email: email.autoSend is the same opt-in for email replies (the autoSend switch in the email reply settings).',
     inputSchema: {
       enabled: z.boolean().optional().describe('true switches AI replies on for this brand, false off'),
       mode: z.enum(['test', 'live']).optional().describe('test = written and logged, nothing sent (the default); live = sent'),
@@ -13097,7 +13097,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     title: 'AI auto-replies: try a message',
     description: 'What the brand\'s AI would answer to a sample message, with its current settings (or settings passed to try before saving): the reply, or why it would hand off or skip, with intent and confidence. Nothing is sent to anyone. Charged like one reply (about 1 credit; best quality about 4); a handoff keyword answers for free.',
     inputSchema: { message: z.string().describe('what a customer would write'), channel: z.enum(AIAR_CH).optional().describe('default instagram'), kind: z.enum(['dm', 'comment']).optional(), settings: z.record(z.string(), z.any()).optional().describe('unsaved settings to try, same fields as set_ai_replies') },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = await apiPost('/api/ai-replies/test', a); return ok(d.note, d); }));
   server.registerTool('undo_ai_reply', {
     title: 'AI auto-replies: remove a reply',
@@ -14370,7 +14370,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiGet('/api/shopify/inventory', a); return ok([d.note, ...(d.lines || []).map((x, i) => `• ${x} (${d.variants?.[i]?.variantId || ''})`)].join('\n'), d); }));
   server.registerTool('set_shopify_inventory', {
     title: 'Set or adjust Shopify stock',
-    description: "Change stock on the merchant's Shopify store. mode set (quantity becomes the new count) or adjust (quantity is added; negative subtracts). changes: [{ variantId or sku, locationId or the location's name, quantity }], up to 100. name: available (default) or on_hand for set; available, damaged, incoming, quality_control, reserved or safety_stock for adjust. reason: correction (default), received, damaged, shrinkage, restock, cycle_count_available, promotion, safety_stock, other and Shopify's other reasons. Without confirm:true NOTHING changes and the reply shows now → after for each: show the user, get a yes, then call again with confirm:true and each change's expected set to the 'now' number, so a sale in between is refused instead of overwritten. Read back. Free.",
+    description: "Change stock on the merchant's Shopify store. mode set (quantity becomes the new count) or adjust (quantity is added; negative subtracts). changes: [{ variantId or sku, locationId or the location's name, quantity }], up to 100. name: available (default) or on_hand for set; available, damaged, incoming, quality_control, reserved or safety_stock for adjust. reason: correction (default), received, damaged, shrinkage, restock, cycle_count_available, promotion, safety_stock, other and Shopify's other reasons. Without confirm:true NOTHING changes and the reply shows the count now and after for each: show the user, get a yes, then call again with confirm:true and each change's expected set to the 'now' number, so a sale in between is refused instead of overwritten. Read back. Free.",
     inputSchema: {
       mode: z.enum(['set', 'adjust']).optional(),
       name: z.string().optional().describe('which quantity: available (default) or on_hand for set'),
@@ -18949,7 +18949,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/contacts/delete', a); return ok(d.note, d); }));
   server.registerTool('enroll_contacts', {
     title: 'Enrol contacts in a sequence',
-    description: 'Start a sequence (save_email_sequence) for contacts: sequence (its id) and contacts [ids, emails, phones or "instagram:<id>"], or tag, or all:true. Each step reaches the person on its channel from their contact; a person with nothing on a step\'s channel, or who opted out of it, is held or skipped on that step with the reason. Same pace, free-plan day and company rules as enroll_email_leads. listConfirmed:true is required when the sequence has an email step. Free.',
+    description: 'Start a saved sequence for contacts: sequence (its id) and contacts [ids, emails, phones or "instagram:<id>"], or tag, or all:true. Each step reaches the person on its channel from their contact; a person with nothing on a step\'s channel, or who opted out of it, is held or skipped on that step with the reason. Same pace, free-plan day and company rules as enrolling email leads. listConfirmed:true is required when the sequence has an email step. Free.',
     inputSchema: { sequence: z.string(), contacts: z.array(z.string()).optional(), tag: z.string().optional(), all: z.boolean().optional(), listConfirmed: z.boolean().optional().describe('with an email step: the list was not bought or rented') },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/contacts/enroll', a); return ok(d.note, d); }));
@@ -35137,14 +35137,14 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('inbox_stats', {
     title: 'Inbox stats: volume, busiest hours, response times',
-    description: "Use this for \"how fast do we reply\", \"when are we busiest\", \"how many messages did we get\" or \"who is waiting\". Across every connected messaging channel (WhatsApp, Messenger, Instagram, Telegram, SMS, LINE, WeChat, Slack, Discord, email; X only with includeX, because X bills per message read): messages received and sent per day and per channel, a day × hour heatmap on the user's clock with the busiest hours, response time (median, p90, fastest, slowest, histogram) per channel and per receiving account, reply rate, conversations waiting now, and per-conversation rows. Counts from when the inbox was first read: Hermoso keeps each message's time and direction, never its text. A channel it could not read is named, never shown as empty. Print `text`. Free (X: X's per-read price).",
+    description: "Use this for \"how fast do we reply\", \"when are we busiest\", \"how many messages did we get\" or \"who is waiting\". Across every connected messaging channel (WhatsApp, Messenger, Instagram, Telegram, SMS, LINE, Slack, Discord, email; X only with includeX, because X bills per message read): messages received and sent per day and per channel, a day × hour heatmap on the user's clock with the busiest hours, response time (median, p90, fastest, slowest, histogram) per channel and per receiving account, reply rate, conversations waiting now, and per-conversation rows. Counts from when the inbox was first read: Hermoso keeps each message's time and direction, never its text. A channel it could not read is named, never shown as empty. Print `text`. Free (X: X's per-read price).",
     inputSchema: {
       ...STORE_BRAND,
       view: z.enum(['summary', 'volume', 'heatmap', 'response_time', 'channels', 'top_accounts', 'conversations', 'waiting']).optional(),
       days: z.number().optional().describe('last N days, 1-365 (default 30)'),
       from: z.string().optional().describe('YYYY-MM-DD'),
       to: z.string().optional().describe('YYYY-MM-DD'),
-      channel: z.string().optional().describe('one channel: whatsapp, messenger, instagram, telegram, sms, line, wechat, slack, discord, email, x'),
+      channel: z.string().optional().describe('one channel: whatsapp, messenger, instagram, telegram, sms, line, slack, discord, email, x'),
       account: z.string().optional().describe('one receiving account: number, Page, handle or mailbox'),
       includeX: z.boolean().optional().describe('also count X DMs (billed per message read by X)'),
       timezone: z.string().optional().describe('IANA zone for days and hours (default: the user\'s)'),

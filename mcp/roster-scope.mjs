@@ -97,7 +97,9 @@ export const TOOL_PROVIDER_RULES = [
   // A DISCORD thread is not the Threads network: it must be named before the `_thread$` rule below, or the two Discord
   // thread tools would be offered to a brand with Threads connected and hidden from one with Discord (2026-11-15).
   [/_discord_thread$/, 'discord'],
-  [/^threads_|_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
+  // An EMAIL thread is not the Threads network either (get_email_thread, 2026-11-20): it reads the brand's own mailbox,
+  // which is not a connector-gated family, so like search_email and every mailbox tool it matches no rule.
+  [/^threads_|(?<!_email)_thread$|_threads_|^(list|search|reply_to|repost|delete|hide)_thread/, 'threads'],
   [/_meta_|^meta_|_meta$|instagram|whatsapp|messenger/, 'meta'], // messenger: Page marketing messages ride the Meta connector (2026-09-07)
   // PHONE / SMS / VOICE (2026-11-18): the brand's OWN Twilio or Telnyx account. ONE tool set serves both providers, filed
   // under 'twilio'; toolHeldBackByConnectors offers it to a brand with either connected (PHONE_TOOL_ALSO). `call_tool` and
