@@ -18,6 +18,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { registerTools, MCP_INSTRUCTIONS, TOOL_GROUP_NAMES, TOOL_GROUPS, canonToolGroups, toolPriceOf } from './tools.mjs';
+import { FLAGGED_OFF_TOOLS } from './roster-scope.mjs';
+import { connectedProviders } from './client.mjs';
 
 export { TOOL_GROUP_NAMES, TOOL_GROUPS };
 
@@ -34,9 +36,23 @@ const ALL_GROUPS = [...TOOL_GROUP_NAMES];
  * Register every tool against an in-process MCP server and return a connected client.
  * Callers MUST await close() — the transport keeps the event loop alive otherwise.
  */
-export async function openRegistry() {
+// A TOOL THAT SHIPS DARK IS DARK HERE TOO, UNTIL THE SERVER SAYS IT IS LIT FOR THIS CALLER (2026-11-20). Registering
+// with no connector read made every FLAGGED_OFF_TOOLS name (roster-scope.mjs: the email and sequence tools, Canva,
+// Amazon Ads, calendars...) disabled for EVERY account, lit or not: measured on production, `hermoso call
+// save_email_sequence` on a brand with Gmail connected answered "No tool named save_email_sequence. Did you mean:
+// save_email_sequence" while the hosted MCP and /v1 ran it. So a call or schema for a dark name asks the server once
+// (the same GET /api/connectors/providers the stdio twin reads) and lights exactly the names in its `flagsOn`. Only
+// `flagsOn` is carried over: readOk stays false, so no other tool is held back for a missing connection — the CLI
+// still offers the whole roster ([[mcp-is-the-complete-surface]]). Every other name stays offline, as before.
+export const isFlaggedOff = (name) => FLAGGED_OFF_TOOLS.has(String(name || ''));
+export async function litFlags(name) {
+  if (!isFlaggedOff(name)) return null;
+  const c = await connectedProviders(); // never throws; a failed read lights nothing
+  return c && c.readOk && c.flagsOn instanceof Set ? { connected: new Set(), readOk: false, flagsOn: c.flagsOn } : null;
+}
+export async function openRegistry({ connectors = null } = {}) {
   const server = new McpServer({ name: 'hermoso-cli', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
-  registerTools(server, { only: ALL_GROUPS });
+  registerTools(server, connectors ? { only: ALL_GROUPS, connectors } : { only: ALL_GROUPS });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'hermoso-cli', version: '1.0.0' }, { capabilities: {} });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

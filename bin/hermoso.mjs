@@ -420,7 +420,7 @@ async function readArgsPayload(flags) {
 }
 
 async function printToolSchema(reg, name, flags) {
-  const { client, close } = await reg.openRegistry();
+  const { client, close } = await reg.openRegistry({ connectors: await reg.litFlags(name) });
   try {
     const all = await reg.listTools(client);
     const tool = all.find((t) => t.name === name);
@@ -451,6 +451,8 @@ async function printToolSchema(reg, name, flags) {
 }
 
 function suggestTool(reg, name) {
+  // A dark tool that is not lit for this brand EXISTS: "No tool named X. Did you mean: X" was the old answer.
+  if (reg.isFlaggedOff?.(name)) return `${name} is not switched on for this brand: it needs a connection this brand has not made (hermoso list_connectors shows what is connected), or the feature is not open yet.`;
   const inv = reg.inventory();
   const needle = String(name).toLowerCase();
   const near = inv.filter((t) => t.name.includes(needle) || needle.includes(t.name.split('_')[0])).slice(0, 6).map((t) => t.name);
@@ -466,7 +468,7 @@ function suggestTool(reg, name) {
 // mechanism — every other command either passes the arguments through untouched or does not use runTool at all,
 // which is what keeps a confirm-gated tool something only the caller can answer.
 async function runTool(reg, name, flags, extraPos = [], preset = null) {
-  const { client, close } = await reg.openRegistry();
+  const { client, close } = await reg.openRegistry({ connectors: await reg.litFlags(name) });
   try {
     const all = await reg.listTools(client);
     const tool = all.find((t) => t.name === name);
