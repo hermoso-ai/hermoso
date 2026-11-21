@@ -3410,9 +3410,16 @@ const CC_WIDGET_WHY = 'creator campaigns are run from the Hermoso app or another
 // they would count as always-listed and push the last ranked families (openai_ads, wordpress) off a list at its cap, which
 // tools/chatgpt-full-roster-check.mjs refuses. Held for the next ChatGPT ranking; every other host lists them.
 const SHOPIFY_OPS_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Shopify orders and stock are changed from the Hermoso app (Studio) or another connected agent';
+const PHONE_PLATFORM_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Hermoso phone is turned on and off from the Hermoso app (Studio) or another connected agent';
 export const SHOPIFY_OPS_TOOLS = Object.freeze(['update_shopify_order', 'edit_shopify_order_items', 'fulfill_shopify_order', 'cancel_shopify_order', 'refund_shopify_order', 'list_shopify_locations', 'get_shopify_inventory', 'set_shopify_inventory']);
 export const WIDGET_WITHHELD_WHY = Object.freeze({
   ...Object.fromEntries(SHOPIFY_OPS_TOOLS.map((n) => [n, SHOPIFY_OPS_WIDGET_WHY])),
+  // HERMOSO PHONE (2026-11-20): three tools no connector holds back (a brand with nothing connected must reach them), so on
+  // ChatGPT they would be always-listed and push the last ranked family off a list at its cap. Held for the next ranking; every
+  // other host lists them, and the port / one-time-code tools ride the phone connection's family as before.
+  phone_service_status: PHONE_PLATFORM_WIDGET_WHY,
+  activate_phone_service: PHONE_PLATFORM_WIDGET_WHY,
+  deactivate_phone_service: PHONE_PLATFORM_WIDGET_WHY,
   // LINKEDIN BOOST API 202611 (2026-11-20): four tools in the linkedin family, which is listed on ChatGPT; one more listed tool
   // pushes the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses.
   // Held for the next ChatGPT ranking; the Ads focused app lists them, and boost_linkedin_post previews and creates there.
@@ -17092,7 +17099,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // ---------- PHONE / SMS / VOICE (2026-11-18): the brand's OWN Twilio or Telnyx account, the same tools whichever is connected ----------
   // Every route is in server.js (search "PHONE NUMBERS, SMS / MMS AND VOICE"); the rules are lib/phone.mjs. Nothing is enforced by
   // default; the optional sending settings are set_sms_settings. Sends cost no credits; transcribe_call is our AI and is billed.
-  const PH_NEEDS = ' Needs Twilio or Telnyx connected (Connectors, or connect_connector).';
+  const PH_NEEDS = ' Needs Hermoso phone on (activate_phone_service) or Twilio or Telnyx connected (Connectors, or connect_connector).';
   const phLine = (name, d = {}) => phoneToolText(name, d);
   server.group('channel_admin');
   server.registerTool('list_phone_numbers', {
@@ -17109,7 +17116,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/numbers/available', a); return ok(phLine('search_phone_numbers', d), d); }));
   server.registerTool('buy_phone_number', {
     title: "Buy a phone number",
-    description: "Buy a phone number on the brand's own Twilio or Telnyx account (the provider bills it monthly at its own price). phoneNumber comes from search_phone_numbers. connectInbox (default true) points its texts at the Hermoso Inbox and its calls at Hermoso's call handling. Without confirm:true nothing is bought and the answer says what would happen; call again with confirm:true once the user agrees. Free in credits." + PH_NEEDS,
+    description: "Buy a phone number on Hermoso phone ($3 a month on the brand's phone subscription, prorated) or on the brand's own Twilio or Telnyx account (the provider bills it monthly). phoneNumber comes from search_phone_numbers. connectInbox (default true) points its texts at the Hermoso Inbox and its calls at Hermoso's call handling. Without confirm:true nothing is bought and the answer says what would happen; call again with confirm:true once the user agrees." + PH_NEEDS,
     inputSchema: { phoneNumber: z.string().describe("E.164, e.g. +14155550123"), connectInbox: z.boolean().optional(), name: z.string().optional().describe("a label for the number"), addressSid: z.string().optional().describe("Twilio: an address for numbers that require one"), bundleSid: z.string().optional().describe("Twilio: a regulatory bundle for numbers that require one"), confirm: z.boolean().optional(), provider: z.enum(["twilio", "telnyx"]).optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/numbers/buy', a); return ok(phLine('buy_phone_number', d), d); }));
@@ -17128,7 +17135,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channels');
   server.registerTool('send_sms', {
     title: "Send an SMS or MMS",
-    description: "Send a text from one of the brand's own Twilio or Telnyx numbers: to (one number or a list of up to 100, E.164), text (up to 1,600 characters), media (up to 10 pictures for an MMS: a Library id, attachment://N or an https link), from (needed when the account has several numbers), sendAt (ISO time, to schedule it; on Twilio this needs a Messaging Service set with set_sms_settings). The answer has each message's id, segment count and status; delivery status follows (get_sms_status). Any optional sending settings the connection turned on (quiet hours, opt-out list) apply. No credits: the provider bills the account." + PH_NEEDS,
+    description: "Send a text from one of the brand's own Twilio or Telnyx numbers: to (one number or a list of up to 100, E.164), text (up to 1,600 characters), media (up to 10 pictures for an MMS: a Library id, attachment://N or an https link), from (needed when the account has several numbers), sendAt (ISO time, to schedule it; on Twilio this needs a Messaging Service set with set_sms_settings). The answer has each message's id, segment count and status; delivery status follows (get_sms_status). Any optional sending settings the connection turned on (quiet hours, opt-out list) apply. On the brand's own account no credits (the provider bills it); on Hermoso phone 0.8 credit a segment, 2.5 an MMS." + PH_NEEDS,
     inputSchema: { to: z.union([z.string(), z.array(z.string())]), text: z.string().optional(), media: z.array(z.string()).optional(), from: z.string().optional(), sendAt: z.string().optional(), recipientTimezone: z.string().optional().describe("IANA zone, only used by quiet hours when the number does not tell it"), provider: z.enum(["twilio", "telnyx"]).optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/sms/send', a); return ok(phLine('send_sms', d), d); }));
@@ -17251,7 +17258,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/calls/transcribe', a); return ok(phLine('transcribe_call', d), d); }));
   server.registerTool('place_call', {
     title: "Place a phone call",
-    description: "Call someone from one of the brand's numbers. With bridgeTo (the user's own phone; default: the number's forwarding phone), that phone rings first and, once answered, to is dialled from the brand's number, so the caller ID is the business. With agent (a voice agent's SIP address, or a wss:// stream on Twilio), the agent places the call to the person instead. record:true records it. The provider bills the call to the account. Free in credits." + PH_NEEDS,
+    description: "Call someone from one of the brand's numbers. With bridgeTo (the user's own phone; default: the number's forwarding phone), that phone rings first and, once answered, to is dialled from the brand's number, so the caller ID is the business. With agent (a voice agent's SIP address, or a wss:// stream on Twilio), the agent places the call to the person instead. record:true records it. On the brand's own account the provider bills the call; on Hermoso phone 0.7 credit a minute per leg (US and Canada)." + PH_NEEDS,
     inputSchema: { to: z.string(), from: z.string().optional(), bridgeTo: z.string().optional(), agent: z.string().optional(), record: z.boolean().optional(), provider: z.enum(["twilio", "telnyx"]).optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/calls/place', a); return ok(phLine('place_call', d), d); }));
@@ -17267,6 +17274,68 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: { days: z.number().optional(), kind: z.enum(["orders", "abandoned", "both"]).optional(), subscribedOnly: z.boolean().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/shopify-buyers', a); return ok(phLine('list_shopify_sms_buyers', d), d); }));
+  // HERMOSO PHONE (2026-11-20): the platform mode on Hermoso's own Telnyx account (no outside account, paid in credits),
+  // one-time codes and number porting. Routes in server.js (search "HERMOSO PHONE: THE PLATFORM"); rules lib/phone-platform.mjs.
+  server.registerTool('phone_service_status', {
+    title: "Hermoso phone status",
+    description: "Whether Hermoso phone is on for this brand: numbers, texts, calls, AI voice agents and one-time codes on Hermoso's own carrier account, paid in credits, with no outside account to open. Answers on or off, the numbers it holds and when each renews, any new-account limits still in place, whether sending is paused, and the full price list in credits. Free.",
+    inputSchema: {  },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/platform', a); return ok(phLine('phone_service_status', d), d); }));
+  server.registerTool('activate_phone_service', {
+    title: "Turn on Hermoso phone",
+    description: "Turn on Hermoso phone for this brand: its own carrier sub-account on Hermoso's account, so it can buy numbers, text, call, run AI voice agents and send one-time codes with no Twilio or Telnyx sign-up: numbers are a monthly subscription on the card on file, texts and minutes are credits. Paid accounts only. Without confirm:true nothing is turned on and the answer lists the prices and the new-account limits; call again with confirm:true once the user agrees. Turning it on costs nothing. A brand that connects its own Telnyx account keeps that instead.",
+    inputSchema: { confirm: z.boolean().optional().describe("true once the user agreed to the prices"), businessName: z.string().optional().describe("the business name for the carrier account (default: the brand name)") },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/platform/activate', a); return ok(phLine('activate_phone_service', d), d); }));
+  server.registerTool('deactivate_phone_service', {
+    title: "Turn off Hermoso phone",
+    description: "Turn Hermoso phone off for this brand: every number it holds is released (gone for good), texts and calls stop, and nothing more is charged. Without confirm:true nothing changes and the answer names the numbers that would be released; call again with confirm:true only after the user agrees to that exact list. To keep a number, port it to another carrier first.",
+    inputSchema: { confirm: z.boolean().optional().describe("true only after the user approved releasing the listed numbers") },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/platform/deactivate', a); return ok(phLine('deactivate_phone_service', d), d); }));
+  server.registerTool('send_verification_code', {
+    title: "Send a one-time code",
+    description: "Text a one-time verification code to a phone number: the code is generated and sent by the carrier, never shown to you; check_verification_code confirms what the person types. Valid for timeoutSecs (default 600). On Hermoso phone it costs 4 credits per code; on the brand's own Telnyx account Telnyx bills it.",
+    inputSchema: { to: z.string().describe("E.164, e.g. +14155550123"), appName: z.string().optional().describe("the name the text says the code is for (set on the first code)"), timeoutSecs: z.number().optional().describe("60 to 3600, default 600") },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/verify/send', a); return ok(phLine('send_verification_code', d), d); }));
+  server.registerTool('check_verification_code', {
+    title: "Check a one-time code",
+    description: "Check the code a person typed against the one send_verification_code texted them. Answers accepted true or false; an expired or used code is reported as such. Free.",
+    inputSchema: { to: z.string().describe("the number the code was sent to"), code: z.string().describe("the digits the person entered") },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/verify/check', a); return ok(phLine('check_verification_code', d), d); }));
+  server.registerTool('check_number_portability', {
+    title: "Check numbers can be ported",
+    description: "Check whether phone numbers the business already has with another carrier can be moved (ported) to Hermoso phone or its own Telnyx account: portable or not, why not, and whether FastPort applies. Nothing is filed. Free.",
+    inputSchema: { numbers: z.array(z.string()).describe("E.164 numbers, up to 100") },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/port/check', a); return ok(phLine('check_number_portability', d), d); }));
+  server.registerTool('create_port_order', {
+    title: "Port numbers in",
+    description: "Move numbers from the business's current carrier to Hermoso phone (or its own Telnyx account). Needs the details on the current carrier account (entityName, authPersonName, billingPhoneNumber, accountNumber, pin if it has one, and the service address) plus two PDF links: loaUrl (the signed Letter of Authorization) and invoiceUrl (a recent bill). Without confirm:true nothing is filed and the answer says what will happen; call again with confirm:true once the user agrees. Porting in is free; on Hermoso phone each number then joins the phone subscription at $3 a month once it arrives. get_port_order follows it.",
+    inputSchema: { numbers: z.array(z.string()).describe("E.164 numbers to port"), entityName: z.string().optional().describe("the name on the current carrier account"), authPersonName: z.string().optional().describe("who authorizes the port"), billingPhoneNumber: z.string().optional().describe("the account billing number"), accountNumber: z.string().optional().describe("the account number with the current carrier"), pin: z.string().optional().describe("the port-out PIN, when the carrier uses one"), streetAddress: z.string().optional(), extendedAddress: z.string().optional(), city: z.string().optional(), state: z.string().optional(), postalCode: z.string().optional(), country: z.string().optional().describe("2-letter, e.g. US"), loaUrl: z.string().optional().describe("signed Letter of Authorization (PDF link; upload_file makes one)"), invoiceUrl: z.string().optional().describe("a recent carrier bill (PDF link)"), reference: z.string().optional().describe("your own reference"), confirm: z.boolean().optional().describe("true once the user agreed") },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/port/orders', a); return ok(phLine('create_port_order', d), d); }));
+  server.registerTool('list_port_orders', {
+    title: "List port orders",
+    description: "The brand's number port orders with their status (draft, in-process, submitted, exception, foc-date-confirmed, ported, cancelled), the numbers in each, the move date once the carrier sets it, and anything the carrier needs fixed. Free.",
+    inputSchema: { status: z.string().optional().describe("only orders in this status") },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/port/orders', a); return ok(phLine('list_port_orders', d), d); }));
+  server.registerTool('get_port_order', {
+    title: "Get a port order",
+    description: "One port order in full: status, numbers, the move date, and for an exception exactly what to fix (the fields to correct or the document to upload again). Free.",
+    inputSchema: { id: z.string().describe("the port order id") },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/phone/port/order', a); return ok(phLine('get_port_order', d), d); }));
+  server.registerTool('cancel_port_order', {
+    title: "Cancel a port order",
+    description: "Stop a port that has not completed: the numbers stay with their current carrier. Without confirm:true nothing is cancelled; call again with confirm:true once the user agrees. Free.",
+    inputSchema: { id: z.string().describe("the port order id"), confirm: z.boolean().optional().describe("true once the user agreed") },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/phone/port/order/cancel', a); return ok(phLine('cancel_port_order', d), d); }));
   // ---------- AI VOICE AGENTS (2026-11-18): the brand's OWN Vapi, Retell AI, ElevenLabs or Telnyx AI account ----------
   // Every route is in server.js (search "AI VOICE AGENTS ON THE CUSTOMER'S OWN"); every vendor path is lib/voice-agents.mjs. The platform
   // runs and bills the calls (no credits); draft_voice_agent and a create_voice_agent without prompt are our AI and billed.
