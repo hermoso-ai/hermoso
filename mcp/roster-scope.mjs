@@ -115,6 +115,8 @@ export const TOOL_PROVIDER_RULES = [
   // collide with Hermoso billing, which is buy_credits / billing_status / upgrade_plan and never says "stripe".
   [/stripe/, 'stripe'],
   [/hubspot/, 'hubspot'],
+  // Salesforce (2026-11-20): the brand's OWN org, offered only to a workspace that connected it.
+  [/salesforce/, 'salesforce'],
   // Intercom (2026-10-12): the brand's OWN support inbox, offered only to a workspace that connected it.
   [/intercom/, 'intercom'],
   // Vercel (2026-10-16): the brand's OWN websites, offered only to a workspace that connected Vercel.
@@ -308,7 +310,7 @@ export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 
 // that already holds a Gmail or Outlook connection, and for the gates' team pass. They are tied to NO single provider
 // in TOOL_PROVIDER_RULES on purpose: one tool serves both mailbox kinds, and the lead list is useful before a mailbox
 // is connected.
-export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts', 'save_email_attachment', 'label_email_reply', 'email_pipeline', 'draft_email_reply', 'list_reply_drafts', 'review_reply_draft', 'find_lead_facts', 'test_inbox_placement', 'sync_email_replies_to_hubspot', 'set_email_reply_settings']);
+export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts', 'save_email_attachment', 'label_email_reply', 'email_pipeline', 'draft_email_reply', 'list_reply_drafts', 'review_reply_draft', 'find_lead_facts', 'test_inbox_placement', 'sync_email_replies_to_hubspot', 'set_email_reply_settings', 'list_email_folders', 'manage_email_folder', 'search_email', 'get_email_thread', 'update_email', 'save_email_draft', 'send_email_draft', 'reply_to_email', 'forward_email']);
 // THE WECHAT TOOLS SHIP DARK WITH THE WECHAT CONNECTOR (2026-11-15, owner: "okay I guess we can skip wechat for now").
 // CONNECTOR_GATES.wechat is shut (WECHAT_ENABLED unset) because WeChat refuses every call from an address that is not on
 // the Service Account's IP whitelist and this deployment sends from a shared, changing pool. Three tools for a channel
