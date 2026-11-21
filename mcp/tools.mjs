@@ -547,13 +547,46 @@ const leftOutLabel = (f) => LEFT_OUT_LABEL[f] || String(f).split('_').map((w) =>
 // a direct call to a held tool), so a renamed menu is one edit. No price, no link to a purchase, no comparison.
 export const CHATGPT_FULL_MCP_URL = 'https://app.hermoso.ai/mcp';
 export const CHATGPT_ADD_FULL_STEPS = `Plugins > + > Add custom MCP server > Server URL ${CHATGPT_FULL_MCP_URL}, OAuth > Create as a plugin`;
-export const CHATGPT_FULL_CONNECTION_LINE = `Hermoso runs it on its full connection, which the user adds in ChatGPT itself: ${CHATGPT_ADD_FULL_STEPS} (where the ChatGPT plan or workspace allows custom MCP servers). It lists every Hermoso tool.`;
-export const chatgptLeftOutLine = (left = CHATGPT_ROSTER_LEFT_OUT, n = 2) => {
+export const CHATGPT_FULL_CONNECTION_LINE = `Hermoso runs it on its full connection, which the user adds in ChatGPT itself: ${CHATGPT_ADD_FULL_STEPS} (where the ChatGPT plan or workspace allows custom MCP servers).`;
+// A PAYMENT OR A ONE-TIME SETUP ALSO HAS A WEBSITE DOOR, AND NOTHING IN CHATGPT EVER SUGGESTS THE STUDIO (2026-11-20, the
+// owner: "for the chatgpt stuff we should offer them to connect the full connection or use the website if its payment or
+// one time setup, but i dont think we'd ever want to suggest the studio because thats really best in their own AI"). So a
+// held PAYMENT (credits, plan, auto-reload, credit limit, paying creators) or ONE-TIME SETUP (a pasted key, the webhook
+// secret) is answered with BOTH: the full connection, added in ChatGPT, or the one page on app.hermoso.ai that does it,
+// by its exact address (each `?tab=` is a BOOT_TABS name in public/app.js). Ongoing work keeps
+// the full connection only, and no ChatGPT-facing sentence names the Studio or "Hermoso's chat"
+// (tools/chatgpt-held-doors-check.mjs). The credit wall's own pricing link (ACCOUNT_INFO_URL, an A/B) is left as it is.
+// "It lists every Hermoso tool" was dropped from the line above the same day: measured on production, a plain /mcp
+// session that names itself openai-mcp gets the same capped list as the published app, so it was not something to promise.
+export const CHATGPT_WEB = 'https://app.hermoso.ai';
+const WEB_BILLING = { url: `${CHATGPT_WEB}/?tab=billing`, where: 'Billing' };
+const WEB_CREDIT_LIMIT = { url: `${CHATGPT_WEB}/?tab=settings`, where: 'Settings, Monthly credit limit' };
+const WEB_CREATORS = { url: `${CHATGPT_WEB}/?tab=creators`, where: 'Creator Campaigns' };
+export const CHATGPT_WEB_DOORS = Object.freeze({
+  buy_credits: { kind: 'payment', ...WEB_BILLING }, // Billing, not the /buy page: the account page, never a purchase link inside ChatGPT
+  upgrade_plan: { kind: 'payment', ...WEB_BILLING },
+  set_auto_reload: { kind: 'payment', ...WEB_BILLING },
+  billing_status: { kind: 'payment', ...WEB_BILLING },
+  get_credit_limits: { kind: 'payment', ...WEB_CREDIT_LIMIT },
+  set_credit_limit: { kind: 'payment', ...WEB_CREDIT_LIMIT },
+  pay_campaign_creators: { kind: 'payment', ...WEB_CREATORS },
+  creator_campaign_funds: { kind: 'payment', ...WEB_CREATORS },
+  connect_connector: { kind: 'setup', url: `${CHATGPT_WEB}/?tab=connectors`, where: 'Connectors' },
+  rotate_webhook_signing_secret: { kind: 'setup', url: `${CHATGPT_WEB}/?tab=connectors`, where: 'Connectors, the webhook card, Alerts' },
+});
+export const chatgptBothWaysLine = (name) => {
+  const d = CHATGPT_WEB_DOORS[name];
+  return d ? `Two ways, both fine: add Hermoso's full connection in ChatGPT itself (${CHATGPT_ADD_FULL_STEPS}, where the ChatGPT plan or workspace allows custom MCP servers), or, since it is a ${d.kind === 'payment' ? 'payment' : 'one-time setup'}, do it once on the Hermoso website: ${d.where}, ${d.url}` + '.' : '';
+};
+// The one sentence every ChatGPT surface carries about payments and setup, with the four addresses (short: the all-in-one
+// app's instructions must fit 2,048 bytes with the longest first-run line on top, mcp-first-run-guidance-check).
+export const CHATGPT_WEB_DOORS_LINE = `Payments and setup also work on ${CHATGPT_WEB}: /?tab=billing (credits, plan), /?tab=settings (limit), /?tab=connectors (keys), /?tab=creators (payouts).`;
+export const chatgptLeftOutLine = (left = CHATGPT_ROSTER_LEFT_OUT, n = 1) => { // one example family (2026-11-20: the website doors took the room)
   const names = left.filter((f) => !/stripe|pay/i.test(f)).slice(0, n).map(leftOutLabel);
-  return `NOT IN THIS APP: buying credits, plans and billing, paying creators, connecting a key${names.length ? `, ${names.join(', ')}` : ''} and more. Hermoso does them on its full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. Never say Hermoso lacks it.`;
+  return `NOT IN THIS APP: buying credits, billing, paying creators, connecting a key${names.length ? `, ${names.join(', ')}` : ''} and more; never say Hermoso lacks it. All run on the full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. ${CHATGPT_WEB_DOORS_LINE}`;
 };
 export const MCP_INSTRUCTIONS_WIDGET = [
-  "Hermoso runs a brand's marketing: research competitors' ads, make image and video ads, post to their accounts, run paid campaigns, read results. Each area works on its own.",
+  "Hermoso runs a brand's marketing: research ads, make image and video ads, post, run paid campaigns, read results.",
   'Asked to make something, make it; tools pick a default model (hermoso_capabilities lists models and costs).',
   '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
   '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in background; poll get_job.',
@@ -561,9 +594,9 @@ export const MCP_INSTRUCTIONS_WIDGET = [
   '• PUBLISH: post_to_* (post_to_meta, post_to_tiktok...) post now; list_inbox, reply_to_inbox_item.',
   '• PAID ADS (Meta, Google, LinkedIn, TikTok, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
   '• RESULTS: post_performance, analyze_campaigns. WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
-  "CREDITS: AI and research tools use the user's credits; the reply says how many. If too low, say so. Nothing is bought in this app.",
+  "CREDITS: AI and research use credits; replies say how many. If too low, say so. Nothing is bought in this app.",
   'CONFIRM before posting or scheduling, messaging customers, turning on a campaign, changing a budget, deleting anything, or draft_brand with save:true.',
-  'SHOWING RESULTS: the widget already shows each finished image and video. Never repeat one as a markdown image or image link; describe it, link only if asked.',
+  'SHOWING RESULTS: the widget already shows each finished image and video. Never repeat one as a markdown image.',
   chatgptLeftOutLine(), // the whole string, with the longest first-run line on top, must fit 2,048 bytes (mcp-first-run-guidance-check)
 ].filter(Boolean).join('\n');
 // ── EACH FOCUSED APP GETS ITS OWN INSTRUCTIONS (2026-11-06) ─────────────────────────────────────────────────────────
@@ -608,7 +641,7 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
     '• CREATORS: creator_campaign_link (join link, or invite one or many), email_campaign_creator, review_campaign_creator; find_instagram_marketplace_creators and discover_tiktok_creators search the creator marketplaces of connected accounts.',
     '• POSTS: list_campaign_posts, review_campaign_post (approve, reject or request changes, with feedback), add_campaign_post, refresh_campaign_views; promote_campaign_post previews or builds a paused ad from an approved post.',
     '• RESULTS: creator_campaign_report (CSV too).',
-    'PAYMENTS: this app shows what creators are owed and never pays them; paying runs on the full connection (OUTSIDE THIS APP below). Creators join through their own link and sign-in; their agreements are their own clicks.',
+    'PAYMENTS: this app shows what creators are owed and never pays them; paying is done outside this app (OUTSIDE THIS APP below). Creators join through their own link and sign-in; their agreements are their own clicks.',
     APP_WORKSPACE,
     'CONFIRM with the user before setting a campaign live or closing it, approving or rejecting a post, removing a creator, emailing a creator, building an ad, or deleting anything.',
   ].join('\n'),
@@ -3384,7 +3417,7 @@ export const STORY_FILM_TOOLS = Object.freeze(['list_story_cards', 'get_story_ca
 export const CHATGPT_CREATE_PUBLISHED_ENV = 'HERMOSO_CHATGPT_CREATE_PUBLISHED';
 export const chatgptCreatePublished = (env = process.env) => String(env?.[CHATGPT_CREATE_PUBLISHED_ENV] ?? '').trim() === '1';
 export const storyFilmsWithheldWhy = (env = process.env) => `story films are in Hermoso's "${APP_TITLES.create}" app for ChatGPT`
-  + (chatgptCreatePublished(env) ? `; the user adds it from ChatGPT's apps and asks for a story film there` : `, which is not published yet; until it is, story films run in the Hermoso web app (Studio, Story films) and on every other MCP host`);
+  + (chatgptCreatePublished(env) ? `; the user adds it from ChatGPT's apps and asks for a story film there` : `, which is not published yet; until it is, story films run on Hermoso's full connection and on every other MCP host`);
 // Tools a widget host withholds from the all-in-one roster but a FOCUSED ChatGPT app lists, by app (APP_SCOPE_TOKENS).
 // 2026-11-20 (owner: list on the focused apps what the all-in-one holds only for its cap or its review date): the tools
 // WIDGET_WITHHELD_WHY holds for that reason alone, in the app whose job they are. Not the ones held for a reason of their own
@@ -3410,9 +3443,9 @@ const CC_WIDGET_WHY = 'creator campaigns are run from the Hermoso app or another
 // SHOPIFY ORDER WRITES + INVENTORY (2026-11-20): eight tools reached through the store, no single connector, so on ChatGPT
 // they would count as always-listed and push the last ranked families (openai_ads, wordpress) off a list at its cap, which
 // tools/chatgpt-full-roster-check.mjs refuses. Held for the next ChatGPT ranking; every other host lists them.
-const SHOPIFY_OPS_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Shopify orders and stock are changed from the Hermoso app (Studio) or another connected agent';
-const PHONE_PLATFORM_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Hermoso phone is turned on and off from the Hermoso app (Studio) or another connected agent';
-const AGENCY_WIDGET_WHY = 'it is agency administration newer than the ChatGPT tool list, which is at its 1,000-tool limit; it works from the Hermoso app Studio, Claude, the CLI, the API or another connected agent';
+const SHOPIFY_OPS_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Shopify orders and stock are changed from the Hermoso app or another connected agent';
+const PHONE_PLATFORM_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; Hermoso phone is turned on and off from the Hermoso app or another connected agent';
+const AGENCY_WIDGET_WHY = 'it is agency administration newer than the ChatGPT tool list, which is at its 1,000-tool limit; it works from the Hermoso app, Claude, the CLI, the API or another connected agent';
 export const SHOPIFY_OPS_TOOLS = Object.freeze(['update_shopify_order', 'edit_shopify_order_items', 'fulfill_shopify_order', 'cancel_shopify_order', 'refund_shopify_order', 'list_shopify_locations', 'get_shopify_inventory', 'set_shopify_inventory']);
 // CONVERSIONS HUB + PROFIT PER CAMPAIGN (2026-11-20): seven tools that need no connection would be CORE on the all-in-one
 // ChatGPT list and push the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs
@@ -3491,13 +3524,13 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   bookmark_x_post: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-15); a post is bookmarked in the Hermoso app or on any other MCP host',
   follow_x_account: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-15); an account is followed in the Hermoso app or on any other MCP host',
   // LEAD SIGNALS (2026-11-17): the same reason as layerize_image and product_move; they need no connector, so they would count as always-listed.
-  find_leads: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a lead search runs in the Hermoso app (Studio) and on every other MCP host',
-  find_proven_formats: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); proven formats are found in the Hermoso app (Studio) and on every other MCP host',
+  find_leads: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a lead search runs in the Hermoso app and on every other MCP host',
+  find_proven_formats: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); proven formats are found in the Hermoso app and on every other MCP host',
   // find_ad_formats is find_proven_formats under its ChatGPT name (WIDGET_HOST_RENAMES, 2026-11-20): held on the all-in-one list for the same reason, listed on the focused create app.
-  find_ad_formats: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); short-video formats are found in the Hermoso app (Studio) and on every other MCP host',
-  find_company_contacts: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a company\'s public contact is read in the Hermoso app (Studio) and on every other MCP host',
-  search_companies: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a company search runs in the Hermoso app (Studio) and on every other MCP host',
-  saved_lead_searches: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); saved searches run in the Hermoso app (Studio) and on every other MCP host',
+  find_ad_formats: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); short-video formats are found in the Hermoso app and on every other MCP host',
+  find_company_contacts: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a company\'s public contact is read in the Hermoso app and on every other MCP host',
+  search_companies: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); a company search runs in the Hermoso app and on every other MCP host',
+  saved_lead_searches: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-17); saved searches run in the Hermoso app and on every other MCP host',
   // THE RAW STORE READ (2026-11-17, revenue attribution): revenue_by_source and set_tracking_links need no connector, so
   // on this host they count as always-listed and pushed the WordPress family off the reviewed list. The cut is the tool with a
   // typed sibling for every key it reads and no recorded use: store_get had 0 rows in the 30-day error ledger (the only
@@ -4314,7 +4347,9 @@ export const appHandoffLine = (app, { widgetHost = false, directory = false } = 
   // ON CHATGPT THE FULL CONNECTION LEADS (2026-11-20, the owner: "let's just offer the full connection"): it is the one
   // route that keeps the user in ChatGPT for everything, held capabilities included. The sibling apps are no longer
   // spelled out in this line (the ~2 KB budget); hermoso_other_capabilities still names each published one with its link.
-  if (widgetHost && !directory) return `OUTSIDE THIS APP (buying credits, billing, paying creators, connecting a key, anything not listed): Hermoso runs it on its full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. Never say Hermoso lacks it. hermoso_other_capabilities lists the other Hermoso apps, including ${ALL_IN_ONE_CHATGPT_TITLE}.`;
+  // Payments and one-time setup also have a website door (2026-11-20); the addresses ride hermoso_other_capabilities, which
+  // every focused app lists, because this line must keep the app's instructions inside 2,048 bytes. Never the Studio.
+  if (widgetHost && !directory) return `OUTSIDE THIS APP (buying credits, billing, paying creators, keys, the rest): Hermoso runs it on its full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}; payments and setup also work on the website. Never say Hermoso lacks it. hermoso_other_capabilities gives the pages and the Hermoso apps, including ${ALL_IN_ONE_CHATGPT_TITLE}.`;
   // Off ChatGPT each sibling is the same URL plus its ?tools= token, so the base is said once (the line must fit ~2 KB).
   return ['OUTSIDE THIS APP, tell the user which Hermoso connection covers it.', `Every tool: ${MCP_PUBLIC_URL}. Or the same URL plus:`, ...others.map((a) => `?tools=${appMcpUrl(a, directory).split('?tools=')[1]} (${APP_TITLES[a].replace(/^Hermoso:\s*/, '')}): ${appAreaWords(a, directory)}.`)].join(' ');
 };
@@ -4394,7 +4429,7 @@ export function handoffAnswer(ctx, env = process.env) {
   if (widgetHost) {
     lines.push(`${hereTitle ? `This is ${hereTitle}. ` : ''}Where each part of Hermoso is in ChatGPT. This list runs nothing.`);
     // THE FULL CONNECTION LEADS ON CHATGPT (2026-11-20, the owner): everything, held capabilities included, without leaving ChatGPT.
-    lines.push(`Everything, including buying credits, plans and billing, paying creators and connecting an account with a key: ${CHATGPT_FULL_CONNECTION_LINE} Tell the user this rather than that Hermoso cannot do it.`);
+    lines.push(`Everything, including buying credits, plans and billing, paying creators and connecting an account with a key: ${CHATGPT_FULL_CONNECTION_LINE} ${CHATGPT_WEB_DOORS_LINE} Tell the user this rather than that Hermoso cannot do it.`);
     lines.push('Hermoso apps in ChatGPT:');
     for (const s of usable) lines.push(`• ${s.id === here ? `${s.title} (this app)` : s.title}${s.link ? `, ${s.link}` : ''}: ${s.id === 'all' ? 'most of Hermoso in one app' : appAreaWords(s.id)}.`);
   } else {
@@ -5058,7 +5093,8 @@ const sessionBound = (factory, ctx) => { const h = factory(ctx); try { h._hermos
 
 // A held tool's ChatGPT tail: where Hermoso runs it. Empty for a name that is not a feature to send anyone to (one that can
 // only refuse, the generic store reader), an OLD name kept beside its new one (clone_static is listed), and get_instructions.
-const chatgptHeldTail = (name) => (HANDOFF_NOT_A_FEATURE.has(name) || Object.prototype.hasOwnProperty.call(TOOL_OLD_NAMES, name) || name === 'get_instructions' || executorLike(name) ? '' : ` This ChatGPT app does not run it. ${CHATGPT_FULL_CONNECTION_LINE}`);
+// A payment or one-time setup (CHATGPT_WEB_DOORS) gets both ways, the full connection or its one page on the website.
+const chatgptHeldTail = (name) => (HANDOFF_NOT_A_FEATURE.has(name) || Object.prototype.hasOwnProperty.call(TOOL_OLD_NAMES, name) || name === 'get_instructions' || executorLike(name) ? '' : ` This ChatGPT app does not run it. ${CHATGPT_WEB_DOORS[name] ? chatgptBothWaysLine(name) : CHATGPT_FULL_CONNECTION_LINE}`);
 // The clauses of a withheld-tool reason that send the user to the Hermoso app or "any other MCP host" are dropped on
 // ChatGPT, where the full connection is the answer; what is left is the reason itself.
 const withoutAppRoute = (why) => String(why).split(/;\s+/).filter((c) => !/Hermoso app|other MCP host|on the full connection|\bthe CLI\b/i.test(c)).join('; ');
@@ -5096,8 +5132,9 @@ export const holdHints = (name, why, ctx = null) => {
   if (why === 'shopify_store') return [{ do: 'if the user runs a Shopify store, call connect_shopify_store and hand them its one link (or they press Connect in Connectors \u25b8 Shopify), then retry', why: `${name} ${SHOPIFY_STORE_NOTE}` }];
   if (why === 'unavailable') return [{ do: 'do not offer this capability; carry on with the tools that are listed', why: `${name} is not available in Hermoso yet` }];
   if (why === 'host_policy' && executorLike(name)) return [{ do: 'call the Hermoso tools in your list directly', why: `on this host every Hermoso operation is its own listed tool, so ${name} is not offered` }];
-  if (why === 'host_policy' && STORY_FILM_TOOLS.includes(name)) return [{ do: chatgptCreatePublished() ? `tell the user story films are in the "${APP_TITLES.create}" app for ChatGPT` : `tell the user story films are in the "${APP_TITLES.create}" app for ChatGPT once it is published, and in the Hermoso web app until then`, why: `${name} is listed in the "${APP_TITLES.create}" ChatGPT app, not in this one` }];
-  if (why === 'host_policy' && chatgptHeldTail(name)) return [{ do: `tell the user this ChatGPT app does not run it and that Hermoso's full connection does; they add it in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}`, why: 'this host\'s own policy withholds it here, not Hermoso, and the full connection lists every Hermoso tool' }];
+  if (why === 'host_policy' && STORY_FILM_TOOLS.includes(name)) return [{ do: chatgptCreatePublished() ? `tell the user story films are in the "${APP_TITLES.create}" app for ChatGPT` : `tell the user story films are in the "${APP_TITLES.create}" app for ChatGPT once it is published, and on Hermoso's full connection until then (${CHATGPT_ADD_FULL_STEPS})`, why: `${name} is listed in the "${APP_TITLES.create}" ChatGPT app, not in this one` }];
+  if (why === 'host_policy' && chatgptHeldTail(name) && CHATGPT_WEB_DOORS[name]) return [{ do: `offer both: add Hermoso's full connection in ChatGPT, or do it once on the website at ${CHATGPT_WEB_DOORS[name].url} (${CHATGPT_WEB_DOORS[name].where})`, why: `the full connection is added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}; this host's policy withholds the tool here, not Hermoso` }];
+  if (why === 'host_policy' && chatgptHeldTail(name)) return [{ do: `tell the user this ChatGPT app does not run it and that Hermoso's full connection does; they add it in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}`, why: 'this host\'s own policy withholds it here, not Hermoso' }];
   if (why === 'host_policy') return [{ do: 'carry on with the tools this connection lists', why: `${name} is withheld by this host's own policy, not by Hermoso` }];
   if (why === 'app_scope') return [{ do: 'carry on with the tools this connection lists', why: `${name} belongs to another Hermoso app (${APP_HOME_TEXT(name, ctx)}), not this one` }];
   if (why === 'directory') return [{ do: 'carry on with the research, publishing, inbox, ads and analytics tools this connection lists', why: `${name} is not part of this connection` }];
@@ -7944,7 +7981,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, sessionBound((sctx) => wrap(async () => {
     const a = handoffAnswer(sctx);
-    if (!a) return ok(sctx?.widgetHost ? `Every Hermoso tool, including buying credits, plans and billing, paying creators and connecting an account with a key: ${CHATGPT_FULL_CONNECTION_LINE}` : `Every Hermoso tool is on the full connection, ${MCP_PUBLIC_URL}; in ChatGPT, ${ALL_IN_ONE_CHATGPT_TITLE}: ${chatgptAppLink('all')}.`, { fullConnection: MCP_PUBLIC_URL });
+    if (!a) return ok(sctx?.widgetHost ? `Every Hermoso tool, including buying credits, plans and billing, paying creators and connecting an account with a key: ${CHATGPT_FULL_CONNECTION_LINE} ${CHATGPT_WEB_DOORS_LINE}` : `Every Hermoso tool is on the full connection, ${MCP_PUBLIC_URL}; in ChatGPT, ${ALL_IN_ONE_CHATGPT_TITLE}: ${chatgptAppLink('all')}.`, { fullConnection: MCP_PUBLIC_URL });
     return ok(a.text, a.data);
   }), ctx));
 
