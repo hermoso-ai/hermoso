@@ -3451,8 +3451,12 @@ export const SHOPIFY_OPS_TOOLS = Object.freeze(['update_shopify_order', 'edit_sh
 // ChatGPT list and push the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs
 // refuses. Held there for the next ChatGPT ranking; they are in the `ads` group, so the Hermoso Ads app in ChatGPT lists them.
 const CONV_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; it works from the Hermoso Ads app in ChatGPT, the Hermoso app, or another connected agent';
+// ABANDONED-CHECKOUT RECOVERY (2026-11-20): held from the capped ChatGPT list for the same reason as the order tools above.
+const SHOPIFY_CART_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; abandoned-checkout recovery is set up from the Hermoso app (Studio) or another connected agent';
+export const SHOPIFY_CART_TOOLS = Object.freeze(['set_shopify_cart_recovery', 'get_shopify_cart_recovery', 'shopify_cart_recovery_report']);
 export const WIDGET_WITHHELD_WHY = Object.freeze({
   ...Object.fromEntries(SHOPIFY_OPS_TOOLS.map((n) => [n, SHOPIFY_OPS_WIDGET_WHY])),
+  ...Object.fromEntries(SHOPIFY_CART_TOOLS.map((n) => [n, SHOPIFY_CART_WIDGET_WHY])),
   // HERMOSO PHONE (2026-11-20): three tools no connector holds back (a brand with nothing connected must reach them), so on
   // ChatGPT they would be always-listed and push the last ranked family off a list at its cap. Held for the next ranking; every
   // other host lists them, and the port / one-time-code tools ride the phone connection's family as before.
@@ -3506,6 +3510,9 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   preview_creator_campaign: CC_WIDGET_WHY,
   delete_creator_campaign: CC_WIDGET_WHY, // 2026-11-20: listed by the Creator Campaigns focused app, like every creator tool
   creator_campaign_sales: CC_WIDGET_WHY, // 2026-11-20 (the money pass): listed by the Creator Campaigns focused app, like every creator tool
+  // GOOGLE DATA MANAGER (2026-11-20): four tools in the google_ads family, which ChatGPT lists; four more would push the last
+  // ranked family (Slack) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses. Held for the next ranking.
+  google_ads_customer_lists: CONV_WIDGET_WHY, upload_google_ads_customer_list: CONV_WIDGET_WHY, send_google_ads_conversions: CONV_WIDGET_WHY, google_ads_upload_status: CONV_WIDGET_WHY,
   submit_tiktok_ads_verification: 'it sends a legal name and a government ID or business licence number, which are entered in TikTok Ads Manager instead',
   merchant_issue_help: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
   trigger_merchant_issue_action: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
@@ -13877,7 +13884,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       pixelSnippetId: z.string().optional().describe('ChatGPT Ads pixel_id'), apiKey: z.string().optional().describe('ChatGPT Ads Conversions API key'),
       amazonProfileId: z.string().optional().describe('Amazon Ads profile'), countryCode: z.string().optional().describe('Amazon default country'),
       eventNames: z.array(z.string()).optional().describe('the events this destination takes; omit for every event'),
-      eventMap: z.record(z.string()).optional().describe('your event name → this platform’s event name'),
+      eventMap: z.record(z.string()).optional().describe('your event name to this platform’s event name'),
       destinationId: z.string().optional().describe('remove: the destination id'),
     },
     outputSchema: { ok: z.boolean().optional(), destinations: z.array(z.any()).optional(), destination: z.any().optional(), platforms: z.array(z.any()).optional(), note: z.string().optional() },
@@ -13900,7 +13907,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const act = a.action || (a.eventId ? 'get' : 'list'); const d = act === 'list' || act === 'get' ? await apiGet('/api/ads/conversions/events', { ...a, action: act }) : await apiPost('/api/ads/conversions/events', a); return ok(d.note, d); }));
   server.registerTool('conversion_insights', {
     title: 'Customer journeys, touch paths and lifetime value',
-    description: 'Read the brand’s stored conversion events as: journey — ONE customer’s every touch and conversion in order, with lifetime value (pass email, phone, externalId, visitorId or a customer key); customers — everyone who converted in the window with their path, conversions and LTV; paths — the most common touch sequences before a conversion (ad_click:meta → organic_search → …); ltv — buyers by first-purchase month and first channel, revenue at months 0, 1, 3, 6 and 12; accuracy — per destination, how many real sales were sent, accepted, failed or never sent and why; overview (default). People are tied together across events by any identifier they share (a visitorId on a page view and an email on the sale). Money stays per currency. Free.',
+    description: 'Read the brand’s stored conversion events as: journey — ONE customer’s every touch and conversion in order, with lifetime value (pass email, phone, externalId, visitorId or a customer key); customers — everyone who converted in the window with their path, conversions and LTV; paths — the most common touch sequences before a conversion (an ad click on Meta, then organic search, and so on); ltv — buyers by first-purchase month and first channel, revenue at months 0, 1, 3, 6 and 12; accuracy — per destination, how many real sales were sent, accepted, failed or never sent and why; overview (default). People are tied together across events by any identifier they share (a visitorId on a page view and an email on the sale). Money stays per currency. Free.',
     inputSchema: {
       view: z.enum(['overview', 'journey', 'customers', 'paths', 'ltv', 'accuracy']).optional().describe('default overview, journey when a customer is named'),
       customer: z.string().optional().describe('journey: an email, phone, external id or a customer key from view customers'),
@@ -13913,7 +13920,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiGet('/api/ads/conversions/insights', a); return ok(d.note, d); }));
   server.registerTool('upload_campaign_results', {
     title: 'Upload your own results per campaign',
-    description: 'Your own numbers per ad campaign per day (sales, revenue, qualified_leads, cogs, gross_profit or any snake_case metric) so campaign_profit can put them next to each platform’s spend. Each row: date (YYYY-MM-DD, up to 400 days back), exactly one of campaignId, utmCampaign or campaignName, optional adAccountId, platform and currency, and values {metric: number}. Or pass csv with a header row (date, campaign_id / utm_campaign / campaign_name, then metric columns). Re-sending a day replaces it. action list reads what is stored (from / to); action clear removes rows in a window (optionally one campaign). Up to 1,000 rows per call. Free.',
+    description: 'Your own numbers per ad campaign per day (sales, revenue, qualified_leads, cogs, gross_profit or any snake_case metric) so campaign_profit can put them next to each platform’s spend. Each row: date (YYYY-MM-DD, up to 400 days back), exactly one of campaignId, utmCampaign or campaignName, optional adAccountId, platform and currency, and values {metric: number}. Or pass csv with a header row: date, then a campaign id, utm campaign or campaign name column, then metric columns. Re-sending a day replaces it. action list reads what is stored (from / to); action clear removes rows in a window (optionally one campaign). Up to 1,000 rows per call. Free.',
     inputSchema: {
       action: z.enum(['upload', 'list', 'clear']).optional().describe('default upload when rows or csv is given, else list'),
       rows: z.array(z.object({ date: z.string().describe('YYYY-MM-DD'), campaignId: z.string().optional().describe('platform campaign id'), utmCampaign: z.string().optional().describe('utm_campaign on its ads'), campaignName: z.string().optional().describe('campaign name, any case'), adAccountId: z.string().optional().describe('narrows matching to one ad account'), platform: z.string().optional().describe('meta, google_ads, tiktok_ads …'), currency: z.string().optional().describe('ISO code of revenue / cogs'), values: z.record(z.number()).describe('1-20 metrics, e.g. {"sales": 2, "revenue": 180, "cogs": 60}') })).optional().describe('rows to save'),
@@ -14333,6 +14340,45 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { shop: z.string().optional(), needsConfirm: z.boolean().optional(), changed: z.boolean().optional(), verified: z.boolean().nullable().optional(), changes: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/shopify/inventory', a); return ok(d.note, d); }));
+
+  // SHOPIFY ▸ ABANDONED-CHECKOUT RECOVERY IN REAL TIME (2026-11-20, lib/shopify-cart-recovery.mjs). Shopify tells Hermoso of
+  // every checkout the moment it changes (checkouts/create + checkouts/update, subscribed on the store when recovery is turned
+  // on); a checkout idle for the delay with no order fires ONE recovery, and orders/create cancels a pending one. Free.
+  server.registerTool('set_shopify_cart_recovery', {
+    title: 'Set up abandoned-checkout recovery',
+    description: "Turn real-time abandoned-checkout recovery on or off for this brand's Shopify store. Once on, Shopify tells Hermoso of every checkout as it happens; a checkout idle for delayMinutes (default 60) with no order fires ONE recovery. action \"sequence\" saves the buyer as a contact and enrols them in `sequence` (an id from list_email_sequences; steps may be email, sms, whatsapp, instagram or facebook), with the cart as merge fields {{cart_url}}, {{cart_items}}, {{cart_total}}, {{cart_item_count}}, {{first_name}}, and {{discount_code}} / {{discount_url}} when discountCode is set. \"alert\" sends the event shopify.checkout_abandoned to the brand's Slack, Discord or webhook (set_alert_events group carts) for your own agent to act on; \"both\" does both. An order for the checkout (or by the same buyer) cancels a pending recovery and stops the sequence. consent \"marketing\" (default) uses an email or phone only when the buyer accepted marketing on it in Shopify; \"any\" uses whatever the checkout carries. A sequence with email steps needs listConfirmed:true. Read back from Shopify. Free.",
+    inputSchema: {
+      enabled: z.boolean().optional().describe('true turns recovery on, false off'),
+      delayMinutes: z.number().optional().describe('how long a checkout sits idle before the recovery fires: 1 to 10080, default 60'),
+      action: z.enum(['sequence', 'alert', 'both']).optional().describe('sequence (default), alert, or both'),
+      sequence: z.string().optional().describe('the sequence id to enrol buyers in (list_email_sequences)'),
+      discountCode: z.string().optional().describe("the store's discount code to offer ({{discount_code}}, {{discount_url}}); \"\" removes it"),
+      consent: z.enum(['marketing', 'any']).optional().describe('marketing (default) or any'),
+      minTotal: z.number().optional().describe('no recovery for a cart below this total (0 = every cart)'),
+      attributionDays: z.number().optional().describe('1-30, default 7: an order by the same buyer this long after a recovery counts as recovered'),
+      listConfirmed: z.boolean().optional().describe("true confirms the people reached are the store's own shoppers (needed for a sequence with email steps)"),
+    },
+    outputSchema: { shop: z.string().optional(), settings: z.any().optional(), subscriptions: z.array(z.string()).nullable().optional(), healthy: z.boolean().optional(), last30Days: z.any().optional(), changed: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/shopify/cart-recovery', a); return ok(d.note, d); }));
+  server.registerTool('get_shopify_cart_recovery', {
+    title: 'Abandoned-checkout recovery settings',
+    description: "This brand's abandoned-checkout recovery: the settings, whether Shopify is sending checkout and order events to Hermoso right now (read from Shopify), the merge fields a sequence can use, and the last 30 days (checkouts, abandoned, recoveries sent, recovered, recovery rate, recovered revenue). Read-only, free.",
+    inputSchema: {},
+    outputSchema: { shop: z.string().optional(), settings: z.any().optional(), subscriptions: z.array(z.string()).nullable().optional(), healthy: z.boolean().optional(), last30Days: z.any().optional(), mergeFields: z.array(z.string()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async () => { const d = await apiGet('/api/shopify/cart-recovery'); return ok(d.note, d); }));
+  server.registerTool('shopify_cart_recovery_report', {
+    title: 'Abandoned-checkout recovery report',
+    description: "How abandoned-checkout recovery is doing: checkouts, abandoned, recoveries sent, recovered (an order after the recovery went out), recovery rate and recovered revenue over `days` (default 30, up to 90), then each checkout: status (waiting = inside the idle delay, sent, recovered, completed = bought before a recovery was needed, no_contact, skipped, failed), cart, contact, what was sent and the order. status filters the rows; limit up to 100. Read-only, free.",
+    inputSchema: {
+      days: z.number().optional().describe('1-90, default 30'),
+      status: z.enum(['waiting', 'sent', 'recovered', 'completed', 'no_contact', 'skipped', 'failed']).optional(),
+      limit: z.number().optional().describe('rows, default 25, up to 100'),
+    },
+    outputSchema: { days: z.number().optional(), checkouts: z.number().optional(), abandoned: z.number().optional(), recoveriesSent: z.number().optional(), recovered: z.number().optional(), recoveryRate: z.number().nullable().optional(), recoveredRevenue: z.any().optional(), counts: z.any().optional(), rows: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet('/api/shopify/cart-recovery/report', a); return ok([d.note, ...(d.rows || []).map((r) => `• ${r.status} · ${r.total} ${r.currency || ''} · ${r.items || 'no items'}${r.email ? ` · ${r.email}` : ''}${r.phone ? ` · ${r.phone}` : ''}${r.order ? ` · order ${r.order.name || r.order.id}` : ''}${r.outcome?.why ? ` · ${r.outcome.why}` : ''} (${r.checkout})`)].join('\n'), d); }));
 
   server.group('ads'); // back to Merchant Center — the product feed Shopping ads and retail PMax serve
   server.registerTool('merchant_report', {
@@ -15297,6 +15343,73 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/conversion-actions', a);
     return ok(d.note || `${d.count || 0} conversion action(s).`, d);
+  }));
+  // ── GOOGLE DATA MANAGER (2026-11-20): Customer Match lists + members, conversion uploads, upload status ─────────
+  server.registerTool('google_ads_customer_lists', {
+    title: 'Google Ads Customer Match lists',
+    description: "Google Ads CUSTOMER MATCH lists on the brand's own Google Ads account, through Google's Data Manager API. action list (every audience list with its Customer Match match rate and sizes), get (one list: status, match rate, search/display/YouTube/Gmail sizes), create (an EMPTY contact-information list: name, description, membershipDays; validateOnly checks it without creating), delete (confirm:true; cannot be undone). Fill a list with upload_google_ads_customer_list, then target or exclude it with set_google_ads_audiences. Sizes take 6 to 48 hours and a list needs 100+ matched people to serve. Free.",
+    inputSchema: {
+      customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
+      action: z.enum(['list', 'get', 'create', 'delete']).optional().describe('list (default), get, create or delete'),
+      listId: z.string().optional().describe('get / delete: the list id from action list'),
+      name: z.string().optional().describe('create: unique on the account'),
+      description: z.string().optional(),
+      membershipDays: z.number().optional().describe('create: whole days a person stays on the list; omit for Google’s maximum'),
+      validateOnly: z.boolean().optional().describe('create: check it without creating'),
+      confirm: z.boolean().optional().describe('delete: required true, after the user agreed'),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), customerId: z.string().optional(), count: z.number().optional(), listId: z.string().optional(), deleted: z.boolean().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/customer-lists', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('upload_google_ads_customer_list', {
+    title: 'Upload customers into a Google Ads Customer Match list',
+    description: "Add people to (action add, the default) or remove them from (action remove) a Google Ads Customer Match list, so campaigns can target or exclude them. Pass PLAIN emails, E.164 phones (+15551234567) or members [{email, phone, firstName, lastName, countryCode, postalCode}] (an address needs all four of the last); Hermoso normalizes them to Google's published rules (lowercase and trim; gmail.com dots and +tags removed) and SHA-256 hashes them, so only digests leave Hermoso. Already-hashed 64-hex values pass through. Up to 10,000 people per call. ADD NEEDS acceptTerms:true: show the user Google's Customer Match policy (https://support.google.com/adspolicy/answer/6299717) and get their agreement first. validateOnly:true checks the upload without changing the list. Returns a requestId for google_ads_upload_status. Free.",
+    inputSchema: {
+      customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
+      listId: z.string().describe('the Customer Match list (google_ads_customer_lists)'),
+      action: z.enum(['add', 'remove']).optional().describe('add (default) or remove these people'),
+      emails: z.array(z.string()).optional().describe('PLAIN emails, normalized and SHA-256 hashed inside Hermoso'),
+      phones: z.array(z.string()).optional().describe('E.164 phones (+15551234567), hashed inside Hermoso'),
+      members: z.array(z.object({ email: z.string().optional(), phone: z.string().optional(), firstName: z.string().optional(), lastName: z.string().optional(), countryCode: z.string().optional(), postalCode: z.string().optional() })).optional().describe('people with several identifiers; an address needs firstName, lastName, countryCode and postalCode together'),
+      acceptTerms: z.boolean().optional().describe('REQUIRED true to add: the user agreed to Google’s Customer Match policy'),
+      validateOnly: z.boolean().optional().describe('check the upload without changing the list'),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), listId: z.string().optional(), action: z.string().optional(), requestId: z.string().nullable().optional(), supplied: z.number().optional(), sent: z.number().optional(), rejected: z.number().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/customer-lists/members', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('send_google_ads_conversions', {
+    title: 'Upload offline conversions to Google Ads',
+    description: "Upload offline or enhanced conversions (sales, qualified leads) into the brand's Google Ads account through Google's Data Manager API, which replaced the Google Ads API upload for new integrations. conversionActionId must be an UPLOAD_CLICKS conversion action (\"Website (Import from clicks)\"; list_google_ads_conversion_actions, or create_google_ads_conversion_action type UPLOAD_CLICKS). Each event needs a time (eventTime: unix seconds or ISO) and something Google can match: a gclid / gbraid / wbraid, or the customer's email or E.164 phone (hashed in Hermoso before sending); optional eventId (Google's transactionId: a repeat counts as an adjustment, not a second sale), value + currency, actionSource. Up to 2,000 per call. validateOnly:true checks without recording. Free.",
+    inputSchema: {
+      customerId: z.string().optional().describe('10-digit account id (dashes ok) — omit to use the brand’s selected default account'),
+      conversionActionId: z.string().describe('an UPLOAD_CLICKS conversion action id'),
+      events: z.array(z.object({ eventTime: z.union([z.string(), z.number()]).describe('unix seconds or ISO'), gclid: z.string().optional(), gbraid: z.string().optional(), wbraid: z.string().optional(), email: z.string().optional(), phone: z.string().optional(), eventId: z.string().optional().describe('order / lead id; Google’s transactionId'), value: z.number().optional(), currency: z.string().optional(), actionSource: z.string().optional().describe('web, app, offline, phone_call …') }).passthrough()).describe('1 to 2000 conversions'),
+      validateOnly: z.boolean().optional().describe('check without recording'),
+      loginCustomerId: z.string().optional().describe('manager id if operating through an MCC'),
+    },
+    outputSchema: { ok: z.boolean().optional(), conversionActionId: z.string().optional(), sent: z.number().optional(), requestId: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/conversions/upload', a);
+    return ok(d.note, d);
+  }));
+  server.registerTool('google_ads_upload_status', {
+    title: 'Check a Google Ads upload',
+    description: "What Google did with a Customer Match or conversion upload: pass the requestId that upload_google_ads_customer_list or send_google_ads_conversions returned. Reports PROCESSING / SUCCESS / PARTIAL_SUCCESS / FAILED per destination, records processed, the match-rate range and any per-record error reasons. Free.",
+    inputSchema: { requestId: z.string().describe('from upload_google_ads_customer_list or send_google_ads_conversions') },
+    outputSchema: { ok: z.boolean().optional(), requestId: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/google-ads/upload-status', a);
+    return ok(d.note, d);
   }));
   server.registerTool('add_google_ads_assets', {
     title: 'Add sitelinks, callouts, call, promotion, price, lead-form and brand assets to Google Ads',
