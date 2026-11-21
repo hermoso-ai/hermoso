@@ -61,6 +61,18 @@ export const VOICE_TOOL_ALSO = Object.freeze(['retell', 'elevenlabs', 'telnyx'])
 // 'outlook_calendar'; toolHeldBackByConnectors offers it to a brand with either connected (CALENDAR_TOOL_ALSO).
 export const CALENDAR_TOOL_RE = /calendar_event|^list_calendars$|^calendar_free_busy$|^find_meeting_slots$/;
 export const CALENDAR_TOOL_ALSO = Object.freeze(['google_calendar']);
+// THE CONVERSIONS HUB AND PROFIT PER CAMPAIGN (2026-11-21). They send to, or read spend from, WHICHEVER ad platforms the
+// brand connected, so no single provider owns them; with none connected every call is a refusal. Like the calendar set,
+// each is filed under ONE provider ('meta') and offered to a brand with ANY of the others connected (the ALSO lists), so
+// a brand with nothing connected is not offered them and find_tools still finds them, marked as waiting on a connection.
+// The hub list is lib/conversions-hub.mjs HUB_PLATFORMS' providers; the profit list is lib/campaign-analyst.mjs
+// ANALYST_PLATFORMS' (where campaign_profit reads spend). The npm package cannot import lib/, so
+// tools/mcp-roster-connector-scope-check.mjs fails when either differs from its source. analyze_campaigns stays
+// ungated on purpose: it says by name which platforms to connect.
+export const CONVERSION_HUB_TOOL_RE = /^(send_conversion_event|conversion_events|conversion_destinations|conversion_insights)$/;
+export const CONVERSION_HUB_ALSO = Object.freeze(['tiktok_ads', 'linkedin', 'snapchat_ads', 'reddit_ads', 'pinterest_ads', 'x_ads', 'microsoft_ads', 'openai_ads', 'applovin_ads', 'google_ads', 'amazon_ads']);
+export const CAMPAIGN_PROFIT_TOOL_RE = /^(campaign_profit|set_profit_settings|upload_campaign_results)$/;
+export const CAMPAIGN_PROFIT_ALSO = Object.freeze(['google_ads', 'openai_ads', 'tiktok_ads', 'linkedin', 'microsoft_ads', 'pinterest_ads', 'reddit_ads', 'snapchat_ads', 'x_ads', 'apple_ads']);
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
@@ -77,6 +89,9 @@ export const NEVER_GATE = new Set([
 // would be gated on the posting connector and a user with TikTok Ads connected but not TikTok posting would lose
 // the whole ads family they are paying for.
 export const TOOL_PROVIDER_RULES = [
+  // any ad platform that takes conversions / reports spend (CONVERSION_HUB_ALSO, CAMPAIGN_PROFIT_ALSO): first, exact names
+  [CONVERSION_HUB_TOOL_RE, 'meta'],
+  [CAMPAIGN_PROFIT_TOOL_RE, 'meta'],
   // ── ads platforms that are their OWN connection (must precede the posting rules below) ──
   [/_tiktok_ads_|^tiktok_ads_|_tiktok_smart_|^tiktok_bid_protection$/, 'tiktok_ads'], // Smart+ is the ads connection too (2026-09-17)
   [/_x_ads_|^x_ads_/, 'x_ads'],
@@ -265,7 +280,11 @@ export const metaAlternativeNote = (name) => INSTAGRAM_LOGIN_TOOLS.has(String(na
     ? ' A WhatsApp Business Account the business already manages is ticked on the "meta" connection\'s assets step; the "whatsapp" connection sets up a number the business does not have yet. Either one is enough for this tool.'
     : TIKTOK_ACCOUNT_GRANT_TOOLS.has(String(name || ''))
       ? ' A creator with no TikTok ad account can use the "tiktok" connection instead; either one, plus authorizing the TikTok account on its card, is enough for this tool.'
-      : '';
+      : CONVERSION_HUB_TOOL_RE.test(String(name || ''))
+        ? ` It is not Meta-only: any ONE ad platform that takes conversions is enough ("meta" or ${CONVERSION_HUB_ALSO.map((x) => `"${x}"`).join(', ')}).`
+        : CAMPAIGN_PROFIT_TOOL_RE.test(String(name || ''))
+          ? ` It is not Meta-only: any ONE ad platform whose spend it reads is enough ("meta" or ${CAMPAIGN_PROFIT_ALSO.map((x) => `"${x}"`).join(', ')}).`
+          : '';
 // ── A TOOL THE SERVER WITHHOLDS FROM EVERY ROSTER (2026-09-27, owner: "why do we even allow access to creator
 // marketplace if we can't even access it ourselves?"). `withheld` rides the same /api/connectors/providers read as the
 // connected set: the server names the tools whose capability it does not offer right now (today: the Instagram
@@ -359,5 +378,7 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'outlook_calendar' && CALENDAR_TOOL_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'meta' && CONVERSION_HUB_TOOL_RE.test(name) && CONVERSION_HUB_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'meta' && CAMPAIGN_PROFIT_TOOL_RE.test(name) && CAMPAIGN_PROFIT_ALSO.some((x) => on.has(x))) return false;
   return !on.has(p);
 }

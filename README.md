@@ -15,7 +15,7 @@ campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a 
 - **Google Ads MCP.** Search and Performance Max campaigns, ad groups, keywords and keyword ideas, assets,
   conversion actions, budgets and reports.
 - **TikTok Ads MCP**, and the same campaign tools for LinkedIn Ads, Reddit Ads, Pinterest Ads, Snapchat Ads,
-  Microsoft Advertising, X Ads, Apple Ads and ChatGPT Ads.
+  Microsoft Advertising, X Ads, Apple Ads, ChatGPT Ads and Amazon Ads.
 - **AI ad generator API.** Image, video and UGC avatar ads with your real product, copy and CTA, from `render_ad`,
   `generate_image` and `generate_video`, the CLI, or the REST API at `/v1`
   ([OpenAPI](https://app.hermoso.ai/openapi.json)).
@@ -135,7 +135,7 @@ second charge. The one exception is X (Twitter), where posting and reads bill cr
 charges per API request (`hermoso_credits` prints the exact credits per X post).
 
 **What it connects to.** Ad platforms: Meta, Google Ads, TikTok Ads, LinkedIn Ads, Reddit Ads, X Ads,
-Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads and AppLovin Ads, plus
+Pinterest Ads, Snapchat Ads, Microsoft Advertising, Apple Search Ads, ChatGPT Ads, AppLovin Ads and Amazon Ads, plus
 product feeds in Google Merchant Center. Publishing and scheduling — **eighteen** channels: Facebook, Instagram,
 Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky, Telegram, WordPress, the Shopify blog, Webflow, Wix, Discord, Slack, Whop and Google Business Profile. Messaging: WhatsApp (you message a
 person, so it is not a nineteenth publishing channel) and DM automations on Instagram, Facebook Pages and
@@ -459,7 +459,7 @@ edit or redo) or post automatically (straight onto the schedule, still pullable)
 writes from what has worked on each channel. Credits are used only when a post is made.
 
 **Run the ads** — full campaign trees, built paused and read back before anything is reported, with every spend
-change confirm-gated, on **twelve** platforms: **Meta**, **Google Ads**, **LinkedIn Ads**, **Reddit Ads**,
+change confirm-gated, on **thirteen** platforms: **Meta**, **Google Ads**, **Amazon Ads** (Sponsored Products and Sponsored Brands), **LinkedIn Ads**, **Reddit Ads**,
 **Pinterest Ads**, **Microsoft Advertising**, **ChatGPT Ads** (OpenAI's Advertiser API), **X Ads**, **TikTok Ads**,
 **Snapchat Ads**, **Apple Ads** (Apple Search Ads on the App Store) and **AppLovin Ads** (reporting and the website
 pixel on the keys every account has; campaign building once AppLovin enables Campaign Management API access on the
