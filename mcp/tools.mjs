@@ -580,6 +580,15 @@ export const chatgptBothWaysLine = (name) => {
   const d = CHATGPT_WEB_DOORS[name];
   return d ? `Two ways, both fine: add Hermoso's full connection in ChatGPT itself (${CHATGPT_ADD_FULL_STEPS}, where the ChatGPT plan or workspace allows custom MCP servers), or, since it is a ${d.kind === 'payment' ? 'payment' : 'one-time setup'}, do it once on the Hermoso website: ${d.where}, ${d.url}` + '.' : '';
 };
+// A SHOPIFY-BILLED ACCOUNT IS SOLD NOTHING HERE (owner, 2026-11-21: "We just dont want to allow them to buy credits, which is why
+// we just offer basic plan … they need to go to us directly"). The server says so on /api/billing/status (shopifyOrigin.line: for
+// an agent, sign up with Hermoso directly on a separate account) and refuses every purchase route; this reads that line so the
+// buying tools, the balance reply and ChatGPT's held payment tools hand it on instead of a pack list, a plan list or a web
+// billing page. null on any other account, or when the read fails (the server's own 403 still stands behind every route).
+export const SHOPIFY_NO_SALE_TOOLS = Object.freeze(['buy_credits', 'upgrade_plan', 'set_auto_reload']);
+export async function shopifyOriginLine() {
+  try { const st = await apiGet('/api/billing/status'); return st && st.shopifyOrigin && st.shopifyOrigin.line ? String(st.shopifyOrigin.line) : null; } catch { return null; }
+}
 // The one sentence every ChatGPT surface carries about payments and setup, with the four addresses (short: the all-in-one
 // app's instructions must fit 2,048 bytes with the longest first-run line on top, mcp-first-run-guidance-check).
 export const CHATGPT_WEB_DOORS_LINE = `Payments and setup also work on ${CHATGPT_WEB}: /?tab=billing (credits, plan), /?tab=settings (limit), /?tab=connectors (keys), /?tab=creators (payouts).`;
@@ -1123,7 +1132,11 @@ const wrap = (fn) => {
     // with its price and a checkout link, in place of the paragraph on how buy_credits works. Never on a widget host.
     const _buy = buyDoorsOf(e, _widget);
     if (_buy) { try { apiPost('/api/analytics/funnel', { step: 'buy_doors', meta: { surface: 'agent_refusal' } }).catch(() => {}); } catch {} } // the doors were shown to an agent: counted once per account per 10 minutes, never awaited
-    if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice, { widgetHost: _widget, buy: _buy }); _hints.push(...videoChoiceHints(_tool, e.videoChoice, { widgetHost: _widget, buy: _buy })); }
+    // A SHOPIFY-BILLED ACCOUNT'S WALL (2026-11-21, owner: "offering credits is too risky so they need to go to us directly"): the
+    // server's sentence already says to sign up with Hermoso directly, so it passes through as written on every host, and
+    // neither buy_credits, upgrade_plan nor a checkout is named. Read from the STRUCTURED field (meta.shopifyOrigin).
+    if (e?.shopifyOrigin === true) _hints.push({ do: 'tell the user in the words of this message; do not call buy_credits or upgrade_plan', why: 'this account belongs to the Hermoso Shopify app, so nothing that adds credits is sold to it here; more credits mean a separate account made directly with Hermoso' });
+    else if (e?.videoChoice && typeof e.videoChoice === 'object') { msg = 'Error: ' + videoChoiceText(_tool, e.videoChoice, { widgetHost: _widget, buy: _buy }); _hints.push(...videoChoiceHints(_tool, e.videoChoice, { widgetHost: _widget, buy: _buy })); }
     // FREE CREDITS WAITING (2026-10-25): the server's sentence already names the one fix (open the app once, signed in) and
     // drops its top-up advice, so it passes through as written on every host, and neither buy_credits nor the pricing page is named.
     else if (e?.welcomeClaim && e.welcomeClaim.url) _hints.push(welcomeClaimHint(e.welcomeClaim));
@@ -3499,6 +3512,7 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   backtest_google_ads_rule: AGENCY_WIDGET_WHY,
   send_conversion_event: CONV_WIDGET_WHY, conversion_destinations: CONV_WIDGET_WHY, conversion_events: CONV_WIDGET_WHY, conversion_insights: CONV_WIDGET_WHY,
   upload_campaign_results: CONV_WIDGET_WHY, set_profit_settings: CONV_WIDGET_WHY, campaign_profit: CONV_WIDGET_WHY,
+  hermoso_tag: CONV_WIDGET_WHY, install_hermoso_tag: CONV_WIDGET_WHY, hermoso_tag_report: CONV_WIDGET_WHY, hermoso_tag_events: CONV_WIDGET_WHY, hermoso_tag_audiences: CONV_WIDGET_WHY, // THE HERMOSO TAG (2026-11-21): same cap, same family
   // LINKEDIN BOOST API 202611 (2026-11-20): four tools in the linkedin family, which is listed on ChatGPT; one more listed tool
   // pushes the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses.
   // Held for the next ChatGPT ranking; the Ads focused app lists them, and boost_linkedin_post previews and creates there.
@@ -5314,6 +5328,7 @@ export function installHeldToolCalls(mcp, ctx) {
       if (!h && LEGACY_TOOL_NAMES[name]) return legacyToolAnswer(name, request, extra, ctx); // a name only an old snapshot still holds
       if (h && h.enabled === false) {
         const why = await holdReasonRechecked(name, ctx, request?.params?.arguments);
+        if (why === 'host_policy' && SHOPIFY_NO_SALE_TOOLS.includes(name)) { const _sl = await shopifyOriginLine(); if (_sl) return { content: [{ type: 'text', text: _sl }], isError: true }; } // a Shopify-billed account: never "buy it on the website" (2026-11-21)
         if (why) { const t = holdReasonText(name, why, ctx); if (why !== 'unavailable') reportDeadEnd(why, name, t); return withHints({ content: [{ type: 'text', text: t }], isError: true }, holdHints(name, why, ctx)); }
         // The call itself is the evidence: this host's tool list still names a tool the session holds out on size,
         // i.e. the host is serving a stale roster. Run it (that is the point) and record that it happened.
@@ -6560,6 +6575,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const why = await holdReasonRechecked(n, ctx, args);
     // ONE sentence per hold, from holdReasonText. call_tool used to spell its own copies, so the connect link added there
     // never reached claude.ai or ChatGPT, the two hosts that run held tools through here.
+    if (why === 'host_policy' && SHOPIFY_NO_SALE_TOOLS.includes(n)) { const _sl = await shopifyOriginLine(); if (_sl) return { content: [{ type: 'text', text: _sl }], isError: true }; } // a Shopify-billed account: never "buy it on the website" (2026-11-21)
     if (why) {
       const t = holdReasonText(n, why, ctx);
       if (why !== 'unavailable') reportDeadEnd(why, n, t); // a capability we withhold on purpose is not a dead end to chase
@@ -8062,7 +8078,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // THE CHARGES THEMSELVES (2026-09-12): the same ledger list as Billing ▸ Usage, so "where did my credits go" has an
     // answer here too. Best effort: a reply about the balance never fails on the history read.
     let recent = ''; try { const u = await apiGet('/api/billing/usage', { limit: 10 }); if (u?.items?.length) recent = `\nRecent charges (newest first):\n${u.items.map((r) => `• ${String(r.at).slice(0, 16).replace('T', ' ')} UTC · ${r.label} · ${r.credits} credits`).join('\n')}`; } catch {}
-    const _mr = d.memberRate === true ? ' This account\'s plan has no markup on models.' : d.planUpsell === true && !hostHidesCommerce() ? ' Starter, Pro and Studio have no markup on models, so credits go twice as far (upgrade_plan); Basic, Free and top-up credits use standard prices.' : '';
+    // A SHOPIFY-BILLED ACCOUNT HEARS NO PLAN PITCH AND NO WAY TO BUY (2026-11-21): read only when a pitch or the ChatGPT ways
+    // would be printed, so every other balance reply costs no extra request.
+    const _shopLine = (d.planUpsell === true || hostHidesCommerce()) ? await shopifyOriginLine() : null;
+    const _mr = d.memberRate === true ? ' This account\'s plan has no markup on models.' : d.planUpsell === true && !hostHidesCommerce() && !_shopLine ? ' Starter, Pro and Studio have no markup on models, so credits go twice as far (upgrade_plan); Basic, Free and top-up credits use standard prices.' : '';
     const _po = d.posting?.line ? ` Posting: ${d.posting.line}` : '';
     // THIS BRAND'S MONTHLY CREDIT LIMIT, when the owner set one (2026-11-18): the balance alone would say "plenty" to a brand that is capped.
     let _cl = ''; try { const L = await apiGet('/api/credit-limits', { current: '1' }); const b = (L?.brands || [])[0]; const me = (b?.members || []).find((m) => m.limit != null && (L.owner === false)); if (b && b.limit != null) _cl = ` This brand's monthly credit limit: ${b.used} of ${b.limit} used, ${b.remaining} left until ${String(L.resetAt || '').slice(0, 10)} (UTC; get_credit_limits shows every limit${L.canEdit ? ', set_credit_limit changes one' : ''}).`; if (me) _cl += ` Your own limit on it: ${me.used} of ${me.limit} used.`; } catch {}
@@ -8070,7 +8089,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // WHERE TO ADD CREDITS, SAID BY THE RESULT ON A PUBLISHED CHATGPT APP (2026-11-20, live): asked to buy credits with only
     // the published app installed, ChatGPT found no purchase direction but this tool's upgradeUrl. OpenAI serves that app its
     // reviewed snapshot of tools and instructions, but a result is our live text, so the two ways (CHATGPT_WEB_DOORS) ride it.
-    const _ways = hostHidesCommerce() ? ` To add credits, change the plan or turn on auto-reload: ${chatgptBothWaysLine('buy_credits').replace(/, since it is a payment,/, '')}` : '';
+    const _ways = _shopLine ? ` ${_shopLine}` : hostHidesCommerce() ? ` To add credits, change the plan or turn on auto-reload: ${chatgptBothWaysLine('buy_credits').replace(/, since it is a payment,/, '')}` : '';
     return ok(`Balance: ${bal} credits${d.sessionUsed != null ? ` · session used: ${d.sessionUsed}` : ''}.${_mr}${_po}${_cl}${_wc}${_ways} ${d.costModel || 'Credits are spent ONLY on AI models and Ad Spy research; posting, scheduling, campaign management, analytics and connectors are free (X is the one per-call exception).'}${d.xCost?.sentence ? ` ${d.xCost.sentence}` : ''} ${d.costEstimate || PRICE_ESTIMATE_LINE}${recent}`, d);
   }));
 
@@ -8099,8 +8118,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async ({ pack, confirm, quote_token }) => {
     // AN ACCOUNT THAT CAME FROM THE SHOPIFY APP buys nothing here (owner, 2026-11-08): the server answers with the one
     // sentence that says how to get credits (a separate hermoso.ai account), and this tool hands it on instead of a pack list.
-    let _shopOrigin = null; try { _shopOrigin = (await apiGet('/api/billing/status'))?.shopifyOrigin || null; } catch {}
-    if (_shopOrigin && _shopOrigin.line) return ok(String(_shopOrigin.line));
+    { const _shopLine = await shopifyOriginLine(); if (_shopLine) return ok(_shopLine); }
     const cfg = await apiGet('/api/billing/config');
     // NOTHING IS ADDED AT CHECKOUT (2026-10-27): a pack's price is what the card is charged, and /api/billing/config hands
     // each pack with the credits THIS account is granted (server-decided; see docs/fee-at-checkout-2026-10-27.md). The quote
@@ -8269,6 +8287,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, // not read-only: with `plan` set it mints a Stripe Checkout Session. It still charges nothing — the human pays.
   }, wrap(async ({ plan, period, confirm, quote_token }) => {
+    { const _shopLine = await shopifyOriginLine(); if (_shopLine) return ok(_shopLine); } // a Shopify-billed account is sold no plan here, not even a list of them (2026-11-21)
     const cfg = await apiGet('/api/billing/config');
     const plans = (cfg.plans || []).filter(p => p.priceUsd > 0 && !p.legacy && !p.cohort).map(p => ({ id: p.id, name: p.name, priceUsd: p.priceUsd, credits: p.credits, noMarkup: !!p.noMarkup, makes: p.makes || null }));
     if (!plan) {
@@ -8307,6 +8326,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async ({ enabled, thresholdCredits, reloadCredits }) => {
+    if (enabled !== false) { const _shopLine = await shopifyOriginLine(); if (_shopLine) return ok(_shopLine); } // auto-reload charges a card for credits: never on a Shopify-billed account (2026-11-21)
     const d = await apiPost('/api/billing/autoreload-config', { enabled, thresholdCredits, reloadCredits });
     if (d.needsCard) return ok(d.guidance || 'Add a card on file first (in the app), then auto-reload can use it.', d);
     if (d.applied) return ok(`Auto-reload ${d.enabled ? `ON — reloads${d.reloadCredits != null ? ' +' + d.reloadCredits.toLocaleString() + ' credits' : ''}${Number(d.reloadUsd) > 0 ? ` ($${d.reloadUsd} each time)` : ''} when the balance drops below ${d.thresholdCredits} credits` : 'OFF'}.`, d);
@@ -8891,13 +8911,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.registerTool('list_threads_posts', {
     title: 'List your Threads posts',
     description: 'List recent posts on the brand’s connected Threads account (id, text, media, permalink, timestamp). Use it to find a post id for threads_insights, list_threads_replies, reply_to_thread or delete_thread.',
-    inputSchema: { ...MANAGE_BRAND, limit: z.number().optional().describe('how many posts (1–50, default 15)') },
-    outputSchema: { username: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional() },
+    inputSchema: { ...MANAGE_BRAND, limit: z.number().optional().describe('how many posts (1–50, default 15)'), cursor: z.string().optional().describe('the cursor a previous call returned, for the next page') },
+    outputSchema: { username: z.string().optional(), count: z.number().optional(), posts: z.array(z.any()).optional(), cursor: z.string().nullable().optional(), sizeNote: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
-    const d = await apiGet('/api/threads/posts', queryBrand(a, { limit: a.limit }));
+    const d = await apiGet('/api/threads/posts', queryBrand(a, { limit: a.limit, cursor: a.cursor }));
     const lines = (d.posts || []).map(p => `• ${String(p.text || '(no text)').replace(/\s+/g, ' ').slice(0, 80)} — ${p.id} · ${String(p.timestamp || '').slice(0, 10)} · ${p.permalink || ''}`);
-    return ok(`@${d.username} — ${d.count} post(s):\n${lines.join('\n') || '(none)'}`, d);
+    return ok(`@${d.username} — ${d.count} post(s):\n${lines.join('\n') || '(none)'}${d.sizeNote ? `\n(${d.sizeNote})` : ''}${d.cursor ? `\nMore: pass cursor "${d.cursor}".` : ''}`, d);
   }));
 
   server.registerTool('threads_insights', {
@@ -14004,6 +14024,94 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), rows: z.array(z.any()).optional(), totals: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), text: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/ads/campaign-profit', a); return ok(d.text || d.note, d); }));
+  // ---------- THE HERMOSO TAG (2026-11-21, server.js htagGet / htagInstall / htagReport / htagEvents) ----------
+  // One first-party snippet per brand: page views, the visit's UTMs and ad click ids, the referrer and conversions,
+  // forwarded server-side through the conversions hub above. Free: our own collector and the brand's own accounts.
+  server.registerTool('hermoso_tag', {
+    title: 'The brand’s Hermoso tag (website tracking snippet)',
+    description: 'The brand’s HERMOSO TAG: ONE first-party snippet per brand for its website. It records page views, each visit’s UTM parameters and ad click ids (gclid, fbclid, ttclid, msclkid, li_fat_id, ScCid, rdt_cid, epik …), the referrer, and conversions the site reports (hermoso(\'track\', \'Lead\' | \'Purchase\' | your own event, {value, currency, orderId, email …})), ties a visitor to a person when the site calls hermoso(\'identify\', {email, phone}) (hashed before storage), and FORWARDS conversions server-side to every conversions destination the brand saved (conversion_destinations), each with one dedup eventId (a Purchase uses its orderId, so a browser pixel firing the same id is deduplicated). action get (default) returns the snippet, the install status (last event seen, from which hosts) and the settings; it MAKES the brand’s tag on first call. action update changes settings: consentDefault, waitForConsent, honorGpc, honorDnt, forward, forwardEvents, allowedDomains, spa, testMode ("validate" or a TikTok / Reddit test code sends conversions as a dry run; "off" ends it) and conversions (define the brand’s own events as conversions, each sent to the platforms as a standard event, e.g. {"quote_requested": {"as": "Lead"}}). action verify reads the site (url, default the brand’s website) for the snippet and reports the last event seen. autoTrack {forms, outbound, downloads, scroll} turns on automatic events (form submits as leads, outbound / phone / email clicks, file downloads, scroll depth); linkDomains lists the brand’s other sites so a visit carries on across them. action server_key makes a server key (shown once) for POST /htag/s, so a backend sends purchases with the same dedup ids; action stripe with signingSecret (whsec_…) turns a Stripe webhook into Purchases through the tag. The tag also runs from the brand’s own domain behind a proxy (forward /htag.js and /htag/e, pass X-Hermoso-Client-IP) so ad blockers do not drop it. CONSENT: the tag follows the consent the site gives it (hermoso(\'consent\', …) or Google Consent Mode v2) and the brand’s defaults; THE WEBSITE OWNER IS RESPONSIBLE for the site’s consent banner and privacy notice. To put it on the site use install_hermoso_tag. Free.',
+    inputSchema: {
+      action: z.enum(['get', 'update', 'verify', 'server_key', 'stripe']).optional().describe('default get; server_key makes a new server key (the old one stops working); stripe saves (signingSecret) or removes the Stripe webhook'),
+      autoTrack: z.union([z.boolean(), z.object({ forms: z.boolean().optional(), outbound: z.boolean().optional(), downloads: z.boolean().optional(), scroll: z.boolean().optional() })]).optional().describe('update: automatic events, each off by default; true turns all on'),
+      linkDomains: z.array(z.string()).optional().describe('update: the brand’s other sites; links to them carry the visit across (cross-domain)'),
+      signingSecret: z.string().optional().describe('stripe: the endpoint’s signing secret (whsec_…); omit to remove the webhook'),
+      consentDefault: z.enum(['granted', 'denied']).optional().describe('update: what applies before the site’s banner says anything'),
+      waitForConsent: z.boolean().optional().describe('update: true sends nothing until the site grants analytics_storage'),
+      honorGpc: z.boolean().optional().describe('update: a browser’s Global Privacy Control signal refuses ad use (default true)'),
+      honorDnt: z.boolean().optional().describe('update: a browser’s Do Not Track signal stops the tag (default false)'),
+      forward: z.boolean().optional().describe('update: false records conversions but sends them to no ad platform'),
+      forwardEvents: z.array(z.string()).nullable().optional().describe('update: the events sent to ad platforms; null = every conversion plus the checkout steps'),
+      allowedDomains: z.array(z.string()).optional().describe('update: only pages on these hosts (and subdomains) count; empty = any'),
+      spa: z.boolean().optional().describe('update: count a page view on each in-page navigation (default true)'),
+      testMode: z.string().optional().describe('update: "validate", a TikTok / Reddit test code, or "off"'),
+      conversions: z.record(z.union([z.object({ as: z.string().describe('Purchase, Lead, CompleteRegistration … or "custom" to send under its own name'), value: z.number().optional().describe('default value when the site sends none'), currency: z.string().optional().describe('ISO code, needed with value') }).passthrough(), z.null()])).optional().describe('update: the brand’s own events that count as conversions; null for one removes it'),
+      replaceConversions: z.boolean().optional().describe('update: true replaces the whole list instead of merging'),
+      url: z.string().optional().describe('verify: the page to read; default the brand’s website'),
+      render: z.boolean().optional().describe('verify: false skips the browser render'),
+    },
+    outputSchema: { ok: z.boolean().optional(), created: z.boolean().optional(), tag: z.any().optional(), page: z.any().optional(), serverKey: z.string().optional(), endpoint: z.string().optional(), webhookUrl: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const act = a.action || 'get'; const d = act === 'get' ? await apiGet('/api/hermoso-tag', a) : await apiPost('/api/hermoso-tag', a); return ok(d.note, d); }));
+  server.registerTool('install_hermoso_tag', {
+    title: 'Put the Hermoso tag on the website',
+    description: 'Put the brand’s HERMOSO TAG (hermoso_tag) on its website through the site connection it has: google_tag_manager (a Custom HTML tag on every page, staged, live with publish:true through the Tag Manager publish confirmation), wordpress (a block in the theme footer, or a custom HTML widget, read back; a site that strips scripts for the connected user is undone and answered with paste steps), shopify (Hermoso’s app pixel in Shopify customer events, which also records checkout purchases) or manual (the snippet and where to paste it in Webflow, Wix, Squarespace, Framer …). site omitted = the best one connected. WITHOUT confirm:true NOTHING IS WRITTEN: the reply says what would change; show the user, get a yes, call again with confirm:true. remove:true uninstalls what Hermoso added. This is NOT install_tracking_tag, which installs ad platforms’ own pixels (Meta Pixel, TikTok Pixel …). Free.',
+    inputSchema: {
+      site: z.enum(['google_tag_manager', 'wordpress', 'shopify', 'manual']).optional().describe('default the best connected site'),
+      confirm: z.boolean().optional().describe('true writes; without it nothing changes'),
+      publish: z.boolean().optional().describe('google_tag_manager: publish the container so it reaches visitors'),
+      containerPath: z.string().optional().describe('google_tag_manager: the container, when several are ticked'),
+      gtmWorkspace: z.string().optional().describe('google_tag_manager: the workspace'),
+      confirmPublicId: z.string().optional().describe('google_tag_manager: the container public id (GTM-…), when it is already live'),
+      remove: z.boolean().optional().describe('true uninstalls what Hermoso added'),
+    },
+    outputSchema: { ok: z.boolean().optional(), tagId: z.string().optional(), site: z.string().optional(), installed: z.boolean().optional(), removed: z.boolean().optional(), needsConfirm: z.boolean().optional(), snippet: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/hermoso-tag/install', a); return ok(d.note, d); }));
+  server.registerTool('hermoso_tag_report', {
+    title: 'Website visits, leads and revenue by source',
+    description: 'What the Hermoso tag saw on the brand’s website: visits → leads → purchases → revenue, grouped by channel (default), source, medium, campaign, post (the Hermoso post or email a utm_content id came from), ad, or landing page. Money stays per currency; days are UTC; bots are left out and counted; test (dry-run) events are reported apart, never in the totals. from / to (YYYY-MM-DD) or days, up to 92. Free.',
+    inputSchema: {
+      groupBy: z.enum(['channel', 'source', 'medium', 'campaign', 'post', 'ad', 'page']).optional().describe('default channel'),
+      from: z.string().optional().describe('YYYY-MM-DD'), to: z.string().optional().describe('YYYY-MM-DD, default today'),
+      days: z.number().optional().describe('the last N days, up to 92; default 30'), limit: z.number().optional().describe('rows, default 50'),
+    },
+    outputSchema: { ok: z.boolean().optional(), totals: z.any().optional(), rows: z.array(z.any()).optional(), status: z.any().optional(), text: z.string().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet('/api/hermoso-tag/report', a); return ok(d.note, d); }));
+  server.registerTool('hermoso_tag_events', {
+    title: 'Recent events from the Hermoso tag',
+    description: 'The most recent events the Hermoso tag received, newest first: conversions (default), visits or all, each with its page, source / medium, value, and what each ad platform answered when it was forwarded (sent, validated, failed or skipped and why). conversion_events (source hermoso_tag) holds each stored conversion’s full delivery record. action send puts SERVER-SIDE events into the tag (a renewal, a phone order, a payment the browser never saw): events [{eventName, eventId (the same id the browser sent, so it is one sale), value, currency, user {email, phone, externalId, visitorId}, sourceUrl}], forwarded and reported like the browser’s. Free.',
+    inputSchema: {
+      action: z.enum(['list', 'send']).optional().describe('default list'),
+      events: z.array(z.record(z.any())).optional().describe('send: 1-500 events in the send_conversion_event shape'),
+      kind: z.enum(['conversions', 'visits', 'all']).optional().describe('default conversions'),
+      eventName: z.string().optional().describe('only this event'), limit: z.number().optional().describe('1-150, default 30'),
+    },
+    outputSchema: { ok: z.boolean().optional(), events: z.array(z.any()).optional(), status: z.any().optional(), accepted: z.number().optional(), refused: z.array(z.any()).optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = a.action === 'send' ? await apiPost('/api/hermoso-tag/events', a) : await apiGet('/api/hermoso-tag/events', a); return ok(d.note, d); }));
+  server.registerTool('hermoso_tag_audiences', {
+    title: 'Audiences from your website visitors',
+    description: 'AUDIENCES FROM THE BRAND’S WEBSITE VISITORS, seen by the Hermoso tag (hermoso_tag). A segment is visitors who visited page paths (visited, prefixes such as "/pricing"), did ANY of some events (events, e.g. ["AddToCart"]) and NONE of others (notEvents, e.g. ["Purchase"]) within withinDays (1-180, default 30). action list (default) shows the segments with how many visitors match, how many are identified (the site gave an email or phone through hermoso(\'identify\') or a form) and how many allowed ad use; preview counts a rule set without saving; save stores one (pass segmentId to edit it); delete removes one (confirm:true). action sync fills a customer-list audience: platform meta (adAccountId; a NEW audience unless audienceId), google_ads (audienceId = a Customer Match list from google_ads_customer_lists, and acceptTerms:true once the advertiser accepts Google’s Customer Match terms), snapchat_ads, pinterest_ads or x_ads (each with the audienceId to fill). Only IDENTIFIED people whose LATEST consent allowed ad use are sent, as SHA-256 hashes made to that platform’s own rule; uploads add people and never remove anyone. WITHOUT confirm:true sync sends nothing and says exactly what it would send: show the user, then call again with confirm:true. Microsoft, Reddit, TikTok and LinkedIn are named with the reason they are not sent. Free.',
+    inputSchema: {
+      action: z.enum(['list', 'preview', 'save', 'delete', 'sync']).optional().describe('default list'),
+      segmentId: z.string().optional().describe('save (edit), delete, sync: the segment'),
+      name: z.string().optional().describe('save / preview: the segment’s name'),
+      visited: z.array(z.string()).optional().describe('page paths (prefixes), any of'),
+      events: z.array(z.string()).optional().describe('events, any of (Lead, AddToCart, your own …)'),
+      notEvents: z.array(z.string()).optional().describe('events none of which happened (e.g. Purchase)'),
+      withinDays: z.number().optional().describe('1-180, default 30'),
+      platform: z.enum(['meta', 'google_ads', 'snapchat_ads', 'pinterest_ads', 'x_ads']).optional().describe('sync: where to send'),
+      audienceId: z.string().optional().describe('sync: the audience / customer list to fill (Meta: omit to make a new one)'),
+      audienceName: z.string().optional().describe('sync to Meta without audienceId: the new audience’s name'),
+      adAccountId: z.string().optional().describe('sync: the ad account (Meta needs it)'),
+      customerId: z.string().optional().describe('sync to Google Ads: the account, when several'),
+      acceptTerms: z.boolean().optional().describe('sync to Google Ads: the advertiser accepted Google’s Customer Match terms'),
+      confirm: z.boolean().optional().describe('sync / delete: true does it; without it nothing changes'),
+    },
+    outputSchema: { ok: z.boolean().optional(), segments: z.array(z.any()).optional(), segment: z.any().optional(), sent: z.number().optional(), needsConfirm: z.boolean().optional(), audienceId: z.string().nullable().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = !a.action || a.action === 'list' ? await apiGet('/api/hermoso-tag/audiences', a) : await apiPost('/api/hermoso-tag/audiences', a); return ok(d.note, d); }));
   // GOOGLE MERCHANT CENTER (2026-08-07) — rides the google_ads connection (same grant, extra `content` scope).
   // ALL FOUR SHIPPED CALLING `text(...)`, WHICH IS DECLARED NOWHERE IN THIS FILE (found 2026-08-10). Every call
   // therefore threw `ReferenceError: text is not defined`, `wrap()` caught it, and the tool answered "Error: text
@@ -16676,7 +16784,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const ttPlatformEnum = z.enum(['meta', 'tiktok', 'google', 'linkedin', 'reddit', 'pinterest', 'x', 'snapchat']);
   server.registerTool('install_tracking_tag', {
     title: 'Install a pixel on the website',
-    description: "PUT A PIXEL ON THE BRAND'S WEBSITE: a Meta Pixel, TikTok Pixel, Google tag, LinkedIn Insight Tag, Reddit Pixel, Pinterest Tag, X Pixel or Snap Pixel. It goes through the site connection the brand has. GOOGLE TAG MANAGER (any pixel): a Custom HTML tag with the platform's base code on every page, staged as a draft, and live only with publish:true, through the same confirmation publish_tag_manager_container asks for (a container already live needs confirmPublicId). WIX (Meta, TikTok, Google Ads AW-, Google Analytics G-): a Wix marketing tag, live at once; Wix keeps one per type, so replacing a different pixel needs replaceExisting set to the one being replaced. WEBFLOW, WORDPRESS, SHOPIFY or no site connection: those give an app no way to add code, so the reply is the base code and exactly where to paste it. THE PIXEL ID IS NEVER INVENTED: leave pixelId out and the brand's only pixel on its connected ad account is used (several are listed for you to pick); a given id is checked against that account when it is connected, and refused if it is not the brand's. The code is the platform's own: Meta and Pinterest from the connected account or their published base code, the Google tag from Google's published snippet; for TikTok, LinkedIn, Reddit, X and Snap pass snippet, the base code copied from the platform's events manager (it must contain the id). WITHOUT confirm:true NOTHING IS WRITTEN: the reply says exactly what would change; show the user, get a yes, call again with confirm:true. After a change reaches the site, Hermoso reads the live page (url, default the brand's website) and verify.found says whether the pixel is there: true, false, or null when the page could not be read (never report null as missing). A Tag Manager publish can take a few minutes to reach visitors. Free.",
+    description: "PUT A PIXEL ON THE BRAND'S WEBSITE: a Meta Pixel, TikTok Pixel, Google tag, LinkedIn Insight Tag, Reddit Pixel, Pinterest Tag, X Pixel or Snap Pixel. It goes through the site connection the brand has. GOOGLE TAG MANAGER (any pixel): a Custom HTML tag with the platform's base code on every page, staged as a draft, and live only with publish:true, through the same confirmation publish_tag_manager_container asks for (a container already live needs confirmPublicId). WIX (Meta, TikTok, Google Ads AW-, Google Analytics G-): a Wix marketing tag, live at once; Wix keeps one per type, so replacing a different pixel needs replaceExisting set to the one being replaced. WEBFLOW, WORDPRESS, SHOPIFY or no site connection: those give an app no way to add code, so the reply is the base code and exactly where to paste it. THE PIXEL ID IS NEVER INVENTED: leave pixelId out and the brand's only pixel on its connected ad account is used (several are listed for you to pick); a given id is checked against that account when it is connected, and refused if it is not the brand's. The code is the platform's own: Meta and Pinterest from the connected account or their published base code, the Google tag from Google's published snippet; for TikTok, LinkedIn, Reddit, X and Snap pass snippet, the base code copied from the platform's events manager (it must contain the id). WITHOUT confirm:true NOTHING IS WRITTEN: the reply says exactly what would change; show the user, get a yes, call again with confirm:true. After a change reaches the site, Hermoso reads the live page (url, default the brand's website) and verify.found says whether the pixel is there: true, false, or null when the page could not be read (never report null as missing). A Tag Manager publish can take a few minutes to reach visitors. For Hermoso's OWN first-party tag (visits, attribution and server-side conversions) use install_hermoso_tag instead. Free.",
     inputSchema: {
       platform: ttPlatformEnum.describe('which pixel: meta, tiktok, google, linkedin, reddit, pinterest, x or snapchat'),
       pixelId: z.string().optional().describe("the pixel's id (Meta pixel id, TikTok pixel code, G-/AW-/GT- id, LinkedIn partner id, …). Leave out to use the brand's only pixel on its connected ad account."),
@@ -34743,7 +34851,15 @@ function memoryNoteVerdict(text) {
     if (!use.length) { // no ads supplied → pull the competitor's real Meta ads (the pull_competitor_ads path), then tear THOSE down
       const pulled = await apiPost('/api/inspire/fanout', { companyName: name, domain: competitor?.domain || '', platforms: ['facebook'], country: 'US', limit: 30, sort: 'longest_running' });
       use = pulled?.facebook?.ads || [];
-      if (!use.length) throw new Error(`No Meta ads found to tear down for "${name}". Pull them another way (search_meta_ads with a keyword) and pass the results as ads.`);
+      if (!use.length) {
+        // AN EMPTY PULL IS AN AUTHORED ANSWER, AND IT SAYS WHY (2026-11-21, er:053d2faa5c3a: "One Week Bathroom" filed twice as
+        // "could not tell" — a bare Error carries no status). A vendor failure stays a failure; no confirmed page, or a page
+        // running nothing, is a 404 the ledger files as the caller's, with the fan-out's own reason in the sentence.
+        const fb = pulled?.facebook || {};
+        if (fb.error) throw new Error(`Could not pull ${name}'s Meta ads: ${fb.error}`);
+        const why = fb.note || (fb.matched?.confident ? `${fb.matched.name} is running no ads in Meta's Ad Library right now.` : `No Meta page could be confirmed as ${name}.`);
+        throw Object.assign(new Error(`No Meta ads found to tear down for "${name}". ${why} Pull them another way (search_meta_ads with a keyword) and pass the results as ads.`), { status: 404, _userInput: true });
+      }
     }
     const brand = await activeBrand().catch(() => null); // tailor white space + counter-plays to the saved brand (best-effort)
     const d = await apiPost('/api/research/teardown', { competitor: { name, domain: competitor?.domain || '' }, ads: use, brand, language: language || '' });
