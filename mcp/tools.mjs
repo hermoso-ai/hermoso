@@ -5055,6 +5055,19 @@ const TOOL_META = new Map();
 export const toolSection = (name) => TOOL_META.get(name)?.section ?? null;
 const toolReadOnly = (name) => TOOL_META.get(name)?.readOnly === true;
 let CANON_HOSTED = false;   // which surface TOOL_CANON was built for — see registerTools
+let CANON_MAILBOX_CHECK = false; // whether TOOL_CANON was built with the paid mailbox check described — see emailMailboxCheckOn
+// THE PAID MAILBOX CHECK IS DESCRIBED ONLY WHERE IT IS SWITCHED ON (2026-11-21, owner: "Why would email address verification
+// be in our service providers if we do it ourselves?"). verify_emails / verify_email run Hermoso's own free checks (syntax,
+// the domain takes mail, disposable, role, typos, duplicates). The OPTIONAL deep layer (does the exact mailbox exist, is the
+// domain catch-all) is a paid outside service behind server.js evDeepOn() (EMAIL_VERIFY_API_KEY). While it is off, no
+// description, parameter or reply mentions it or its price; when it is on, `deep` / `dryRun` and the price sentence appear
+// by themselves. ON = the server's providers read names EMAIL_MAILBOX_CHECK_FLAG in `flagsOn` (server.js flagsOnNow, which is
+// how the CLI twin learns it), or this process holds the key itself (the hosted MCP and /v1 run inside server.js).
+// Pinned by tools/email-verify-check.mjs §T (both twins, both ways) and §S (the booted server's flagsOn, both ways).
+// WHEN SWITCHING IT ON: re-add the privacy policy's service-provider line ("email-address verification", site/privacy.html
+// on marketing-site, plus the Last updated date), because addresses then go to an outside processor.
+export const EMAIL_MAILBOX_CHECK_FLAG = 'email_mailbox_check';
+export const emailMailboxCheckOn = (conn, env = process.env) => !!(conn && conn.flagsOn instanceof Set && conn.flagsOn.has(EMAIL_MAILBOX_CHECK_FLAG)) || String(env?.EMAIL_VERIFY_API_KEY ?? '').trim() !== '';
 // THE GROUP EACH TOOL WAS WRITTEN UNDER, read off the canon the last complete build recorded (2026-09-24). The CLI
 // inventory used to infer it by registering one group at a time and asking which tools came back ENABLED, which
 // labelled every ON_DEMAND_TOOLS entry `?`: those are held out of every roster short of all groups, so no single-group
@@ -5935,13 +5948,16 @@ export function registerTools(rawServer, opts = {}) {
   // rather than replay when it differs; `only`/`directory`/`widgetHost` do NOT need this, because they filter and
   // decorate a roster rather than changing the definitions the canon stores.
   if (TOOL_CANON && CANON_HOSTED !== !!opts.hosted) TOOL_CANON = null;
+  // The same for the paid mailbox check: it adds `deep` / `dryRun` to verify_emails / verify_email (emailMailboxCheckOn).
+  const mailboxCheck = typeof opts.mailboxCheck === 'boolean' ? opts.mailboxCheck : emailMailboxCheckOn(opts.connectors);
+  if (TOOL_CANON && CANON_MAILBOX_CHECK !== mailboxCheck) TOOL_CANON = null;
   // A FOCUSED APP READS THE CANON'S GROUPS to rewrite its descriptions (defForApp), so the first app session of a
   // process builds the canon on a throwaway stub and then replays like every later session.
-  if (!TOOL_CANON && opts.app) registerTools({ registerTool: () => ({ enabled: true, enable() {}, disable() {}, remove() {}, update() {} }), registerResource: () => ({}) }, { only: [...TOOL_GROUP_NAMES], hosted: !!opts.hosted });
+  if (!TOOL_CANON && opts.app) registerTools({ registerTool: () => ({ enabled: true, enable() {}, disable() {}, remove() {}, update() {} }), registerResource: () => ({}) }, { only: [...TOOL_GROUP_NAMES], hosted: !!opts.hosted, mailboxCheck });
   if (TOOL_CANON) { replayTools(server, opts, TOOL_CANON); return rawServer; }
   const sink = [];
-  const r = buildTools(server, opts, sink);
-  TOOL_CANON = sink; CANON_HOSTED = !!opts.hosted; // published only after a COMPLETE run — a throw mid-build must not cache a truncated roster
+  const r = buildTools(server, { ...opts, mailboxCheck }, sink);
+  TOOL_CANON = sink; CANON_HOSTED = !!opts.hosted; CANON_MAILBOX_CHECK = mailboxCheck; // published only after a COMPLETE run — a throw mid-build must not cache a truncated roster
   return r;
 }
 
@@ -19345,9 +19361,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost('/api/email/leads/facts', a);
     return ok(`${d.note}\n${(d.leads || []).map((x) => `• ${x.lead}: ${x.fact ? `${JSON.stringify(x.fact)} (source ${x.source})${x.firstLine ? `\n  first line: ${JSON.stringify(x.firstLine)}` : ''}` : `no fact (${x.why})`}`).join('\n')}`, d);
   }));
+  // THE PAID MAILBOX CHECK appears only where it is switched on (emailMailboxCheckOn, see CANON_MAILBOX_CHECK): off, these
+  // two tools describe and accept only the free checks Hermoso runs itself.
+  const evPaid = opts.mailboxCheck === true;
   server.registerTool('verify_emails', {
     title: 'Check email addresses',
-    description: "CHECK EMAIL ADDRESSES before sending to them (addresses the brand already has): emails [list] or email, leads [ids or addresses] or all:true (the brand's email list), contacts [ids or addresses], tag or allContacts:true. Each comes back valid, invalid, risky or unknown with the reason. The checks are free: the address is well formed, its domain exists and takes email, it is not a disposable (throwaway) mailbox, a role address (info@, sales@) or a common domain typo (gmial.com, with the fix), and duplicates in the list are named. Results are saved on each lead and contact (list_email_leads shows them; enroll_email_leads skipInvalid:true leaves invalid ones out); a result from the last 30 days is reused (refresh:true asks again). deep:true also asks whether each exact mailbox exists and whether the domain accepts every address (catch-all): 1 credit per 8 addresses checked, rounded up; an address it cannot settle is not charged; where the mailbox check is not switched on the reply says so and nothing is charged. dryRun:true prices it. Up to 500 addresses answer at once; more (up to 20,000) run in the background: read progress and results with job (offset, status), jobs:true lists them. Sends nothing to anyone.",
+    description: "CHECK EMAIL ADDRESSES before sending to them (addresses the brand already has): emails [list] or email, leads [ids or addresses] or all:true (the brand's email list), contacts [ids or addresses], tag or allContacts:true. Each comes back valid, invalid, risky or unknown with the reason. The checks are free and run by Hermoso itself: the address is well formed, its domain exists and takes email, it is not a disposable (throwaway) mailbox, a role address (info@, sales@) or a common domain typo (gmial.com, with the fix), and duplicates in the list are named. Results are saved on each lead and contact (list_email_leads shows them; enroll_email_leads skipInvalid:true leaves invalid ones out); a result from the last 30 days is reused (refresh:true asks again)." + (evPaid ? ' deep:true also asks whether each exact mailbox exists and whether the domain accepts every address (catch-all): 1 credit per 8 addresses checked, rounded up; an address it cannot settle is not charged. dryRun:true prices it.' : '') + " Up to 500 addresses answer at once; more (up to 20,000) run in the background: read progress and results with job (offset, status), jobs:true lists them. Sends nothing to anyone.",
     inputSchema: {
       emails: z.array(z.string()).optional().describe('addresses to check'),
       email: z.string().optional().describe('one address'),
@@ -19356,9 +19375,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
       contacts: z.array(z.string()).optional().describe('contact ids or addresses'),
       tag: z.string().optional().describe('every contact with this tag'),
       allContacts: z.boolean().optional().describe('every contact'),
-      deep: z.boolean().optional().describe('also check whether each mailbox exists (1 credit per 8 addresses)'),
+      ...(evPaid ? { deep: z.boolean().optional().describe('also check whether each mailbox exists (1 credit per 8 addresses)') } : {}),
       refresh: z.boolean().optional().describe('check again even when a recent result is saved'),
-      dryRun: z.boolean().optional().describe('price it, run nothing'),
+      ...(evPaid ? { dryRun: z.boolean().optional().describe('price it, run nothing') } : {}),
       job: z.string().optional().describe('a background check\'s id: its progress and results'),
       jobs: z.boolean().optional().describe('list the background checks'),
       status: z.enum(['valid', 'invalid', 'risky', 'unknown']).optional().describe('with job: only these results'),
@@ -19369,10 +19388,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = await apiPost('/api/email/verify', a); return ok(d.text || d.note, d); }));
   server.registerTool('verify_email', {
     title: 'Check one email address',
-    description: "Check ONE email address: valid, invalid, risky or unknown, with the reason and the fix for a mistyped domain. Free checks: well formed, the domain exists and takes email, not a disposable mailbox, not a role address. deep:true also asks whether the mailbox itself exists (1 credit; where the mailbox check is not switched on the reply says so and nothing is charged). The result is saved on the lead or contact with that address. Sends nothing.",
+    description: "Check ONE email address: valid, invalid, risky or unknown, with the reason and the fix for a mistyped domain. Free checks run by Hermoso itself: well formed, the domain exists and takes email, not a disposable mailbox, not a role address." + (evPaid ? ' deep:true also asks whether the mailbox itself exists (1 credit).' : '') + " The result is saved on the lead or contact with that address. Sends nothing.",
     inputSchema: {
       email: z.string().describe('the address'),
-      deep: z.boolean().optional().describe('also check whether the mailbox exists (1 credit)'),
+      ...(evPaid ? { deep: z.boolean().optional().describe('also check whether the mailbox exists (1 credit)') } : {}),
       refresh: z.boolean().optional().describe('check again even when a recent result is saved'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
