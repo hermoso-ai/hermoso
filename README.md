@@ -118,7 +118,7 @@ Ask in your own words. The agent picks the tools:
 - "Compare last week's Google Ads and Meta Ads results and tell me what to pause."
 - "Schedule this video to TikTok, Instagram Reels and YouTube Shorts for Tuesday at 9am."
 
-**1584 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
+**1597 tools.** `tools/list` is always the authoritative set; `hermoso_capabilities` (free) returns the live model
 catalog with exact per-render credit costs plus the full capability map.
 
 **No markup on models** on Starter, Pro and Studio. Stop overpaying markups on AI models. Plans: [hermoso.ai/pricing](https://hermoso.ai/pricing).
@@ -364,7 +364,7 @@ block entirely if you signed in above; it is there for CI, where the process can
 
 Then ask your agent: *“Generate an image ad with Hermoso.”*
 
-### What the 1584 tools cover
+### What the 1597 tools cover
 
 **Ad spy / research** — `find_competitors`, `competitor_teardown`, `pull_competitor_ads`, `research_ads`; the
 Meta / Google / LinkedIn ad libraries (`search_meta_ads`, `search_google_ads`, `search_linkedin_ads`); organic
@@ -381,6 +381,10 @@ The workspace's **saved cast** is reusable: `list_creators` returns every saved 
 Also `make_template_ad` (native HTML ad formats), `make_explainer`, `product_sizzle`, `make_thumbnail`,
 `clone_static`, `recast_motion`, `reframe_video`, `upscale_video`, `dub_video`, `change_voice`, `finish_video`,
 `fix_beat`, `stitch_video`, `clip_video`, `post_edit`, plus `plan_variations` + `score_ad` to fan out and rank.
+The one-job tools from the web's /tools pages are here too, each with a free `dryRun` price: `face_swap_video`
+(face only), `track_objects`, `face_match_cut`, `photo_to_model` (.glb), `upscale_image`, `cut_out_background`,
+`cut_out_video_background`, `split_vocals`, `video_filter`, `reangle_image`, `make_singing_ad`, `check_hook` and
+`write_video_ad_script` (held out of the starting list: `hermoso tools --search` or `find_tools` reaches them).
 **Length is yours to set:** pass `durationSeconds` to `plan_ad` and the storyboard is *authored* to it — a length
 that fits one clip of the render model renders as a single continuous take, longer is stitched from acts (on a
 15s-clip model, 40s = 15+15+10), never time-compressed. What fits one clip is the model's own maximum, not a fixed

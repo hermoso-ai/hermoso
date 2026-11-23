@@ -106,7 +106,11 @@ const _min = (vals) => { const ok = vals.map(_pos).filter((v) => v != null); ret
 
 // The flat figures the status payload already publishes for one tool each, by the payload's own key.
 export const PRICE_KEYS = Object.freeze(['editCredits', 'reframeCredits', 'upscaleCredits', 'dubCredits', 'voiceSwapCredits',
-  'clipCredits', 'subtitleCredits', 'explainCredits', 'editVideoCredits', 'postEditCredits', 'avatarCreditsPerSecond']);
+  'clipCredits', 'subtitleCredits', 'explainCredits', 'editVideoCredits', 'postEditCredits', 'avatarCreditsPerSecond',
+  // the mini tools (2026-11-23), only where the published figure IS the least a call costs: each is that tool's floor
+  // (the upscaler's megapixel floor, one cut-out, a second of sound, a picture up to 1 MP). The per-10-second figures the
+  // payload also publishes are priced at 30 fps, above what a lower-frame-rate clip costs, so those tools keep the metered floor.
+  'imageUpscaleCredits', 'bgRemoveCredits', 'stemMinCredits', 'anglesCredits']);
 
 /** The handful of numbers `toolPriceText` reads, from one /api/generate/status payload. null when there is none. */
 export function priceDigestFrom(status) {
@@ -124,6 +128,8 @@ export function priceDigestFrom(status) {
     musicFrom: _min((o.music?.models || []).flatMap((m) => [m?.credits15s, m?.credits])),
     meteredFrom: _pos(tp.meteredFloor),        // the least a metered step (a writing model, a lookup) can bill
     researchFrom: _pos(tp.researchLookup),     // one Ad Spy data lookup
+    model3dFrom: _min(Object.values(status.model3dCredits || {})),                       // photo_to_model's cheaper tier
+    singingFrom: _span([{ credits: status.singingAd?.credits }])?.[0] ?? null,             // the cheapest singing ad on the table
   };
 }
 
@@ -150,6 +156,12 @@ export const TOOL_PRICE_SPECS = Object.freeze({
   generate_voice: { digest: 'voicePer1k', per: '1,000 characters' },
   generate_sfx: { digest: 'sfxFrom', from: true },
   generate_music: { digest: 'musicFrom', from: true },
+  upscale_image: { flat: 'imageUpscaleCredits', from: true },
+  cut_out_background: { flat: 'bgRemoveCredits' },
+  split_vocals: { flat: 'stemMinCredits', from: true },
+  reangle_image: { flat: 'anglesCredits', from: true },
+  photo_to_model: { digest: 'model3dFrom', from: true },
+  make_singing_ad: { digest: 'singingFrom', from: true },
 });
 export const PRICE_UNKNOWN = 'credits vary: get_cost prices it';
 

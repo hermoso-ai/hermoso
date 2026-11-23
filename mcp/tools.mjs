@@ -3641,7 +3641,9 @@ const executorLike = (name) => EXECUTOR_TOOLS.has(name) || WIDGET_GENERIC_PROXIE
 export const EXECUTOR_TOOLS = new Set(['find_tools', 'call_tool', 'enable_tools']);
 // Listed on a FOCUSED APP (2026-11-20, see handoffAnswer): never on the all-in-one ChatGPT list (widgetHostHides), and held
 // out of the default list elsewhere on demand (ON_DEMAND_TOOLS: a focused app and ?tools=all enable every group, so they list it).
-export const APP_ONLY_TOOLS = new Set(['hermoso_other_capabilities']);
+// The thirteen mini tools (2026-11-23) are listed on the focused Create app, not on the all-in-one list: that list is at
+// ChatGPT's 1,000-tool cap, and listing them there pushed the OneDrive and HubSpot families off it.
+export const APP_ONLY_TOOLS = new Set(['hermoso_other_capabilities', 'face_swap_video', 'track_objects', 'face_match_cut', 'photo_to_model', 'upscale_image', 'split_vocals', 'video_filter', 'cut_out_background', 'cut_out_video_background', 'reangle_image', 'make_singing_ad', 'check_hook', 'write_video_ad_script']);
 export const WIDGET_HOST_RENAMES = Object.freeze({ clone_video: 'plan_video_remake', click_to_ad: 'plan_video_ad_from_product_link', delete_openai_ads_object: 'archive_openai_ads_object', make_from_preset: 'plan_video_from_preset', make_short: 'plan_short_video', find_proven_formats: 'find_ad_formats' }); // find_proven_formats (2026-11-20 scan, "name appears promotional, exaggerated, or inconsistent with its behavior"): "proven" read as a claim; it finds and groups high-view videos // make_from_preset + make_short (2026-11-09 scan, "name appears promotional, exaggerated, or inconsistent with its behavior"): both PLAN and render nothing, render_ad makes the video // delete_openai_ads_object (2026-11-03 scan, "name … inconsistent with its behavior"): OpenAI has no delete, the tool ARCHIVES // click_to_ad: the scan (2026-10-27) read the name as promotional / not what it does — it PLANS the ad, render_ad makes it
 export const WIDGET_HOST_ALIAS_OF = Object.freeze(Object.fromEntries(Object.entries(WIDGET_HOST_RENAMES).map(([from, to]) => [to, from])));
 // A WIDGET-HOST NAME THAT WAS REPLACED, and the canonical tool it still runs. ChatGPT keeps the roster it last published
@@ -3902,7 +3904,7 @@ export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['hermoso_other_capabilities', 'get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images']); // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
+export const ON_DEMAND_TOOLS = new Set(['hermoso_other_capabilities', 'get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images', 'face_swap_video', 'track_objects', 'face_match_cut', 'photo_to_model', 'upscale_image', 'split_vocals', 'video_filter', 'cut_out_background', 'cut_out_video_background', 'reangle_image', 'make_singing_ad', 'check_hook', 'write_video_ad_script']); // the thirteen mini tools (2026-11-23): held out of the default list on weight; find_tools finds each by what it does // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -30709,7 +30711,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
           seam: z.union([z.literal(false), z.object({ thickness: z.number().optional().describe('0-0.03 of the short side'), color: z.string().optional().describe('hex or a colour name') })]).optional().describe('split: the line between the panels (default thin white; false = none). Its position comes back so a caption can sit on it'),
           presenter: z.string().optional().describe("cutout / green_screen: the person clip, 'this' (default) or a URL"),
           background: z.union([z.string(), z.object({}).passthrough()]).optional().describe("cutout / green_screen: what is behind them: a clip or still URL, a colour, or 'grid' (a cutting mat, the cutout default)"),
-          matte: z.enum(['green', 'alpha']).optional().describe("how the person is cut: green (filmed on a green screen, keyed free; default) or alpha (a clip with its own transparent background, e.g. from remove_video_background)"),
+          matte: z.enum(['green', 'alpha']).optional().describe("how the person is cut: green (filmed on a green screen, keyed free; default) or alpha (a clip with its own transparent background, e.g. from cut_out_video_background)"),
           scale: z.number().optional().describe("cutout / green_screen: the person's height as a share of the frame, 0.2-1"),
           x: z.number().optional().describe('cutout / green_screen: their centre, 0-1 of the width'),
           y: z.number().optional().describe('cutout / green_screen: where their feet land, 0.3-1.2 of the height; letterbox: where the band sits, 0-1'),
@@ -31595,7 +31597,10 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // long render is received, so every disclosure the direct reply carries has to be here too — the model
     // substitution (`switchNote`) explicitly, the vision-QA verdict via `okVideo`'s own `qaLine`. Both resolve the
     // payload through `renderPayload`, which is why handing them the JOB works at all.
-    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${(j.status === 'queued' || j.status === 'running') && j.queue?.line ? ` — ${j.queue.line}` : ''}${url ? ` → ${url}` : ''}${channelOutcomeLine(res)}${j.error ? ` — ${j.error}` : ''}${j.status === 'done' ? switchNote(j) : ''}${resumeLine(j)}`;
+    // A JOB THAT DELIVERS MORE THAN ITS PICTURE SAYS SO (2026-11-23): photo_to_model's .glb and cut_out_video_background's
+    // green-screen MP4 ride beside the video, and a resumed render must name them as the inline reply does.
+    const extraFiles = [['glb', '3D model (.glb)'], ['greenVideo', 'Green-screen MP4']].filter(([k]) => typeof res?.[k] === 'string' && res[k]).map(([k, l]) => `\n${l}: ${abs(res[k])}`).join('');
+    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${(j.status === 'queued' || j.status === 'running') && j.queue?.line ? ` — ${j.queue.line}` : ''}${url ? ` → ${url}` : ''}${extraFiles}${channelOutcomeLine(res)}${j.error ? ` — ${j.error}` : ''}${j.status === 'done' ? switchNote(j) : ''}${resumeLine(j)}`;
     // THE TEXT BLOCK MUST CARRY THE JOB, NOT JUST structuredContent (2026-08-24). ChatGPT hands a widget the
     // content array WITHOUT structuredContent, so the render card — which polls this tool over the host bridge —
     // received prose it could not read: 219 polls over 9 minutes, every one HTTP 200, against a job that finished
@@ -35051,6 +35056,201 @@ function memoryNoteVerdict(text) {
     const r = await renderJob('motion', _in, 'Motion recast');
     const p = renderPayload(r) || {};
     return okVideo(`Recast video: ${r.url}${r.model ? `  (${r.model})` : ''}${p.note ? `\n${p.note}` : ''}`, r);
+  }));
+
+  // THE MINI TOOLS, FOR AGENTS (2026-11-23). Every /tools page below shipped with a server route or a job and no agent
+  // door, so a customer's agent could not do what the page does (web-only is a defect). Each tool is the SAME route or job
+  // the page calls, with the page's own inputs; every price is the server's own dry run for THIS input. Pinned by
+  // tools/miniapps-agent-parity-check.mjs, which derives the pages from the catalog and fails on one with no agent door.
+  const syncQuote = (d, what) => (d?.quote?.credits != null ? `DRY RUN (nothing made, nothing charged): ${what} costs ${d?.measured === false ? 'up to ' : ''}${d.quote.credits} credit${Number(d.quote.credits) === 1 ? '' : 's'}. Call again without dryRun to make it.` : `DRY RUN: ${what} has no price right now. Nothing was charged.`);
+  const anyRef = async (raw, kind) => { const s = String(raw || '').trim(); if (!s) throw new Error(`Pass the ${kind}.`); if (/^https?:\/\//i.test(s) || /^L\d{1,3}$/i.test(s) || /^\/generated\//.test(s)) return mediaRef(s, kind === 'audio' ? 'video' : kind); if (isRemote()) throw new Error(`\`${s.slice(0, 80)}\` is not a link. Pass an https or upload_file URL. Nothing was made or charged.`); const { readFile } = await import('node:fs/promises'); const ext = (s.split('.').pop() || '').toLowerCase(); const ct = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', mov: 'video/quicktime', webm: 'video/webm' }[ext] || 'video/mp4'; const up = await apiUpload('/api/upload', await readFile(s), { contentType: ct, fileName: s.split(/[\\/]/).pop() }); return abs(up?.url || up?.data?.url || ''); };
+  const IMG_IN = 'the picture: an https / upload_file URL, a Library id (L0…), or a local path on the CLI';
+  const VID_IN = 'the video: an https / upload_file URL, a post link, a Library id (L0…), or a local path on the CLI';
+  server.registerTool('face_swap_video', {
+    title: 'Swap only the face in a video',
+    description: "VIDEO FACE SWAP, face only: every frame gets the new face; hair, body, clothes, expressions, background and sound stay (recast_motion swaps the whole person). Up to 30 s with one face clearly in view (longer clips are cut to 30 s). A frame with no face keeps its own picture and is not charged. Priced per frame; dryRun returns this clip's price. " + LIKENESS_TERMS,
+    inputSchema: { video: z.string().describe(VID_IN), image: z.string().describe('a clear photo of the new face, one person looking at the camera'), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const _in = { video: await anyRef(a.video, 'video'), image: await mediaRef(a.image, 'image') };
+    if (a.dryRun) { const q = await quoteJob('faceswapvideo', _in); return ok(quoteText(q, 'This face swap'), { raw: q }); }
+    const r = await renderJob('faceswapvideo', _in, 'Video face swap');
+    const p = renderPayload(r) || {};
+    return okVideo(`Face swapped (${p.framesSwapped ?? '?'} of ${p.frames ?? '?'} frames${p.framesWithoutFace ? `; ${p.framesWithoutFace} had no face and kept their own picture` : ''}): ${r.url}`, r);
+  }));
+  server.registerTool('track_objects', {
+    title: 'Track objects in a video',
+    description: "OBJECT TRACKING: say what to follow ('person', 'car, dog'); every match gets a box and label that keep their id for the whole clip, drawn over the original frames (sound kept). Up to 30 s. Nothing found is said and not charged. Paid; dryRun returns this clip's price.",
+    inputSchema: {
+      video: z.string().describe(VID_IN), track: z.string().describe("what to follow, comma separated, e.g. 'person, dog'"),
+      faces: z.boolean().optional().describe('also box every face'), box: z.enum(['corners', 'full', 'dashed', 'none']).optional().describe("default 'corners'"),
+      palette: z.enum(['neon', 'single', 'pastel', 'acid', 'mono', 'warm']).optional().describe("box colours, default 'neon'"),
+      links: z.enum(['none', 'sequential', 'star', 'mst', 'full']).optional().describe("lines between the objects with their distance: sequential (in order), star (from the first), mst (shortest path), full; default 'none'"),
+      trail: z.boolean().optional().describe('false = no motion trail'), hud: z.boolean().optional().describe('false = no corner readout'),
+      dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged'),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const _in = { video: await anyRef(a.video, 'video'), track: String(a.track || '').trim(), faces: a.faces === true, ...(a.box ? { box: a.box } : {}), ...(a.palette ? { palette: a.palette } : {}), ...(a.links ? { links: a.links } : {}), ...(a.trail === false ? { trail: false } : {}), ...(a.hud === false ? { hud: false } : {}) };
+    if (a.dryRun) { const q = await quoteJob('track', _in); return ok(quoteText(q, 'Tracking this video'), { raw: q }); }
+    const r = await renderJob('track', _in, 'Object tracking');
+    const p = renderPayload(r) || {};
+    return okVideo(`Tracked ${p.tracked ?? '?'} object${p.tracked === 1 ? '' : 's'} (${p.prompt || _in.track}): ${r.url}`, r);
+  }));
+  server.registerTool('face_match_cut', {
+    title: 'Face match cut',
+    description: "FACE MATCH CUT: 2-24 portraits cut a few frames apart with every face turned and scaled so the eyes land on the same spot, a fast morph-like edit. Photos with no face are left out and said. Our own render, no AI model; a small price by photo count (dryRun returns it).",
+    inputSchema: {
+      photos: z.array(z.string()).min(2).max(24).describe('2-24 portraits, one face each looking at the camera: URLs, Library ids or local paths'),
+      aspect: z.enum(['9:16', '4:5', '1:1', '16:9']).optional(), framing: z.enum(['close', 'medium', 'wide']).optional(),
+      layer: z.enum(['pile', 'cut']).optional().describe("pile (default) keeps the edges of earlier photos around each new one; cut shows one at a time"),
+      speed: z.enum(['slow', 'normal', 'fast']).optional(), rhythm: z.enum(['uniform', 'arc']).optional().describe('arc = slow, fast, slow'),
+      background: z.enum(['dark', 'light', 'black', 'white']).optional(), grain: z.boolean().optional().describe('film grain'),
+      dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged'),
+    },
+    outputSchema: { video: z.string().optional(), seconds: z.number().optional(), faces: z.number().optional(), note: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const photos = await Promise.all((a.photos || []).map((u) => mediaRef(u, 'image')));
+    const d = await apiPost('/api/video/face-match-cut', { photos, aspect: a.aspect, framing: a.framing, layer: a.layer, speed: a.speed, rhythm: a.rhythm, background: a.background, grain: a.grain === true, ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, `A match cut of ${photos.length} photos`), {});
+    return okVideo(`Face match cut (${d?.faces ?? photos.length} faces, ${d?.seconds ?? '?'} s): ${abs(d?.video)}${d?.note ? `\n${d.note}` : ''}`, { url: abs(d?.video), poster: abs(d?.poster) || null, raw: d });
+  }));
+  server.registerTool('photo_to_model', {
+    title: 'Photo to 3D model',
+    description: "PHOTO TO 3D: one photo of an object becomes a textured 3D model (.glb, PBR) plus a 5 s turntable video and a still of it. quality 'detailed' = finer geometry and textures at twice the price. Takes about two minutes. Paid; dryRun returns the price.",
+    inputSchema: { image: z.string().describe(IMG_IN + '; one object, at least 128 px a side'), quality: z.enum(['standard', 'detailed']).optional().describe("default 'standard' (web, AR and game sized)"), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const _in = { image: await mediaRef(a.image, 'image'), ...(a.quality ? { quality: a.quality } : {}) };
+    if (a.dryRun) { const q = await quoteJob('model3d', _in); return ok(quoteText(q, `A ${a.quality || 'standard'} 3D model`), { raw: q }); }
+    const r = await renderJob('model3d', _in, 'Photo to 3D');
+    const p = renderPayload(r) || {};
+    if (r.stillRendering) return okVideo('', r);
+    return okVideo(`3D model (.glb, ${p.triangles ?? '?'} triangles): ${abs(p.glb)}\nTurntable: ${abs(p.video) || '—'}  Still: ${abs(p.image) || '—'}`, r);
+  }));
+  server.registerTool('upscale_image', {
+    title: 'Upscale an image',
+    description: "Upscale a PICTURE 2x or 4x, same picture, sharper and bigger (upscale_video is for video). Output up to 36 MP; a 4x past that is refused with 2x offered. Priced per output megapixel; dryRun returns this picture's price. Lands in the Library.",
+    inputSchema: { image: z.string().describe(IMG_IN), factor: z.union([z.literal(2), z.literal(4)]).optional().describe('2 (default) or 4'), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { image: z.string().optional(), width: z.number().optional(), height: z.number().optional(), factor: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/image/upscale', { image: await mediaRef(a.image, 'image'), factor: a.factor === 4 ? 4 : 2, ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, `Upscaling it ${d?.factor || 2}x to ${d?.width}x${d?.height}`), { width: d?.width, height: d?.height, factor: d?.factor });
+    return ok(`Upscaled ${d?.factor}x (${d?.width}x${d?.height}): ${abs(d?.image)}`, { image: abs(d?.image), width: d?.width, height: d?.height, factor: d?.factor });
+  }));
+  server.registerTool('split_vocals', {
+    title: 'Remove vocals (split a song into stems)',
+    description: "VOCAL REMOVER: a song, voice note, video or video post link split into vocals, an instrumental (everything but the voice), and drums, bass and other, each its own MP3. Up to 10 minutes. Priced by the seconds of sound; dryRun returns the price ('up to' when the length cannot be read first).",
+    inputSchema: { audio: z.string().describe('the song or video: an https / upload_file URL, a post link, or a local path on the CLI'), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { vocals: z.string().optional(), instrumental: z.string().nullable().optional(), stems: z.record(z.string(), z.string()).optional(), seconds: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/audio/separate', { audio: await anyRef(a.audio, 'audio'), ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, `Splitting ${d?.seconds ?? '?'} s of sound`), { seconds: d?.seconds });
+    const stems = Object.fromEntries(Object.entries(d?.stems || {}).map(([k, v]) => [k, abs(v)]));
+    return ok(`Split ${d?.seconds ?? '?'} s:\nVocals: ${abs(d?.vocals)}\nInstrumental: ${abs(d?.instrumental) || '—'}\n${Object.entries(stems).filter(([k]) => !['vocals', 'instrumental'].includes(k)).map(([k, v]) => `${k}: ${v}`).join('\n')}`, { vocals: abs(d?.vocals), instrumental: abs(d?.instrumental) || null, stems, seconds: d?.seconds });
+  }));
+  server.registerTool('video_filter', {
+    title: 'Apply a retro or camera filter to a video',
+    description: "VIDEO FILTERS on the whole clip, sound kept, out at up to 720p, up to 60 s: vhs (VHS tape), crt (old TV), glitch, night_vision, thermal, rainbow_thermal, black_hot, white_hot, old_phone, retro_pop. Our own render, no AI model; a small price per 10 s (dryRun returns it).",
+    inputSchema: { video: z.string().describe(VID_IN), look: z.enum(['vhs', 'crt', 'glitch', 'night_vision', 'thermal', 'rainbow_thermal', 'black_hot', 'white_hot', 'old_phone', 'retro_pop']).describe('the look'), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { video: z.string().optional(), look: z.string().optional(), seconds: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/video/filter', { video: await anyRef(a.video, 'video'), look: a.look, ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, `The ${a.look} filter on ${d?.seconds ?? '?'} s`), { seconds: d?.seconds });
+    return okVideo(`${a.look} filter (${d?.seconds ?? '?'} s): ${abs(d?.video)}`, { url: abs(d?.video), poster: abs(d?.poster) || null, raw: d });
+  }));
+  server.registerTool('cut_out_background', {
+    title: 'Remove the background from a picture',
+    description: "Cut the subject out of an existing PICTURE: a transparent PNG of the same picture, nothing re-drawn (generate_image background:'transparent' paints a new one). A flat price per picture; dryRun returns it. Lands in the Library.",
+    inputSchema: { image: z.string().describe(IMG_IN), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { image: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/image/remove-background', { image: await mediaRef(a.image, 'image'), ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, 'Removing the background'), {});
+    return ok(`Background removed (transparent PNG): ${abs(d?.image)}`, { image: abs(d?.image) });
+  }));
+  server.registerTool('cut_out_video_background', {
+    title: 'Remove the background from a video',
+    description: "Cut the subject out of a VIDEO frame by frame: a transparent WebM plus a green-screen MP4 of the same cut (for editors and phones that cannot read transparency). Priced on the clip's frames; dryRun returns this clip's price.",
+    inputSchema: { video: z.string().describe(VID_IN), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const _in = { video: await anyRef(a.video, 'video') };
+    if (a.dryRun) { const q = await quoteJob('videobg', _in); return ok(quoteText(q, 'Removing this video’s background'), { raw: q }); }
+    const r = await renderJob('videobg', _in, 'Video background removed');
+    const p = renderPayload(r) || {};
+    return okVideo(`Background removed (transparent WebM): ${r.url}${p.greenVideo ? `\nGreen screen MP4: ${abs(p.greenVideo)}` : ''}`, r);
+  }));
+  server.registerTool('reangle_image', {
+    title: 'Turn the camera around a picture',
+    description: "A NEW CAMERA ANGLE ON A PICTURE: the camera turns around the subject, label and face kept. horizontal 0-360 (0 front, 90 its right side, 180 behind, 270 its left), vertical -30 (looking up) to 90 (straight down), zoom 0 (wide) to 10 (close). One picture per call; for a video, re-shoot it instead. Paid per megapixel; dryRun returns the price. A real person's photo: " + LIKENESS_TERMS,
+    inputSchema: { image: z.string().describe(IMG_IN), horizontal: z.number().min(0).max(360).optional().describe('default 45'), vertical: z.number().min(-30).max(90).optional().describe('default 0'), zoom: z.number().min(0).max(10).optional().describe('default 5'), dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged') },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const _in = { image: await mediaRef(a.image, 'image'), ...(a.horizontal != null ? { horizontal: a.horizontal } : {}), ...(a.vertical != null ? { vertical: a.vertical } : {}), ...(a.zoom != null ? { zoom: a.zoom } : {}) };
+    if (a.dryRun) { const q = await quoteJob('angles', _in); return ok(quoteText(q, 'This new angle'), { raw: q }); }
+    const r = await renderJob('angles', _in, 'New camera angle');
+    if (r.stillRendering) return ok(`Still rendering [job ${r.jobId}]. Call get_job with that id.`, r);
+    return ok(`New angle: ${r.url}  [job ${r.jobId}]${chargeNote(r)}`, r);
+  }));
+  server.registerTool('make_singing_ad', {
+    title: 'Make a singing ad',
+    description: "A SINGING AD: lyrics written around the product, a produced song in a genre with them sung, and a singer performing it on camera with product shots, 15, 20 or 30 s. Singer: an AI singer (singer = words, or cast by the song), a preset person (maya, sofia, hana, marcus, diego, jun) or a saved creator by name (creator); or an animated style with mascot 'product' or 'logo'. Expensive: call with dryRun first and state the price.",
+    inputSchema: {
+      productName: z.string().describe('the product or brand name, sung in the chorus'), concept: z.string().optional().describe('the idea in a line'),
+      product: z.string().optional().describe('a product photo URL, Library id or local path (strongly recommended)'),
+      genre: z.enum(['pop', 'country', 'hiphop', 'rock', 'rnb', 'musical', 'synth80s', 'acoustic']).optional().describe("default 'pop'"),
+      durationSeconds: z.union([z.literal(15), z.literal(20), z.literal(30)]).optional(), language: z.string().optional().describe('English (default), Spanish, French, German, Portuguese, Italian, Dutch, Japanese, Korean, Hindi, Indonesian, Turkish, Polish or Arabic'),
+      style: z.enum(['real', '3d', 'cartoon', 'clay', 'anime']).optional().describe("default 'real'"), mascot: z.enum(['product', 'logo']).optional().describe('an animated style only: the product or the logo sings'),
+      creator: z.string().optional().describe("realistic only: a preset person or a saved creator's name. " + LIKENESS_TERMS), singer: z.string().optional().describe('the AI singer or character in words'),
+      vocal: z.enum(['female', 'male']).optional(), lyrics: z.string().optional().describe('your own lyrics instead'),
+      aspectRatio: z.enum(['9:16', '1:1', '16:9']).optional(), resolution: z.enum(['720p', '1080p']).optional(), captions: z.boolean().optional(), endCard: z.boolean().optional(),
+      dryRun: z.boolean().optional().describe('price only: nothing made, nothing charged'),
+    },
+    outputSchema: { ...JOB_OUT },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    let b = await readStore('heist.brand.v1').catch(() => null); if (!b || typeof b !== 'object') b = {};
+    const _in = { productName: a.productName, ...(a.concept ? { concept: a.concept } : {}), genre: a.genre || 'pop', durationSeconds: a.durationSeconds || 15, language: a.language || 'English', aspectRatio: a.aspectRatio || '9:16', resolution: a.resolution || '720p', captions: a.captions === true, endCard: a.endCard === true, style: a.style || 'real',
+      ...(a.mascot ? { mascot: a.mascot } : {}), ...(a.vocal ? { vocal: a.vocal } : {}), ...(a.product ? { product: await mediaRef(a.product, 'image') } : {}), ...(a.creator ? { creator: a.creator } : {}), ...(a.singer ? { singer: a.singer } : {}), ...(a.lyrics ? { lyrics: a.lyrics } : {}),
+      ...(b.name ? { brand: { name: b.name, ...(b.domain ? { domain: b.domain } : {}), ...(b.logo ? { logo: b.logo } : {}), ...(b.summary ? { summary: b.summary } : {}) } } : {}) };
+    if (a.dryRun) { const q = await quoteJob('singingad', _in); return ok(quoteText(q, `A ${_in.durationSeconds} s ${_in.genre} singing ad`), { raw: q }); }
+    const r = await renderJob('singingad', _in, `Singing ad · ${String(a.productName).slice(0, 40)}`);
+    return okVideo(`Singing ad ready: ${r.url}`, r);
+  }));
+  server.registerTool('check_hook', {
+    title: 'Check a video’s hook',
+    description: "HOOK CHECK: a vision read of a short clip's opening (first 15 s): a hook score, what a viewer takes away in the first second, the predicted attention peak and drop, a per-second attention curve and the one fix. The curve is a prediction from the pictures and on-screen words, not a measurement, and the sound is not heard. Priced by length; dryRun returns it.",
+    inputSchema: { url: z.string().describe('the video: a file URL, a post link, a Library id or a local path on the CLI'), dryRun: z.boolean().optional().describe('price only: nothing read, nothing charged') },
+    outputSchema: { score: z.number().optional(), verdict: z.string().optional(), firstSecond: z.string().optional(), peakSecond: z.number().optional(), dropSecond: z.number().optional(), hold: z.array(z.any()).optional(), fix: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const url = await anyRef(a.url, 'video');
+    const d = await apiPost('/api/score/hook', { url, ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, 'A hook check'), {});
+    return ok(`Hook score ${d?.score}/100${d?.verdict ? ` (${d.verdict})` : ''}. First second: ${d?.firstSecond || '—'}\nPeak at ${d?.peakSecond}s${d?.peakWhy ? `: ${d.peakWhy}` : ''}${d?.dropSecond >= 0 ? `; drop at ${d.dropSecond}s` : ''}${d?.fix ? `\nFix: ${d.fix}` : ''}\nAttention (predicted): ${(d?.hold || []).map((h) => `${h.second}s ${h.attention}`).join(', ')}`, d || {});
+  }));
+  server.registerTool('write_video_ad_script', {
+    title: 'Write a TikTok ad script and hooks',
+    description: "TIKTOK SCRIPT + HOOKS: a product and an audience in; ten hooks, each on a named hook mechanic, and one ready-to-film TikTok ad script (timed beats with visual, voiceover and on-screen text, CTA, caption, hashtags) built on the strongest. Words only, nothing rendered. A small price by length; dryRun returns it.",
+    inputSchema: { product: z.string().describe('what is sold, in a line'), audience: z.string().optional(), offer: z.string().optional(), seconds: z.union([z.literal(15), z.literal(30), z.literal(60)]).optional().describe('default 30'), style: z.enum(['creator', 'faceless']).optional().describe("default 'creator'"), dryRun: z.boolean().optional().describe('price only: nothing written, nothing charged') },
+    outputSchema: { hooks: z.array(z.any()).optional(), best: z.any().optional(), bestWhy: z.string().optional(), script: z.any().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const d = await apiPost('/api/hooks/script', { product: a.product, audience: a.audience, offer: a.offer, seconds: a.seconds, style: a.style, ...(a.dryRun ? { dryRun: true } : {}) });
+    if (a.dryRun) return ok(syncQuote(d, `A ${d?.quote?.seconds || a.seconds || 30} s script`), {});
+    const s = d?.script || {};
+    return ok(`HOOKS:\n${(d?.hooks || []).map((h, i) => `${i + 1}. [${h.mechanic}] ${h.spoken || h.onScreen || ''}`).join('\n')}\nBest: ${typeof d?.best === 'number' ? d.best + 1 : d?.best ?? '—'}${d?.bestWhy ? ` (${d.bestWhy})` : ''}\n\nSCRIPT: ${s.title || ''} (${s.seconds || '?'} s)\n${(s.beats || []).map((x) => `${x.start}-${x.end}s ${x.label || ''}: ${x.visual || ''}${x.voiceover ? ` | VO: ${x.voiceover}` : ''}${x.onScreen ? ` | TEXT: ${x.onScreen}` : ''}`).join('\n')}\nCTA: ${s.cta || '—'}\nCaption: ${s.caption || '—'} ${(s.hashtags || []).join(' ')}`, d || {});
   }));
 
   // RECAST A VIRAL HOOK WITH OUR OWN SUBJECT (2026-09-24): the found hook's subject becomes the brand's product or saved
