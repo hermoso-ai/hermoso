@@ -18,6 +18,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups, widgetHostScope, withFirstRunLine, firstRunOffers } from './tools.mjs';
 import { chatgptExtRequested } from './openai-extensions.mjs';
+import { CURATED_SCOPES, isCuratedToken } from './directory-curated.mjs'; // a curated Claude directory connector's own scope on its 401 + PRM (2026-11-22)
 import { mcpCtx, connectedProviders } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
@@ -64,12 +65,18 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   // that URL from issuer identifier `${BASE}/mcp`, which is not what the document says). The 404 there is
   // CORRECT and is what lets a probing client fall through cleanly. Alias it only if `issuer` ever grows a path.
   const MCP_PATH = '/mcp';                            // the resource's path component — app.all(MCP_PATH) below
-  const protectedResourceMetadata = (req, res) => res.json({
+  // A CURATED CONNECTOR'S OWN SCOPE (2026-11-22). The consent card has to say what a curated Claude directory connector
+  // does, and the only thing Claude carries from the connector URL into /oauth/authorize is the scope (resource arrives
+  // bare: measured on production, see CURATED_SCOPES in ./directory-curated.mjs). So a 401 on `?tools=<curated>` names
+  // that connector's one scope, and points at this document with the same `?tools=`, which then lists only that scope:
+  // the challenge and the PRM agree whichever one a client reads. `resource` is UNCHANGED on every form.
+  const curatedOfReq = (req) => { const t = String(req?.query?.tools ?? req?.headers?.['x-hermoso-tools'] ?? '').trim().toLowerCase(); return isCuratedToken(t) ? t : null; };
+  const protectedResourceMetadata = (req, res) => { const cur = curatedOfReq(req); return res.json({
     resource: `${BASE}${MCP_PATH}`,
     authorization_servers: [process.env.HERMOSO_OAUTH_ISSUER || process.env.HEIST_OAUTH_ISSUER].filter(Boolean),
-    scopes_supported: ['hermoso.research', 'hermoso.generate'],
+    scopes_supported: cur ? [CURATED_SCOPES[cur]] : ['hermoso.research', 'hermoso.generate'],
     bearer_methods_supported: ['header'],
-  });
+  }); };
   app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
   app.get(`/.well-known/oauth-protected-resource${MCP_PATH}`, protectedResourceMetadata);
   // ── AND AT THE APPENDED FORM, /mcp/.well-known/oauth-protected-resource (2026-09-28, Perplexity) ──────────────────
@@ -218,11 +225,13 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // moment a client is provably stuck, written for the model that will read it: OAuth first (the normal route),
   // then the two that need no browser at all. `WWW-Authenticate` still points at the protected-resource metadata,
   // which is what a spec-following client uses; this is for the one that is not following it.
-  const challenge = (res) => res.status(401)
+  const challenge = (res, req = null) => res.status(401)
     // `scope` rides the challenge (MCP authorization spec, "Protected Resource Metadata Discovery Requirements":
     // servers SHOULD include it; ChatGPT's own auth doc shows the same shape). The same ONE list the PRM and the AS
     // metadata publish, so a client that scopes its authorize request from the challenge asks for exactly that.
-    .set('WWW-Authenticate', `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource", scope="hermoso.research hermoso.generate"`)
+    .set('WWW-Authenticate', curatedOfReq(req)
+      ? `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource?tools=${curatedOfReq(req)}", scope="${CURATED_SCOPES[curatedOfReq(req)]}"`
+      : `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource", scope="hermoso.research hermoso.generate"`)
     .json({
       error: 'Authentication required',
       error_description: 'This Hermoso MCP server needs a signed-in account. Normally your client opens a browser consent page. IF NO BROWSER OR CONSENT CARD OPENED, your client cannot complete OAuth — retrying will keep failing the same way. Read the `how_to_connect` field of THIS response and use one of those two browser-free routes instead. Tell the user which one you are taking.',
@@ -510,14 +519,14 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       if (req.method === 'POST' && isAllPreauth(req.body) && anonPreviewAllowed(req)) {
         const scope = scopeFor(req, res);
         if (scope === false) return; // unknown group — already answered 400
-        return serveAnonDiscovery(req, res, scope).catch(() => { try { challenge(res); } catch {} });
+        return serveAnonDiscovery(req, res, scope).catch(() => { try { challenge(res, req); } catch {} });
       }
       // The refused half of the [mcp-anon] line: the clientInfo a challenged tokenless initialize named, so a
       // directory check that starts failing can be identified from the log instead of guessed from its UA.
       if (!token && req.method === 'POST' && methodsOf(req.body).includes('initialize')) {
         try { console.error(`[mcp-anon] refused initialize client=${JSON.stringify(clientInfoOf(req.body))} ua=${JSON.stringify(String(req.headers['user-agent'] || '').slice(0, 80))} src=${srcOf(req) || '-'}`); } catch {}
       }
-      return challenge(res);
+      return challenge(res, req);
     }
 
     // The stream cap, BEFORE any session work: a burst of reconnects must be refused at the door, not after allocating.
