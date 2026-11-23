@@ -605,17 +605,17 @@ export const chatgptLeftOutLine = (left = CHATGPT_ROSTER_LEFT_OUT, n = 1) => { /
   return `NOT IN THIS APP: buying credits, billing, paying creators, connecting a key${names.length ? `, ${names.join(', ')}` : ''} and more; never say Hermoso lacks it. All run on the full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. ${CHATGPT_WEB_DOORS_LINE}`;
 };
 export const MCP_INSTRUCTIONS_WIDGET = [
-  "Hermoso runs a brand's marketing: research ads, make image and video ads, post, run paid campaigns, read results.",
+  "Hermoso runs a brand's marketing: ad research, image and video ads, posting, paid campaigns, results.",
   'Asked to make something, make it; tools pick a default model (hermoso_capabilities lists models and costs).',
   '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
   '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in background; poll get_job.',
   '• FILES & SCHEDULING: upload_file turns a file into a URL; schedule_post, list_scheduled, list_connectors, list_library.',
-  '• PUBLISH: post_to_* (post_to_meta, post_to_tiktok...) post now; list_inbox, reply_to_inbox_item.',
+  '• PUBLISH: post_to_* post now; publish_page hosts a web page (more: the Hermoso Launch app); list_inbox, reply_to_inbox_item.',
   '• PAID ADS (Meta, Google, LinkedIn, TikTok, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
   '• RESULTS: post_performance, analyze_campaigns. WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
-  "CREDITS: AI and research use credits; replies say how many. If too low, say so. Nothing is bought in this app.",
+  "CREDITS: AI and research use credits; replies say how many; if too low, say so. Nothing is bought here.",
   'CONFIRM before posting or scheduling, messaging customers, turning on a campaign, changing a budget, deleting anything, or draft_brand with save:true.',
-  'SHOWING RESULTS: the widget already shows each finished image and video. Never repeat one as a markdown image.',
+  'SHOWING RESULTS: the widget shows each finished image and video; never repeat one as a markdown image.',
   chatgptLeftOutLine(), // the whole string, with the longest first-run line on top, must fit 2,048 bytes (mcp-first-run-guidance-check)
 ].filter(Boolean).join('\n');
 // ── EACH FOCUSED APP GETS ITS OWN INSTRUCTIONS (2026-11-06) ─────────────────────────────────────────────────────────
@@ -624,7 +624,7 @@ export const MCP_INSTRUCTIONS_WIDGET = [
 // truncates near there). The directory pair (Claude) also names no generation tool.
 // The all-in-one ChatGPT app (the unscoped server) is "Hermoso: AI Marketing Agent"; these are the three focused apps
 // beside it, named by Keyword Planner volume (the owner, 2026-11-06; evidence in memory mcp-directory-listings.md).
-export const APP_TITLES = Object.freeze({ create: 'Hermoso: AI Ad Generator', ads: 'Hermoso: Ads Manager', social: 'Hermoso: Social Media Manager', creators: 'Hermoso: Creator Campaigns' });
+export const APP_TITLES = Object.freeze({ create: 'Hermoso: AI Ad Generator', ads: 'Hermoso: Ads Manager', social: 'Hermoso: Social Media Manager', creators: 'Hermoso: Creator Campaigns', sites: 'Hermoso Launch' });
 const APP_CONFIRM = 'CONFIRM with the user before posting or scheduling, messaging customers, turning on a campaign or changing a budget, deleting anything, or replacing a saved profile.';
 const APP_WORKSPACE = 'WORKSPACE: get_brand, list_brands, use_brand, create_brand, list_connectors (accounts are connected in the Hermoso app, Connectors), hermoso_credits, report_bug, request_feature.';
 const APP_ADS_LINES = [
@@ -654,6 +654,14 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
   ].join('\n'),
   ads: [...APP_ADS_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
   social: [...APP_SOCIAL_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
+  sites: [
+    "Hermoso Launch hosts a web page or small site that the user's own AI wrote, at https://<name>.hermoso.page: every version gets a preview link, the brand's Hermoso tag measures visits, and forms marked data-hermoso-lead fill the brand's email lead list.",
+    '• PAGES: publish_page (the files you wrote), update_page (change a few files, or setLive to roll back), get_page (a file back to edit, and the page as a UTM-tagged ad destination), list_pages, unpublish_page.',
+    '• RESULTS: hermoso_tag_report (visits, leads and revenue by source), hermoso_tag_events, list_email_leads (who signed up).',
+    'EVERY PUBLISHED FILE IS PUBLIC: never put API keys or secrets in page files.',
+    APP_WORKSPACE,
+    'CONFIRM with the user before publishing over a live page or taking one offline.',
+  ].join('\n'),
   creators: [
     "Hermoso Creator Campaigns runs the brand's creator (UGC / clipping) campaigns, where the brand pays creators for posts about it: set up a campaign, invite creators, review their posts and read the results.",
     '• CAMPAIGNS: create_creator_campaign (made as a draft), update_creator_campaign (edit, or set it active, paused or closed), read_creator_campaigns, preview_creator_campaign.',
@@ -1055,7 +1063,9 @@ const wrap = (fn) => {
       // does NOT have is refused here, by its argument ("`refImages[0]` is `/mnt/data/a.png`, and there is no such
       // file on this machine"), where toRef could only say ENOENT about a path with no argument named. Same sentence
       // as the hosted connector and the server (mcp/media-ref.mjs localMediaSentence).
-      if (_tool !== 'upload_file') { const _lm = findClientLocalMedia(args, isRemote() ? { served: null } : { served: null, exists: (p) => { try { return localFileExists(p); } catch { return false; } } }); if (_lm) throw clientLocalMediaError(_lm); }
+      // A HOSTED PAGE'S files[].path IS A PATH INSIDE THE SITE ("/about/index.html"), not a file on the caller's machine, and
+      // files[].content is the file itself; its files[].url is held to http(s) by the server (lib/launch-sites.mjs normalizeFiles).
+      if (_tool !== 'upload_file' && _tool !== 'publish_page' && _tool !== 'update_page') { const _lm = findClientLocalMedia(args, isRemote() ? { served: null } : { served: null, exists: (p) => { try { return localFileExists(p); } catch { return false; } } }); if (_lm) throw clientLocalMediaError(_lm); }
       const _st = { tool: _tool }; _stU = _st;
       if (typeof args?.account === 'string' && args.account.trim() && accountScopedTool(_tool)) _st.account = args.account.trim(); // see MULTI_ACCOUNT_CHANNELS
       // PRICE FIRST, BUY ONCE (spend-guard.mjs): the call controls never reach the handler; with none of them sent this
@@ -2740,6 +2750,10 @@ export const INBOX_SOURCES = [
   { source: 'slack_dm',        provider: 'slack',           read: '/api/slack/inbox/thread',       reply: '/api/slack/inbox/reply',           kind: 'dm',      label: 'Slack direct message', dmReplyId: 'replyTo', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the slack_dm item id after "slack_dm:")' }, readAll: '/api/slack/inbox' },
   { source: 'discord',         provider: 'discord',         read: '/api/discord/inbox',            reply: '/api/discord/inbox/reply',         kind: 'mention', label: 'Discord mention' },
   { source: 'discord_dm',      provider: 'discord',         read: '/api/discord/history',          reply: '/api/discord/dm',                  kind: 'dm',      label: 'Discord direct message', dmReplyId: 'replyTo', needs: { arg: 'discordMember', param: 'member', from: 'search_discord_members' } },
+  // THE DOMAIN INBOX (2026-11-23): email to the brand's own domain (any address it chose, or a catch-all), kept by Hermoso and
+  // answered from the same address in the same thread. Not a connector: the server folds `domain_mail` into the connected set
+  // when the account has a domain inbox address. readAll lists one row per thread; a conversation folds on its conversationId.
+  { source: 'domain_mail',     provider: 'domain_mail',     read: '/api/domain-mail/inbox/thread',  reply: '/api/domain-mail/inbox/reply',      kind: 'email',   label: 'Domain email', dmReplyId: 'conversationId', needs: { arg: 'conversationId', param: 'id', from: 'list_inbox (the domain_mail item id after "domain_mail:")' }, readAll: '/api/domain-mail/inbox' },
   { source: 'email',           provider: 'outlook',         read: '/api/email/replies',            reply: '/api/email/send',                  kind: 'email',   label: 'Email reply', query: { kind: 'reply' } },
 ];
 
@@ -2975,7 +2989,7 @@ export function normalizeInboxItem(source, row = {}) {
     // SLACK, DISCORD AND EMAIL (2026-11-16): where it was said, and the last few messages of a Slack DM.
     ...(source === 'slack_dm' ? { ...(typeof row.workspace === 'string' && row.workspace ? { workspace: row.workspace } : {}), ...(Array.isArray(row.recent) ? { recent: row.recent } : {}) } : {}),
     ...(source === 'discord' ? { ...(typeof row.channelName === 'string' && row.channelName ? { channelName: row.channelName } : {}), ...(typeof row.server === 'string' && row.server ? { server: row.server } : {}), ...(row.contentHidden === true ? { contentHidden: true } : {}) } : {}),
-    ...(source === 'email' ? { ...(typeof row.subject === 'string' ? { subject: row.subject } : {}), ...(row.automatic === true ? { automatic: true } : {}), ...(row.askedToStop === true ? { askedToStop: true } : {}), ...(Array.isArray(row.attachments) && row.attachments.length ? { attachments: row.attachments } : {}) } : {}),
+    ...(source === 'email' || source === 'domain_mail' ? { ...(typeof row.subject === 'string' ? { subject: row.subject } : {}), ...(row.automatic === true ? { automatic: true } : {}), ...(row.askedToStop === true ? { askedToStop: true } : {}), ...(Array.isArray(row.attachments) && row.attachments.length ? { attachments: row.attachments } : {}) } : {}),
     ...(source === 'whatsapp' ? { windowOpen: row.windowOpen ?? null, windowClosesAt: row.windowClosesAt || null, ...(typeof row.windowNote === 'string' ? { windowNote: row.windowNote } : {}), ...(row.phoneNumberId ? { phoneNumberId: String(row.phoneNumberId) } : {}), ...(Array.isArray(row.recent) ? { recent: row.recent } : {}) } : {}),
     // WHICH OF THE BRAND'S ACCOUNTS RECEIVED IT (2026-11-16): { id, label, handle? }, a WhatsApp number, a Facebook Page, an
     // Instagram account, a Slack workspace or a Discord server, so a brand with several on one channel can tell; list_inbox's
@@ -3475,11 +3489,17 @@ export const storyFilmsWithheldWhy = (env = process.env) => `story films are in 
 // find_company_contacts or find_leads (they return people's contact details or posts), nor saved_lead_searches (list, save,
 // run and delete through one `action` argument, the shape the 2026-11-19 review refused). tools/app-handoff-check.mjs counts the coverage.
 const APP_ACCOUNT_OFFERS = ['get_credit_limits', 'set_credit_limit', 'contact_support'];
+// The Hermoso Launch app (sites; a placeholder name until the owner settles it): the five page tools, the tag that measures the page, and the lead list its forms fill.
+// The owner's admin tools for a hosted project (2026-11-23, G8 G12 G13 G14 G15; lib/launch-sites-admin-routes.mjs): on demand, listed by Hermoso Launch.
+export const LAUNCH_ADMIN_TOOLS = Object.freeze(['export_site', 'push_site_to_github', 'site_logs', 'export_site_db', 'list_site_db_backups', 'restore_site_db', 'site_email_report', 'set_site_email_suppression', 'list_site_users', 'update_site_user', 'delete_site_user']);
+export const LAUNCH_PAGE_TOOLS = Object.freeze(['publish_page', 'update_page', 'list_pages', 'get_page', 'unpublish_page', 'connect_domain', 'domain_status', 'disconnect_domain', 'set_site_secret', 'delete_site_secret', 'rollback_page', 'list_site_usage', 'set_site_spend_cap', 'find_domain', 'buy_domain', 'list_domains', 'get_domain', 'set_domain_autorenew', 'renew_domain', 'transfer_out', 'set_email_forwarding', 'list_dns_records', 'set_dns_record', 'delete_dns_record', 'connect_email_provider', 'set_page_access', 'create_review_link', 'audit_page', 'connect_page_to_search_console', 'create_domain_address', 'list_domain_mail', 'get_domain_mail', 'reply_domain_mail', 'send_domain_mail', 'start_payments_onboarding', 'payments_status', 'list_site_payments', 'get_site_payment', 'refund_site_payment', 'payouts_status', 'set_site_payments_mode']); // + rollback, usage, spend cap and the dollar domain tools (2026-11-23; buy_domain answers a payment link the user opens, on ChatGPT too)
+const APP_SITES_ALSO = Object.freeze(['hermoso_tag', 'hermoso_tag_report', 'hermoso_tag_events', 'list_email_leads']);
 export const WIDGET_APP_OFFERS = Object.freeze({
   create: new Set([...STORY_FILM_TOOLS, 'search_companies', 'find_proven_formats', 'find_ad_formats', 'layerize_image', 'product_move', 'save_location', 'delete_location', ...APP_ACCOUNT_OFFERS]),
   ads: new Set([...APP_ACCOUNT_OFFERS, 'get_linkedin_boost', 'update_linkedin_boost', 'list_linkedin_boost_audiences', 'manage_linkedin_boost_audience', 'update_linkedin_ads_campaign']),
   social: new Set(['repost_on_x', 'bookmark_x_post', 'follow_x_account', ...APP_ACCOUNT_OFFERS]),
   creators: new Set(APP_ACCOUNT_OFFERS),
+  sites: new Set([...LAUNCH_PAGE_TOOLS, ...LAUNCH_ADMIN_TOOLS, ...APP_SITES_ALSO, ...APP_ACCOUNT_OFFERS]),
 });
 // The Creator Campaigns app lists the creator tools the all-in-one ChatGPT list holds for its cap (CC_WIDGET_WHY), by
 // that reason rather than by name, so a creator tool held for any OTHER reason (money, sensitive data) stays held there.
@@ -3504,6 +3524,7 @@ const SHOPIFY_ADMIN_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which 
 // CONVERSIONS HUB + PROFIT PER CAMPAIGN (2026-11-20): seven tools that need no connection would be CORE on the all-in-one
 // ChatGPT list and push the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs
 // refuses. Held there for the next ChatGPT ranking; they are in the `ads` group, so the Hermoso Ads app in ChatGPT lists them.
+const PAGES_WIDGET_WHY = "it will be in the Hermoso Launch app for ChatGPT once that is published, and it runs now on the full connection, Claude, the CLI or the API";
 const CONV_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; it works from the Hermoso Ads app in ChatGPT, the Hermoso app, or another connected agent';
 // ABANDONED-CHECKOUT RECOVERY (2026-11-20): held from the capped ChatGPT list for the same reason as the order tools above.
 const SHOPIFY_CART_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; abandoned-checkout recovery is set up from the Hermoso app (Studio) or another connected agent';
@@ -3537,6 +3558,15 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   upload_campaign_results: CONV_WIDGET_WHY, set_profit_settings: CONV_WIDGET_WHY, campaign_profit: CONV_WIDGET_WHY,
   post_purchase_survey: CONV_WIDGET_WHY, // POST-PURCHASE SURVEY (2026-11-21): needs no connection, so it would be always-listed on a ChatGPT list at its cap
   hermoso_tag: CONV_WIDGET_WHY, install_hermoso_tag: CONV_WIDGET_WHY, hermoso_tag_report: CONV_WIDGET_WHY, hermoso_tag_events: CONV_WIDGET_WHY, hermoso_tag_audiences: CONV_WIDGET_WHY, // THE HERMOSO TAG (2026-11-21): same cap, same family
+  // LAUNCH PAGES (2026-11-23): publish_page and get_page fit the all-in-one ChatGPT list (measured: chatgpt-full-roster-check
+  // stays green with both); the other three would push the last ranked family (HubSpot) off it, so they are held here and
+  // listed by the Hermoso Launch focused app (WIDGET_APP_OFFERS.sites). ChatGPT has no find_tools / call_tool (EXECUTOR_TOOLS
+  // are withheld on widget hosts), so a held tool is not reachable from the all-in-one app at all; every other surface lists all five.
+  update_page: PAGES_WIDGET_WHY, list_pages: PAGES_WIDGET_WHY, unpublish_page: PAGES_WIDGET_WHY,
+  connect_domain: PAGES_WIDGET_WHY, domain_status: PAGES_WIDGET_WHY, disconnect_domain: PAGES_WIDGET_WHY, // step 3 (2026-11-23)
+  set_site_secret: PAGES_WIDGET_WHY, delete_site_secret: PAGES_WIDGET_WHY, // step 5: the site secret store
+  rollback_page: PAGES_WIDGET_WHY, list_site_usage: PAGES_WIDGET_WHY, set_site_spend_cap: PAGES_WIDGET_WHY, find_domain: PAGES_WIDGET_WHY, buy_domain: PAGES_WIDGET_WHY, list_domains: PAGES_WIDGET_WHY, get_domain: PAGES_WIDGET_WHY, set_domain_autorenew: PAGES_WIDGET_WHY, renew_domain: PAGES_WIDGET_WHY, transfer_out: PAGES_WIDGET_WHY, set_email_forwarding: PAGES_WIDGET_WHY, list_dns_records: PAGES_WIDGET_WHY, set_dns_record: PAGES_WIDGET_WHY, delete_dns_record: PAGES_WIDGET_WHY, connect_email_provider: PAGES_WIDGET_WHY, set_page_access: PAGES_WIDGET_WHY, create_review_link: PAGES_WIDGET_WHY, audit_page: PAGES_WIDGET_WHY, connect_page_to_search_console: PAGES_WIDGET_WHY, create_domain_address: PAGES_WIDGET_WHY, list_domain_mail: PAGES_WIDGET_WHY, get_domain_mail: PAGES_WIDGET_WHY, reply_domain_mail: PAGES_WIDGET_WHY, send_domain_mail: PAGES_WIDGET_WHY, start_payments_onboarding: PAGES_WIDGET_WHY, payments_status: PAGES_WIDGET_WHY, list_site_payments: PAGES_WIDGET_WHY, get_site_payment: PAGES_WIDGET_WHY, refund_site_payment: PAGES_WIDGET_WHY, payouts_status: PAGES_WIDGET_WHY, set_site_payments_mode: PAGES_WIDGET_WHY, // 2026-11-23: rollback, usage, spend cap, domains (the Hermoso Launch app lists them)
+  export_site: PAGES_WIDGET_WHY, push_site_to_github: PAGES_WIDGET_WHY, site_logs: PAGES_WIDGET_WHY, export_site_db: PAGES_WIDGET_WHY, list_site_db_backups: PAGES_WIDGET_WHY, restore_site_db: PAGES_WIDGET_WHY, site_email_report: PAGES_WIDGET_WHY, set_site_email_suppression: PAGES_WIDGET_WHY, list_site_users: PAGES_WIDGET_WHY, update_site_user: PAGES_WIDGET_WHY, delete_site_user: PAGES_WIDGET_WHY, // 2026-11-23 launch admin: held on the all-in-one list for its cap, listed by Hermoso Launch
   // LINKEDIN BOOST API 202611 (2026-11-20): four tools in the linkedin family, which is listed on ChatGPT; one more listed tool
   // pushes the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses.
   // Held for the next ChatGPT ranking; the Ads focused app lists them, and boost_linkedin_post previews and creates there.
@@ -3908,7 +3938,8 @@ export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
 // self-describing schema, and the default roster sits at its token ceiling. find_tools finds these, call_tool or a
 // direct tools/call runs them, and enable_tools({groups:['create']}) (or 'all', or ?tools=all) lists them. post_edit's description names
 // edit_timeline, and edit_timeline's names video_frames, so a caller that starts from post_edit reaches both.
-export const ON_DEMAND_TOOLS = new Set(['hermoso_other_capabilities', 'get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images', 'face_swap_video', 'track_objects', 'face_match_cut', 'photo_to_model', 'upscale_image', 'split_vocals', 'video_filter', 'cut_out_background', 'cut_out_video_background', 'reangle_image', 'make_singing_ad', 'check_hook', 'write_video_ad_script']); // the thirteen mini tools (2026-11-23): held out of the default list on weight; find_tools finds each by what it does // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
+export const ON_DEMAND_TOOLS = new Set(['hermoso_other_capabilities', 'get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images', 'face_swap_video', 'track_objects', 'face_match_cut', 'photo_to_model', 'upscale_image', 'split_vocals', 'video_filter', 'cut_out_background', 'cut_out_video_background', 'reangle_image', 'make_singing_ad', 'check_hook', 'write_video_ad_script', 'update_page', 'list_pages', 'get_page', 'unpublish_page', 'connect_domain', 'domain_status', 'disconnect_domain', 'set_site_secret', 'delete_site_secret', 'rollback_page', 'list_site_usage', 'set_site_spend_cap', 'find_domain', 'buy_domain', 'list_domains', 'get_domain', 'set_domain_autorenew', 'renew_domain', 'transfer_out', 'set_email_forwarding', 'list_dns_records', 'set_dns_record', 'delete_dns_record', 'connect_email_provider', 'set_page_access', 'create_review_link', 'audit_page', 'connect_page_to_search_console', 'create_domain_address', 'list_domain_mail', 'get_domain_mail', 'reply_domain_mail', 'send_domain_mail', 'start_payments_onboarding', 'payments_status', 'list_site_payments', 'get_site_payment', 'refund_site_payment', 'payouts_status', 'set_site_payments_mode']); // launch pages (2026-11-23): publish_page is listed and its description and every reply name these four // the thirteen mini tools (2026-11-23): held out of the default list on weight; find_tools finds each by what it does // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
+for (const t of LAUNCH_ADMIN_TOOLS) ON_DEMAND_TOOLS.add(t); // launch admin (2026-11-23): on demand, so no default roster grows
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
 // ChatGPT users get the tool roster OpenAI SNAPSHOTTED at review time, never a live tools/list (memory:
@@ -4145,6 +4176,9 @@ export const WITHHELD_FROM_DIRECTORY = new Set([
   'find_proven_formats',
   // 2026-11-18: the monthly credit limits are on demand, and an on-demand tool is never reachable through a cage's call_tool.
   'get_credit_limits', 'set_credit_limit',
+  // 2026-11-23: Hermoso Launch's tools are on demand (listed by the Hermoso Launch app and every full connection), and the
+  // directory listings were reviewed without them, so no cage reaches them through call_tool.
+  ...LAUNCH_PAGE_TOOLS, ...LAUNCH_ADMIN_TOOLS,
 ]);
 // TWO DIRECTORY MODES (2026-09-02, after the directory turned out to list Tofu Ads — an AI ad-image generator
 // (RETIRED 2026-09-25: `directory-full` now parses to the cage — see parseToolScope. The 'full' mode below is kept only
@@ -4332,12 +4366,16 @@ export function defForDirectory(def, directory, name) {
 //            (UGC / clipping) campaigns: the tools written in the creator campaigns section (server.section), the
 //            read-only creator searches, and find_creators. Nothing that moves money: paying creators stays on the full
 //            connection (and its own app pages), so this app only ever quotes.
-export const APP_NAMES = Object.freeze(['create', 'ads', 'social', 'creators']);
+// sites (2026-11-23, the owner: "a separate focused 'sites' plugin for the full set") — a page the user's own AI wrote,
+//            hosted by Hermoso: every tool in the launch_pages section, the brand's Hermoso tag (the page's analytics) and
+//            the email lead list its forms fill. Not created or submitted on ChatGPT yet (docs/plans/launch-sites-build.md).
+export const APP_NAMES = Object.freeze(['create', 'ads', 'social', 'creators', 'sites']);
 export const APP_SCOPE_TOKENS = Object.freeze({
   'chatgpt-create': { app: 'create' }, 'app-create': { app: 'create' },
   'chatgpt-ads': { app: 'ads' }, 'app-ads': { app: 'ads' },
   'chatgpt-social': { app: 'social' }, 'app-social': { app: 'social' },
   'chatgpt-creators': { app: 'creators' }, 'app-creators': { app: 'creators' },
+  'chatgpt-sites': { app: 'sites' }, 'app-sites': { app: 'sites' },
   'directory-ads': { app: 'ads', directory: 'scoped' }, 'directory-social': { app: 'social', directory: 'scoped' },
 });
 // THE FOCUSED CONNECTIONS, TOLD TO AN AI THAT ASKS (2026-11-10, the owner approved it). hermoso_capabilities' RESULT
@@ -4388,7 +4426,7 @@ export const ALL_IN_ONE_CHATGPT_TITLE = 'Hermoso: AI Marketing Agent';
 // The ChatGPT app ids (platform.openai.com/plugins ▸ app ▸ Copy link). A focused app is linked only once it is
 // PUBLISHED: nobody can add an app still in review. HERMOSO_CHATGPT_APPS_PUBLISHED=create,ads,social names the published
 // ones (HERMOSO_CHATGPT_CREATE_PUBLISHED=1 still counts for create); read per call, so publishing needs no code change.
-export const CHATGPT_APP_IDS = Object.freeze({ all: 'plugin_asdk_app_6abde87d08048191b2ee7cda76721749', create: 'plugin_asdk_app_6aee494d54448191bfce04e45210a487', ads: 'plugin_asdk_app_6aee41978fe081919e59d8dfa9397a39', social: 'plugin_asdk_app_6aee41bde0788191a780b26d39df18af', creators: 'plugin_asdk_app_6affb6dffac48191a1a3219f64785726' }); // creators: submitted 2026-11-20 (1.0.0)
+export const CHATGPT_APP_IDS = Object.freeze({ all: 'plugin_asdk_app_6abde87d08048191b2ee7cda76721749', create: 'plugin_asdk_app_6aee494d54448191bfce04e45210a487', ads: 'plugin_asdk_app_6aee41978fe081919e59d8dfa9397a39', social: 'plugin_asdk_app_6aee41bde0788191a780b26d39df18af', creators: 'plugin_asdk_app_6affb6dffac48191a1a3219f64785726', sites: null }); // creators: submitted 2026-11-20 (1.0.0)
 export const CHATGPT_APPS_PUBLISHED_ENV = 'HERMOSO_CHATGPT_APPS_PUBLISHED';
 export const chatgptAppPublished = (app, env = process.env) => app === 'all' || (app === 'create' && chatgptCreatePublished(env)) || String(env?.[CHATGPT_APPS_PUBLISHED_ENV] ?? '').split(/[,\s]+/).map((s) => s.trim().toLowerCase()).includes(app);
 export const chatgptAppLink = (app) => (CHATGPT_APP_IDS[app] ? `https://chatgpt.com/plugins/${CHATGPT_APP_IDS[app]}` : null);
@@ -4675,6 +4713,7 @@ export function appScopeHas(app, name, group, directory = false) {
   if (app === 'social') return group === 'channels' || (group === 'channel_admin' && !APP_ADS_CHANNEL_ADMIN_PROVIDERS.has(prov)) || (group === 'analytics' && APP_SOCIAL_ANALYTICS_PROVIDERS.has(prov)) || APP_SOCIAL_FROM_CREATE.has(n);
   if (app === 'ads') return group === 'ads' || (group === 'analytics' && !APP_SOCIAL_ANALYTICS_PROVIDERS.has(prov)) || (group === 'channel_admin' && (APP_ADS_CHANNEL_ADMIN_PROVIDERS.has(prov) || APP_ADS_ALSO.test(n))) || (!!directory && group === 'research');
   if (app === 'creators') return appCreatorsHas(n, group);
+  if (app === 'sites') return toolSection(n) === 'launch_pages' || APP_SITES_ALSO.includes(n);
   return false;
 }
 // THE CREATOR CAMPAIGNS APP, BY CATEGORY (2026-11-20). Every tool written in the creator campaigns block joins it (a new
@@ -7836,7 +7875,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Use this when the user asks what they need to reply to, about new comments or DMs, or how people are responding. It lists everything people said to this brand, across every connected channel: Facebook and "
       + "Instagram comments, Threads replies and mentions, YouTube comments, TikTok comments, LinkedIn Page comments, Google Business reviews, "
       + "Bluesky replies and mentions, and X mentions — plus DIRECT MESSAGES on Meta (Messenger and Instagram "
-      + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp, SMS (Twilio, Telnyx), LINE, Slack and Discord. Discord messages that mention the Hermoso bot or reply to it, and replies to the brand's Outlook email. Support tickets too: the open conversations in the brand's Intercom inbox. Phone calls too: the calls the brand's AI voice agents (Vapi, Retell AI, ElevenLabs, Telnyx AI) answered or placed, with their transcripts, read only. Each "
+      + "Direct), Instagram, Bluesky, X, Telegram, WhatsApp, SMS (Twilio, Telnyx), LINE, Slack and Discord. Discord messages that mention the Hermoso bot or reply to it, and replies to the brand's Outlook email, plus email to the brand's own domain (the domain inbox). Support tickets too: the open conversations in the brand's Intercom inbox. Phone calls too: the calls the brand's AI voice agents (Vapi, Retell AI, ElevenLabs, Telnyx AI) answered or placed, with their transcripts, read only. Each "
       + "item carries a composite id you hand straight to reply_to_inbox_item. A channel that is not connected is "
       + "skipped and named; a channel that FAILS to read is named in `notes` rather than dropped, so a short list is "
       + "never mistaken for a quiet week. Each DM conversation folds to ONE item (the newest thing the other person said). "
@@ -8025,6 +8064,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
     }
     // Email: the native id is the reply list_email_replies noticed; send_email answers it in the same thread.
     else if (t.source === 'email') { payload.replyTo = t.nativeId; payload.body = body; }
+    // The domain inbox: the native id IS the conversation; the reply leaves from the address it reached, in the same thread.
+    else if (t.source === 'domain_mail') payload.id = t.nativeId;
     // Intercom: the id rides in the PATH, and the route sends to the customer only with confirm:true (this tool's own
     // contract is that the user already approved the wording). Anything but a confirmed read-back is said as such.
     else if (t.source === 'intercom') payload.confirm = true;
@@ -8041,7 +8082,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // A DM IS PRIVATE. Saying "replied publicly as the brand" about a direct message is wrong in the one
     // direction that matters — it invites a caller to be more guarded than it needs to be about a private reply,
     // and, worse, teaches that the same sentence covers both.
-    const note = (t.source.endsWith('_dm') || t.source === 'intercom' || t.source === 'whatsapp' || t.source === 'line' || t.source === 'wechat' || t.source === 'sms' || t.source === 'email') ? `Sent a private reply to the ${t.label} as the brand.` : `Replied to the ${t.label} as the brand.`;
+    const note = (t.source.endsWith('_dm') || t.source === 'intercom' || t.source === 'whatsapp' || t.source === 'line' || t.source === 'wechat' || t.source === 'sms' || t.source === 'email' || t.source === 'domain_mail') ? `Sent a private reply to the ${t.label} as the brand.` : `Replied to the ${t.label} as the brand.`;
     if (r?.idempotentReplay) return ok(r.note, { ok: true, source: t.source, id: r?.id || r?.messageId || undefined, note: r.note }); // that same reply had already gone out
     return ok(note, { ok: true, source: t.source, id: r?.id || r?.messageId || r?.partId || r?.name || undefined, note });
   }));
@@ -12863,7 +12904,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       description: z.string().optional().describe('the smaller description line under the headline'),
       cards: z.array(z.object({ headline: z.string().optional().describe('headline for this carousel card'), description: z.string().optional().describe('description line for this carousel card'), link: z.string().optional().describe('destination URL for this carousel card') })).optional().describe('carousel cards in order — each may set its own headline/description/link'),
       carouselEndCard: z.boolean().optional().describe('append the Page end card to a carousel'),
-      link: z.string().optional().describe('destination URL (defaults to the brand domain)'),
+      link: z.string().optional().describe('destination URL (defaults to the brand domain). A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
       cta: z.string().optional().describe('call-to-action, e.g. SHOP_NOW / LEARN_MORE / SIGN_UP (default LEARN_MORE); WHATSAPP_MESSAGE for a click-to-WhatsApp ad (see destinationType). Any Meta call-to-action type works (SEE_DETAILS…); unknown ones are refused, not swapped.'),
       leadFormId: z.string().optional().describe('LEAD ADS — attach an instant form (from list_meta_lead_forms / create_meta_lead_form) so the button opens that form INSIDE Facebook/Instagram instead of sending the click to a website. Requires objective:"OUTCOME_LEADS"; the ad set is then optimized for LEAD_GENERATION and pointed at the form automatically. Read the submissions afterwards with read_meta_leads.'),
       objective: z.enum(['OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_ENGAGEMENT', 'OUTCOME_LEADS', 'OUTCOME_SALES']).optional().describe('default OUTCOME_TRAFFIC'),
@@ -14292,7 +14333,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // each answer lands on the Shopify order (hermoso.how_did_you_hear) and the brand's contact, and the report sets what buyers
   // said beside what tracking saw for the same orders. Free.
   server.registerTool('post_purchase_survey', {
-    title: 'Post-purchase survey',
+    title: 'How-did-you-hear survey (after an order)', // no 'purchase' wording on a ChatGPT answer (app-handoff-check, 2026-11-23)
     description: 'POST-PURCHASE SURVEY, "How did you hear about us?": what buyers SAY brought them, beside what tracking saw. Asked in three places: on Shopify’s Thank you and Order status pages (the "Hermoso survey" app block, placed once in Settings > Checkout > Customize; not on Shopify Starter), on a hosted page (pageUrl) any store links from its own order email or SMS, and through a signed webhook for answers collected anywhere else (WooCommerce, another survey app, a form). Each answer is written to the Shopify order (metafield hermoso.how_did_you_hear, shown on the order page) and to the brand’s contact (field how_did_you_hear, tag survey:<channel>), and sent as survey.answered to the brand’s Slack, Discord or webhook alerts. action get (default): settings, the page and webhook links, the answer count, whether the Shopify block has loaded. set: enabled, question, options [{ label, channel?, freeText? }] (2-20; channel such as instagram, tiktok, google, ai, word_of_mouth, creator, podcast, email, other), thankYou, shuffle, writeToOrder, writeToContact, accent (hex). link: orderId, email, value, currency -> a link signed with the brand’s secret, so the answer is tied to that order. secret: the signing secret for links and the webhook (rotate:true makes a new one; old signatures stop working). record: an answer the user or agent already has (answer = an option id or label, or the buyer’s own words; otherText, orderId, email, value, currency, at). answers: the answers (days or from/to, channel, source, limit). report: answers and revenue per answer, and for each answer what tracking recorded for the same orders, including how many buyers named a channel tracking credited to direct traffic or nothing. sync: retry writing answers onto orders and contacts. Free.',
     inputSchema: {
       action: z.enum(['get', 'set', 'link', 'secret', 'answers', 'record', 'report', 'sync']).optional().describe('default get'),
@@ -15344,7 +15385,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   //    three levels: a campaign alone can never serve an impression, so create_google_ads_campaign can build the
   //    whole tree in ONE atomic mutate and the granular tools below fill in / edit an existing account.
   const gadsAdShape = {
-    finalUrls: z.array(z.string()).optional().describe('the landing page(s) — at least one is required'),
+    finalUrls: z.array(z.string()).optional().describe('the landing page(s) — at least one is required. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
     headlines: z.array(z.union([z.string(), z.object({ text: z.string(), pin: z.enum(['HEADLINE_1', 'HEADLINE_2', 'HEADLINE_3', 'DESCRIPTION_1', 'DESCRIPTION_2']).optional() })])).optional().describe('SEARCH: 3–15 headlines, each ≤30 characters. DISPLAY: 1–5. Pass a plain string, or {text, pin} to PIN one to a fixed slot (a brand name or legal line).'),
     descriptions: z.array(z.union([z.string(), z.object({ text: z.string(), pin: z.enum(['HEADLINE_1', 'HEADLINE_2', 'HEADLINE_3', 'DESCRIPTION_1', 'DESCRIPTION_2']).optional() })])).optional().describe('SEARCH: 2–4 descriptions, each ≤90 characters. DISPLAY: 1–5. Pass a plain string, or {text, pin} to pin it.'),
     path1: z.string().optional().describe('SEARCH only — display-URL path segment, ≤15 chars'),
@@ -16387,7 +16428,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       imageExtraction: z.boolean().optional().describe('default FALSE: Google may NOT take images from your landing pages and serve them as ad creative. Sent explicitly, because Google switches image extraction ON by default for new Performance Max campaigns from 2026-12-04. Pass true to allow it; the reply reads the setting back from Google'),
       assetGroup: z.object({
         name: z.string().describe('asset group name'),
-        finalUrls: z.array(z.string()).describe('the landing page(s) — at least one'),
+        finalUrls: z.array(z.string()).describe('the landing page(s) — at least one. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
         headlines: z.array(z.string()).describe('3–15, each ≤30 characters'),
         longHeadlines: z.array(z.string()).describe('1–5, each ≤90 characters'),
         descriptions: z.array(z.string()).describe('2–5, each ≤90 characters'),
@@ -18196,6 +18237,450 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiPost(`/api/vercel/deployments/${encodeURIComponent(String(deploymentId || ''))}/delete`, rest);
     return ok(d.note, d);
   }));
+  // ---------- LAUNCH PAGES (2026-11-23): a page the caller's own AI wrote, hosted by Hermoso at <name>.hermoso.page ----------
+  // server.js lsPublish / lsUpdate / lsList / lsGet / lsUnpublish (routes /api/pages*), the logic in lib/launch-sites*.mjs. Hermoso
+  // never writes the page: it stores the files as a version, adds the brand's Hermoso tag, points forms at the lead list and
+  // serves it from a Cloudflare Worker on a domain that is not hermoso.ai. Free: our own storage, no model call.
+  server.group('channels');
+  server.section('launch_pages'); // the Hermoso Launch focused app (APP_NAMES 'sites') lists this section
+  const pageFile = z.object({
+    path: z.string().describe('relative path inside the site, e.g. index.html, css/site.css, img/hero.webp'),
+    content: z.string().optional().describe('the file content: text, or base64 with encoding base64'),
+    encoding: z.enum(['utf-8', 'base64']).optional().describe('utf-8 (default) for text, base64 for binary'),
+    url: z.string().optional().describe('instead of content: the url of a file put through upload_file (or any public https file)'),
+  });
+  const pageOut = { ok: z.boolean().optional(), created: z.boolean().optional(), page: z.any().optional(), pages: z.array(z.any()).optional(), source: z.any().optional(), changed: z.array(z.string()).optional(), removed: z.array(z.string()).optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), unpublished: z.boolean().optional(), enabled: z.boolean().optional(), terms: z.string().optional(), note: z.string().optional() };
+  const pageName = z.string().describe('the page name, which is its address: spring-sale → https://spring-sale.hermoso.page');
+  server.registerTool('publish_page', {
+    title: 'Publish a web page (Hermoso hosts it)',
+    description: "Put a web page, or a small static site, live at https://<name>.hermoso.page from files YOU wrote: Hermoso hosts it and never writes it. name: 3-40 lower-case letters, digits and dashes. html becomes index.html, or files [{path, content}] ({path, content, encoding:'base64'} for binary, {path, url} for a file put through upload_file): up to 100 web files (html, css, js, images, fonts, video, pdf), 10 MB each, 25 MB in all, with an index.html. Every publish is a new version with its own preview link (<name>--v<N>). Hermoso adds the brand's Hermoso tag to every HTML file (visits, UTMs, ad click ids, conversions); the page may load and call anything it needs. Forms post wherever their HTML says; to collect a form's sign-ups in the brand's email lead list, mark it data-hermoso-lead (it needs an email field). EVERY PUBLISHED FILE IS PUBLIC: never put API keys or secrets in page files (a browser key like Stripe's pk_ is fine; a secret key is refused); a secret store comes with the later backend pack. live:false saves a preview and leaves the live page alone. Publishing a name the brand already has replaces its files with exactly these; update_page changes a few, get_page reads a file back, list_pages lists them, unpublish_page takes one offline. A site that ships functions/_worker.js gets a backend: a database, accounts, uploads, checkout, realtime and cron, with keys kept by set_site_secret. To run ads to it, use the live URL, or get_page's adDestinations, as the ad's destination link. Free.",
+    inputSchema: {
+      name: pageName,
+      html: z.string().optional().describe('the full HTML of the page (becomes index.html)'),
+      files: z.array(pageFile).optional().describe('instead of (or as well as) html: every file of the site'),
+      title: z.string().optional().describe('a title for list_pages (default: the index.html <title>)'),
+      live: z.boolean().optional().describe('false = save this version as a preview only; default true'),
+      note: z.string().optional().describe('what this version changes'),
+      badge: z.boolean().optional().describe('false takes the small Made with Hermoso badge off (paid plans)'),
+      cookieBanner: z.boolean().optional().describe('a cookie banner + privacy page (default on when the tag forwards to ad platforms)'),
+    },
+    outputSchema: pageOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/pages', a); return ok(d.note, d); }));
+  server.registerTool('update_page', {
+    title: 'Change a hosted page',
+    description: "Change a page published with publish_page. files [{path, content | url}] add or replace just those files and the rest are kept from the live version; remove [paths] deletes files; html replaces index.html; replace:true publishes exactly the files sent. Each change is a new version with its own preview link; live:false keeps the live page as it is. setLive <version> with no files makes an existing version live: a rollback, or bringing back an unpublished page. abTest {version, split} runs an A/B test: that version for split% of visitors (default 50), the live one for the rest; abTest:false ends it. A site without robots.txt / sitemap.xml gets them generated. get_page file returns a file's current source to edit. Free.",
+    inputSchema: {
+      name: pageName,
+      html: z.string().optional().describe('the new index.html'),
+      files: z.array(pageFile).optional().describe('files to add or replace'),
+      remove: z.array(z.string()).optional().describe('paths to delete, e.g. ["old.html"]'),
+      replace: z.boolean().optional().describe('true = the new version holds exactly the files sent'),
+      live: z.boolean().optional().describe('false = save as a preview only'),
+      setLive: z.number().optional().describe('make this existing version live (no files needed)'),
+      badge: z.boolean().optional().describe('false takes the Made with Hermoso badge off (paid plans); no files needed'),
+      cookieBanner: z.boolean().optional().describe('cookie banner + privacy page on or off; no files needed'),
+      abTest: z.union([z.object({ version: z.number().describe('the variant version (publish it with live:false first)'), split: z.number().optional().describe('percent of visitors who see it, 1-99, default 50') }), z.literal(false)]).optional().describe('test a version against the live one; false ends the test'),
+      title: z.string().optional(), note: z.string().optional().describe('what this version changes'),
+    },
+    outputSchema: pageOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/update`, rest); return ok(d.note, d); }));
+  server.registerTool('list_pages', {
+    title: 'List hosted pages',
+    description: "The brand's hosted pages (publish_page): each name, status (live, preview, unpublished, taken_down), live URL and version, file count and the leads its forms brought in. Free.",
+    inputSchema: {},
+    outputSchema: pageOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/pages', a); return ok(d.note, d); }));
+  server.registerTool('get_page', {
+    title: 'Read a hosted page',
+    description: "One hosted page: its live and preview URLs, every version, its files, and the leads from its forms by version and A/B variant. file (e.g. index.html, optionally version) returns that file's source as it was sent, with Hermoso's tag and form wiring taken out, to edit and send back with update_page (a form marked data-hermoso-lead sends to the lead list; every file is public, so no secrets). platform (meta, google, tiktok, linkedin, microsoft, reddit, pinterest, snapchat, x, chatgpt) with optional campaign / content returns the page as a UTM-tagged ad destination; adDestinations always lists one per platform. Free.",
+    inputSchema: {
+      name: pageName,
+      file: z.string().optional().describe('a file to read, e.g. index.html'),
+      version: z.number().optional().describe('with file: the version to read (default the live one)'),
+      platform: z.enum(['meta', 'google', 'tiktok', 'linkedin', 'microsoft', 'reddit', 'pinterest', 'snapchat', 'x', 'chatgpt']).optional().describe('the ad platform the destination is for'),
+      campaign: z.string().optional().describe('utm_campaign'), content: z.string().optional().describe('utm_content, e.g. the ad name'),
+      path: z.string().optional().describe('a page of the site other than the home page, e.g. pricing.html'),
+    },
+    outputSchema: pageOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiGet(`/api/pages/${encodeURIComponent(String(name || ''))}`, rest); return ok(d.note, d); }));
+  server.registerTool('unpublish_page', {
+    title: 'Take a hosted page offline',
+    description: "Take a hosted page offline: its live address and every preview link answer that it is not published, ads pointing at it included. Without confirm:true nothing changes and you get what it would take down; call again with confirm:true once the user says yes. Its versions are kept: update_page setLive brings it back. Free.",
+    inputSchema: { name: pageName, confirm: z.boolean().optional().describe('true only after the user approved taking this page offline') },
+    outputSchema: pageOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/unpublish`, rest); return ok(d.note, d); }));
+  // Step 3 (2026-11-23): a domain the customer already owns, through Cloudflare for SaaS (lib/launch-sites-domains.mjs).
+  const domOut = { ok: z.boolean().optional(), hostname: z.string().optional(), page: z.string().optional(), state: z.string().optional(), live: z.boolean().optional(), records: z.array(z.any()).optional(), errors: z.array(z.string()).optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), disconnected: z.boolean().optional(), note: z.string().optional() };
+  const domHost = z.string().describe('the address to serve the page on: a subdomain such as go.brand.com or www.brand.com');
+  server.registerTool('connect_domain', {
+    title: 'Serve a page on your own domain',
+    description: "Serve a hosted page on a domain the customer already owns: a subdomain such as go.brand.com or www.brand.com (a bare root cannot take the CNAME; redirect it to www at the DNS host). Answers the ONE DNS record to add (a CNAME); the HTTPS certificate is issued automatically once it resolves and the page goes live on it by itself; domain_status checks it. Needs a paid plan or a funded balance. Free.",
+    inputSchema: { name: pageName, hostname: domHost },
+    outputSchema: domOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/domains`, rest); return ok(d.note, d); }));
+  server.registerTool('domain_status', {
+    title: 'Check a connected domain',
+    description: "Whether a domain connected with connect_domain serves its page yet: waiting for the DNS record (with the record to add), certificate being issued, live, or what went wrong, read from Cloudflare. Free.",
+    inputSchema: { name: pageName, hostname: domHost },
+    outputSchema: domOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet(`/api/pages/${encodeURIComponent(String(a.name || ''))}/domains/${encodeURIComponent(String(a.hostname || ''))}`, {}); return ok(d.note, d); }));
+  server.registerTool('disconnect_domain', {
+    title: 'Disconnect a domain from a page',
+    description: "Stop a connected domain serving its page; the hermoso.page address keeps working. Without confirm:true nothing changes and you get what it would disconnect; call again with confirm:true once the user says yes. Free.",
+    inputSchema: { name: pageName, hostname: domHost, confirm: z.boolean().optional().describe('true only after the user approved it') },
+    outputSchema: domOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { name, hostname, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/domains/${encodeURIComponent(String(hostname || ''))}/disconnect`, rest); return ok(d.note, d); }));
+  // The backend pack's secret store (2026-11-23, lib/launch-sites-secrets.mjs): write-only, names come back, values never.
+  const secOut = { ok: z.boolean().optional(), page: z.string().optional(), secrets: z.array(z.string()).optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), note: z.string().optional() };
+  server.registerTool('set_site_secret', {
+    title: 'Save a secret for a site’s server code',
+    description: "Save a secret (an API key) for a hosted site's server code: key in UPPER_CASE, value. Write-only: the value is never shown again, and the site's functions/_worker.js reads it as env.<KEY>. Never put secrets in page files, which are public. Needs a paid plan or a funded balance. Free.",
+    inputSchema: { name: pageName, key: z.string().describe('e.g. STRIPE_SECRET_KEY'), value: z.string().describe('the secret itself') },
+    outputSchema: secOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/secrets`, rest); return ok(d.note, d); }));
+  server.registerTool('delete_site_secret', {
+    title: 'Delete a site secret',
+    description: "Delete one of a hosted site's secrets. Without confirm:true nothing changes and you get what it would delete; call again with confirm:true once the user says yes. Free.",
+    inputSchema: { name: pageName, key: z.string(), confirm: z.boolean().optional().describe('true only after the user approved it') },
+    outputSchema: secOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, key, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/secrets/${encodeURIComponent(String(key || ''))}/delete`, rest); return ok(d.note, d); }));
+  // G1 rollback, G6 usage + spend cap (2026-11-23, lib/launch-sites-ops.mjs).
+  server.registerTool('rollback_page', {
+    title: 'Roll a hosted project back',
+    description: "Put a hosted project back on its last good version in one call: with no version, the live version before the current one (calling it again undoes the rollback); version names one. The page files and server code go back; the project's database rows, uploads and secrets do not. Free.",
+    inputSchema: { name: pageName, version: z.number().optional().describe('a version to go back to; default the one live before this') },
+    outputSchema: pageOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/rollback`, rest); return ok(d.note, d); }));
+  const useOut = { ok: z.boolean().optional(), month: z.string().optional(), sites: z.array(z.any()).optional(), credits: z.number().optional(), cap: z.number().nullable().optional(), state: z.string().optional(), charging: z.boolean().optional(), note: z.string().optional() };
+  server.registerTool('list_site_usage', {
+    title: 'Hosting usage of hosted projects',
+    description: "This month's hosting usage per hosted project (publish_page): requests and bytes served, bytes stored, publishes, form leads, and the credits it comes to, beside the monthly spend cap. Read-only; hosting is not charged until launch, and the reply says so. Free.",
+    inputSchema: { name: z.string().optional().describe('one project; default all'), month: z.string().optional().describe('YYYY-MM; default this month') },
+    outputSchema: useOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/sites/usage', a); return ok(d.note, d); }));
+  server.registerTool('set_site_spend_cap', {
+    title: 'Cap hosting spend',
+    description: "Set a monthly credit cap on the account's hosting usage (list_site_usage): the owner is emailed at 80%, and at 100% every hosted project answers \"paused\" until the cap is raised or removed, or the month turns. monthlyCredits null removes the cap. Free.",
+    inputSchema: { monthlyCredits: z.number().nullable().describe('the cap in credits a month, or null to remove it') },
+    outputSchema: useOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a = {}) => { const d = await apiPost('/api/sites/spend-cap', a); return ok(d.note, d); }));
+  // LAUNCH ADMIN (2026-11-23, G8 G12 G13 G14 G15; lib/launch-sites-admin-routes.mjs): export + GitHub push, server logs,
+  // database backups and restore, email report + suppression list, site users. Every one is free; each has its own switch.
+  const admOut = { ok: z.boolean().optional(), page: z.string().optional(), version: z.number().optional(), files: z.number().optional(), bytes: z.number().optional(), url: z.string().optional(), expiresAt: z.string().optional(), commit: z.string().optional(), commitUrl: z.string().optional(), lines: z.array(z.any()).optional(), count: z.number().optional(), errors: z.number().optional(), snapshot: z.any().optional(), snapshots: z.array(z.any()).optional(), sql: z.string().optional(), safetySnapshot: z.string().optional(), sent: z.number().optional(), bounced: z.number().optional(), refused: z.number().optional(), suppressed: z.any().optional(), users: z.array(z.any()).optional(), user: z.any().optional(), total: z.number().optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), note: z.string().optional() };
+  const admName = z.string().describe('the project (its hermoso.page name)');
+  const admConfirm = z.boolean().optional().describe('true only after the user approved it');
+  const pg = (a) => encodeURIComponent(String(a?.name || ''));
+  server.registerTool('export_site', {
+    title: 'Download a hosted project as a zip',
+    description: "A zip of a hosted project's files (the live version, or version) exactly as the user's AI wrote them, with Hermoso's tag, badge and form wiring taken out: a download link that works for 60 minutes. Secrets, the database, uploads and users are not in it. Free.",
+    inputSchema: { name: admName, version: z.number().optional().describe('a kept version; default the live one') },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet(`/api/pages/${pg(a)}/export`, a.version != null ? { version: a.version } : {}); return ok(d.note, d); }));
+  server.registerTool('push_site_to_github', {
+    title: 'Push a hosted project to GitHub',
+    description: "Commit a hosted project's files (the live version, or version) to a GitHub repository (repo owner/name, branch default main) as one new commit: the branch's files become exactly the project's files, its history is kept, nothing is force-pushed, and a repository that does not exist is created private. Needs a GitHub fine-grained token from the user with Contents read and write (token; saveToken:true keeps it write-only for next time). Without confirm:true nothing is pushed; call again with confirm:true once the user says yes. Free.",
+    inputSchema: { name: admName, repo: z.string().describe('owner/name, e.g. acme/spring-sale-site'), branch: z.string().optional().describe('default main'), version: z.number().optional(), token: z.string().optional().describe("the user's GitHub token; omit to use a saved one"), saveToken: z.boolean().optional(), message: z.string().optional().describe('the commit message'), confirm: admConfirm },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiPost(`/api/pages/${pg(a)}/github`, rest); return ok(d.note, d); }));
+  server.registerTool('site_logs', {
+    title: "Read a hosted project's server logs",
+    description: "A hosted project's server-code logs (functions/_worker.js): its console output, uncaught errors with their stack, and one line per request with status and time, newest last. hours (default 24, up to 72), level error | warn | request | all, contains (text to match), limit (up to 500). Read-only. Free.",
+    inputSchema: { name: admName, hours: z.number().optional(), level: z.enum(['error', 'warn', 'request', 'all']).optional(), contains: z.string().optional(), limit: z.number().optional() },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiGet(`/api/pages/${pg(a)}/logs`, rest); return ok(d.note, d); }));
+  server.registerTool('export_site_db', {
+    title: "Export a hosted project's database",
+    description: "A hosted project's database (env.DB) as SQL: a download link (60 minutes), the SQL itself when it is small, and the same dump kept as a snapshot restore_site_db can go back to. Free.",
+    inputSchema: { name: admName },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiPost(`/api/pages/${pg(a)}/db/export`, {}); return ok(d.note, d); }));
+  server.registerTool('list_site_db_backups', {
+    title: "List a hosted project's database snapshots",
+    description: "A hosted project's database snapshots, newest first: one every day, one before every restore and one per export_site_db, the newest 7 kept; in production D1 Time Travel also covers any minute of the last 30 days. Read-only. Free.",
+    inputSchema: { name: admName },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet(`/api/pages/${pg(a)}/db/backups`, {}); return ok(d.note, d); }));
+  server.registerTool('restore_site_db', {
+    title: "Restore a hosted project's database",
+    description: "Replace a hosted project's whole database with a snapshot (snapshot: an id from list_site_db_backups) or, in production, with how it was at a time in the last 30 days (timestamp, ISO). A snapshot of the database as it is now is taken first, so it can be undone. Files, uploads, secrets and sessions are not touched. Without confirm:true nothing changes; call again with confirm:true once the user says yes. Free.",
+    inputSchema: { name: admName, snapshot: z.string().optional(), timestamp: z.string().optional().describe('ISO time, production only'), confirm: admConfirm },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiPost(`/api/pages/${pg(a)}/db/restore`, rest); return ok(d.note, d); }));
+  server.registerTool('site_email_report', {
+    title: "A hosted project's email report",
+    description: "The emails a hosted project's server code sent with env.EMAIL over the last days (default 7, up to 30): sent, bounced, refused as suppressed and failed, by template, and its suppression list (hard bounces, spam complaints, addresses the owner added), synced from Cloudflare's bounce and complaint list. Templates are files emails/<name>.html (its <title> is the subject; optional emails/<name>.txt) sent with env.EMAIL.send({ to, template: '<name>', data: {...} }), {{field}} filled in. Free.",
+    inputSchema: { name: admName, days: z.number().optional() },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiGet(`/api/pages/${pg(a)}/email`, rest); return ok(d.note, d); }));
+  server.registerTool('set_site_email_suppression', {
+    title: "Edit a hosted project's email suppression list",
+    description: "suppressed:true adds an address to a hosted project's suppression list (env.EMAIL refuses to send to it); suppressed:false takes it off so the site can email it again, which needs confirm:true after the user says yes. Free.",
+    inputSchema: { name: admName, email: z.string(), suppressed: z.boolean(), confirm: admConfirm },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiPost(`/api/pages/${pg(a)}/email/suppression`, rest); return ok(d.note, d); }));
+  server.registerTool('list_site_users', {
+    title: "List a hosted project's users",
+    description: "The people signed up on a hosted project through its accounts (/_hermoso/auth): email, id, when, whether disabled, password or Google sign-in. search (part of an email), limit (up to 200), offset. Read-only. Free.",
+    inputSchema: { name: admName, search: z.string().optional(), limit: z.number().optional(), offset: z.number().optional() },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiGet(`/api/pages/${pg(a)}/users`, rest); return ok(d.note, d); }));
+  server.registerTool('update_site_user', {
+    title: "Disable, enable or reset a hosted project's user",
+    description: "Change one user of a hosted project (user: their id or email). action disable: signed out everywhere and unable to sign in, data kept; enable: undoes it; reset_password: their password stops working, they are signed out, and they are emailed a link to choose a new one (valid 60 minutes). Disable and reset_password need confirm:true after the user says yes; without it nothing changes. Free.",
+    inputSchema: { name: admName, user: z.string().describe('the user id or email'), action: z.enum(['disable', 'enable', 'reset_password']), confirm: admConfirm },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiPost(`/api/pages/${pg(a)}/users/update`, rest); return ok(d.note, d); }));
+  server.registerTool('delete_site_user', {
+    title: "Delete a hosted project's user",
+    description: "Delete one user's account on a hosted project for good (user: id or email): they are signed out and cannot sign in again with it. Rows the site's own code keeps under their id are not touched. Without confirm:true nothing changes; call again with confirm:true once the user says yes. Free.",
+    inputSchema: { name: admName, user: z.string().describe('the user id or email'), confirm: admConfirm },
+    outputSchema: admOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; void name; const d = await apiPost(`/api/pages/${pg(a)}/users/delete`, rest); return ok(d.note, d); }));
+  // DOMAINS SOLD IN DOLLARS (2026-11-23, lib/launch-sites-registrar.mjs): Hermoso's Stripe, never credits; buy_domain answers a payment link.
+  const dOut = { ok: z.boolean().optional(), domain: z.any().optional(), domains: z.array(z.any()).optional(), results: z.array(z.any()).optional(), url: z.string().optional(), authCode: z.string().optional(), firstYearUsd: z.number().optional(), renewalUsd: z.number().optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), note: z.string().optional() };
+  const dName = z.string().describe('the domain, e.g. yourbrand.com');
+  const dConfirm = z.boolean().optional().describe('true only after the user approved it');
+  server.registerTool('find_domain', {
+    title: 'Check a domain and its price',
+    description: "Check whether domains can be bought through Hermoso and what they cost in dollars (first year and yearly renewal). names: full names (yourbrand.com), or one brand word to try across .com, .co, .io, .app and get/try prefixes. Read-only, reserves nothing. Free.",
+    inputSchema: { names: z.union([z.array(z.string()), z.string()]).describe('domains to check, or one brand word') },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/domains/find', { names: Array.isArray(a.names) ? a.names.join(',') : a.names }); return ok(d.note, d); }));
+  server.registerTool('buy_domain', {
+    title: 'Get a new domain (payment link)',
+    description: "Buy a domain through Hermoso, priced in dollars. The registrant (firstName, lastName, email, phone +1.4155550100, address1, city, state, zip, country) owns it; WHOIS privacy is free; auto-renew is on. Without confirm:true nothing happens and you get the exact fees and the Name.com Registration Agreement to show the user; once they accept it, confirm:true with acceptRegistrationAgreement:true returns a Stripe payment link for the USER to open and pay by card (nothing is charged in the chat), and the domain registers within about a minute of paying. Name.com is the sponsoring registrar. Needs a paid plan or bought credits. page optionally names the hosted project it is for.",
+    inputSchema: {
+      domain: dName,
+      registrant: z.object({ firstName: z.string(), lastName: z.string(), email: z.string(), phone: z.string().describe('+<country>.<number>, e.g. +1.4155550100'), address1: z.string(), city: z.string(), state: z.string(), zip: z.string(), country: z.string().describe('two letters, e.g. US'), companyName: z.string().optional() }).describe('who will own the domain (ICANN needs real details)'),
+      page: z.string().optional().describe('the hosted project this domain is for'),
+      acceptRegistrationAgreement: z.boolean().optional().describe('true only after the user accepted the Name.com Registration Agreement'),
+      confirm: dConfirm,
+    },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/domains/buy', a); return ok(d.note, d); }));
+  server.registerTool('list_domains', {
+    title: 'List bought domains',
+    description: "The domains this account bought through Hermoso: status, expiry, renewal price, auto-renew, the card on file. Free.",
+    inputSchema: {},
+    outputSchema: dOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async () => { const d = await apiGet('/api/domains', {}); return ok(d.note, d); }));
+  server.registerTool('get_domain', {
+    title: 'Read a bought domain',
+    description: "One domain bought through Hermoso: expiry, renewal price, auto-renew, card, receipts (Stripe receipt links), email forwarding, the transfer lock date, and a pending payment link if it is not paid yet. Free.",
+    inputSchema: { domain: dName },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet(`/api/domains/${encodeURIComponent(String(a.domain || ''))}`, {}); return ok(d.note, d); }));
+  server.registerTool('set_domain_autorenew', {
+    title: 'Turn domain auto-renew on or off',
+    description: "Turn auto-renew on or off for a domain bought through Hermoso. Off means it lapses at its expiry unless renewed. Nothing is charged by this call. Free.",
+    inputSchema: { domain: dName, on: z.boolean().describe('true = renew automatically, false = let it lapse at expiry') },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/autorenew`, rest); return ok(d.note, d); }));
+  server.registerTool('renew_domain', {
+    title: 'Renew a domain now',
+    description: "Renew a domain bought through Hermoso for one more year now, charged in dollars to the card on file. Without confirm:true nothing is charged and you get the price and card to show the user; call again with confirm:true once they say yes.",
+    inputSchema: { domain: dName, confirm: dConfirm },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/renew`, rest); return ok(d.note, d); }));
+  server.registerTool('transfer_out', {
+    title: 'Move a domain to another registrar',
+    description: "Unlock a domain bought through Hermoso and get its transfer (auth) code to move it to another registrar; Hermoso's auto-renew turns off. Refused within 60 days of registration (ICANN lock). Without confirm:true nothing changes; call again with confirm:true once the user says yes. Free.",
+    inputSchema: { domain: dName, confirm: dConfirm },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/transfer-out`, rest); return ok(d.note, d); }));
+  server.registerTool('set_email_forwarding', {
+    title: 'Forward email on a bought domain',
+    description: "Forward mail for an address on a domain bought through Hermoso to an inbox: alias (hello, or * for every address) and to (you@gmail.com). The inbox owner confirms one email from Cloudflare first. remove:true with confirm:true stops it. Free.",
+    inputSchema: { domain: dName, alias: z.string().describe('the part before the @, or *'), to: z.string().optional().describe('the inbox to forward to'), remove: z.boolean().optional(), confirm: dConfirm },
+    outputSchema: dOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/email-forwarding`, rest); return ok(d.note, d); }));
+  // LAUNCH G10 (2026-11-23): the DNS editor on a domain bought through Hermoso (server.js "G10", LAUNCH_SITES_DNS_EDITOR=on).
+  // Free: the domain's own zone in the pages Cloudflare account.
+  const lOut = { ok: z.boolean().optional(), domain: z.any().optional(), records: z.array(z.any()).optional(), record: z.any().optional(), deleted: z.any().optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), note: z.string().optional() };
+  const lConfirm = z.boolean().optional().describe('true only after the user approved it');
+  server.registerTool('list_dns_records', {
+    title: 'List DNS records of a bought domain',
+    description: "The DNS records on a domain bought through Hermoso: type, name, value, id, and which ones Hermoso keeps for the page or the email forwarding. Free.",
+    inputSchema: { domain: dName },
+    outputSchema: lOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet(`/api/domains/${encodeURIComponent(String(a.domain || ''))}/dns`, {}); return ok(d.note, d); }));
+  server.registerTool('set_dns_record', {
+    title: 'Add or change a DNS record',
+    description: "Add a DNS record to a domain bought through Hermoso, or change one (pass id): a TXT to verify Google or another service, MX for a mail provider, a CNAME or A for a third-party tool, CAA. name is @ for the domain itself or a subdomain. Records serving the page or the email forwarding are refused with the way out. Free.",
+    inputSchema: { domain: dName, type: z.enum(['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'CAA']), name: z.string().describe('@, or a subdomain such as mail or _dmarc'), content: z.string().describe('the value: an IP, a host name or the TXT text'), ttl: z.number().optional().describe('seconds, 60-86400; default auto'), priority: z.number().optional().describe('MX only, default 10'), proxied: z.boolean().optional().describe('A/AAAA/CNAME through Cloudflare; default false'), id: z.string().optional().describe('change this record (list_dns_records)') },
+    outputSchema: lOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/dns`, rest); return ok(d.note, d); }));
+  server.registerTool('delete_dns_record', {
+    title: 'Delete a DNS record',
+    description: "Delete one DNS record (by id, from list_dns_records) on a domain bought through Hermoso. Without confirm:true nothing changes. Free.",
+    inputSchema: { domain: dName, id: z.string(), confirm: lConfirm },
+    outputSchema: lOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, id, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/dns/${encodeURIComponent(String(id || ''))}/delete`, rest); return ok(d.note, d); }));
+  server.registerTool('connect_email_provider', {
+    title: 'Connect an email provider to a bought domain',
+    description: "Connect the email provider the user signed up for (google_workspace, microsoft_365, zoho, fastmail, or custom with mx + spfInclude) to a domain bought through Hermoso in one step: its MX, ONE SPF merged with the includes already there, DKIM (dkim {selector, value}; Microsoft: {selector1, selector2}), DMARC (p=none unless asked) and its verification TXT. Hermoso's email forwarding goes off, since mail can only go one way. Without confirm:true when it replaces the MX nothing changes. Answers the provider's own verification steps. Free.",
+    inputSchema: { domain: dName, provider: z.enum(['google_workspace', 'microsoft_365', 'zoho', 'fastmail', 'custom']), verification: z.string().optional().describe("the provider's domain verification TXT, e.g. google-site-verification=... or MS=ms..."), dkim: z.object({ selector: z.string().optional(), value: z.string().optional(), type: z.enum(['TXT', 'CNAME']).optional(), selector1: z.string().optional(), selector2: z.string().optional() }).optional(), dmarc: z.object({ policy: z.enum(['none', 'quarantine', 'reject']).optional(), rua: z.string().optional() }).optional(), mx: z.union([z.string(), z.array(z.string())]).optional().describe('Microsoft: the MX value its admin center shows; custom: the mail servers, e.g. ["10 mx1.host.com"]'), spfInclude: z.string().optional().describe('custom only'), region: z.string().optional().describe('Zoho data center: com, eu, in, com.au, jp, ca, sa'), confirm: lConfirm },
+    outputSchema: { ...lOut, added: z.array(z.any()).optional(), removed: z.array(z.any()).optional(), steps: z.array(z.string()).optional(), needs: z.array(z.string()).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/email-provider`, rest); return ok(d.note, d); }));
+  // THE DOMAIN INBOX (2026-11-23, server.js "THE DOMAIN INBOX", LAUNCH_SITES_DOMAIN_INBOX=on): email as <any address>@a domain
+  // bought through Hermoso, received by Cloudflare Email Routing and sent with Cloudflare Email Sending; no other mailbox.
+  const mOut = { ok: z.boolean().optional(), domain: z.any().optional(), addresses: z.array(z.any()).optional(), conversations: z.array(z.any()).optional(), messages: z.array(z.any()).optional(), id: z.string().optional(), threadId: z.string().optional(), messageId: z.string().optional(), subject: z.string().optional(), count: z.number().optional(), costCredits: z.number().optional(), dryRun: z.boolean().optional(), needsConfirm: z.boolean().optional(), note: z.string().optional() };
+  const mList = z.union([z.array(z.string()), z.string()]);
+  const mAtt = z.array(z.union([z.string(), z.object({ url: z.string(), filename: z.string().optional() })])).optional().describe('files as links (upload_file turns a file into one), up to 10 MB in all');
+  server.registerTool('create_domain_address', {
+    title: 'Add an email address to a domain',
+    description: "Give a domain bought through Hermoso an email address whose mail lands in the Hermoso inbox (list_inbox, list_domain_mail): address is ANY name the user picks (sales, jane, support) or * for every address. forwardTo also forwards a copy to an inbox (it confirms Cloudflare's email once). remove:true with confirm:true takes it away. Not available while the domain's mail goes to Google Workspace or Microsoft 365 (connect_email_provider). Free.",
+    inputSchema: { domain: dName, address: z.string().describe('the part before the @ (any name), or * for every address'), forwardTo: z.string().optional().describe('also forward a copy to this inbox'), remove: z.boolean().optional(), confirm: dConfirm },
+    outputSchema: mOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/domain-mail/addresses', a); return ok(d.note, d); }));
+  server.registerTool('list_domain_mail', {
+    title: 'List domain inbox email',
+    description: "The email conversations in the domain inbox, newest first, one per thread: who wrote, to which address, subject, answered or not. domain or address narrow it; unansweredOnly leaves out what was answered. Free.",
+    inputSchema: { domain: z.string().optional(), address: z.string().optional(), unansweredOnly: z.boolean().optional(), limit: z.number().optional() },
+    outputSchema: mOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a = {}) => { const d = await apiGet('/api/domain-mail', a); return ok(d.note, d); }));
+  server.registerTool('get_domain_mail', {
+    title: 'Read a domain inbox conversation',
+    description: "One domain inbox conversation in full: every message with its text, sender, attachments (download links) and threading ids. id is from list_domain_mail (or the part after domain_mail: in list_inbox). Free.",
+    inputSchema: { id: z.string() },
+    outputSchema: mOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet(`/api/domain-mail/${encodeURIComponent(String(a.id || ''))}`, {}); return ok(d.note, d); }));
+  server.registerTool('reply_domain_mail', {
+    title: 'Reply to a domain inbox email',
+    description: "Reply in a domain inbox conversation: it goes from the address the person wrote to, in the same thread (Re: subject, In-Reply-To, References), to the person who wrote (replyAll adds the others). Show the user the wording first. The first emails each month are free; after that a block of 1,000 is paid in advance from credits.",
+    inputSchema: { id: z.string(), text: z.string().describe('the reply'), html: z.string().optional(), replyAll: z.boolean().optional(), cc: mList.optional(), attachments: mAtt, fromName: z.string().optional().describe('the sender name shown; default the brand name') },
+    outputSchema: mOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { id, ...rest } = a; const d = await apiPost(`/api/domain-mail/${encodeURIComponent(String(id || ''))}/reply`, rest); return ok(d.note, d); }));
+  server.registerTool('send_domain_mail', {
+    title: 'Send an email from the domain',
+    description: "Start an email conversation from a domain inbox address (from: e.g. hello@theirdomain; with a catch-all, any address on it): to, subject, text, optional html, cc, bcc, attachments. Their reply comes back to the inbox. For one-to-one conversations: a newsletter, campaign or list send is refused, and belongs in an email marketing tool. Show the user the email first.",
+    inputSchema: { from: z.string(), to: mList, subject: z.string(), text: z.string(), html: z.string().optional(), cc: mList.optional(), bcc: mList.optional(), attachments: mAtt, fromName: z.string().optional() },
+    outputSchema: mOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/domain-mail/send', a); return ok(d.note, d); }));
+  // LAUNCH G4 / G11 (2026-11-23): private projects and review links (LAUNCH_SITES_PRIVATE_PAGES=on), the SEO audit and Search
+  // Console (LAUNCH_SITES_SEO_TOOLS=on). server.js "LAUNCH, FOURTH PASS"; free.
+  const pOut = { ok: z.boolean().optional(), page: z.any().optional(), access: z.any().optional(), url: z.string().optional(), expiresAt: z.string().optional(), score: z.number().optional(), findings: z.array(z.any()).optional(), siteUrl: z.string().optional(), verified: z.boolean().optional(), queries: z.array(z.any()).optional(), coverage: z.array(z.any()).optional(), note: z.string().optional() };
+  server.registerTool('set_page_access', {
+    title: 'Make a project private',
+    description: "Put a hosted project behind one shared password, or make its preview links private: password (null removes it), paths (default the whole site, e.g. ['/members']), previews (true: --v<N> links need the password or a review link), public:true opens it again, revoke:true ends every review link and session. Free.",
+    inputSchema: { name: pageName, password: z.string().nullable().optional().describe('the shared password; null removes it'), paths: z.array(z.string()).optional(), previews: z.boolean().optional(), public: z.boolean().optional(), revoke: z.boolean().optional() },
+    outputSchema: pOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/access`, rest); return ok(d.note, d); }));
+  server.registerTool('create_review_link', {
+    title: 'Make a review link',
+    description: "A signed, expiring link that opens a private project (or one version's preview) without the password, to send a client or a teammate. hours: 1-720, default 72. Free.",
+    inputSchema: { name: pageName, version: z.number().optional().describe('one version (default: the live site and every preview)'), hours: z.number().optional() },
+    outputSchema: pOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/review-link`, rest); return ok(d.note, d); }));
+  server.registerTool('audit_page', {
+    title: 'SEO audit of a project',
+    description: "Check a hosted project's SEO: title, description, headings, alt text, viewport, canonical, Open Graph, JSON-LD, broken links, favicon, llms.txt. Each finding carries the fix to apply with update_page. Free.",
+    inputSchema: { name: pageName, version: z.number().optional() },
+    outputSchema: pOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiGet(`/api/pages/${encodeURIComponent(String(name || ''))}/seo-audit`, rest); return ok(d.note, d); }));
+  server.registerTool('connect_page_to_search_console', {
+    title: 'Put a project on Google Search Console',
+    description: "Add a hosted project to the connected Google Search Console, serve its verification file (verificationFile: the google....html name Search Console shows under Ownership verification), and once verified submit the sitemap and read coverage and top searches. Free.",
+    inputSchema: { name: pageName, verificationFile: z.string().optional(), siteUrl: z.string().optional().describe('default: its custom domain, else its hermoso.page address') },
+    outputSchema: pOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/search-console`, rest); return ok(d.note, d); }));
+  // HERMOSO PAYMENTS (2026-11-23): a site takes card payments with no Stripe setup, through Hermoso's Stripe Connect platform
+  // (server.js "HERMOSO PAYMENTS", lib/site-payments.mjs; LAUNCH_SITES_PAYMENTS=on). No credits move; the seller pays Stripe's fees + 3%.
+  const spOut = { ok: z.boolean().optional(), on: z.boolean().optional(), ready: z.boolean().optional(), state: z.string().optional(), url: z.string().optional(), payments: z.array(z.any()).optional(), payment: z.any().optional(), refund: z.any().optional(), available: z.array(z.any()).optional(), pending: z.array(z.any()).optional(), payouts: z.array(z.any()).optional(), schedule: z.any().optional(), recovery: z.any().optional(), sites: z.array(z.any()).optional(), mode: z.string().optional(), needsConfirm: z.boolean().optional(), note: z.string().optional() };
+  server.registerTool('start_payments_onboarding', {
+    title: 'Set up Hermoso Payments',
+    description: "Let this brand's hosted sites take card payments with no Stripe account of their own: the business is reviewed against Stripe's prohibited and restricted list (a cheap review, billed), then this answers Stripe's own onboarding link (identity and bank details, kept by Stripe). country: where the business is registered. The seller pays Stripe's fees + 3%; money reaches the bank 31 days after each sale.",
+    inputSchema: { country: z.string().optional().describe('two letters, e.g. US, CA, GB (asked once)'), business: z.string().optional().describe('what the business does and sells') },
+    outputSchema: spOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiPost('/api/site-payments/onboarding', a); return ok(d.note, d); }));
+  server.registerTool('payments_status', {
+    title: 'Hermoso Payments status',
+    description: "Whether Hermoso Payments is ready for this brand, what Stripe still needs, which sites use it, any block or suspension, and the fee and payout terms. Free.",
+    inputSchema: {},
+    outputSchema: spOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async () => { const d = await apiGet('/api/site-payments/status', {}); return ok(d.note, d); }));
+  server.registerTool('list_site_payments', {
+    title: 'List site payments',
+    description: "Payments taken on the brand's hosted sites through Hermoso Payments: amount, product, buyer, status, fees. name: one site. Free.",
+    inputSchema: { name: z.string().optional(), status: z.string().optional().describe('paid, refunded, partly_refunded, disputed, failed'), limit: z.number().optional() },
+    outputSchema: spOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => { const d = await apiGet('/api/site-payments/payments', a); return ok(d.note, d); }));
+  server.registerTool('get_site_payment', {
+    title: 'One site payment',
+    description: "One Hermoso Payments payment (id from list_site_payments): amount, fees, refunds, dispute. Free.",
+    inputSchema: { id: z.string() },
+    outputSchema: spOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const d = await apiGet(`/api/site-payments/payments/${encodeURIComponent(String(a.id || ''))}`, {}); return ok(d.note, d); }));
+  server.registerTool('refund_site_payment', {
+    title: 'Refund a site payment',
+    description: "Refund a Hermoso Payments payment to the buyer, in full or amount (cents). It is taken from the brand's balance; Stripe's and Hermoso's fees are not returned. Without confirm:true nothing is refunded. Free.",
+    inputSchema: { id: z.string(), amount: z.number().optional().describe('cents; default the whole amount left'), reason: z.string().optional(), confirm: z.boolean().optional().describe('true only after the user approved it') },
+    outputSchema: spOut,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => { const { id, ...rest } = a; const d = await apiPost(`/api/site-payments/payments/${encodeURIComponent(String(id || ''))}/refund`, rest); return ok(d.note, d); }));
+  server.registerTool('payouts_status', {
+    title: 'Hermoso Payments payouts',
+    description: "The brand's Hermoso Payments balance (available, on its way), its payout schedule (31-day hold; paused while it owes money) and recent payouts. Free.",
+    inputSchema: {},
+    outputSchema: spOut,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async () => { const d = await apiGet('/api/site-payments/payouts', {}); return ok(d.note, d); }));
+  server.registerTool('set_site_payments_mode', {
+    title: 'Choose how a site takes payments',
+    description: "mode hermoso: the site takes payments through Hermoso Payments (no Stripe setup; the products in its hermoso.json payments.prices are reviewed, a cheap billed review). mode own: the owner's own Stripe (site secret STRIPE_SECRET_KEY). The site's fetch('/_hermoso/checkout', {method:'POST', body: JSON.stringify({price})}) works in both, unchanged.",
+    inputSchema: { name: pageName, mode: z.enum(['hermoso', 'own']) },
+    outputSchema: spOut,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/payments-mode`, rest); return ok(d.note, d); }));
   // ---------- PHONE / SMS / VOICE (2026-11-18): the brand's OWN Twilio or Telnyx account, the same tools whichever is connected ----------
   // Every route is in server.js (search "PHONE NUMBERS, SMS / MMS AND VOICE"); the rules are lib/phone.mjs. Nothing is enforced by
   // default; the optional sending settings are set_sms_settings. Sends cost no credits; transcribe_call is our AI and is billed.
@@ -20276,7 +20761,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // THE MONEY PASS (2026-11-20): campaign funds + OPTIONAL automatic payouts, and the sales credited for commission.
   server.registerTool('creator_campaign_funds', {
     title: 'Campaign funds and automatic payouts',
-    description: 'Money a brand pays INTO one creator campaign ahead of payouts, and the campaign\'s OPTIONAL automatic payouts (off unless the brand turns them on). action read (default): funds available, on hold, spent and taken back, and whether automatic payouts are on. action fund with amountUsd (+ method card or bank): a PREVIEW, nothing charged (the funds + one payment processing line + currency conversion); confirm:true with acceptTerms:true and expectTotalCents from the preview makes the payment link. Funds are held like every payment (7 days by card, 14 once a bank debit clears), then payouts are paid from them, each taking the creator\'s amount, the Hermoso fee and Stripe\'s payout costs. action auto_on (acceptTerms:true: the brand\'s standing instruction) or auto_off: Hermoso pays payable earnings from the funds as they come off hold and never charges the brand. action refund: what is left goes back to the payment method (preview, then confirm:true). Free.',
+    description: 'Money a brand pays INTO one creator campaign ahead of payouts, and the campaign\'s OPTIONAL automatic payouts (off unless the brand turns them on). action read (default): funds available, on hold, spent and taken back, and whether automatic payouts are on. action fund with amountUsd (+ method card or bank): a PREVIEW, nothing charged (the funds + one payment processing line + currency conversion); confirm:true with acceptTerms:true and expectTotalCents from the preview makes the payment link. Funds are held like every payment (14 days when it is the brand\'s first payment, 7 days after that, by card; 14 once a bank debit clears), then payouts are paid from them, each taking the creator\'s amount, the Hermoso fee and Stripe\'s payout costs. action auto_on (acceptTerms:true: the brand\'s standing instruction) or auto_off: Hermoso pays payable earnings from the funds as they come off hold and never charges the brand. action refund: what is left goes back to the payment method (preview, then confirm:true). Free.',
     inputSchema: { campaignId: z.string(), action: z.enum(['read', 'fund', 'auto_on', 'auto_off', 'refund']).optional(), amountUsd: z.number().optional().describe('fund: how much to pay in'), method: z.enum(['card', 'bank']).optional(), expectTotalCents: z.number().optional().describe('fund with confirm: the previewed total the user agreed to'), fundingId: z.string().optional().describe('refund: only this payment'), confirm: z.boolean().optional(), acceptTerms: z.boolean().optional().describe('fund and auto_on: the user accepts the creator-campaign terms; recorded') },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
@@ -20503,7 +20988,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const msAdShape = {
     headlines: z.array(z.string()).optional().describe('3–15 headlines, each ≤30 characters'),
     descriptions: z.array(z.string()).optional().describe('2–4 descriptions, each ≤90 characters'),
-    finalUrls: z.array(z.string()).optional().describe('the landing page(s) — at least one is required'),
+    finalUrls: z.array(z.string()).optional().describe('the landing page(s) — at least one is required. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
     path1: z.string().optional().describe('display-URL path segment, ≤15 chars, no "/"'),
     path2: z.string().optional().describe('second display-URL path segment (only with path1)'),
   };
@@ -22582,7 +23067,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Create an X card — the big image/video with a headline or button that an X ad clicks through on. ONE destination: websiteUrl (a website card, with a headline `title`), leadFormId (opens an X lead form — headline, or a button with buttonLabel), or an app (iosAppId/googlePlayAppId + countryCode, a button). Media: mediaKey, or 2–6 mediaKeys for a swipeable card (upload_x_ads_media). utm {source,medium,campaign,content,term} is appended to websiteUrl without overwriting the URL's own. Read back from X; a card is used by create_x_ads_post(cardUri). Free.",
     inputSchema: {
       ...xAcct, name: z.string().describe('internal name for the card'), mediaKey: z.string().optional().describe('one media key from upload_x_ads_media (single image or video)'), mediaKeys: z.array(z.string()).optional().describe('2-6 media keys from upload_x_ads_media, for a swipeable card'),
-      title: z.string().optional().describe('headline, for website and lead-form cards'), websiteUrl: z.string().optional().describe('destination URL for a website card'), utm: xUtm.optional().describe('UTM tags object: source, medium, campaign, content, term; appended to websiteUrl'),
+      title: z.string().optional().describe('headline, for website and lead-form cards'), websiteUrl: z.string().optional().describe('destination URL for a website card. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'), utm: xUtm.optional().describe('UTM tags object: source, medium, campaign, content, term; appended to websiteUrl'),
       leadFormId: z.string().optional().describe('X lead form id from list_x_ads_lead_forms, for a lead-form card'), buttonLabel: z.enum(['BOOK', 'CONNECT', 'INSTALL', 'OPEN', 'ORDER', 'PLAY', 'SHOP']).optional().describe('button text shown on a lead-form or app card'),
       iosAppId: z.string().optional().describe('iOS App Store app id, for an app card'), googlePlayAppId: z.string().optional().describe('Google Play package id, for an app card'), countryCode: z.string().optional().describe('2-letter store country for an app card, e.g. US'), iosDeepLink: z.string().optional().describe('iOS deep link for an app card'), googlePlayDeepLink: z.string().optional().describe('Android deep link for an app card'),
     },
@@ -23126,7 +23611,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     pinId: z.string().describe('the numeric id of an existing Pin — a Pinterest ad PROMOTES a Pin, so create one with post_to_pinterest first if there is nothing to promote'),
     creativeType: z.enum(['REGULAR', 'VIDEO', 'SHOPPING', 'CAROUSEL', 'MAX_VIDEO', 'COLLECTION', 'IDEA', 'SHOWCASE', 'QUIZ', 'COLLAGE', 'APP']).optional().describe('default REGULAR'),
     name: z.string().optional().describe('internal ad name'),
-    destinationUrl: z.string().optional().describe('where the click goes'),
+    destinationUrl: z.string().optional().describe('where the click goes. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
     utm: z.object({ source: z.string().optional().describe('utm_source tag merged into destinationUrl; Pinterest has no UTM field'), medium: z.string().optional().describe('utm_medium tag merged into destinationUrl; Pinterest has no UTM field'), campaign: z.string().optional().describe('utm_campaign tag merged into destinationUrl; Pinterest has no UTM field'), term: z.string().optional().describe('utm_term tag merged into destinationUrl; Pinterest has no UTM field'), content: z.string().optional().describe('utm_content tag merged into destinationUrl; Pinterest has no UTM field') }).optional().describe('UTM tags merged into destinationUrl as utm_source / utm_medium / utm_campaign / utm_term / utm_content — Pinterest has no UTM field of its own. Other query parameters and Pinterest macros like {campaignid} are kept'),
   };
   const pinAdGroupShape = {
@@ -23475,7 +23960,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // the server refuses it as its FIRST statement, before any read or write, so it can never reach Pinterest.
       status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DRAFT']).optional().describe('REFUSED HERE ON PURPOSE — use set_pinterest_ads_status, which confirm-gates real spend and Pinterest’s archive-as-delete'),
       name: z.string().optional().describe('new ad name'),
-      destinationUrl: z.string().optional().describe('where the click goes'),
+      destinationUrl: z.string().optional().describe('where the click goes. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
       utm: z.object({ source: z.string().optional().describe('utm_source tag merged into the destination URL; Pinterest has no UTM field'), medium: z.string().optional().describe('utm_medium tag merged into the destination URL; Pinterest has no UTM field'), campaign: z.string().optional().describe('utm_campaign tag merged into the destination URL; Pinterest has no UTM field'), term: z.string().optional().describe('utm_term tag merged into the destination URL; Pinterest has no UTM field'), content: z.string().optional().describe('utm_content tag merged into the destination URL; Pinterest has no UTM field') }).optional().describe('UTM tags merged into destinationUrl (or, if you omit destinationUrl, into the ad’s CURRENT destination) as utm_source / utm_medium / utm_campaign / utm_term / utm_content — Pinterest has no UTM field of its own. Other query parameters and Pinterest macros like {campaignid} are kept'),
       creativeType: z.enum(['REGULAR', 'VIDEO', 'SHOPPING', 'CAROUSEL', 'MAX_VIDEO', 'COLLECTION', 'IDEA', 'SHOWCASE', 'QUIZ', 'COLLAGE', 'APP']).optional().describe('creative format, e.g. REGULAR, VIDEO, CAROUSEL or APP'),
       adGroupId: z.string().optional().describe('move the ad into a different ad group'),
@@ -24080,7 +24565,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       adGroupId: z.string().describe('the ad group whose targeting and budget this ad runs under'),
       name: z.string().describe('ad name'),
       postId: z.string().optional().describe('the post to promote (t3_…) from create_reddit_ads_post or list_reddit_ads_posts — required except for a catalog ad built from shoppingCreative'),
-      clickUrl: z.string().optional().describe('leave unset for TEXT-post ads — Reddit rejects "Free form ads cannot have a click url"'),
+      clickUrl: z.string().optional().describe('leave unset for TEXT-post ads — Reddit rejects "Free form ads cannot have a click url". A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
       clickUrlQueryParameters: z.record(z.string()).optional().describe('UTM / tracking parameters Reddit appends to the click URL, e.g. {"utm_source":"reddit","utm_medium":"paid","utm_content":"{{AD_ID}}"} — up to 14'),
       previewDays: z.number().optional().describe('1-30: switch on a preview link that stays valid this many days'),
       redditProfileId: z.string().optional().describe('the post author profile — required for catalog sales campaigns'),
@@ -26392,7 +26877,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       imageIds: z.array(z.string()).optional().describe('for a video ad, the ONE cover image: pass [coverImageId] from the same upload_tiktok_ads_creative call. For the image formats, the images themselves.'),
       adText: z.string().optional().describe('the ad copy people read'),
       callToAction: z.string().optional().describe('TikTok’s CTA button value — default LEARN_MORE'),
-      landingPageUrl: z.string().optional().describe('where the ad sends people — not needed on an Instant-Form lead ad'),
+      landingPageUrl: z.string().optional().describe('where the ad sends people — not needed on an Instant-Form lead ad. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'),
       utmParams: z.record(z.string()).optional().describe('URL parameters (UTMs) TikTok appends to the landing URL, e.g. {"utm_source":"tiktok","utm_campaign":"__CAMPAIGN_NAME__"}; up to 14; values may be TikTok macros (__CAMPAIGN_NAME__, __AID__, __CID__, __PLACEMENT__ …).'),
       musicId: z.string().optional().describe('CAROUSEL ADS — the sound, from list_tiktok_ads_music. Required with adFormat CAROUSEL_ADS, which takes the slide images (1-35) as imageIds and no videoId; refused here for free otherwise.'),
       pageId: z.string().optional().describe('LEAD ADS \u2014 the Instant Form the ad opens, from list_tiktok_ads_lead_forms (a PUBLISHED one). Use it under a LEAD_GENERATION campaign whose ad group has promotionTargetType INSTANT_PAGE. Checked first, for free: a draft form, a form on another account, or an ad account that has not accepted TikTok\u2019s Lead Ads terms is refused by name. The reply reads the form back off TikTok\u2019s stored ad.'),
@@ -27962,7 +28447,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       privacyPolicyUrl: z.string().optional().describe('linked on the confirmation screen'),
       legal: z.object({ title: z.string().describe('legal disclosure heading shown on the form, max 35 characters'), description: z.string().describe('legal disclosure body text, max 80 characters'), consents: z.array(z.union([z.string(), z.object({ text: z.string(), required: z.boolean().optional() })])).optional().describe('up to 2 consent checkboxes: plain text, or {text, required}') }).optional().describe('legal disclosure: title max 35, description max 80, up to 2 consent checkboxes'),
       bannerMediaId: z.string().optional().describe('an IMAGE media id already on the ad account; 75:23, 750x230 to 1875x575, 5MB'),
-      endPage: z.object({ url: z.string().describe('where its button goes'), callToAction: z.enum(['VIEW_WEBSITE', 'BOOK_NOW', 'LEARN_MORE', 'DONATE', 'SPECIAL_OFFER', 'SCHEDULE_NOW', 'BUY_TICKETS', 'TEST_DRIVE', 'APPLY_NOW', 'GET_COUPON', 'CLAIM_SAMPLE', 'FREE_TRIAL']).optional().describe('default VIEW_WEBSITE — the end page has its own list, not the creative one'), headline: z.string().optional().describe('defaults to the form title'), description: z.string().optional().describe('defaults to the form description') }).describe('REQUIRED by Snapchat (E25022): the screen shown after someone submits'),
+      endPage: z.object({ url: z.string().describe('where its button goes. A Hermoso page works: publish_page’s live URL, or get_page adDestinations.'), callToAction: z.enum(['VIEW_WEBSITE', 'BOOK_NOW', 'LEARN_MORE', 'DONATE', 'SPECIAL_OFFER', 'SCHEDULE_NOW', 'BUY_TICKETS', 'TEST_DRIVE', 'APPLY_NOW', 'GET_COUPON', 'CLAIM_SAMPLE', 'FREE_TRIAL']).optional().describe('default VIEW_WEBSITE — the end page has its own list, not the creative one'), headline: z.string().optional().describe('defaults to the form title'), description: z.string().optional().describe('defaults to the form description') }).describe('REQUIRED by Snapchat (E25022): the screen shown after someone submits'),
     },
     outputSchema: { adAccountId: z.string().optional(), formId: z.string().optional(), form: z.any().optional(), verified: z.boolean().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
@@ -28653,7 +29138,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       title: z.string().optional().describe('title of an uploaded document or video ad (max 200 characters)'),
       altText: z.string().optional().describe('image alt text for accessibility, for a single-image ad'),
       allowReshare: z.boolean().optional().describe('true lets viewers reshare the sponsored post; default false (reshare disabled)'),
-      landingPage: z.string().optional().describe('WHERE THE AD SENDS THE CLICK — a full https URL, sent as LinkedIn\u2019s contentLandingPage. REQUIRED when the campaign objective is WEBSITE_VISIT (refused here, for free, without it). Only for a NEW sponsored post: an existing postUrn keeps its own link.'),
+      landingPage: z.string().optional().describe('WHERE THE AD SENDS THE CLICK — a full https URL (a Hermoso page works: publish_page), sent as LinkedIn\u2019s contentLandingPage. REQUIRED when the campaign objective is WEBSITE_VISIT (refused here, for free, without it). Only for a NEW sponsored post: an existing postUrn keeps its own link.'),
       callToAction: z.enum(['APPLY', 'DOWNLOAD', 'VIEW_QUOTE', 'LEARN_MORE', 'SIGN_UP', 'SUBSCRIBE', 'REGISTER', 'JOIN', 'ATTEND', 'REQUEST_DEMO', 'SEE_MORE', 'BUY_NOW', 'SHOP_NOW']).optional().describe('the BUTTON on the ad (contentCallToActionLabel) \u2014 needs landingPage. Omit for no button.'),
       leadFormId: z.string().optional().describe('LEAD GEN ADS: the lead gen form this ad opens (create_linkedin_lead_form / list_linkedin_lead_forms). REQUIRED under a LEAD_GENERATION campaign and refused under any other objective'),
       leadButton: z.enum(['APPLY', 'DOWNLOAD', 'VIEW_QUOTE', 'LEARN_MORE', 'SIGN_UP', 'SUBSCRIBE', 'REGISTER', 'REQUEST_DEMO', 'JOIN', 'ATTEND', 'UNLOCK_FULL_DOCUMENT', 'SHOP_NOW', 'BUY_NOW', 'SEE_MORE']).optional().describe('the lead gen button label, default LEARN_MORE (UNLOCK_FULL_DOCUMENT for a gated document)'),
