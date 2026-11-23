@@ -32709,6 +32709,25 @@ function memoryNoteVerdict(text) {
   const CONN_PICKER_IDS = Object.keys(CONN_ACCOUNT_PICKERS);
   const connIdentityLines = (rows) => rows.map(r => `  ${r.selected ? '[x]' : '[ ]'} ${r.name} (id: ${r.id}, ${r.type})${r.detail ? ` — ${r.detail}` : ''}`).join('\n');
 
+  // NOT CONNECTED IS THE ANSWER, NOT A FAILURE (2026-11-23). "Which accounts can this connection reach?" asked of a provider
+  // the brand never linked has a true, complete answer: none, because it is not connected. It used to come back as a tool
+  // ERROR (the route's 401 rethrown, or Meta's needsConnect as isError), and that was 36-40% of every call on ChatGPT and
+  // /v1 (872 of 2,292 in a week, every one a not-connected 401: Threads alone 710), because agents ask provider by
+  // provider. The HTTP route keeps its 401 + connector shape; this tool reads it as a state, says which providers ARE
+  // listable here so the agent stops walking the enum, and hands on the server's connect link. A session 401 (no
+  // `connector`) and every other failure still throw. Pinned by tools/connector-accounts-not-connected-check.mjs.
+  const connAccountsNotConnected = async (provider, p, said = '', connectUrl = '') => {
+    let here = null; // null = could not read, never "nothing is connected"
+    try { const c = await apiGet('/api/connectors'); here = [...new Set((Array.isArray(c?.connectors) ? c.connectors : []).filter((r) => r && r.status !== 'revoked' && r.status !== 'merged' && CONN_PICKER_IDS.includes(r.provider)).map((r) => r.provider))]; } catch {}
+    const link = typeof connectUrl === 'string' && /^https:\/\//.test(connectUrl) ? connectUrl : '';
+    const how = Object.prototype.hasOwnProperty.call(KEY_CONNECTORS, provider) ? `The user connects it in Connectors ▸ ${p.label}${link ? ` (${link})` : ''}, or you can with connect_connector and their key.` : `Connecting it is a sign-in the user does in a browser: ${link || `Connectors ▸ ${p.label}`}.`;
+    const where = here === null ? '' : here.length ? ` Connected on this brand and listable now: ${here.join(', ')}.` : ' No provider this tool covers is connected on this brand yet.';
+    // A connection the provider stopped honouring (a refused refresh rides the same 401 + connector) is not "never linked":
+    // the server's own sentence says which, and the lead follows it.
+    const stale = /reconnect|expired|revoked|no longer/i.test(said);
+    const lead = stale ? `${p.label} is linked to this brand but cannot be used until it is reconnected, so no accounts can be listed.` : `${p.label} is not connected to this brand, so it has no accounts to list.`;
+    return ok(`${lead} ${said && !/^connect /i.test(said) ? `${said} ` : ''}${how}${where}`, { provider, connected: false, ...(stale ? { needsReconnect: true } : {}), identities: [], selectedIds: [], ...(link ? { connectUrl: link } : {}), ...(here ? { connectedProviders: here } : {}) });
+  };
   server.group('workspace');
   server.registerTool('list_connector_accounts', {
     title: 'List a connector’s accounts',
@@ -32716,13 +32735,15 @@ function memoryNoteVerdict(text) {
     // Enum DERIVED from the picker table, never hand-listed — adding linkedin_ads to the table and forgetting the
     // enum is precisely how a roster goes stale and the agent is told a real capability does not exist.
     inputSchema: { provider: z.enum(CONN_PICKER_IDS).describe('which connector’s accounts to list') },
-    outputSchema: { provider: z.string().optional(), identities: z.array(z.any()).optional(), selectedIds: z.array(z.string()).optional() },
+    outputSchema: { provider: z.string().optional(), identities: z.array(z.any()).optional(), selectedIds: z.array(z.string()).optional(), connected: z.boolean().optional(), needsReconnect: z.boolean().optional(), connectUrl: z.string().optional(), connectedProviders: z.array(z.string()).optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const p = CONN_ACCOUNT_PICKERS[a.provider];
     if (!p) return { content: [{ type: 'text', text: `list_connector_accounts covers: ${CONN_PICKER_IDS.join(', ')}.` }], isError: true };
-    const d = await apiGet(p.read);
-    if (p.needsConnect?.(d)) return { content: [{ type: 'text', text: `${p.label} isn’t connected to this workspace yet. Linking it is an OAuth consent screen, so the user has to do it in a browser: Connectors ▸ ${p.label}. Then call this again.` }], isError: true };
+    let d;
+    try { d = await apiGet(p.read); }
+    catch (e) { if (Number(e?.status) === 401 && e?.connector) return connAccountsNotConnected(a.provider, p, String(e.message || ''), e.connectUrl); throw e; }
+    if (p.needsConnect?.(d)) return connAccountsNotConnected(a.provider, p, '', d?.connectUrl);
     const rows = p.identities(d);
     const sel = [...new Set(rows.filter(r => r.selected).map(r => r.id))];
     const _bad = p.unreadable?.(d) || [];
