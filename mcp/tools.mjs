@@ -3690,6 +3690,8 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('delete_meta_post', { action: 'delete' }, ['brand', 'postId!', 'target', 'pageId', 'confirm', 'confirmName', 'confirmChildren'], splitW(true, true), 'Delete a published Facebook, Instagram or Threads post', 'Use this when a post the brand published on Facebook, Instagram or Threads must be removed. PERMANENT. For Instagram call it first WITHOUT confirm: nothing is deleted and the reply shows the post’s caption, likes, comments and carousel cards; show the user that, then call again with confirm:true (plus confirmName / confirmChildren when the reply asks). An Instagram carousel is deleted as a whole album. Get postId from list_meta_posts or list_instagram_media. Free.', { confirm: 'must be true to delete (permanent)' }),
     splitOp('manage_facebook_reel_collaborators', { action: 'collaborators', target: 'facebook' }, ['brand', 'postId!', 'invitePageIds', 'pageId'], splitW(true, false), 'List or invite collaborator Pages on a Facebook Reel', 'Use this when a Facebook Reel the brand published should be co-authored with another Facebook Page: pass invitePageIds to invite (10 invitations per Page per day), or nothing to list the collaborators and whether each accepted. postId is the Reel’s video id. Free.'),
     splitOp('set_facebook_video_cover', { action: 'cover', target: 'facebook' }, ['brand', 'postId!', 'coverAtMs', 'coverImageUrl', 'videoUrl', 'pageId'], splitW(true, true), 'Replace the cover of a published Facebook video or Reel', 'Use this when a Facebook video or Reel the brand already published needs a new cover: a frame (coverAtMs) or a Hermoso-hosted picture (coverImageUrl). postId is the video id. Instagram covers cannot be changed after publishing. Free.'),
+    splitOp('pin_facebook_post', { action: 'pin', target: 'facebook' }, ['brand', 'postId!', 'pageId'], splitW(true, true), 'Pin a post to the top of a Facebook Page', 'Use this when a post the brand published on its Facebook Page should be shown at the top of the Page. Facebook only: Instagram and Threads have no pin for a post. Meta has been seen refusing it on some New Pages Experience Pages even with every permission granted; the reply says so plainly. Meta offers no read of the pinned state. Undo with unpin_facebook_post. Free.'),
+    splitOp('unpin_facebook_post', { action: 'unpin', target: 'facebook' }, ['brand', 'postId!', 'pageId'], splitW(true, true), 'Unpin a post from the top of a Facebook Page', 'Use this when a pinned post on the brand’s Facebook Page should no longer be shown at the top. The post itself stays published. Free.'),
   ],
   set_youtube_watermark: [
     splitOp('add_youtube_watermark', { action: 'set' }, ['imageUrl!', 'timingType', 'offsetMs', 'durationMs'], splitW(true, true), 'Set the YouTube branding watermark', 'Use this when the brand wants its small subscribe badge shown on EVERY video on the connected YouTube channel, including later uploads. Square image, at least 150x150, under 10MB. Replaces any watermark already set. YouTube has no read-back, so the reply says accepted, not confirmed. Free.'),
@@ -3794,6 +3796,8 @@ export const WIDGET_HOST_SPLITS = Object.freeze(withSplitAccounts({
     splitOp('hide_tiktok_comment', { action: 'HIDE' }, ['commentId!', 'videoId!'], splitW(true, true), 'Hide a TikTok comment', 'Use this when a comment on the brand’s own TikTok post should be hidden, including a stranger’s (only the brand’s own comments can be deleted). Reversible. Free.'),
     splitOp('unhide_tiktok_comment', { action: 'UNHIDE' }, ['commentId!', 'videoId!'], splitW(true, true), 'Unhide a TikTok comment', 'Use this when a hidden comment on the brand’s own TikTok post should be visible again. TikTok may keep it hidden if its own filters hid it; the reply reads the real status back. Free.'),
     splitOp('delete_tiktok_comment', { action: 'DELETE' }, ['commentId!', 'videoId', 'confirm'], splitW(true, true), 'Delete a TikTok comment the brand wrote', 'Use this when a comment the brand’s own account wrote must be removed for good. Other people’s comments can only be hidden (hide_tiktok_comment). PERMANENT: needs confirm:true. Free.', { confirm: 'must be true to delete (permanent)' }),
+    splitOp('pin_tiktok_comment', { action: 'PIN' }, ['commentId!', 'videoId!'], splitW(true, true), 'Pin a comment to the top of a TikTok post', 'Use this when a comment on the brand’s own TikTok post should be shown at the top of its comments. TikTok does not document this call, so the reply reads the comment back and reports its real pinned state. Get commentId from list_tiktok_comments. Free.'),
+    splitOp('unpin_tiktok_comment', { action: 'UNPIN' }, ['commentId!', 'videoId!'], splitW(true, true), 'Unpin a comment on a TikTok post', 'Use this when a pinned comment on the brand’s own TikTok post should no longer be shown at the top. The comment stays; the reply reads its pinned state back. Free.'),
   ],
   manage_tiktok_brand_hashtags: [
     splitOp('enable_tiktok_brand_hashtags', { action: 'ADD' }, ['hashtags!', 'username'], splitW(true, true), 'Turn on brand hashtags for TikTok tracking', 'Use this when TikTok should count up to 10 hashtags as the brand’s (50 in total). A new hashtag is counted after 24 hours and cannot be turned off for 7 days. A tag must be on the available list or contain the account handle. Free.', { hashtags: 'up to 10, with or without the leading #' }),
@@ -5024,7 +5028,11 @@ const WIDGET_PROXY_REFS = [[/\s*\/\s*fetch_social_data\b/g, ''], [/go through fe
   [/, which submit_tiktok_ads_verification can reuse/g, ''], [/the code submit_tiktok_ads_verification needs/g, 'its code'],
   [/SECRET with update_pinterest_board\b/g, 'SECRET with set_pinterest_board_visibility'],
   // (2026-11-18) find_proven_formats is withheld on ChatGPT (cap), so search_tiktok's pointer to it goes there; the text matches its published one again.
-  [/; for formats across a category, find_proven_formats/g, '']];
+  [/; for formats across a category, find_proven_formats/g, ''],
+  // (2026-11-23) install_hermoso_tag and google_ads_rule_approvals are withheld on ChatGPT (cap), so install_tracking_tag's and
+  // create_google_ads_rule's pointers to them go there; the approval itself still works from the one-click link.
+  [/ For Hermoso's OWN first-party tag \(visits, attribution and server-side conversions\) use install_hermoso_tag instead\./g, ''],
+  [/\(google_ads_rule_approvals, or the one-click link in the brand's alerts\)/g, "(the one-click link in the brand's alerts)"]];
 const widgetProxyHit = (d) => WIDGET_PROXY_REFS.some(([re]) => { re.lastIndex = 0; const hit = re.test(d); re.lastIndex = 0; return hit; });
 // …EXCEPT where rewriting the name would change a definition ChatGPT has already PUBLISHED (2026-11-09). A changed
 // definition goes back through OpenAI's scan review: remake_video_for_brand's live text names make_short, and renaming
@@ -14188,6 +14196,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), rows: z.array(z.any()).optional(), totals: z.array(z.any()).optional(), unreadable: z.array(z.any()).optional(), text: z.string().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiGet('/api/ads/campaign-profit', a); return ok(d.text || d.note, d); }));
+  // The tag and the survey are website MEASUREMENT on our own collector, not campaign management: none dispatches to
+  // an ads route, so they sit in `analytics` (tool-group-truth-check §2) and the marker after them re-opens `ads`.
+  server.group('analytics');
   // ---------- THE HERMOSO TAG (2026-11-21, server.js htagGet / htagInstall / htagReport / htagEvents) ----------
   // One first-party snippet per brand: page views, the visit's UTMs and ad click ids, the referrer and conversions,
   // forwarded server-side through the conversions hub above. Free: our own collector and the brand's own accounts.
@@ -14307,6 +14318,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     outputSchema: { ok: z.boolean().optional(), survey: z.any().optional(), answers: z.any().optional(), url: z.string().optional(), secret: z.string().optional(), webhookUrl: z.string().optional(), rows: z.array(z.any()).optional(), stored: z.boolean().optional(), answer: z.any().optional(), note: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = !a.action || ['get', 'answers', 'report'].includes(a.action) ? await apiGet('/api/survey', { ...a, ...(a.options ? { options: undefined } : {}) }) : await apiPost('/api/survey', a); return ok(d.note, d); }));
+  server.group('ads'); // back to paid-campaign management: Merchant Center, the feed Shopping ads serve
   // GOOGLE MERCHANT CENTER (2026-08-07) — rides the google_ads connection (same grant, extra `content` scope).
   // ALL FOUR SHIPPED CALLING `text(...)`, WHICH IS DECLARED NOWHERE IN THIS FILE (found 2026-08-10). Every call
   // therefore threw `ReferenceError: text is not defined`, `wrap()` caught it, and the tool answered "Error: text
