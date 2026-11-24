@@ -5,7 +5,6 @@
 // the ChatGPT extension tools take (CHATGPT_EXT_TOOL_ROOM), because those tools are on the same list.
 export const CHATGPT_ROSTER_FAMILIES = Object.freeze([
   'google_drive', // long tail, pinned (plugin skills)
-  'intercom', // long tail, pinned (plugin skills)
   'meta', // publishing, core channel (never cut for room)
   'youtube', // publishing, core channel (never cut for room)
   'tiktok', // publishing, core channel (never cut for room)
@@ -16,23 +15,24 @@ export const CHATGPT_ROSTER_FAMILIES = Object.freeze([
   'x', // publishing, core channel (never cut for room)
   'pinterest', // publishing, core channel (never cut for room)
   'telegram', // publishing, core channel (never cut for room)
-  'wordpress', // publishing, core channel (never cut for room)
-  'bluesky', // publishing, core channel (never cut for room)
   'openai_ads', // big-platform ads, core channel (never cut for room)
   'google_analytics', // analytics
   'google_search_console', // analytics
   'threads', // publishing
-  'google_tag_manager', // long tail
-  'microsoft_onedrive', // long tail
 ]);
 // Left out to stay under the cap, in rank order (the first one is the next to get in when room appears).
 export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
+  'google_tag_manager', // long tail, demoted by the owner for Launch
+  'wordpress', // publishing, demoted by the owner for Launch
   'microsoft_ads', // big-platform ads
   'reddit_ads', // long tail
   'snapchat_ads', // long tail
+  'bluesky', // publishing, demoted by the owner for Launch
   'slack', // publishing
   'bing_webmaster', // analytics
   'hubspot', // analytics
+  'intercom', // long tail, demoted by the owner for Launch
+  'microsoft_onedrive', // long tail, demoted by the owner for Launch
   'notion', // long tail
   'x_ads', // long tail
   'discord', // publishing
@@ -61,4 +61,7 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'wix', // long tail
   'woocommerce', // long tail
 ]);
+// Demoted by the owner (CHATGPT_DEMOTED_FAMILIES): a listed description that names one of their tools drops that clause on
+// ChatGPT (mcp/tools.mjs leftOutNeutralDef), so nothing sends the model to a tool it does not hold.
+export const CHATGPT_ROSTER_DEMOTED = Object.freeze(["intercom","microsoft_onedrive","bluesky","google_tag_manager","wordpress"]);
 export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-23T23:59:49.590Z" });

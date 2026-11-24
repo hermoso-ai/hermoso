@@ -1,7 +1,7 @@
 {
   "flags": {
     "AMAZON_ADS_API_APPROVED": true,
-    "CANVA_APP_APPROVED": false,
+    "CANVA_APP_APPROVED": true,
     "OUTLOOK_CALENDAR_ENABLED": true,
     "OUTLOOK_MAIL_ENABLED": true,
     "WECHAT_ENABLED": false,

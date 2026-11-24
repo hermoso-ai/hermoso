@@ -91,14 +91,17 @@ export function buyDoorsOf(e, widgetHost) {
   const b = e && e.buy;
   return !widgetHost && b && typeof b === 'object' && b.pack && Array.isArray(b.lines) && b.lines.length ? b : null;
 }
+// SHOWN AS WRITTEN, CHEAPEST FIRST (2026-11-23, funnel: 14 agent-only signups ran out in 35 days, 4 links opened, 1 paid; owner:
+// "offer BOTH subscriptions and credit packs, each as a ready-to-click link, with the cheapest sensible option first. Keep it
+// short."). The agent is told to hand the user the links exactly as the server wrote them, not to call buy_credits first.
 export function buyDoorsText(buy, tool) {
   if (!buy) return '';
   const lines = buy.lines.map((x) => String(x)).filter(Boolean);
   const doors = lines.filter((l) => l.startsWith('•'));
-  return [buy.plan ? `Recommend the ${buy.plan.name} plan to the user, with its link; a one-time credit pack is the other option:` : 'Give the user this way to continue, with its link:', ...doors,
-    `Each link opens a secure checkout page for this account, no sign-in needed. Once they have paid, call ${tool || 'the same tool'} again with the same arguments. A card already on file: buy_credits({pack:"${buy.pack.id}"}) quotes it and charges on confirm.`].join('\n');
+  return ['Show the user these links exactly as written, cheapest first. Each opens a secure checkout for this account, no sign-in needed:', ...doors,
+    `After they pay, call ${tool || 'the same tool'} again with the same arguments.`].join('\n');
 }
-export const buyDoorsHints = (buy, tool) => (buy ? [{ do: `${buy.plan ? `recommend the ${buy.plan.name} plan from this message with its price and link, and mention the one-time pack as the other option` : 'show the user the pack from this message with its price and link'}; after they pay, call ${tool || 'the same tool'} again with the same arguments`, why: 'the account cannot cover this call; each link is a checkout for this account that needs no sign-in, and nothing was charged' }] : []);
+export const buyDoorsHints = (buy, tool) => (buy ? [{ do: `show the user every checkout link in this message exactly as written (credits once and each monthly plan, cheapest first); after they pay, call ${tool || 'the same tool'} again with the same arguments`, why: 'the account cannot cover this call; each link is a checkout for this account that needs no sign-in, and nothing was charged' }] : []);
 export function videoChoiceHints(tool, choice, opts = {}) {
   const c = choice && typeof choice === 'object' ? choice : {}, o = c.options || {};
   const out = opts.widgetHost
