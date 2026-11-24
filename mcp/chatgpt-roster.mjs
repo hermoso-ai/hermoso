@@ -48,6 +48,8 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'apple_ads', // long tail
   'applovin_ads', // long tail
   'canva', // long tail
+  'devto', // long tail
+  'hashnode', // long tail
   'line', // long tail
   'outlook_calendar', // long tail
   'pinterest_ads', // long tail

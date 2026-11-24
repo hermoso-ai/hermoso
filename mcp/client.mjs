@@ -141,7 +141,7 @@ function headers(extra = {}) {
   // A PRICE QUOTE AND THE AGENT'S STATED GOAL (2026-11-11, spend-guard.mjs): get_cost / expected_credits run the tool's own
   // handler with every request marked as a quote (the server stops each spending point and prices it); `context` rides
   // as one redacted, percent-encoded sentence the server puts on the ledger row of whatever the call bills.
-  { const st = toolCtx.getStore(); if (st?.quoteOnly) h['x-hermoso-quote'] = '1'; if (st?.contextHeader) h['x-hermoso-context'] = st.contextHeader; }
+  { const st = toolCtx.getStore(); if (st?.quoteOnly) h['x-hermoso-quote'] = '1'; if (st?.contextHeader) h['x-hermoso-context'] = st.contextHeader; if (st?.callId) h['x-hermoso-call'] = String(st.callId).slice(0, 64); } // x-hermoso-call (2026-11-24): one tool call counts once against the free-read ceiling however many requests it makes (lib/free-read-limit.mjs)
   if (process.env.EDGE_SECRET) h['x-edge-auth'] = process.env.EDGE_SECRET; // belt: in-process self-calls satisfy the edge shield even if the loopback exemption ever changes
   // THE SAME RULE FOR THE BEARER (2026-09-23). This read `ctx?.token || TOKEN`, so a hosted request whose ctx carried
   // no token would have been sent with the SERVER process's own HERMOSO_TOKEN — an operator credential standing in for

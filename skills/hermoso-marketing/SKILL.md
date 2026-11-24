@@ -60,6 +60,27 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 - A platform whose read failed is unreadable, not zero. Say which one, and do not move budget on the strength of an absence.
 - Feed the winners back into the next round.
 
+## Recurring runs (a scheduled agent, nobody watching)
+When this skill runs on a schedule (a Claude routine, a ChatGPT task, a Codex automation, cron) there is no one to
+answer a question, so each run reads, prepares and reports, and leaves every irreversible step to the person.
+Every tool below runs as `hermoso call <name> --json '{...}'`.
+1. `hermoso call business_status` and `hermoso call hermoso_credits`: where the launch plan stands and what the balance covers. Stop and report
+   if the balance cannot cover this run's work.
+2. Read: `post_performance` (what worked since the last run), `analyze_campaigns` (what to scale, pause, fix, test),
+   `list_watch_findings` (new competitor ads and winners, if `set_competitor_watch` is on), `list_inbox` (what is
+   waiting for a reply), `list_scheduled` (what is already queued, so nothing is planned twice).
+3. Prepare inside the limits the person set when they created the schedule: `plan_week` without `confirm` to quote
+   the next batch; `confirm:true` only when that price fits the credit budget they gave you. The posts it makes stay
+   drafts until they are approved.
+4. Never, in an unattended run: arm spend (a campaign or ad set status switch to ACTIVE, a budget raise), delete
+   anything, or publish a draft the person has not approved, unless they set auto-publish (`set_post_refill`) for
+   exactly that. Put those in the report as one-line asks instead.
+5. Retries are safe: pass an `idempotencyKey` on every publish or schedule call, built from the run date and the post.
+6. End with a short report: numbers that moved, drafts waiting for approval with their links, money asks, and any
+   platform whose read failed (an unreadable platform is not a zero).
+Work that must happen even when no agent runs belongs on Hermoso's side: autopilot posting (`set_post_refill`),
+the market radar (`set_competitor_watch`) and alerts to Slack, Discord or a signed webhook (`set_alert_events`).
+
 ## Notes
 - Publishing, scheduling, campaign management and analytics cost no credits. The Free plan includes up to 10 posts on 3 channels; every paid plan posts without a limit and runs autopilot. Every paid plan includes Autopilot plus unlimited posting and scheduling; upgrade_plan lists the plans on sale with their live prices and monthly credits. A post over the Free allowance is refused with the count, the reset date and the upgrade link: relay it, do not retry it. Credits are spent on running a model and on research. State a render's or a fix's exact cost before you run it, from a live quote (`dryRun: true` on render_ad, generate_video, edit_image, fix_beat or post_edit), never from memory. A fix is an edit, not a full re-render.
 - Text baked into an AI video frame comes out garbled, so `render_ad` composites it in post. Captions, end cards and brand lockups are **opt-in**: leave them off unless the user asked for them.

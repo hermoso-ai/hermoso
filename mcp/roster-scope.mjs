@@ -181,6 +181,10 @@ export const TOOL_PROVIDER_RULES = [
   // (The Shopify blog tools carry `shopify` in their names, so they ride SHOPIFY_STORE_TOOL_RE below: an account type.)
   [/webflow/, 'webflow'],
   [/wix/, 'wix'],
+  // dev.to and Hashnode blog syndication (2026-11-24): the brand's OWN accounts, offered only to a workspace that connected
+  // one. The automatic-syndication settings serve BOTH, so they file under devto and are released by hashnode too (below).
+  [/devto|blog_syndication/, 'devto'],
+  [/hashnode/, 'hashnode'],
   // THE SHOPIFY BLOG IS A FAMILY OF ITS OWN (2026-11-15), not core: it needs no connector row (the store IS the account,
   // see SHOPIFY_STORE_TOOL_RE below, which still answers first for an account with no store), but counted as core it sat on
   // every roster and, on ChatGPT, against the reviewed list's cap, where six tools pushed a whole ranked family off it.
@@ -387,6 +391,7 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'meta' && on.has('instagram') && INSTAGRAM_LOGIN_TOOLS.has(name)) return false;
   if (p === 'meta' && on.has('whatsapp') && isWhatsAppTool(name)) return false;
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
+  if (p === 'devto' && /blog_syndication/.test(name) && on.has('hashnode')) return false; // the settings serve either platform
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'sendblue' && IMSG_TOOL_ALSO.some((x) => on.has(x))) return false;
