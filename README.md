@@ -1,11 +1,29 @@
 # Hermoso: AI marketing agent and AI ad generator for Claude, ChatGPT and Cursor (MCP server, CLI and skills)
 
 **The AI marketing agent with an AI ad generator built in**, run from **any AI agent**: Claude Code, Claude.ai, Cursor, Codex, or your own
-scripts. Research the ads already winning in a market, generate image & video ads (your real product
+scripts. It takes an idea from your own AI agent to launch and growth: put the site your AI built live with a
+domain, email and payments, then research the ads already winning in a market, generate image & video ads (your real product
 composited in, copy + CTA included), publish them to your own social channels, and build & manage the ad
 campaigns behind them, all over [MCP](https://modelcontextprotocol.io) tools, a CLI, or installable Claude skills.
 
 **Start free: 160+ free credits, no card. No markup on models.** Sign up at [app.hermoso.ai](https://app.hermoso.ai); plans at [hermoso.ai/pricing](https://hermoso.ai/pricing).
+
+## New: Launch
+
+Launch puts the site your AI writes live on Hermoso hosting, connects or buys a domain, gives you email on that
+domain, and takes payments. Apps can also ship server functions and get a database and sign-in for their users.
+Hermoso hosts the files your agent wrote; it never rewrites them.
+
+Then market it from the same place: research the ads competitors run, make on-brand image and video ads, post
+and schedule to your own social channels, and run ad campaigns on 13 ad platforms, with analytics to see what
+works.
+
+- "Publish this folder as my site, then connect my domain and set up hello@ on it."
+- "Find me a domain for this app and buy the best one."
+- "Turn on payments for my site so people can check out."
+
+The tools behind it include `publish_page`, `update_page`, `find_domain`, `buy_domain`, `connect_domain`,
+`create_domain_address`, `send_domain_mail` and `start_payments_onboarding`.
 
 ## What it does
 
@@ -34,6 +52,10 @@ directory. Press Install plugin and sign in with your Hermoso account, no key ne
 **Claude (claude.ai, Claude Desktop):** one click. **[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Hermoso&connectorUrl=https%3A%2F%2Fapp.hermoso.ai%2Fmcp%3Fsrc%3Dreadme)**
 opens Claude's *Add custom connector* dialog with Hermoso already filled in. Press Continue, choose **Sign in now**
 if Claude asks about Authentication, then sign in with your Hermoso account.
+
+**Kiro:** one click. [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=Hermoso&config=%7B%22url%22%3A%22https%3A%2F%2Fapp.hermoso.ai%2Fmcp%22%7D)
+opens Kiro with the Hermoso server (`https://app.hermoso.ai/mcp`) filled in. Add it, then sign in with your
+Hermoso account when Kiro opens the browser.
 
 **Grok Bot, Meta Muse, Claude Code, Cursor, Codex and any other agent that can read a link and run a command:** one line,
 no key. Paste this into a new chat and the agent reads [hermoso.ai/SKILL.md](https://hermoso.ai/SKILL.md), which gives
@@ -141,7 +163,9 @@ Threads, TikTok, YouTube, X, LinkedIn, Pinterest, Bluesky, Telegram, WordPress, 
 person, so it is not a nineteenth publishing channel) and DM automations on Instagram, Facebook Pages and
 Messenger, and X (a keyword comment, a DM, a story reply or an ig.me / m.me link gets an automatic reply). Ad research: the Meta, Google and LinkedIn ad libraries plus organic TikTok,
 Instagram, YouTube, Threads and Reddit. Analytics: Google Analytics 4, Google Search Console and every
-connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive.
+connected platform's own post and campaign insights. Files: Google Drive, Sheets, Docs and OneDrive. Design:
+Canva. Send any image or video ad to Canva to edit, and bring finished Canva designs back to post, schedule or
+run as ads. Sites: Launch hosting, domains, email on your domain and payments (see *New: Launch* above).
 
 **It is not all-or-nothing.** Research, creation, publishing/scheduling and ads management are four *independent*
 areas — no tool requires that you used another one first. Publish or schedule creative you already have and
@@ -591,6 +615,13 @@ The skills pick themselves. These are whole prompts, not commands:
 
 `mcp/http.mjs` is the hosted remote-connector transport (paste-a-URL into Claude.ai → Connectors). It ships in
 this repo for transparency and refuses to mount without authenticated identity — no anonymous spend, ever.
+
+## Privacy and support
+
+- Privacy Policy: [hermoso.ai/privacy](https://hermoso.ai/privacy)
+- Terms of Service: [hermoso.ai/terms](https://hermoso.ai/terms)
+- Support: email [hello@hermoso.ai](mailto:hello@hermoso.ai) or use [hermoso.ai/contact](https://hermoso.ai/contact).
+  From inside an agent, the `contact_support` tool reaches the same team.
 
 ## License
 

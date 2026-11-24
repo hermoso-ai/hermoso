@@ -1,12 +1,12 @@
 {
   "name": "hermoso",
   "owner": { "name": "Hermoso AI", "email": "hello@hermoso.ai", "url": "https://hermoso.ai" },
-  "metadata": { "description": "Hermoso for coding agents: seven skills that drive the hermoso CLI, in one install." },
+  "metadata": { "description": "Hermoso for coding agents: launch and market what you build, with seven skills that drive the hermoso CLI, in one install." },
   "plugins": [
     {
       "name": "hermoso",
       "source": "./",
-      "description": "An AI marketing agent in your coding agent: research winning ads, generate on-brand creative, publish and schedule to your own channels, and run your ad campaigns, all through the hermoso CLI. No markup on models."
+      "description": "Launch and market from your coding agent: put the site you built live with a domain, email and payments, then research ads, make image and video ads, post and schedule, and run campaigns. Requires a Hermoso account (free to start)."
     }
   ]
 }

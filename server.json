@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
-  "description": "AI marketing agent: 1659 tools, usable alone. Start free: 160+ free credits. No markup on models.",
+  "description": "Launch and market what your AI built. 1659 tools, usable alone. Start free: 160+ credits. No markup.",
   "version": "0.1.674",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
