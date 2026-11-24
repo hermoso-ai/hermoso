@@ -9,30 +9,31 @@ export const CHATGPT_ROSTER_FAMILIES = Object.freeze([
   'meta', // publishing, core channel (never cut for room)
   'youtube', // publishing, core channel (never cut for room)
   'tiktok', // publishing, core channel (never cut for room)
-  'pinterest', // publishing, core channel (never cut for room)
   'google_ads', // big-platform ads, core channel (never cut for room)
-  'linkedin', // publishing, core channel (never cut for room)
-  'x', // publishing, core channel (never cut for room)
-  'telegram', // publishing, core channel (never cut for room)
-  'tiktok_ads', // big-platform ads, core channel (never cut for room)
   'google_business', // publishing, core channel (never cut for room)
+  'linkedin', // publishing, core channel (never cut for room)
+  'tiktok_ads', // big-platform ads, core channel (never cut for room)
+  'x', // publishing, core channel (never cut for room)
+  'pinterest', // publishing, core channel (never cut for room)
+  'telegram', // publishing, core channel (never cut for room)
   'wordpress', // publishing, core channel (never cut for room)
   'bluesky', // publishing, core channel (never cut for room)
   'openai_ads', // big-platform ads, core channel (never cut for room)
+  'google_analytics', // analytics
   'google_search_console', // analytics
   'threads', // publishing
-  'google_analytics', // analytics
   'google_tag_manager', // long tail
   'microsoft_onedrive', // long tail
 ]);
 // Left out to stay under the cap, in rank order (the first one is the next to get in when room appears).
 export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'microsoft_ads', // big-platform ads
-  'bing_webmaster', // analytics
   'reddit_ads', // long tail
-  'slack', // publishing
-  'hubspot', // analytics
   'snapchat_ads', // long tail
+  'slack', // publishing
+  'bing_webmaster', // analytics
+  'hubspot', // analytics
+  'notion', // long tail
   'x_ads', // long tail
   'discord', // publishing
   'twilio', // publishing
@@ -48,7 +49,6 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'applovin_ads', // long tail
   'canva', // long tail
   'line', // long tail
-  'notion', // long tail
   'outlook_calendar', // long tail
   'pinterest_ads', // long tail
   'salesforce', // long tail
@@ -61,4 +61,4 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'wix', // long tail
   'woocommerce', // long tail
 ]);
-export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-21T01:06:10.181Z" });
+export const CHATGPT_ROSTER_META = Object.freeze({ cap: 1000, usageCollectedAt: "2026-11-23T23:59:49.590Z" });

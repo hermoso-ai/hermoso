@@ -353,6 +353,10 @@ export const CAPABILITY_MAP = [
 // source of truth. Kept parity across mcp/ and cli/mcp/ (the npm copy).
 // The setup line names the one SKILL.md line for every host that can run commands, Grok Bot and Muse included (2026-11-18).
 export const SETUP_ELSEWHERE_LINE = 'ADDING HERMOSO TO ANOTHER AI APP (only if the user asks): ChatGPT, one click: https://chatgpt.com/plugins/plugin_asdk_app_6abde87d08048191b2ee7cda76721749. Claude: Customize > Connectors > Add custom connector, https://app.hermoso.ai/mcp. Grok Bot, Muse, Claude Code, Codex, Cursor, any agent with a shell: have it follow https://hermoso.ai/SKILL.md (one line, every host). Other apps: https://app.hermoso.ai/mcp (?tools=all lists all; ?tools=app-create, app-ads or app-social is one job).';
+// AN AGENT WITH NO ACCOUNT, NO PERSON AND ITS OWN PAYMENT CREDENTIAL (2026-11-23, lib/agent-signup-mpp.mjs): it signs up
+// AND pays over HTTP 402 in one call. Here so a shell or HTTP agent reading these instructions (or SKILL.md, which says
+// the same) can do it alone; the setup topic carries it and the head points there.
+export const AGENT_SIGNUP_PAY_LINE = 'NO ACCOUNT, NO PERSON TO SIGN IN, AND YOUR OWN PAYMENT CREDENTIAL (MPP, e.g. a Link wallet Shared Payment Token): POST https://app.hermoso.ai/api/signup/machine-payment with {email, claim_token: a secret you generate (32+ chars), plan OR packId}. It answers HTTP 402; authorise the challenge and retry the SAME body, and the response carries the API key (shown once). plan = one prepaid month, renewed by paying again with POST /api/billing/machine-payment {planId} (send the key as X-Api-Key: on the paid retry Authorization carries the payment); packId = credits only. No free credits on this path. Lost the response? Send the same request again: same account, fresh key, no second charge. Ids and prices: GET https://app.hermoso.ai/api/billing/config, machinePayments.signup. No credential: POST https://app.hermoso.ai/v1/signup (a Stripe checkout page for a person).';
 // ── THE INSTRUCTIONS ARE A SHORT HEAD, AND EVERYTHING ELSE IS ONE get_instructions CALL AWAY (2026-11-18) ─────────
 // Owner-approved 2026-11-18: "the first ~2,000 characters carry everything an agent must know … everything else moves".
 // The string below was ~14,900 chars, sent to every agent every session, and the hosts that cut it cut it short:
@@ -476,6 +480,7 @@ export const MCP_INSTRUCTION_TOPICS = Object.freeze({
     // focused ChatGPT apps and the Claude directory listings are still in review; add them here the day they publish.
     // Not on ChatGPT: MCP_INSTRUCTIONS_WIDGET is its own string.
     SETUP_ELSEWHERE_LINE,
+    AGENT_SIGNUP_PAY_LINE,
   ].join('\n'),
   // THE LAUNCH PLAYBOOK (2026-11-23): idea to revenue with start_business / business_status, the steps in order, where the
   // user must click, and what to suggest next. One literal shared by both twins and the Studio (mcp/launch-playbook.mjs).
@@ -611,14 +616,15 @@ export const chatgptLeftOutLine = (left = CHATGPT_ROSTER_LEFT_OUT, n = 1) => { /
   return `NOT IN THIS APP: buying credits, billing, paying creators, connecting a key${names.length ? `, ${names.join(', ')}` : ''} and more; never say Hermoso lacks it. All run on the full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. ${CHATGPT_WEB_DOORS_LINE}`;
 };
 export const MCP_INSTRUCTIONS_WIDGET = [
-  "Hermoso runs a brand's marketing: ad research, image and video ads, posting, paid campaigns, results.",
-  'Asked to make something, make it; tools pick a default model. First use or "what can you do?": welcome.',
+  "Hermoso launches and markets a business: site, domain, email, payments, ad research, image and video ads, posting, paid ads, results.",
+  'Asked to make something, make it. First use or "what can you do?": welcome.',
   '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
-  '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in background; poll get_job.',
+  '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake, edit_image. Renders run in background; poll get_job.',
   '• FILES & SCHEDULING: upload_file turns a file into a URL; schedule_post, list_scheduled, list_connectors, list_library.',
-  '• PUBLISH: post_to_* post now; list_inbox, reply_to_inbox_item. LAUNCH: start_business, publish_page (Hermoso Launch app).',
+  '• PUBLISH: post_to_* post now; list_inbox, reply_to_inbox_item.',
+  '• LAUNCH a business: start_business; publish_page, update_page; find_domain, connect_domain, set_email_forwarding; start_payments_onboarding.',
   '• PAID ADS (Meta, Google, LinkedIn, TikTok, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
-  '• RESULTS: post_performance, analyze_campaigns. WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
+  '• RESULTS: post_performance, analyze_campaigns. WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits.',
   "CREDITS: AI and research use credits; replies say how many; if too low, say so. Nothing is bought here.",
   'CONFIRM before posting or scheduling, messaging customers, turning on a campaign, changing a budget, deleting anything, or draft_brand with save:true.',
   'SHOWING RESULTS: the widget shows each finished image and video; never repeat one as a markdown image.',
@@ -661,13 +667,16 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
   ads: [...APP_ADS_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
   social: [...APP_SOCIAL_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
   sites: [
-    "Hermoso Launch hosts a web page or small site that the user's own AI wrote, at https://<name>.hermoso.page: every version gets a preview link, the brand's Hermoso tag measures visits, and forms marked data-hermoso-lead fill the brand's email lead list.",
-    '• PAGES: publish_page (the files you wrote), update_page (change a few files, or setLive to roll back), get_page (a file back to edit, and the page as a UTM-tagged ad destination), list_pages, unpublish_page.',
-    '• RESULTS: hermoso_tag_report (visits, leads and revenue by source), hermoso_tag_events, list_email_leads (who signed up).',
-    '• START A BUSINESS: start_business (an idea becomes a step plan: page, domain, email, payments, posts, ads, tracking), business_status (the progress, shown in the chat); welcome lists ways to start.',
-    'EVERY PUBLISHED FILE IS PUBLIC: never put API keys or secrets in page files.',
+    "Hermoso Launch puts the user's business online: the site you wrote, live at https://<name>.hermoso.page, their own domain, email on it, and payments. Each part works on its own.",
+    '• START A BUSINESS: start_business (an idea becomes a step plan), business_status (progress); welcome lists ways to start.',
+    '• SITE: publish_page (the files you wrote), update_page (change files, or setLive to go back), rollback_page, get_page, list_pages, unpublish_page.',
+    '• DOMAIN AND EMAIL: find_domain, connect_domain (a domain the user owns), domain_status, set_dns_record, set_email_forwarding, connect_email_provider, create_domain_address, list_domain_mail, reply_domain_mail, send_domain_mail.',
+    '• PAYMENTS: start_payments_onboarding (the seller sets it up), payments_status, list_site_payments, set_site_payments_mode.',
+    '• BACKEND: site_logs, list_site_users, export_site_db, restore_site_db, push_site_to_github.',
+    '• RESULTS: hermoso_tag_report (visits, leads, revenue by source); schedule_post announces the launch.',
+    'EVERY PUBLISHED FILE IS PUBLIC: never put API keys or secrets in page files. Site secrets, page passwords and buying a domain are done in the Hermoso app.',
     APP_WORKSPACE,
-    'CONFIRM with the user before publishing over a live page or taking one offline.',
+    'CONFIRM with the user before publishing over a live page, taking one offline, restoring a database, changing DNS, sending an email, or switching payments to live.',
   ].join('\n'),
   creators: [
     "Hermoso Creator Campaigns runs the brand's creator (UGC / clipping) campaigns, where the brand pays creators for posts about it: set up a campaign, invite creators, review their posts and read the results.",
@@ -3526,13 +3535,22 @@ const APP_ACCOUNT_OFFERS = ['get_credit_limits', 'set_credit_limit', 'contact_su
 // The owner's admin tools for a hosted project (2026-11-23, G8 G12 G13 G14 G15; lib/launch-sites-admin-routes.mjs): on demand, listed by Hermoso Launch.
 export const LAUNCH_ADMIN_TOOLS = Object.freeze(['export_site', 'push_site_to_github', 'site_logs', 'export_site_db', 'list_site_db_backups', 'restore_site_db', 'site_email_report', 'set_site_email_suppression', 'list_site_users', 'update_site_user', 'delete_site_user']);
 export const LAUNCH_PAGE_TOOLS = Object.freeze(['publish_page', 'update_page', 'list_pages', 'get_page', 'unpublish_page', 'connect_domain', 'domain_status', 'disconnect_domain', 'set_site_secret', 'delete_site_secret', 'rollback_page', 'list_site_usage', 'set_site_spend_cap', 'find_domain', 'buy_domain', 'list_domains', 'get_domain', 'set_domain_autorenew', 'renew_domain', 'transfer_out', 'set_email_forwarding', 'list_dns_records', 'set_dns_record', 'delete_dns_record', 'connect_email_provider', 'set_page_access', 'create_review_link', 'audit_page', 'connect_page_to_search_console', 'create_domain_address', 'list_domain_mail', 'get_domain_mail', 'reply_domain_mail', 'send_domain_mail', 'start_payments_onboarding', 'payments_status', 'list_site_payments', 'get_site_payment', 'refund_site_payment', 'payouts_status', 'set_site_payments_mode']); // + rollback, usage, spend cap and the dollar domain tools (2026-11-23; buy_domain answers a payment link the user opens, on ChatGPT too)
-const APP_SITES_ALSO = Object.freeze(['hermoso_tag', 'hermoso_tag_report', 'hermoso_tag_events', 'list_email_leads']);
+export const LAUNCH_COMMERCE_TOOLS = Object.freeze(['buy_domain', 'renew_domain', 'refund_site_payment', 'transfer_out', 'payouts_status']); // see LAUNCH_COMMERCE_WIDGET_WHY
+// The Launch tools that take a credential in the conversation (a site secret, a page password): held on every ChatGPT app
+// (tools/app-scope-check.mjs, the 2026-11-20 "solicits sensitive personal data" review), entered in the Hermoso app instead.
+export const LAUNCH_CREDENTIAL_TOOLS = Object.freeze(['set_site_secret', 'set_page_access']);
+// THE HERMOSO LAUNCH APP STARTS A BUSINESS (2026-11-23, owner: keep the focused app, "focused plugins make it clear to ChatGPT when to
+// recommend us"): the site, domain, domain email and payments tools, the start-a-business guide (start_business, business_status,
+// welcome: registered once the agent-playbook branch lands; a name that is not registered lists nothing), the Hermoso tag that
+// measures the site, and the launch announcement hand-off (schedule_post, list_scheduled). Ads and creative stay in their own apps,
+// which hermoso_other_capabilities names.
+const APP_SITES_ALSO = Object.freeze(['hermoso_tag', 'hermoso_tag_report', 'hermoso_tag_events', 'list_email_leads', 'start_business', 'business_status', 'welcome', 'schedule_post', 'list_scheduled']);
 export const WIDGET_APP_OFFERS = Object.freeze({
   create: new Set([...STORY_FILM_TOOLS, 'search_companies', 'find_proven_formats', 'find_ad_formats', 'layerize_image', 'product_move', 'save_location', 'delete_location', ...APP_ACCOUNT_OFFERS]),
   ads: new Set([...APP_ACCOUNT_OFFERS, 'get_linkedin_boost', 'update_linkedin_boost', 'list_linkedin_boost_audiences', 'manage_linkedin_boost_audience', 'update_linkedin_ads_campaign']),
   social: new Set(['repost_on_x', 'bookmark_x_post', 'follow_x_account', ...APP_ACCOUNT_OFFERS]),
   creators: new Set(APP_ACCOUNT_OFFERS),
-  sites: new Set([...LAUNCH_PAGE_TOOLS, ...LAUNCH_ADMIN_TOOLS, ...APP_SITES_ALSO, ...APP_ACCOUNT_OFFERS]),
+  sites: new Set([...LAUNCH_PAGE_TOOLS, ...LAUNCH_ADMIN_TOOLS, ...APP_SITES_ALSO, ...APP_ACCOUNT_OFFERS].filter((n) => !LAUNCH_COMMERCE_TOOLS.includes(n) && !LAUNCH_CREDENTIAL_TOOLS.includes(n))), // no purchase, money movement or credential on a ChatGPT app (2026-11-23)
 });
 // The Creator Campaigns app lists the creator tools the all-in-one ChatGPT list holds for its cap (CC_WIDGET_WHY), by
 // that reason rather than by name, so a creator tool held for any OTHER reason (money, sensitive data) stays held there.
@@ -3557,7 +3575,36 @@ const SHOPIFY_ADMIN_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which 
 // CONVERSIONS HUB + PROFIT PER CAMPAIGN (2026-11-20): seven tools that need no connection would be CORE on the all-in-one
 // ChatGPT list and push the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs
 // refuses. Held there for the next ChatGPT ranking; they are in the `ads` group, so the Hermoso Ads app in ChatGPT lists them.
-const PAGES_WIDGET_WHY = "it will be in the Hermoso Launch app for ChatGPT once that is published, and it runs now on the full connection, Claude, the CLI or the API";
+// LAUNCH ON CHATGPT (2026-11-23): the purchase and money-movement tools of Hermoso Launch. A domain purchase or renewal answers a
+// payment link, a refund and a domain transfer move money or an asset out, and payouts_status names payouts; OpenAI's plugin
+// rules bar purchases and money transfers, the same reason buy_credits is held.
+const LAUNCH_COMMERCE_WIDGET_WHY = 'it buys something or moves money, which is done in the Hermoso app (Launch) rather than in a ChatGPT conversation; find_domain checks a name and its price here, and connect_domain uses a domain the user already owns';
+// X LIVE AND X CHAT ADMINISTRATION (2026-11-23): 48 tools (45 names plus 3 multi-op originals) in the x family with no recorded call on any host (tool_usage_daily since
+// 2026-11-18, the 30-day error ledger). Held from the all-in-one ChatGPT list to make room for Hermoso Launch; post_to_x, X DMs,
+// mentions, search and the chat inbox stay listed.
+export const X_LIVE_ADMIN_TOOLS = Object.freeze([
+  'list_x_broadcasts', 'read_x_broadcast_chat', 'send_x_broadcast_chat', 'schedule_x_broadcast', 'update_x_broadcast', 'start_x_broadcast',
+  'create_x_broadcast', 'end_x_broadcast', 'delete_x_broadcast', 'cancel_x_broadcast', 'list_x_stream_sources', 'get_x_stream_source',
+  'get_x_ingest_region', 'create_x_stream_source', 'rename_x_stream_source', 'delete_x_stream_source', 'remove_x_broadcast_chat_message',
+  'mute_x_broadcast_chat_user', 'unmute_x_broadcast_chat_user', 'list_x_broadcast_chat_mutes', 'list_x_broadcast_chat_moderators',
+  'add_x_broadcast_chat_moderator', 'remove_x_broadcast_chat_moderator', 'mute_x_chat_user_everywhere', 'unmute_x_chat_user_everywhere',
+  'update_x_chat_settings', 'mute_x_chat', 'unmute_x_chat', 'delete_x_chat', 'set_x_chat_disappearing_messages', 'clear_x_chat_disappearing_messages',
+  'set_x_chat_screenshot_setting', 'set_x_chat_admin_settings', 'add_x_chat_admins', 'remove_x_chat_admins', 'remove_x_chat_members',
+  'leave_x_chat', 'approve_x_chat_admin_request', 'reject_x_chat_admin_request', 'reject_x_chat_join_requests', 'enable_x_chat_invite_link',
+  'disable_x_chat_invite_link', 'archive_x_chat', 'unarchive_x_chat', 'x_chat_settings',
+  'manage_x_broadcast', 'manage_x_stream_source', 'moderate_x_broadcast', // the multi-op originals whose every ChatGPT split is held
+]);
+// TIKTOK ONE (creator marketplace) ADMINISTRATION (2026-11-23): 14 tools in the tiktok_ads family with no recorded call on any
+// host, held from the all-in-one ChatGPT list for the same reason. The way in (list_tiktok_tto_accounts) and the campaign list stay
+// listed with their report (a connector's entry tool and a campaign list are never cut for room), as do TikTok ads, Spark ads and lead forms.
+export const TIKTOK_TTO_ADMIN_TOOLS = Object.freeze([
+  'list_tiktok_tto_brand_profiles', 'create_tiktok_tto_brand_profile', 'create_tiktok_tto_campaign',
+  'update_tiktok_tto_campaign', 'list_tiktok_tto_link_requests', 'request_tiktok_tto_spark_authorization',
+  'get_tiktok_tto_spark_authorization', 'request_tiktok_tto_video_link', 'revoke_tiktok_tto_video_link', 'list_tiktok_tto_anchors',
+  'create_tiktok_tto_anchor', 'delete_tiktok_tto_anchor', 'link_tiktok_tto_video', 'manage_tiktok_tto_anchor',
+]);
+const TIKTOK_TTO_ADMIN_WIDGET_WHY = 'TikTok One creator-marketplace administration runs in the Hermoso app or on any other MCP host; on ChatGPT, the TikTok One accounts and campaigns, TikTok ads, Spark ads and lead forms are here';
+const X_LIVE_ADMIN_WIDGET_WHY = 'X live video and X group-chat administration run in the Hermoso app or on any other MCP host; on ChatGPT, post_to_x, X DMs, mentions and the chat inbox are here';
 const CONV_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; it works from the Hermoso Ads app in ChatGPT, the Hermoso app, or another connected agent';
 // ABANDONED-CHECKOUT RECOVERY (2026-11-20): held from the capped ChatGPT list for the same reason as the order tools above.
 const SHOPIFY_CART_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; abandoned-checkout recovery is set up from the Hermoso app (Studio) or another connected agent';
@@ -3587,19 +3634,22 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   list_meta_ad_studies: AGENCY_WIDGET_WHY,
   list_ad_rule_templates: AGENCY_WIDGET_WHY,
   backtest_google_ads_rule: AGENCY_WIDGET_WHY, google_ads_rule_approvals: AGENCY_WIDGET_WHY,
-  send_conversion_event: CONV_WIDGET_WHY, conversion_destinations: CONV_WIDGET_WHY, conversion_events: CONV_WIDGET_WHY, conversion_insights: CONV_WIDGET_WHY,
-  upload_campaign_results: CONV_WIDGET_WHY, set_profit_settings: CONV_WIDGET_WHY, campaign_profit: CONV_WIDGET_WHY,
+  // send_conversion_event, conversion_destinations, conversion_events, conversion_insights: LISTED since 2026-11-23 (owner: the Launch roster; the conversions basics are in)
+  // upload_campaign_results, set_profit_settings, campaign_profit: listed since 2026-11-23 (the conversions basics name them)
+  // A FIELD THAT TAKES A CREDENTIAL STAYS OFF THE ALL-IN-ONE LIST (2026-11-23; the 2026-10-16 and 2026-11-20 scans held tools that ask for
+  // a key or password in the conversation): conversion_destinations saves a platform API key, set_site_secret a site secret, set_page_access a page password.
+  conversion_destinations: 'it saves an ad platform API key, which is entered in the Hermoso app (Connectors) rather than in a conversation; send_conversion_event here sends to every destination already saved',
+  set_site_secret: 'it saves an API key or other secret, which is entered in the Hermoso app (Launch) rather than in a conversation; delete_site_secret and the rest of the backend tools run here',
+  set_page_access: 'it sets a page password, which is entered in the Hermoso app (Launch) rather than in a conversation; publish_page, update_page and create_review_link run here',
   post_purchase_survey: CONV_WIDGET_WHY, // POST-PURCHASE SURVEY (2026-11-21): needs no connection, so it would be always-listed on a ChatGPT list at its cap
-  hermoso_tag: CONV_WIDGET_WHY, install_hermoso_tag: CONV_WIDGET_WHY, hermoso_tag_report: CONV_WIDGET_WHY, hermoso_tag_events: CONV_WIDGET_WHY, hermoso_tag_audiences: CONV_WIDGET_WHY, // THE HERMOSO TAG (2026-11-21): same cap, same family
-  // LAUNCH PAGES (2026-11-23): publish_page and get_page fit the all-in-one ChatGPT list (measured: chatgpt-full-roster-check
-  // stays green with both); the other three would push the last ranked family (HubSpot) off it, so they are held here and
-  // listed by the Hermoso Launch focused app (WIDGET_APP_OFFERS.sites). ChatGPT has no find_tools / call_tool (EXECUTOR_TOOLS
-  // are withheld on widget hosts), so a held tool is not reachable from the all-in-one app at all; every other surface lists all five.
-  update_page: PAGES_WIDGET_WHY, list_pages: PAGES_WIDGET_WHY, unpublish_page: PAGES_WIDGET_WHY,
-  connect_domain: PAGES_WIDGET_WHY, domain_status: PAGES_WIDGET_WHY, disconnect_domain: PAGES_WIDGET_WHY, // step 3 (2026-11-23)
-  set_site_secret: PAGES_WIDGET_WHY, delete_site_secret: PAGES_WIDGET_WHY, // step 5: the site secret store
-  rollback_page: PAGES_WIDGET_WHY, list_site_usage: PAGES_WIDGET_WHY, set_site_spend_cap: PAGES_WIDGET_WHY, find_domain: PAGES_WIDGET_WHY, buy_domain: PAGES_WIDGET_WHY, list_domains: PAGES_WIDGET_WHY, get_domain: PAGES_WIDGET_WHY, set_domain_autorenew: PAGES_WIDGET_WHY, renew_domain: PAGES_WIDGET_WHY, transfer_out: PAGES_WIDGET_WHY, set_email_forwarding: PAGES_WIDGET_WHY, list_dns_records: PAGES_WIDGET_WHY, set_dns_record: PAGES_WIDGET_WHY, delete_dns_record: PAGES_WIDGET_WHY, connect_email_provider: PAGES_WIDGET_WHY, set_page_access: PAGES_WIDGET_WHY, create_review_link: PAGES_WIDGET_WHY, audit_page: PAGES_WIDGET_WHY, connect_page_to_search_console: PAGES_WIDGET_WHY, create_domain_address: PAGES_WIDGET_WHY, list_domain_mail: PAGES_WIDGET_WHY, get_domain_mail: PAGES_WIDGET_WHY, reply_domain_mail: PAGES_WIDGET_WHY, send_domain_mail: PAGES_WIDGET_WHY, start_payments_onboarding: PAGES_WIDGET_WHY, payments_status: PAGES_WIDGET_WHY, list_site_payments: PAGES_WIDGET_WHY, get_site_payment: PAGES_WIDGET_WHY, refund_site_payment: PAGES_WIDGET_WHY, payouts_status: PAGES_WIDGET_WHY, set_site_payments_mode: PAGES_WIDGET_WHY, // 2026-11-23: rollback, usage, spend cap, domains (the Hermoso Launch app lists them)
-  export_site: PAGES_WIDGET_WHY, push_site_to_github: PAGES_WIDGET_WHY, site_logs: PAGES_WIDGET_WHY, export_site_db: PAGES_WIDGET_WHY, list_site_db_backups: PAGES_WIDGET_WHY, restore_site_db: PAGES_WIDGET_WHY, site_email_report: PAGES_WIDGET_WHY, set_site_email_suppression: PAGES_WIDGET_WHY, list_site_users: PAGES_WIDGET_WHY, update_site_user: PAGES_WIDGET_WHY, delete_site_user: PAGES_WIDGET_WHY, // 2026-11-23 launch admin: held on the all-in-one list for its cap, listed by Hermoso Launch
+  // THE HERMOSO TAG + HERMOSO LAUNCH ARE ON THE ALL-IN-ONE CHATGPT LIST (2026-11-23, owner: "Launch tools would be much more
+  // valuable than some random connector like PostHog. We want to focus on the ChatGPT plugin for launch as well."). The room came
+  // from families and tools with no recorded ChatGPT use (CHATGPT_DEMOTED_FAMILIES in tools/chatgpt-roster-rank.mjs, and
+  // X_LIVE_ADMIN_TOOLS below). The five Launch tools that SELL something or MOVE money stay held, because ChatGPT plugins may
+  // not run a purchase or a money transfer (tools/chatgpt-no-money-movement-check.mjs); the Hermoso Launch app lists them.
+  ...Object.fromEntries(LAUNCH_COMMERCE_TOOLS.map((n) => [n, LAUNCH_COMMERCE_WIDGET_WHY])),
+  ...Object.fromEntries(X_LIVE_ADMIN_TOOLS.map((n) => [n, X_LIVE_ADMIN_WIDGET_WHY])),
+  ...Object.fromEntries(TIKTOK_TTO_ADMIN_TOOLS.map((n) => [n, TIKTOK_TTO_ADMIN_WIDGET_WHY])),
   // LINKEDIN BOOST API 202611 (2026-11-20): four tools in the linkedin family, which is listed on ChatGPT; one more listed tool
   // pushes the last ranked family (WordPress) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses.
   // Held for the next ChatGPT ranking; the Ads focused app lists them, and boost_linkedin_post previews and creates there.
@@ -3632,7 +3682,7 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   creator_campaign_sales: CC_WIDGET_WHY, // 2026-11-20 (the money pass): listed by the Creator Campaigns focused app, like every creator tool
   // GOOGLE DATA MANAGER (2026-11-20): four tools in the google_ads family, which ChatGPT lists; four more would push the last
   // ranked family (Slack) off a list at its cap, which tools/chatgpt-full-roster-check.mjs refuses. Held for the next ranking.
-  google_ads_customer_lists: CONV_WIDGET_WHY, upload_google_ads_customer_list: CONV_WIDGET_WHY, send_google_ads_conversions: CONV_WIDGET_WHY, google_ads_upload_status: CONV_WIDGET_WHY,
+  // google_ads_customer_lists, upload_google_ads_customer_list, send_google_ads_conversions, google_ads_upload_status: listed since 2026-11-23 (the conversions basics; hermoso_tag_audiences names them)
   submit_tiktok_ads_verification: 'it sends a legal name and a government ID or business licence number, which are entered in TikTok Ads Manager instead',
   merchant_issue_help: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
   trigger_merchant_issue_action: 'Google defines the actions on each issue as opaque flows, so they are not offered as separate tools here; list_merchant_issues names the issue and Merchant Center fixes it',
@@ -4961,8 +5011,7 @@ export const WIDGET_HOST_DESCRIPTIONS = Object.freeze({
   // the old all-caps lead as a claim); update_creator_campaign "description appears missing, blank, or unclear" (one dense
   // paragraph); create_openai_ads_feed "claims capabilities that do not match" (it named a follow-up tool and a beta);
   // find_ad_formats is find_proven_formats under a neutral name (WIDGET_HOST_RENAMES).
-  // LAUNCH PAGES (2026-11-23): the all-in-one ChatGPT list carries publish_page and get_page but holds update_page,
-  // list_pages, unpublish_page and set_site_secret (PAGES_WIDGET_WHY), so these texts name only tools ChatGPT lists.
+  // LAUNCH PAGES (2026-11-23): every Launch tool but the five LAUNCH_COMMERCE_TOOLS is on the all-in-one ChatGPT list now.
   publish_page: "Put a web page, or a small static site, live at https://<name>.hermoso.page from files you wrote: Hermoso hosts it and never writes it. name: 3-40 lower-case letters, digits and dashes. html becomes index.html, or files [{path, content}] ({path, content, encoding:'base64'} for binary, {path, url} for a file put through upload_file): up to 100 web files (html, css, js, images, fonts, video, pdf), 10 MB each, 25 MB in all, with an index.html. Every publish is a new version with its own preview link (<name>--v<N>). Hermoso adds the brand's Hermoso tag to every HTML file (visits, UTMs, ad click ids, conversions). Forms post wherever their HTML says; to collect a form's sign-ups in the brand's email lead list, mark it data-hermoso-lead (it needs an email field). Every published file is public: never put API keys or secrets in page files (a browser key like Stripe's pk_ is fine; a secret key is refused). live:false saves a preview and leaves the live page alone. Publishing a name the brand already has replaces its files with exactly these, and get_page reads a file back to edit. To run ads to it, use the live URL, or get_page's adDestinations, as the ad's destination link. Free.",
   get_page: "One hosted page: its live and preview URLs, every version, its files, and the leads from its forms by version and A/B variant. file (e.g. index.html, optionally version) returns that file's source as it was sent, with Hermoso's tag and form wiring taken out, to edit and publish again with publish_page (a form marked data-hermoso-lead sends to the lead list; every file is public, so no secrets). platform (meta, google, tiktok, linkedin, microsoft, reddit, pinterest, snapchat, x, chatgpt) with optional campaign / content returns the page as a UTM-tagged ad destination; adDestinations always lists one per platform. Free.",
   youtube_bulk_report: "Reads YouTube Reporting API files for the connected channel. Reports: thumbnails (thumbnail impressions and click-through rate per video per day), thumbnails_by_source (the same, split by traffic source, device and operating system), cards (impressions, clicks and click rate per card), end_screens (per end-screen element), traffic_source (traffic sources with their detail) and basic (daily channel totals). YouTube writes these files on a schedule rather than on request: if the channel has no reporting job for the chosen report, the first call creates one (unless schedule is false) and returns no rows. YouTube then adds one file per day, usually the first within 48 hours, with up to 30 days of earlier data, and keeps each file for 60 days, so it cannot return data for dates before that. Inputs: report (default thumbnails), days (how many recent daily files, 1 to 14), since and until (YYYY-MM-DD). Returns the rows from the files found; no rows means no file covers that window yet. 0 credits. Needs YouTube connected.",
@@ -14234,7 +14283,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }).passthrough();
   server.registerTool('send_conversion_event', {
     title: 'Send a conversion to every ad platform at once',
-    description: 'Send ONE conversion event (a sale, sign-up, lead or your own event) to EVERY ad platform conversions API the brand saved as a destination (conversion_destinations), in one call: Meta, TikTok, LinkedIn, Snapchat, Reddit, Pinterest, X, Microsoft Advertising, ChatGPT Ads, AppLovin and Amazon Ads. Pass PLAIN identifiers: each platform’s sender normalises and SHA-256 hashes them to that platform’s own rules, and every platform receives the same eventId as its dedup key (match it to the browser pixel’s). Click ids in sourceUrl (gclid, fbclid, ttclid, twclid, msclkid, li_fat_id …) are read automatically, and a click id the same person carried on an earlier stored page view rides along with a server-side sale. Each destination answers on its own, read back from what the PLATFORM said (accepted, refused, skipped and why); one failing never blocks another. DRY RUN: validateOnly:true and/or testCode reach only the platforms with a mode that records nothing (Pinterest, Snapchat and ChatGPT Ads validate; TikTok and Reddit take a test code from their Events Manager) and skip the rest by name, so nothing real is counted. Meta keeps events sent with a test code, so a dry run never reaches Meta. forward:false only RECORDS the events (page views and other touches for journeys) and sends them nowhere. Every non-test event is stored with its identifiers hashed, for conversion_insights and campaign_profit. Google Ads is refused by name: Google no longer accepts conversion uploads from new integrations through its Ads API. Free.',
+    description: 'Send ONE conversion event (a sale, sign-up, lead or your own event) to EVERY ad platform conversions API the brand saved as a destination, in one call: Meta, TikTok, LinkedIn, Snapchat, Reddit, Pinterest, X, Microsoft Advertising, ChatGPT Ads, AppLovin and Amazon Ads. Pass PLAIN identifiers: each platform’s sender normalises and SHA-256 hashes them to that platform’s own rules, and every platform receives the same eventId as its dedup key (match it to the browser pixel’s). Click ids in sourceUrl (gclid, fbclid, ttclid, twclid, msclkid, li_fat_id …) are read automatically, and a click id the same person carried on an earlier stored page view rides along with a server-side sale. Each destination answers on its own, read back from what the PLATFORM said (accepted, refused, skipped and why); one failing never blocks another. DRY RUN: validateOnly:true and/or testCode reach only the platforms with a mode that records nothing (Pinterest, Snapchat and ChatGPT Ads validate; TikTok and Reddit take a test code from their Events Manager) and skip the rest by name, so nothing real is counted. Meta keeps events sent with a test code, so a dry run never reaches Meta. forward:false only RECORDS the events (page views and other touches for journeys) and sends them nowhere. Every non-test event is stored with its identifiers hashed, for conversion_insights and campaign_profit. Google Ads is refused by name: Google no longer accepts conversion uploads from new integrations through its Ads API. Free.',
     inputSchema: {
       events: z.array(hubEvent).describe('1 to 1,000 events'),
       destinations: z.array(z.union([z.string(), z.record(z.any())])).optional().describe('send to these instead of the saved ones: saved destination ids, or destination objects shaped like conversion_destinations action add'),
@@ -14343,7 +14392,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // forwarded server-side through the conversions hub above. Free: our own collector and the brand's own accounts.
   server.registerTool('hermoso_tag', {
     title: 'The brand’s Hermoso tag (website tracking snippet)',
-    description: 'The brand’s HERMOSO TAG: ONE first-party snippet per brand for its website. It records page views, each visit’s UTM parameters and ad click ids (gclid, fbclid, ttclid, msclkid, li_fat_id, ScCid, rdt_cid, epik …), the referrer, and conversions the site reports (hermoso(\'track\', \'Lead\' | \'Purchase\' | your own event, {value, currency, orderId, email …})), ties a visitor to a person when the site calls hermoso(\'identify\', {email, phone}) (hashed before storage), and FORWARDS conversions server-side to every conversions destination the brand saved (conversion_destinations), each with one dedup eventId (a Purchase uses its orderId, so a browser pixel firing the same id is deduplicated). action get (default) returns the snippet, the install status (last event seen, from which hosts) and the settings; it MAKES the brand’s tag on first call. action update changes settings: consentDefault, waitForConsent, honorGpc, honorDnt, forward, forwardEvents, allowedDomains, spa, testMode ("validate" or a TikTok / Reddit test code sends conversions as a dry run; "off" ends it) and conversions (define the brand’s own events as conversions, each sent to the platforms as a standard event, e.g. {"quote_requested": {"as": "Lead"}}). action verify reads the site (url, default the brand’s website) for the snippet and reports the last event seen. autoTrack {forms, outbound, downloads, scroll} turns on automatic events (form submits as leads, outbound / phone / email clicks, file downloads, scroll depth); linkDomains lists the brand’s other sites so a visit carries on across them. action server_key makes a server key (shown once) for POST /htag/s, so a backend sends purchases with the same dedup ids; action stripe with signingSecret (whsec_…) turns a Stripe webhook into Purchases through the tag. The tag also runs from the brand’s own domain behind a proxy (forward /htag.js and /htag/e, pass X-Hermoso-Client-IP) so ad blockers do not drop it. CONSENT: the tag follows the consent the site gives it (hermoso(\'consent\', …) or Google Consent Mode v2) and the brand’s defaults; THE WEBSITE OWNER IS RESPONSIBLE for the site’s consent banner and privacy notice. To put it on the site use install_hermoso_tag. Free.',
+    description: 'The brand’s HERMOSO TAG: ONE first-party snippet per brand for its website. It records page views, each visit’s UTM parameters and ad click ids (gclid, fbclid, ttclid, msclkid, li_fat_id, ScCid, rdt_cid, epik …), the referrer, and conversions the site reports (hermoso(\'track\', \'Lead\' | \'Purchase\' | your own event, {value, currency, orderId, email …})), ties a visitor to a person when the site calls hermoso(\'identify\', {email, phone}) (hashed before storage), and FORWARDS conversions server-side to every conversions destination the brand saved, each with one dedup eventId (a Purchase uses its orderId, so a browser pixel firing the same id is deduplicated). action get (default) returns the snippet, the install status (last event seen, from which hosts) and the settings; it MAKES the brand’s tag on first call. action update changes settings: consentDefault, waitForConsent, honorGpc, honorDnt, forward, forwardEvents, allowedDomains, spa, testMode ("validate" or a TikTok / Reddit test code sends conversions as a dry run; "off" ends it) and conversions (define the brand’s own events as conversions, each sent to the platforms as a standard event, e.g. {"quote_requested": {"as": "Lead"}}). action verify reads the site (url, default the brand’s website) for the snippet and reports the last event seen. autoTrack {forms, outbound, downloads, scroll} turns on automatic events (form submits as leads, outbound / phone / email clicks, file downloads, scroll depth); linkDomains lists the brand’s other sites so a visit carries on across them. action server_key makes a server key (shown once) for POST /htag/s, so a backend sends purchases with the same dedup ids; action stripe with signingSecret (whsec_…) turns a Stripe webhook into Purchases through the tag. The tag also runs from the brand’s own domain behind a proxy (forward /htag.js and /htag/e, pass X-Hermoso-Client-IP) so ad blockers do not drop it. CONSENT: the tag follows the consent the site gives it (hermoso(\'consent\', …) or Google Consent Mode v2) and the brand’s defaults; THE WEBSITE OWNER IS RESPONSIBLE for the site’s consent banner and privacy notice. To put it on the site use install_hermoso_tag. Free.',
     inputSchema: {
       action: z.enum(['get', 'update', 'verify', 'server_key', 'stripe']).optional().describe('default get; server_key makes a new server key (the old one stops working); stripe saves (signingSecret) or removes the Stripe webhook'),
       autoTrack: z.union([z.boolean(), z.object({ forms: z.boolean().optional(), outbound: z.boolean().optional(), downloads: z.boolean().optional(), scroll: z.boolean().optional() })]).optional().describe('update: automatic events, each off by default; true turns all on'),
@@ -18601,7 +18650,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Turn auto-renew on or off for a domain bought through Hermoso. Off means it lapses at its expiry unless renewed. Nothing is charged by this call. Free.",
     inputSchema: { domain: dName, on: z.boolean().describe('true = renew automatically, false = let it lapse at expiry') },
     outputSchema: dOut,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // off lets the domain lapse at expiry, a hard-to-reverse loss (2026-11-23, the 2026-10-16 scan's destructiveHint rule)
   }, wrap(async (a) => { const { domain, ...rest } = a; const d = await apiPost(`/api/domains/${encodeURIComponent(String(domain || ''))}/autorenew`, rest); return ok(d.note, d); }));
   server.registerTool('renew_domain', {
     title: 'Renew a domain now',
@@ -18687,14 +18736,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "Reply in a domain inbox conversation: it goes from the address the person wrote to, in the same thread (Re: subject, In-Reply-To, References), to the person who wrote (replyAll adds the others). Show the user the wording first. The first emails each month are free; after that a block of 1,000 is paid in advance from credits.",
     inputSchema: { id: z.string(), text: z.string().describe('the reply'), html: z.string().optional(), replyAll: z.boolean().optional(), cc: mList.optional(), attachments: mAtt, fromName: z.string().optional().describe('the sender name shown; default the brand name') },
     outputSchema: mOut,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }, // an email once sent cannot be recalled (the reply_to_inbox_item / send_x_dm precedent; 2026-11-23)
   }, wrap(async (a) => { const { id, ...rest } = a; const d = await apiPost(`/api/domain-mail/${encodeURIComponent(String(id || ''))}/reply`, rest); return ok(d.note, d); }));
   server.registerTool('send_domain_mail', {
     title: 'Send an email from the domain',
     description: "Start an email conversation from a domain inbox address (from: e.g. hello@theirdomain; with a catch-all, any address on it): to, subject, text, optional html, cc, bcc, attachments. Their reply comes back to the inbox. For one-to-one conversations: a newsletter, campaign or list send is refused, and belongs in an email marketing tool. Show the user the email first.",
     inputSchema: { from: z.string(), to: mList, subject: z.string(), text: z.string(), html: z.string().optional(), cc: mList.optional(), bcc: mList.optional(), attachments: mAtt, fromName: z.string().optional() },
     outputSchema: mOut,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }, // an email once sent cannot be recalled (the reply_to_inbox_item / send_x_dm precedent; 2026-11-23)
   }, wrap(async (a) => { const d = await apiPost('/api/domain-mail/send', a); return ok(d.note, d); }));
   // LAUNCH G4 / G11 (2026-11-23): private projects and review links (LAUNCH_SITES_PRIVATE_PAGES=on), the SEO audit and Search
   // Console (LAUNCH_SITES_SEO_TOOLS=on). server.js "LAUNCH, FOURTH PASS"; free.
@@ -18777,7 +18826,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: "mode hermoso: the site takes payments through Hermoso Payments (no Stripe setup; the products in its hermoso.json payments.prices are reviewed, a cheap billed review). mode own: the owner's own Stripe (site secret STRIPE_SECRET_KEY). The site's fetch('/_hermoso/checkout', {method:'POST', body: JSON.stringify({price})}) works in both, unchanged.",
     inputSchema: { name: pageName, mode: z.enum(['hermoso', 'own']) },
     outputSchema: spOut,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // live mode takes real payments from buyers (2026-11-23, the 2026-10-16 scan's destructiveHint rule)
   }, wrap(async (a) => { const { name, ...rest } = a; const d = await apiPost(`/api/pages/${encodeURIComponent(String(name || ''))}/payments-mode`, rest); return ok(d.note, d); }));
   // ---------- PHONE / SMS / VOICE (2026-11-18): the brand's OWN Twilio or Telnyx account, the same tools whichever is connected ----------
   // Every route is in server.js (search "PHONE NUMBERS, SMS / MMS AND VOICE"); the rules are lib/phone.mjs. Nothing is enforced by
