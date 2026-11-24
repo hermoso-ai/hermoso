@@ -621,18 +621,18 @@ export const chatgptLeftOutLine = (left = CHATGPT_ROSTER_LEFT_OUT, n = 1) => { /
   return `NOT IN THIS APP: buying credits, billing, paying creators, connecting a key${names.length ? `, ${names.join(', ')}` : ''} and more; never say Hermoso lacks it. All run on the full connection, added in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. ${CHATGPT_WEB_DOORS_LINE}`;
 };
 export const MCP_INSTRUCTIONS_WIDGET = [
-  "Hermoso launches and markets a business: site, domain, email, payments, ad research, image and video ads, posting, paid ads, results.",
+  "Hermoso launches and markets a business: site, domain, email, payments, ad research, image and video ads, posting, paid ads.",
   'Asked to make something, make it. First use or "what can you do?": welcome.',
   '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles.',
-  '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake, edit_image. Renders run in background; poll get_job.',
-  '• FILES & SCHEDULING: upload_file turns a file into a URL; schedule_post, list_scheduled, list_connectors, list_library.',
+  '• CREATE: get_brand, draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake, edit_image. Renders run in background; poll get_job.',
+  "• FILES & SCHEDULING: upload_file makes a file a URL (OneDrive: attach it or use ChatGPT's connector); schedule_post, list_scheduled.", // OneDrive is off this list whole (2026-11-24 rebalance); its files still reach every tool here
   '• PUBLISH: post_to_* post now; list_inbox, reply_to_inbox_item.',
   '• LAUNCH a business: start_business; publish_page, update_page; find_domain, connect_domain, set_email_forwarding; start_payments_onboarding.',
   '• PAID ADS (Meta, Google, LinkedIn, TikTok, ChatGPT): create_* builds campaigns paused; set_*_status and set_*_budget control spend.',
   '• RESULTS: post_performance, analyze_campaigns. WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits.',
   "CREDITS: AI and research use credits; replies say how many; if too low, say so. Nothing is bought here.",
   'CONFIRM before posting or scheduling, messaging customers, turning on a campaign, changing a budget, deleting anything, or draft_brand with save:true.',
-  'SHOWING RESULTS: the widget shows each finished image and video; never repeat one as a markdown image.',
+  'SHOWING RESULTS: the widget shows each finished image and video; never repeat one as markdown.',
   chatgptLeftOutLine(), // the whole string, with the longest first-run line on top, must fit 2,048 bytes (mcp-first-run-guidance-check)
 ].filter(Boolean).join('\n');
 // ── EACH FOCUSED APP GETS ITS OWN INSTRUCTIONS (2026-11-06) ─────────────────────────────────────────────────────────
@@ -675,8 +675,8 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
     "Hermoso Launch puts the user's business online: the site you wrote, live at https://<name>.hermoso.page, their own domain, email on it, and payments. Each part works on its own.",
     '• START A BUSINESS: start_business (an idea becomes a plan), business_status (progress); welcome lists ways to start.',
     '• SITE: publish_page (the files you wrote), update_page (change files; setLive goes back), rollback_page, get_page, list_pages, unpublish_page.',
-    '• DOMAIN AND EMAIL: find_domain, connect_domain (a domain the user owns), domain_status, set_dns_record, set_email_forwarding, connect_email_provider, create_domain_address (a bought domain, or a connected one with no email), list_domain_mail, reply_domain_mail, send_domain_mail.',
-    '• PAYMENTS: start_payments_onboarding (the seller sets it up), payments_status, list_site_payments, set_site_payments_mode.',
+    '• DOMAIN AND EMAIL: find_domain, connect_domain (one the user owns), domain_status, set_dns_record, set_email_forwarding, connect_email_provider, create_domain_address (bought, or connected with no email), list_domain_mail, reply_domain_mail, send_domain_mail.',
+    '• PAYMENTS: start_payments_onboarding, payments_status, list_site_payments, set_site_payments_mode.',
     '• BACKEND: site_logs, list_site_users, export_site_db, restore_site_db.',
     '• RESULTS: hermoso_tag_report (visits, leads, revenue by source); schedule_post to announce it.',
     'EVERY PUBLISHED FILE IS PUBLIC: never put API keys or secrets in page files. Secrets, page passwords and new domains are set in the Hermoso app.',
@@ -3617,6 +3617,17 @@ const CONV_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its
 // ABANDONED-CHECKOUT RECOVERY (2026-11-20): held from the capped ChatGPT list for the same reason as the order tools above.
 const SHOPIFY_CART_WIDGET_WHY = 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; abandoned-checkout recovery is set up from the Hermoso app (Studio) or another connected agent';
 export const SHOPIFY_CART_TOOLS = Object.freeze(['set_shopify_cart_recovery', 'get_shopify_cart_recovery', 'shopify_cart_recovery_report']);
+// THE 2026-11-24 REBALANCE (see the AGENT WATCH entry inside WIDGET_WITHHELD_WHY): never called on any host, no connector, a listed way here.
+export const ROOM_WIDGET_WHY = Object.freeze({
+  import_posts_csv: 'on this host schedule_posts takes the posts directly: read the CSV in the conversation and pass its rows to schedule_posts; the CSV importer runs in the Hermoso app (Calendar) and on every other MCP host',
+  check_spam_words: 'the wording of an email can be reviewed in this conversation; the rule-based spam-word check runs in the Hermoso app and on every other MCP host',
+  tidy_memory: 'list_memory shows each saved fact and forget removes one; the one-step tidy runs in the Hermoso app and on every other MCP host',
+  leave_connector: 'a connection shared by several teammates is managed in the Hermoso app (Connectors) with the other team settings; disconnect_connector runs here, and every other MCP host runs this tool',
+  update_video_preset: 'a saved video preset is renamed or changed in the Hermoso app (Library) or on any other MCP host; list_video_presets, save_video_preset and plan_video_from_preset run here',
+  delete_video_preset: 'a saved video preset is deleted in the Hermoso app (Library) or on any other MCP host; list_video_presets reads them here',
+  delete_creator: 'a saved creator is deleted in the Hermoso app or on any other MCP host; list_creators reads them here',
+  delete_playbook: 'a saved playbook is deleted in the Hermoso app or on any other MCP host; list_playbooks reads them here',
+});
 export const WIDGET_WITHHELD_WHY = Object.freeze({
   ...Object.fromEntries(SHOPIFY_OPS_TOOLS.map((n) => [n, SHOPIFY_OPS_WIDGET_WHY])),
   ...Object.fromEntries(SHOPIFY_ADMIN_TOOLS.map((n) => [n, SHOPIFY_ADMIN_WIDGET_WHY])),
@@ -3670,9 +3681,7 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   update_linkedin_ads_campaign: LI_BOOST_WIDGET_WHY, // 2026-11-20, the EU political declaration on an existing campaign; same cap
   // contact_support (2026-11-19) is newer than the reviewed ChatGPT list, and one more ungated tool would push the last ranked
   // family (WordPress) over CHATGPT_TOOL_CAP. Held for the next ChatGPT review, with the address said.
-  // schedule_posts (2026-11-24) needs no connection, so it would be always-listed and push the last ranked family (Threads) off
-  // a list at its cap. Held here like contact_support; schedule_post covers one post at a time on this list.
-  schedule_posts: 'it is newer than the ChatGPT tool list, which is at its 1,000-tool limit; here schedule_post schedules the posts one at a time, and the Hermoso Social Media Manager app in ChatGPT, the Hermoso app or another connected agent schedules many in one call',
+  // schedule_posts (2026-11-24): LISTED since the 2026-11-24 rebalance below (THE ROOM FOR THE NEW TOOLS), with whats_new and set_watch_keywords.
   contact_support: 'it is newer than the reviewed ChatGPT tool list; until it is added, the user can write to hello@hermoso.ai or press Help in the Hermoso app, and a defect can go through report_bug',
   create_creator_campaign: CC_WIDGET_WHY,
   read_creator_campaigns: CC_WIDGET_WHY,
@@ -3735,11 +3744,17 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   // 2026-11-18, the 30-day error ledger). Held from the all-in-one ChatGPT list so the Threads family fits whole beside Hermoso
   // Launch; a connector is never listed in part (owner, 2026-11-23), and these belong to no connector.
   submit_to_gallery: GALLERY_WIDGET_WHY, list_gallery_submissions: GALLERY_WIDGET_WHY, withdraw_from_gallery: GALLERY_WIDGET_WHY,
-  // THE AGENT WATCH (2026-11-24, lib/agent-watch.mjs): two tools that need no connector, so here they would be always-listed and
-  // push the Threads family (the lowest-ranked listed one) off the capped list, the gallery precedent above. On this host the
-  // polled lists still take `since`, and the alert channels chosen in the app push each new item.
-  whats_new: 'the published ChatGPT app has a reviewed tool list at its cap, and a new always-listed tool would push the Threads family off it (2026-11-24); here every list (list_inbox, list_threads_replies, …) takes `since` for only what is new, the alerts chosen in the Hermoso app (Connectors, webhook) push each item, and every other MCP host runs it',
-  set_watch_keywords: 'the published ChatGPT app has a reviewed tool list at its cap, and a new always-listed tool would push the Threads family off it (2026-11-24); keyword watches are saved on any other MCP host or over the REST API (PUT /api/agent/watch)',
+  // THE AGENT WATCH (whats_new, set_watch_keywords) and schedule_posts: LISTED since the 2026-11-24 rebalance (owner: "should we
+  // remove some unused connector like microsoft drive or something to fit it?"). THE ROOM FOR THEM, MEASURED, NOT ASSUMED: the
+  // file-storage connectors were the first candidates, and the call log said no. OneDrive is already off this list whole
+  // (CHATGPT_DEMOTED_FAMILIES, 0 calls). Google Drive (Docs, Sheets, Slides) is one connector, and real customers call it
+  // THROUGH CHATGPT (tool_usage_daily 2026-11-18..24, our own accounts left out: 167 calls, 3 accounts, list_drive_files,
+  // update_drive_file, read_sheet, create_doc …); a connector is listed whole or not at all (owner, 2026-11-23), so it stays.
+  // Every listed family has ChatGPT use except the protected X and ChatGPT Ads channels. So the room comes from eight tools that
+  // belong to no connector, were called by NOBODY on ANY host in that log (our own accounts included), are named by no listed
+  // description, instruction or plugin skill, and have a listed way to the same result here (ROOM_WIDGET_WHY). 983 - 8 + 3 = 978
+  // listed, + the extension tools = 994 of 1,000: six slots of headroom. Every other host keeps all eight.
+  ...ROOM_WIDGET_WHY,
   rotate_webhook_signing_secret: 'it returns the alert webhook signing secret, which is created and copied in the Hermoso app (Settings, Alerts) rather than in a conversation; every other MCP host runs it',
   get_x_stream_key: 'it returns an X stream key, a live secret that belongs in the encoder, not in a conversation; the key is read in X Media Studio or on any other MCP host',
   // EMAIL FROM YOUR OWN MAILBOX (2026-11-15): fifteen tools that need no single connector, so on this host they would count as
@@ -6528,6 +6543,33 @@ function buildTools(rawServer, opts = {}, sink = null) {
     commission: ['affiliate'], commissions: ['affiliate'], affiliate: ['affiliate'], affiliates: ['affiliate'], payout: ['affiliate', 'payout'], payouts: ['affiliate', 'payout'], withdraw: ['withdraw', 'affiliate'],
     welcome: ['welcome'], onboarding: ['welcome', 'brand'], onboard: ['welcome', 'brand'], started: ['welcome', 'capabilities'], begin: ['welcome'], intro: ['welcome', 'capabilities'],
   });
+  // THE USER'S OWN LANGUAGE (2026-11-24, defect board: find_tools("jeu"), French for "game"). Agents pass the user's word
+  // through untranslated, and the matcher only knew English, so a French, Spanish, Portuguese, German or Italian task word
+  // was a dead end even when the tool exists ("publicité", "programar", "concorrente"). Accents are folded first (the
+  // matcher drops non a-z letters, so "vidéo" read as "vid" + "o"); then a short table maps common task words onto the
+  // English word, whose own synonyms then apply. A word with no tool behind it ("jeu" → game) still files its dead end.
+  const foldAccents = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const QUERY_TRANSLATIONS = Object.freeze(Object.fromEntries([
+    ['game', ['jeu', 'jeux', 'juego', 'juegos', 'jogo', 'jogos', 'spiel', 'spiele', 'gioco', 'giochi']],
+    ['ad', ['publicite', 'publicites', 'annonce', 'annonces', 'anuncio', 'anuncios', 'werbung', 'anzeige', 'anzeigen', 'annuncio', 'annunci', 'pubblicita']],
+    ['publish', ['publier', 'publication', 'publicar', 'publicacion', 'publicacao', 'veroffentlichen', 'pubblicare', 'pubblicazione']],
+    ['schedule', ['programmer', 'planifier', 'programar', 'agendar', 'planen', 'programmare', 'calendrier', 'calendario']],
+    ['competitor', ['concurrent', 'concurrents', 'concurrence', 'competidor', 'competidores', 'competencia', 'concorrente', 'concorrentes', 'concorrenti', 'konkurrent', 'konkurrenten', 'wettbewerber']],
+    ['image', ['imagen', 'imagenes', 'imagem', 'imagens', 'bild', 'bilder', 'immagine', 'immagini', 'foto', 'fotos']],
+    ['voice', ['voix', 'voz', 'stimme', 'voce']],
+    ['subtitle', ['soustitres', 'subtitulos', 'legenda', 'legendas', 'untertitel', 'sottotitoli']],
+    ['campaign', ['campagne', 'campagnes', 'campana', 'campanas', 'campanha', 'campanhas', 'kampagne', 'kampagnen', 'campagna']],
+    ['report', ['rapport', 'informe', 'relatorio', 'bericht', 'statistiques', 'estadisticas', 'estatisticas', 'statistiken', 'statistiche']],
+    ['budget', ['presupuesto', 'orcamento']],
+    ['audience', ['publico', 'audiencia', 'zielgruppe', 'pubblico']],
+    ['comment', ['commentaire', 'commentaires', 'comentario', 'comentarios', 'kommentar', 'kommentare', 'commento', 'commenti']],
+    ['message', ['mensaje', 'mensajes', 'mensagem', 'mensagens', 'nachricht', 'nachrichten', 'messaggio', 'messaggi']],
+    ['thumbnail', ['miniature', 'miniatura', 'vorschaubild']],
+    ['music', ['musique', 'musica', 'musik']],
+    ['product', ['produit', 'produits', 'producto', 'productos', 'produto', 'produtos', 'produkt', 'produkte', 'prodotto', 'prodotti']],
+    ['translate', ['traduire', 'traducir', 'traduzir', 'ubersetzen', 'tradurre']],
+    ['create', ['creer', 'crear', 'criar', 'erstellen', 'creare']],
+  ].flatMap(([en, words]) => words.map((x) => [x, en]))));
   const stemWord = (w) => {
     if (w.length <= 3) return w;
     if (w.endsWith('ies')) return w.slice(0, -3) + 'y';
@@ -6563,13 +6605,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const df = ctx._tokenDf; return Math.min(weight(t), df && df.has(a) ? weight(a) : 1);
   };
   const expandQueryWord = (raw) => {
-    const w = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!w || QUERY_STOPWORDS.has(w)) return null;
-    if (w.includes('_')) return { w, st: w, alts: [w], literal: true }; // a tool name (or part of one) typed as-is
+    const w0 = foldAccents(raw.toLowerCase()).replace(/[^a-z0-9_]/g, '');
+    if (!w0 || QUERY_STOPWORDS.has(w0)) return null;
+    if (w0.includes('_')) return { w: w0, st: w0, alts: [w0], literal: true }; // a tool name (or part of one) typed as-is
+    // The user's language → the English task word (QUERY_TRANSLATIONS), scored exactly as if it had been typed in English.
+    const w = TOOL_SYNONYMS[w0] ? w0 : (QUERY_TRANSLATIONS[w0] || w0);
     const st = stemWord(w);
     // A word with its OWN entry is not also read as its stem's (2026-11-17): "leads" (the people) has an entry, and
     // adding the entry of "lead" (lead + form) ranked twelve lead-form tools above every tool that returns leads.
-    const alts = new Set([w, st, ...(TOOL_SYNONYMS[w] || TOOL_SYNONYMS[st] || [])]);
+    const alts = new Set([w, st, ...(w !== w0 ? [w0] : []), ...(TOOL_SYNONYMS[w] || TOOL_SYNONYMS[st] || [])]);
     return { w, st, alts: [...alts] };
   };
   // ONE GLUED TOKEN IS SEVERAL WORDS (2026-10-04, off the defect board). An agent wanting a video's transcript searched
@@ -6580,7 +6624,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   // that IS known stays whole, so TikTok, LinkedIn, WhatsApp and ecommerce are never cut into nonsense.
   const queryVocabFor = (ctx) => {
     if (ctx._qVocab) return ctx._qVocab;
-    const vocab = new Set([...Object.keys(TOOL_SYNONYMS), ...QUERY_STOPWORDS]);
+    const vocab = new Set([...Object.keys(TOOL_SYNONYMS), ...Object.keys(QUERY_TRANSLATIONS), ...QUERY_STOPWORDS]);
     for (const n of Object.keys(ctx.handleOf)) for (const t of n.split('_')) if (t.length >= 2) vocab.add(t);
     const sq = new Set();
     for (const h of Object.values(ctx.handleOf)) if (h) for (const x of squashedIdentifiers(h)) sq.add(x);
@@ -6620,7 +6664,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   const splitQueryWords = (rawQuery, ctx) => {
     const V = queryVocabFor(ctx);
     const out = [];
-    let joined = String(rawQuery || ''); for (const [re, to] of JOINED_PHRASES) joined = joined.replace(re, to);
+    let joined = foldAccents(rawQuery); for (const [re, to] of JOINED_PHRASES) joined = joined.replace(re, to);
     for (const raw of joined.trim().split(/[\s,]+/).filter(Boolean)) {
       const whole = raw.toLowerCase();
       if (whole.includes('_') || tokenHasOwnHit(whole.replace(/[^a-z0-9]/g, ''), V)) { out.push(whole); continue; }
@@ -7703,8 +7747,8 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('get_blog_syndication', {
     title: 'Show automatic blog syndication',
-    description: "Show the brand's automatic blog syndication on dev.to and Hashnode: on or off, the feed it watches, posts per day, what is queued, what went out recently, and why it is paused if it is. Free.",
-    inputSchema: { ...MANAGE_BRAND, platform: z.enum(['devto', 'hashnode']).optional() },
+    description: "Show the brand's automatic blog syndication on dev.to, Hashnode and its LinkedIn company Page: on or off, the feed it watches, posts per day, what is queued, what went out recently, and why it is paused if it is. Free.",
+    inputSchema: { ...MANAGE_BRAND, platform: z.enum(['devto', 'hashnode', 'linkedin_page']).optional() },
     outputSchema: { platforms: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a = {}) => {
@@ -7713,10 +7757,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_blog_syndication', {
     title: 'Set up automatic blog syndication',
-    description: "Turn on AUTOMATIC blog syndication: Hermoso republishes the brand's blog posts on dev.to and/or Hashnode by itself, each with its canonical URL, one at a time and spaced through the day (perDay, default 4, at most 10). Give feedUrl (the blog's RSS or Atom feed: every post published AFTER syndication is switched on goes out) and/or queue (blog post URLs to publish first, in that order: the way to bring over older posts, best first). Posts already on the platform are skipped. Free; it needs the platform connected. on:false pauses it.",
+    description: "Turn on AUTOMATIC blog syndication: Hermoso republishes the brand's blog posts on dev.to and/or Hashnode by itself, each with its canonical URL, one at a time and spaced through the day (perDay, default 4, at most 10). Give feedUrl (the blog's RSS or Atom feed: every post published AFTER syndication is switched on goes out) and/or queue (blog post URLs to publish first, in that order: the way to bring over older posts, best first). Posts already on the platform are skipped. Free; it needs the platform connected. on:false pauses it. With platforms including linkedin_page, each NEW post in the feed is also queued as a native post on the brand's LinkedIn company Page (linkedinOrganizationId; a short summary in the brand's voice plus the link) in the next free weekly slot (linkedinDays, default Mon/Wed/Fri; linkedinTime, default 15:15 UTC). Writing a summary costs a few credits; when credits are short it uses the article's own description.",
     inputSchema: {
       ...MANAGE_BRAND,
-      platforms: z.array(z.enum(['devto', 'hashnode'])).optional().describe('default both connected platforms'),
+      platforms: z.array(z.enum(['devto', 'hashnode', 'linkedin_page'])).optional().describe('default both connected blog platforms (devto, hashnode); name linkedin_page to add the LinkedIn company Page'),
+      linkedinOrganizationId: z.string().optional().describe('linkedin_page: the company Page id from list_linkedin_pages (defaults to the only shared Page)'),
+      linkedinDays: z.array(z.string()).optional().describe('linkedin_page: weekdays for the slots, e.g. ["mon","wed","fri"] (default)'),
+      linkedinTime: z.string().optional().describe('linkedin_page: slot time HH:MM in UTC, default 15:15'),
       on: z.boolean().optional(),
       feedUrl: z.string().optional().describe('RSS or Atom feed of the blog'),
       perDay: z.number().optional().describe('1 to 10 posts a day per platform, default 4'),
@@ -8451,7 +8498,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       limit: z.number().optional().describe('items per page (1–200, default 50); counts always cover everything new'),
     },
     outputSchema: { cursor: z.string().optional(), counts: z.any().optional(), items: z.array(z.any()).optional(), more: z.boolean().optional(), gap: z.boolean().optional(), watching: z.any().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }, // NOT read-only: the first call starts watching the brand (OpenAI scan 2026-11-24: "marked readOnlyHint: true, but its behavior appears to have a user-visible side effect"); the same `since` returns the same items
   }, wrap(async (a) => {
     const d = await apiGet('/api/agent/whats-new', { since: a.since, events: Array.isArray(a.events) ? a.events.join(',') : undefined, platforms: Array.isArray(a.platforms) ? a.platforms.join(',') : undefined, limit: a.limit });
     const lines = (d.items || []).map((x) => `• ${x.event} · ${x.platform || '?'}${x.from?.name ? ` · ${x.from.name}` : ''}: ${String(x.text || x.caption || x.summary || '').replace(/\s+/g, ' ').slice(0, 140)}${x.comment_id ? ` [comment ${x.comment_id}]` : x.message_id ? ` [message ${x.message_id}]` : x.item_id ? ` [${x.item_id}]` : x.media_id ? ` [media ${x.media_id}]` : x.post_id ? ` [post ${x.post_id}]` : ''}${x.reply_with ? ` → ${x.reply_with}` : ''}`);
@@ -8465,7 +8512,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       keywords: z.array(z.union([z.string(), z.object({ q: z.string(), platform: z.enum(['threads', 'x']).optional() })])).describe('words or phrases; a plain string watches Threads'),
     },
     outputSchema: { keywords: z.array(z.any()).optional(), x: z.boolean().optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, // replaces the saved list (empty clears it) and watches public posts: set_competitor_watch's class, which OpenAI's scan held as not destructive (2026-11-24, listed on ChatGPT)
   }, wrap(async (a) => {
     const d = await apiPost('/api/agent/watch', { keywords: a.keywords || [] });
     return ok(d.note, d);

@@ -391,7 +391,7 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'meta' && on.has('instagram') && INSTAGRAM_LOGIN_TOOLS.has(name)) return false;
   if (p === 'meta' && on.has('whatsapp') && isWhatsAppTool(name)) return false;
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
-  if (p === 'devto' && /blog_syndication/.test(name) && on.has('hashnode')) return false; // the settings serve either platform
+  if (p === 'devto' && /blog_syndication/.test(name) && (on.has('hashnode') || on.has('linkedin'))) return false; // the settings serve every target: dev.to, Hashnode, the LinkedIn Page
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'sendblue' && IMSG_TOOL_ALSO.some((x) => on.has(x))) return false;
