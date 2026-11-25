@@ -32708,14 +32708,14 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // unset) after its live cert was judged fake (product decision, 2026-09-28). This schema is a byte-twin shipped to npm, so it cannot read the
     // server's switch: it names no second engine, and `engine` is a free string the SERVER rules on — any engine it
     // offers is listed live in hermoso_capabilities (avatarEngines), and a name it does not offer is refused, free.
-    description: "ANIMATE A PHOTO so it talks: the presenter in `image` says `script` word for word, a separate voice lip-synced onto the still. Use it ONLY when the user asks for an animated photo / talking photo / lip-sync look by name; for any other talk-to-camera or spokesperson ask use generate_video with `speak` (the person filmed saying it, which reads as real footage). About 1-3 min, holds the pose steady, 480p/720p. The per-second credit price is in hermoso_capabilities (avatarEngines); dryRun:true returns this exact job's hold without rendering. Blocks until done where the host allows, else returns a job id to poll with get_job. Requires canAvatar. Spends credits; a refusal before rendering costs nothing.",
+    description: "ANIMATE A PHOTO so it talks: the presenter in `image` says `script` word for word, a separate voice lip-synced onto the still. Use it ONLY when the user asks for an animated photo / talking photo / lip-sync look by name; for any other talk-to-camera or spokesperson ask use generate_video with `speak` (the person filmed saying it, which reads as real footage). About a minute, lifelike expressions and gestures that follow the words, 1080p (or 2k). The per-second credit price is in hermoso_capabilities (avatarEngines); dryRun:true returns this exact job's hold without rendering. Blocks until done where the host allows, else returns a job id to poll with get_job. Requires canAvatar. Spends credits; a refusal before rendering costs nothing.",
     inputSchema: {
       image: z.string().describe('local path or URL of the presenter portrait. ' + LIKENESS_TERMS),
       script: z.string().describe('the words the avatar speaks'),
       voice: z.string().optional().describe('voice name (Aria / Sarah / George / Adam). Leave it out and the voice matches the person in `image`; if nobody can be read, the call is refused free asking for one'),
       engine: z.string().optional().describe('leave out for the standard engine; only an engine listed in hermoso_capabilities avatarEngines is accepted'),
-      resolution: z.string().optional().describe("'720p' (default) or '480p'"),
-      prompt: z.string().optional().describe('motion direction, only for an engine other than standard that hermoso_capabilities lists'),
+      resolution: z.string().optional().describe("'1080p' (default) or '2k'"),
+      prompt: z.string().optional().describe('optional direction for expression and movement (e.g. calm, few gestures)'),
       seed: z.number().int().optional().describe('fixed seed, only for an engine other than standard'),
       acceptQueue: z.boolean().optional().describe('only for an engine hermoso_capabilities marks oneAtATime: wait in line'),
       dryRun: z.boolean().optional().describe('return the credits this exact job would hold, without rendering'),
