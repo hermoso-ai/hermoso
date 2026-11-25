@@ -1,0 +1,42 @@
+{
+  "name": "hermoso-social-scheduler",
+  "displayName": "Hermoso Social Scheduler",
+  "version": "1.0.0",
+  "description": "Publish and schedule your own posts to your own connected accounts (Facebook, Instagram, Threads, X, LinkedIn, Pinterest, Bluesky, Telegram, YouTube and TikTok), answer comments and messages, and see which posts performed. Every post is shown to you for a yes first. When you ask Hermoso to fit one caption to each channel, that version is written by an AI model run by Hermoso AI. Requires a Hermoso account (free to start).",
+  "author": {
+    "name": "Hermoso AI",
+    "email": "hello@hermoso.ai",
+    "url": "https://hermoso.ai"
+  },
+  "homepage": "https://hermoso.ai",
+  "repository": "https://github.com/hermoso-ai/hermoso",
+  "license": "MIT",
+  "keywords": [
+    "social-media",
+    "scheduling",
+    "publishing",
+    "instagram",
+    "tiktok",
+    "linkedin",
+    "x",
+    "youtube",
+    "inbox",
+    "marketing"
+  ],
+  "icon": "./logo.png",
+  "documentationUrl": "https://hermoso.ai/docs/mcp/",
+  "supportUrl": "https://hermoso.ai/contact",
+  "privacyPolicyUrl": "https://hermoso.ai/privacy",
+  "termsOfServiceUrl": "https://hermoso.ai/terms",
+  "network": {
+    "hosts": [
+      "app.hermoso.ai"
+    ]
+  },
+  "mcpServers": {
+    "hermoso-social-scheduler": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-scheduler"
+    }
+  }
+}

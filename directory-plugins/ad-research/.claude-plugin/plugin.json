@@ -1,0 +1,42 @@
+{
+  "name": "hermoso-ad-research",
+  "displayName": "Hermoso Ad Research",
+  "version": "1.0.0",
+  "description": "Research the ads and posts already working in any market: find a brand's competitors, read their running ads in the Meta, Google and LinkedIn ad libraries, search organic TikTok, Instagram, YouTube, Reddit and Threads, break down a video ad, and check ad copy against Meta's advertising standards. Read-only. Competitor lists, teardowns, research summaries, video breakdowns and policy verdicts are written by an AI model run by Hermoso AI. Requires a Hermoso account (free to start).",
+  "author": {
+    "name": "Hermoso AI",
+    "email": "hello@hermoso.ai",
+    "url": "https://hermoso.ai"
+  },
+  "homepage": "https://hermoso.ai",
+  "repository": "https://github.com/hermoso-ai/hermoso",
+  "license": "MIT",
+  "keywords": [
+    "advertising",
+    "ad-library",
+    "competitor-research",
+    "meta-ads",
+    "google-ads",
+    "linkedin-ads",
+    "tiktok",
+    "instagram",
+    "youtube",
+    "marketing"
+  ],
+  "icon": "./logo.png",
+  "documentationUrl": "https://hermoso.ai/docs/mcp/",
+  "supportUrl": "https://hermoso.ai/contact",
+  "privacyPolicyUrl": "https://hermoso.ai/privacy",
+  "termsOfServiceUrl": "https://hermoso.ai/terms",
+  "network": {
+    "hosts": [
+      "app.hermoso.ai"
+    ]
+  },
+  "mcpServers": {
+    "hermoso-ad-research": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-research"
+    }
+  }
+}

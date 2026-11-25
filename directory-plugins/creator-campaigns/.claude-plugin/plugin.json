@@ -1,0 +1,40 @@
+{
+  "name": "hermoso-creator-campaigns",
+  "displayName": "Hermoso Creator Campaigns",
+  "version": "1.0.0",
+  "description": "Run creator campaigns: find creators whose organic posts do well in your niche, keep a shortlist with an outreach status, create and edit campaigns, invite creators with personal links, review the creators who join and the posts they submit, and report views, spend and earnings. Requires a Hermoso account (free to start).",
+  "author": {
+    "name": "Hermoso AI",
+    "email": "hello@hermoso.ai",
+    "url": "https://hermoso.ai"
+  },
+  "homepage": "https://hermoso.ai",
+  "repository": "https://github.com/hermoso-ai/hermoso",
+  "license": "MIT",
+  "keywords": [
+    "creators",
+    "influencer-marketing",
+    "ugc",
+    "creator-campaigns",
+    "tiktok",
+    "instagram",
+    "youtube",
+    "marketing"
+  ],
+  "icon": "./logo.png",
+  "documentationUrl": "https://hermoso.ai/docs/mcp/",
+  "supportUrl": "https://hermoso.ai/contact",
+  "privacyPolicyUrl": "https://hermoso.ai/privacy",
+  "termsOfServiceUrl": "https://hermoso.ai/terms",
+  "network": {
+    "hosts": [
+      "app.hermoso.ai"
+    ]
+  },
+  "mcpServers": {
+    "hermoso-creator-campaigns": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-creators"
+    }
+  }
+}

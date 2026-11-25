@@ -1,22 +1,54 @@
 {
   "name": "hermoso",
   "displayName": "Hermoso",
-  "version": "1.1.0",
-  "description": "Launch and market from your coding agent: put the site you built live with a domain, email and payments, then research ads, make image and video ads, post and schedule, and run campaigns. Requires a Hermoso account (free to start).",
-  "author": { "name": "Hermoso AI", "email": "hello@hermoso.ai", "url": "https://hermoso.ai" },
+  "version": "2.0.0",
+  "description": "Research the ads already working in any market, report on your own ad accounts and website analytics, publish and schedule your own posts, and run creator campaigns, from Claude. Four Hermoso connections in one plugin: Ad Research, Ads Reporting, Social Scheduler and Creator Campaigns. Research summaries, teardowns and fitted captions are written by an AI model run by Hermoso AI. Requires a Hermoso account (free to start).",
+  "author": {
+    "name": "Hermoso AI",
+    "email": "hello@hermoso.ai",
+    "url": "https://hermoso.ai"
+  },
   "homepage": "https://hermoso.ai",
   "repository": "https://github.com/hermoso-ai/hermoso",
   "license": "MIT",
-  "keywords": ["marketing", "ads", "advertising", "ad-library", "website-launch", "domains", "social-media", "scheduling", "ai-video", "ai-image", "mcp"],
+  "keywords": [
+    "marketing",
+    "advertising",
+    "ad-library",
+    "competitor-research",
+    "ads-reporting",
+    "analytics",
+    "social-media",
+    "scheduling",
+    "creators",
+    "mcp"
+  ],
   "icon": "./logo.png",
-  "documentationUrl": "https://hermoso.ai/mcp/",
+  "documentationUrl": "https://hermoso.ai/docs/mcp/",
   "supportUrl": "https://hermoso.ai/contact",
   "privacyPolicyUrl": "https://hermoso.ai/privacy",
   "termsOfServiceUrl": "https://hermoso.ai/terms",
+  "network": {
+    "hosts": [
+      "app.hermoso.ai"
+    ]
+  },
   "mcpServers": {
-    "hermoso": {
+    "hermoso-ad-research": {
       "type": "http",
-      "url": "https://app.hermoso.ai/mcp"
+      "url": "https://app.hermoso.ai/mcp?tools=directory-research"
+    },
+    "hermoso-ads-reporting": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-reports"
+    },
+    "hermoso-social-scheduler": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-scheduler"
+    },
+    "hermoso-creator-campaigns": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-creators"
     }
   }
 }

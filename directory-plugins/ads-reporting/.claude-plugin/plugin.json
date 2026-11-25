@@ -1,0 +1,42 @@
+{
+  "name": "hermoso-ads-reporting",
+  "displayName": "Hermoso Ads Reporting",
+  "version": "1.0.0",
+  "description": "Read campaign and ad performance from your own connected ad accounts (Meta, Google Ads, LinkedIn, TikTok, Microsoft Advertising, Reddit, Pinterest, X and ChatGPT Ads) and your website analytics (Google Analytics 4 and Search Console), then turn it into one honest report. Read-only. Requires a Hermoso account (free to start).",
+  "author": {
+    "name": "Hermoso AI",
+    "email": "hello@hermoso.ai",
+    "url": "https://hermoso.ai"
+  },
+  "homepage": "https://hermoso.ai",
+  "repository": "https://github.com/hermoso-ai/hermoso",
+  "license": "MIT",
+  "keywords": [
+    "advertising",
+    "reporting",
+    "analytics",
+    "meta-ads",
+    "google-ads",
+    "linkedin-ads",
+    "tiktok-ads",
+    "google-analytics",
+    "search-console",
+    "marketing"
+  ],
+  "icon": "./logo.png",
+  "documentationUrl": "https://hermoso.ai/docs/mcp/",
+  "supportUrl": "https://hermoso.ai/contact",
+  "privacyPolicyUrl": "https://hermoso.ai/privacy",
+  "termsOfServiceUrl": "https://hermoso.ai/terms",
+  "network": {
+    "hosts": [
+      "app.hermoso.ai"
+    ]
+  },
+  "mcpServers": {
+    "hermoso-ads-reporting": {
+      "type": "http",
+      "url": "https://app.hermoso.ai/mcp?tools=directory-reports"
+    }
+  }
+}
