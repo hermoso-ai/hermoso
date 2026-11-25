@@ -47,6 +47,16 @@ scene around it is generated. Drive the **Hermoso CLI**.
 6. **A marketplace listing set** (Amazon-style) is its own job: a main image (the product alone on a pure white background, filling most of the frame, no props, text or badges, the marketplace's own main-image rule), then the secondary images: an infographic of benefit callouts, a multi-angle view, a detail or macro shot, a lifestyle shot and a "what's in the box" layout; and, when asked, A+ modules: a hero banner, pain points, features, ingredients or materials, results, how to use, and an endorsement. The main image renders FIRST and every other image is drawn from it (each waits for it, so the whole set shows the same product, scale and light); pass an approved main as `mainImage` to redo the rest from it. `aplus:true` adds Amazon's 7 A+ modules: a 21:9 brand hero and brand promise and 3:2 modules 2-6 (key benefits, how to use, materials and details, lifestyle, what you get), each also delivered at its Amazon module's exact pixels (Premium 1464x600 + mobile 600x450, or 800x600; the Basic size beside it), with its text fields suggested only from the product's own data (`copy` for the seller's words; `copyIn:"image"` paints them on). The set is ONE call: `hermoso call make_listing_set --json '{"image":"<product photo>","dryRun":true}'` returns the plan and its exact price (main, lifestyle, detail, scale, in use by default; `shots` takes multi_angle, whats_in_box, back_of_pack or the user's own words), then the same call with `plan` set to that plan renders it, one image job per shot.
 7. Report each served image URL as a short labelled list (e.g. "lifestyle / kitchen counter"); never paste the prompt back. Offer to `hermoso fetch` them to disk or to tweak a scene.
 
+## Checkpoints before anything paid
+Every paid render waits for three yeses, one at a time (the hermoso-approval-checkpoints skill has the detail):
+1. **The script.** Show the concept, the copy and, for a video, the timed shot list in full. Edits come back here.
+2. **The pictures.** Show what the render will be built from (the image prompt and the product photo, or the
+   stills) and let the user pick.
+3. **The price.** Quote the tool that renders with `hermoso call <name> --json '{..., "get_cost": true}'`, show the
+   number, and run only after a yes, adding `"expected_credits"` (the quote) and an `"idempotency_key"` you reuse
+   on any retry.
+If the user says to skip a checkpoint or gives a budget, do that, and still say what you are spending.
+
 ## Notes
 - Keep the product as the hero; never let generated text garble the real label, describe the product as "the exact product in the reference, label unchanged."
 - `--ref` takes a local path (read + sent) or a URL.

@@ -42,6 +42,7 @@ found rather than invented, but it is never a prerequisite. Do what was asked an
 - One asset for every placement in one call: `repurpose_video` (one video → 9:16, 4:5, 1:1, 16:9 or any canvas, blur-padded for free by default, optional captions and dubs, a named file list) and `repurpose_image` (one static ad → variants × formats, the text read once and every output text-checked). `add_presenter` puts a person the user picked on any video, only when asked.
 - Post-production: `stitch_video`, `reframe_video`, `upscale_video`, `dub_video`, `change_voice`, `recast_motion`, `finish_video`, `fix_beat`. Native HTML formats: `make_template_ad`.
 - Video, avatar and stitch are job-based: keep `--wait` so the command prints the final URL, or poll with `hermoso jobs get <id> --wait`. Never report a render as done before the job finishes.
+- **Checkpoints.** A paid render waits for three yeses: the script, then the pictures it is built from, then the price (`"get_cost": true` on the `hermoso call`), run with `"expected_credits"` set to that quote. The hermoso-approval-checkpoints skill has the detail; a user who sets a budget or says to skip one is followed.
 
 ### 3. Publish and schedule
 - A week of posts: `plan_week` drafts 5 posts with new images, captions and times for the active brand, on any plan. Without `confirm` it gives the price and spends nothing. `get_job` reads the drafts, the user changes what they like in plain words, and `run_post_refill` schedules them after they agree. On TikTok these land as drafts in the creator's inbox to finish there.

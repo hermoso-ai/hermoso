@@ -86,6 +86,16 @@ around it is generated. It runs on the Hermoso MCP tools.
 7. Report each served image URL as a short labelled list (for example "lifestyle / kitchen counter"); never paste
    the prompt back. Offer to tweak a scene.
 
+## Checkpoints before anything paid
+Every paid render waits for three yeses, one at a time (the hermoso-approval-checkpoints skill has the detail):
+1. **The script.** Show the concept, the copy and, for a video, the timed shot list in full. Edits come back here.
+2. **The pictures.** Show what the render will be built from (the image prompt and the product photo, the
+   foundations from `render_ad` with `foundations: "choose"`, or the stills) and let the user pick.
+3. **The price.** Quote with `get_cost: true` (`dryRun: true` on a render also shows how it will be filmed), show
+   the number, and run only after a yes, with `expected_credits` set to that quote and an `idempotency_key` you
+   reuse on any retry.
+If the user says to skip a checkpoint or gives a budget, do that, and still say what you are spending.
+
 ## Notes
 - Keep the product as the hero; never let generated text garble the real label. Describe the product as "the exact
   product in the reference, label unchanged."

@@ -19,7 +19,7 @@ Send any image or video ad to Canva to edit, and bring finished Canva designs ba
 - **The Hermoso MCP server**, connected remotely at `https://app.hermoso.ai/mcp`. Nothing is installed on your
   machine and no key is stored: the first time a Hermoso tool runs you sign in with your Hermoso account in the
   browser (in Claude Code, `/mcp` and then `hermoso`).
-- **Seven skills** that teach Claude how to use it well:
+- **Eleven skills** that teach Claude how to use it well:
 
 | Skill | Use it for |
 | --- | --- |
@@ -30,6 +30,10 @@ Send any image or video ad to Canva to edit, and bring finished Canva designs ba
 | `hermoso-product-photoshoot` | Studio, lifestyle and marketplace product shots from a real product photo |
 | `hermoso-marketing` | The whole loop: research, create, publish and schedule, paid campaigns, results |
 | `hermoso-edit-timeline` | The manual for custom video edits and transitions |
+| `hermoso-article-everywhere` | One article or topic to a blog post, an X Article, a LinkedIn post, a YouTube video and a Short |
+| `hermoso-approval-checkpoints` | Approve the script, then the pictures, then the price, before anything paid runs |
+| `hermoso-lock-presenter` | Keep the same presenter and voice across a whole job |
+| `hermoso-setup-check` | Check the brand, channels, credits and defaults, and get exactly what to fix |
 
 ## Ask in your own words
 

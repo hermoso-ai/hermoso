@@ -1,6 +1,6 @@
 {
   "name": "hermoso",
-  "version": "1.4.5",
-  "description": "Launch and market from Gemini CLI: put the site you built live with a domain, email and payments, then research ads, make image and video ads, post and schedule, and run campaigns. Seven Hermoso skills that drive the hermoso CLI. Requires a Hermoso account (free to start).",
+  "version": "1.5.0",
+  "description": "Launch and market from Gemini CLI: put the site you built live with a domain, email and payments, then research ads, make image and video ads, post and schedule, and run campaigns. Eleven Hermoso skills that drive the hermoso CLI. Requires a Hermoso account (free to start).",
   "contextFileName": "GEMINI.md"
 }

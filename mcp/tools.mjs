@@ -13948,7 +13948,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       email: z.object({ autoSend: z.boolean().optional() }).optional(),
       resume: z.boolean().optional().describe('true clears a pause (after a top-up or a reconnect)'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => {
     const d = Object.keys(a || {}).length ? await apiPost('/api/ai-replies', a) : await apiGet('/api/ai-replies', {});
     return ok(`${d.summary}${d.todayLine ? `\n${d.todayLine}` : ''}${d.notes?.length ? `\n${d.notes.join('\n')}` : ''}`, d);
@@ -14839,7 +14839,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       from: z.string().optional().describe('list / clear: YYYY-MM-DD'), to: z.string().optional().describe('list / clear: YYYY-MM-DD'), campaign: z.string().optional().describe('clear: only this campaign'),
     },
     outputSchema: { ok: z.boolean().optional(), received: z.number().optional(), stored: z.number().optional(), rows: z.array(z.any()).optional(), totals: z.record(z.number()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const act = a.action || (a.rows || a.csv ? 'upload' : 'list'); const d = act === 'list' ? await apiGet('/api/ads/campaign-results', { ...a, action: act }) : await apiPost('/api/ads/campaign-results', { ...a, action: act }); return ok(d.note, d); }));
   server.registerTool('set_profit_settings', {
     title: 'Set margin and cost per order for profit',
@@ -14850,7 +14850,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       campaignMargins: z.record(z.number().nullable()).nullable().optional().describe('per-campaign margins; null for one removes it'),
     },
     outputSchema: { ok: z.boolean().optional(), marginPercent: z.number().nullable().optional(), costPerOrder: z.number().nullable().optional(), campaignMargins: z.record(z.number()).optional(), note: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const asks = ['marginPercent', 'costPerOrder', 'campaignMargins'].some((k) => a[k] !== undefined); const d = asks ? await apiPost('/api/ads/profit-settings', a) : await apiGet('/api/ads/profit-settings', {}); return ok(d.note, d); }));
   server.registerTool('campaign_profit', {
     title: 'Profit per ad campaign',
@@ -20756,7 +20756,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       sync: z.union([z.boolean(), z.array(z.enum(['email_leads', 'sms_consents', 'inbox', 'creators', 'shopify', 'stripe', 'hubspot']))]).optional().describe('pull people in from these sources (true = all)'),
       source: z.string().optional().describe('where these rows came from, kept on each contact (default manual)'),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, wrap(async (a) => { const d = await apiPost('/api/contacts', a); return ok(d.note, d); }));
   server.registerTool('delete_contacts', {
     title: 'Delete contacts',
@@ -28113,7 +28113,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       confirm: z.boolean().optional().describe("true once the user has said yes to exactly what the refusal described"),
       confirmScope: z.string().optional().describe("the scopeToken the list tool (or the refusal) prints; required with confirm when the rule can raise spend"),
     },
-    annotations: {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
+    annotations: {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true},
   }, wrap(async (a) => {
     const d = await apiPost('/api/google-ads/rules/update', a);
     return ok(adRuleText(d), d);

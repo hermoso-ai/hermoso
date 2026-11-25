@@ -40,6 +40,16 @@ Go from a brand to an on-brand ad in three steps with the Hermoso MCP tools. Rep
    - `hermoso_capabilities` lists the valid model ids and exact costs if you need another option.
 4. **Report the served URL.** Offer one concrete next step: a punchier hook, a different aspect ratio, or a variation.
 
+## Checkpoints before anything paid
+Every paid render waits for three yeses, one at a time (the hermoso-approval-checkpoints skill has the detail):
+1. **The script.** Show the concept, the copy and, for a video, the timed shot list in full. Edits come back here.
+2. **The pictures.** Show what the render will be built from (the image prompt and the product photo, the
+   foundations from `render_ad` with `foundations: "choose"`, or the stills) and let the user pick.
+3. **The price.** Quote with `get_cost: true` (`dryRun: true` on a render also shows how it will be filmed), show
+   the number, and run only after a yes, with `expected_credits` set to that quote and an `idempotency_key` you
+   reuse on any retry.
+If the user says to skip a checkpoint or gives a budget, do that, and still say what you are spending.
+
 ## Notes
 - **Test hooks before formats.** For a test batch, try four different hooks in one format before one hook in four
   formats: the opening decides performance more than the format does.

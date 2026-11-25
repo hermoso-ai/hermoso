@@ -31,6 +31,16 @@ Drive the **Hermoso CLI** to go from a brand to an on-brand ad in three steps. R
    - Video: `hermoso generate video --prompt "<from the storyboard>" --model <vmodel> --aspect 9:16 --duration 8 --wait`
 4. **Report the served URL.** Offer one concrete next step (a punchier hook, a different aspect ratio, or a variation).
 
+## Checkpoints before anything paid
+Every paid render waits for three yeses, one at a time (the hermoso-approval-checkpoints skill has the detail):
+1. **The script.** Show the concept, the copy and, for a video, the timed shot list in full. Edits come back here.
+2. **The pictures.** Show what the render will be built from (the image prompt and the product photo, or the
+   stills) and let the user pick.
+3. **The price.** Quote the tool that renders with `hermoso call <name> --json '{..., "get_cost": true}'`, show the
+   number, and run only after a yes, adding `"expected_credits"` (the quote) and an `"idempotency_key"` you reuse
+   on any retry.
+If the user says to skip a checkpoint or gives a budget, do that, and still say what you are spending.
+
 ## Notes
 - **Test hooks before formats.** For a test batch, try four different hooks in one format before one hook in four formats: the opening decides performance more than the format does.
 - **Copy a reference ad OR compose from a hook and a setting, never both at once.** When the user hands you an ad to model (a link or a file), follow its structure; when they pick a hook and a scene, build from those; mixing the two blurs both.
