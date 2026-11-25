@@ -147,6 +147,8 @@ export const TOOL_PROVIDER_RULES = [
   // collide with Hermoso billing, which is buy_credits / billing_status / upgrade_plan and never says "stripe".
   [/stripe/, 'stripe'],
   [/hubspot/, 'hubspot'],
+  // HighLevel (2026-11-24): the agency's OWN sub-account, offered only to a brand that connected it.
+  [/highlevel/, 'highlevel'],
   // Salesforce (2026-11-20): the brand's OWN org, offered only to a workspace that connected it.
   [/salesforce/, 'salesforce'],
   // Intercom (2026-10-12): the brand's OWN support inbox, offered only to a workspace that connected it.
