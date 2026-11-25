@@ -50,9 +50,12 @@
 // (Business Discovery, the Threads API, TikTok's Creator Marketplace) — free to us, but impossible without the
 // connection, so gating them is correct.
 // The phone / SMS / voice tools (2026-11-18). Exact names or `sms` as a whole word, so no existing tool can match.
-export const PHONE_TOOL_RE = /(^|_)sms(_|$)|^(list|search)_phone_numbers$|^(buy|configure|release)_phone_number$|10dlc|tollfree|^list_calls$|^list_call_recordings$|^transcribe_call$|^place_call$|^call_tracking_report$|^assign_number_to_campaign$|^list_provider_opt_outs$|^(send|check)_verification_code$|^check_number_portability$|^(create|get|cancel)_port_order$|^list_port_orders$|^set_softphone$|_sip_trunks?$|_branded_calling(_status)?$|^branded_calling_status$/; // + one-time codes and porting (2026-11-20, a Telnyx line: BYO or Hermoso phone). The Hermoso phone on/off/status tools are NOT here: a brand with nothing connected must reach them
+export const PHONE_TOOL_RE = /(^|_)sms(_|$)|^(list|search)_phone_numbers$|^(buy|configure|release)_phone_number$|10dlc|tollfree|^list_calls$|^list_call_recordings$|^transcribe_call$|^place_call$|^call_tracking_report$|^assign_number_to_campaign$|^list_provider_opt_outs$|^(send|check)_verification_code$|^check_number_portability$|^(create|get|cancel)_port_order$|^list_port_orders$|^set_softphone$|_sip_trunks?$|_branded_calling(_status)?$|^branded_calling_status$|^lookup_phone_number$|^manage_live_call$|^estimate_call_cost$|^manage_rcs$/; // + one-time codes and porting (2026-11-20, a Telnyx line: BYO or Hermoso phone). The Hermoso phone on/off/status tools are NOT here: a brand with nothing connected must reach them
 // A phone tool is filed under 'twilio' and served by a Telnyx connection just as well.
 export const PHONE_TOOL_ALSO = Object.freeze(['telnyx']);
+// ONE CALL HISTORY (2026-11-25, Zernio §68): list_calls also reads the brand's WhatsApp calls, so a brand with only WhatsApp
+// connected is offered it too.
+export const UNIFIED_CALLS_ALSO = Object.freeze(['whatsapp']);
 // The AI voice-agent tools (2026-11-18): every one carries `voice_agent` in its name, which nothing else does.
 export const VOICE_TOOL_RE = /voice_agents?(_|$)/;
 // iMESSAGE (2026-11-21): every tool carries `imessage` in its name, which nothing else does. Filed under 'sendblue'; served by a
@@ -74,14 +77,27 @@ export const CALENDAR_TOOL_ALSO = Object.freeze(['google_calendar']);
 // tools/mcp-roster-connector-scope-check.mjs fails when either differs from its source. analyze_campaigns stays
 // ungated on purpose: it says by name which platforms to connect.
 export const CONVERSION_HUB_TOOL_RE = /^(send_conversion_event|conversion_events|conversion_destinations|conversion_insights)$/;
-export const CONVERSION_HUB_ALSO = Object.freeze(['tiktok_ads', 'linkedin', 'snapchat_ads', 'reddit_ads', 'pinterest_ads', 'x_ads', 'microsoft_ads', 'openai_ads', 'applovin_ads', 'google_ads', 'amazon_ads']);
+export const CONVERSION_HUB_ALSO = Object.freeze(['tiktok_ads', 'linkedin', 'snapchat_ads', 'reddit_ads', 'pinterest_ads', 'x_ads', 'microsoft_ads', 'openai_ads', 'applovin_ads', 'google_ads', 'amazon_ads', 'taboola_ads', 'outbrain_ads', 'trade_desk', 'attentive', 'impact', 'awin', 'klaviyo', 'google_analytics']);
 export const CAMPAIGN_PROFIT_TOOL_RE = /^(campaign_profit|set_profit_settings|upload_campaign_results)$/;
 export const CAMPAIGN_PROFIT_ALSO = Object.freeze(['google_ads', 'openai_ads', 'tiktok_ads', 'linkedin', 'microsoft_ads', 'pinterest_ads', 'reddit_ads', 'snapchat_ads', 'x_ads', 'apple_ads']);
+// STAGED AD CHANGES (2026-11-25): the review queue holds writes for WHICHEVER ad platform the change targets, so no single
+// provider owns it. Filed under 'meta' like the hub above and offered to a brand with ANY ad platform connected; with none
+// there is nothing to stage, and find_tools still finds them, marked as waiting on a connection.
+export const AD_CHANGE_TOOL_RE = /^(stage_ad_change|list_ad_changes|get_ad_change|confirm_ad_change|discard_ad_change)$/;
+export const AD_CHANGE_ALSO = Object.freeze(['google_ads', 'tiktok_ads', 'linkedin', 'microsoft_ads', 'pinterest_ads', 'reddit_ads', 'snapchat_ads', 'x_ads', 'apple_ads', 'openai_ads', 'amazon_ads', 'applovin_ads']);
+// THE AUTOMATIONS HUB (2026-11-25, lib/automations-hub.mjs): ad rules and boosts on any ad platform, filed under 'meta' like the
+// staged changes above and offered to a brand with ANY ad platform connected; with none, find_tools still finds them.
+export const AUTOMATION_TOOL_RE = /^(list_automations|get_automation|set_automation_status|update_automation|delete_automation|automation_runs|test_automation|backtest_automation|automation_controls|manage_automation_templates|create_boost_automation)$/;
+// ADS OPERATIONS ACROSS PLATFORMS (2026-11-25, Zernio ads parity): the health check, the alerts, many campaigns at once,
+// the ad leads and the result metrics each serve WHICHEVER ad platform the brand connected. Same shape as the review queue
+// above: filed under 'meta', offered to a brand with ANY ad platform connected.
+export const ADS_OPS_TOOL_RE = /^(check_ad_account_health|list_ads_alerts|set_ad_campaigns_status|manage_ad_leads|campaign_result_metrics)$/;
 export const NEVER_GATE = new Set([
   'search_meta_ads', 'search_google_ads', 'search_linkedin_ads', 'search_tiktok',
   'search_instagram', 'search_youtube', 'search_reddit', 'search_threads', 'fetch_social_data',
   'tiktok_ideas', // public TikTok post lookups on our research key + one writing call, never a TikTok connection (2026-11-03)
   'search_meta_places', // place search runs on our data provider and a web search, never on a Meta connection (2026-10-27)
+  'reddit_subreddit_feed', 'reddit_post_comments', // a subreddit feed and a post's comments on our research key, never a Reddit connection (2026-11-25)
 ]);
 
 // Tool-name → connector provider. ORDERED: the first match wins, so the more specific pattern must come first.
@@ -96,8 +112,12 @@ export const TOOL_PROVIDER_RULES = [
   // any ad platform that takes conversions / reports spend (CONVERSION_HUB_ALSO, CAMPAIGN_PROFIT_ALSO): first, exact names
   [CONVERSION_HUB_TOOL_RE, 'meta'],
   [CAMPAIGN_PROFIT_TOOL_RE, 'meta'],
+  [AD_CHANGE_TOOL_RE, 'meta'],
+  [AUTOMATION_TOOL_RE, 'meta'],
+  [/^search_google_listings$/, 'google_business'], // white-label connect (2026-11-25): searching Google's listings runs on the Business Profile connection
+  [ADS_OPS_TOOL_RE, 'meta'],
   // ── ads platforms that are their OWN connection (must precede the posting rules below) ──
-  [/_tiktok_ads_|^tiktok_ads_|_tiktok_smart_|^tiktok_bid_protection$/, 'tiktok_ads'], // Smart+ is the ads connection too (2026-09-17)
+  [/_tiktok_ads_|^tiktok_ads_|_tiktok_smart_|^tiktok_smart_|^tiktok_bid_protection$/, 'tiktok_ads'], // Smart+ is the ads connection too (2026-09-17; ^tiktok_smart_ for tiktok_smart_review / _material_report, 2026-11-25)
   [/_x_ads_|^x_ads_/, 'x_ads'],
   [/_pinterest_ads_|^pinterest_ads_/, 'pinterest_ads'],
   [/_reddit_ads_|^reddit_ads_/, 'reddit_ads'],
@@ -107,6 +127,10 @@ export const TOOL_PROVIDER_RULES = [
   [/_openai_ads_|^openai_ads_/, 'openai_ads'],
   [/_amazon_ads_|^amazon_ads_/, 'amazon_ads'], // Amazon Ads (2026-11-07): Sponsored Products through Login with Amazon
   [/applovin/, 'applovin_ads'],   // AppLovin Ads (2026-10-04) has no posting sibling, so the bare name is unambiguous
+  // The Trade Desk, Taboola and Outbrain (2026-11-25): each its own paste-a-key connection, no posting sibling.
+  [/trade_desk/, 'trade_desk'],
+  [/taboola/, 'taboola_ads'],
+  [/outbrain/, 'outbrain_ads'], // Outbrain Amplify (2026-11-25): its own paste-a-token connection, no posting sibling
   // Google Ads owns Merchant Center + the Ads↔Analytics link (both are Google Ads API surfaces, not GA4 ones).
   [/_google_ads_|^google_ads_|_merchant_|^merchant_|^list_merchant_|link_google_ads_to_analytics/, 'google_ads'],
   // ── LinkedIn: ads and posting share ONE connection (the Advertising API grant carries w_organization_social —
@@ -167,7 +191,7 @@ export const TOOL_PROVIDER_RULES = [
   [/woocommerce/, 'woocommerce'],
   // ── posting-only channels ──
   [/youtube/, 'youtube'],
-  [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$/, 'google_business'],
+  [/google_business|business_location|^list_business_(categories|attributes)$|^business_google_updated$|^manage_business_(photos|action_links|verification|food_menus)$|^update_business_attributes$|^search_google_listings$/, 'google_business'], // photos, links, attribute writes, verification, menus, find a listing (2026-11-25)
   [/_drive_|^list_drive|^get_drive|^create_drive|^save_to_drive$|^export_swipefile_deck$|_doc$|^read_doc|^create_doc|^update_doc|^append_to_doc|sheet/, 'google_drive'],
   [/onedrive/, 'microsoft_onedrive'],
   [/bluesky/, 'bluesky'],
@@ -192,7 +216,7 @@ export const TOOL_PROVIDER_RULES = [
   // every roster and, on ChatGPT, against the reviewed list's cap, where six tools pushed a whole ranked family off it.
   // The server names `shopify_blog` among the live providers exactly when the account has a store (or it could not tell:
   // only a definite "no store" holds a Shopify tool), so the connector gate offers these to a merchant and nobody else.
-  [/^(post_to_shopify_blog|update_shopify_article|delete_shopify_article|list_shopify_articles|get_shopify_article|list_shopify_blogs)$/, 'shopify_blog'],
+  [/^(post_to_shopify_blog|update_shopify_article|delete_shopify_article|list_shopify_articles|get_shopify_article|list_shopify_blogs|manage_shopify_blog)$/, 'shopify_blog'],
   [/discord/, 'discord'],
   [/slack/, 'slack'],
   // Whop (2026-11-03): the brand's OWN whop, offered only to a workspace whose whop installed Hermoso.
@@ -355,7 +379,7 @@ export const AMAZON_ADS_DARK_TOOLS = Object.freeze(['list_amazon_ads_profiles', 
 // that already holds a Gmail or Outlook connection, and for the gates' team pass. They are tied to NO single provider
 // in TOOL_PROVIDER_RULES on purpose: one tool serves both mailbox kinds, and the lead list is useful before a mailbox
 // is connected.
-export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts', 'save_email_attachment', 'label_email_reply', 'email_pipeline', 'draft_email_reply', 'list_reply_drafts', 'review_reply_draft', 'find_lead_facts', 'verify_emails', 'verify_email', 'test_inbox_placement', 'sync_email_replies_to_hubspot', 'set_email_reply_settings', 'list_email_folders', 'manage_email_folder', 'search_email', 'get_email_thread', 'update_email', 'save_email_draft', 'send_email_draft', 'reply_to_email', 'forward_email']);
+export const EMAIL_DARK_TOOLS = Object.freeze(['list_email_mailboxes', 'send_email', 'add_email_leads', 'list_email_leads', 'update_email_lead', 'remove_email_leads', 'save_email_sequence', 'list_email_sequences', 'enroll_email_leads', 'set_email_sequence_status', 'stop_email_lead', 'delete_email_sequence', 'list_email_replies', 'get_email_conversation', 'run_email_sequences', 'set_email_mailbox', 'detect_mailbox_settings', 'set_email_sender', 'manage_email_suppressions', 'list_email_drafts', 'review_email_drafts', 'save_email_attachment', 'label_email_reply', 'email_pipeline', 'draft_email_reply', 'list_reply_drafts', 'review_reply_draft', 'find_lead_facts', 'verify_emails', 'verify_email', 'test_inbox_placement', 'sync_email_replies_to_hubspot', 'set_email_reply_settings', 'list_email_folders', 'manage_email_folder', 'search_email', 'get_email_thread', 'update_email', 'save_email_draft', 'send_email_draft', 'reply_to_email', 'forward_email', 'manage_scheduled_emails', 'manage_email_signatures', 'manage_email_send_as', 'search_address_book']);
 // THE WECHAT TOOLS SHIP DARK WITH THE WECHAT CONNECTOR (2026-11-15, owner: "okay I guess we can skip wechat for now").
 // CONNECTOR_GATES.wechat is shut (WECHAT_ENABLED unset) because WeChat refuses every call from an address that is not on
 // the Service Account's IP whitelist and this deployment sends from a shared, changing pool. Three tools for a channel
@@ -367,7 +391,14 @@ export const WECHAT_DARK_TOOLS = Object.freeze(['read_wechat_inbox', 'send_wecha
 // CALLER like the email tools: server.js flagsOnNow names them when either gate is open, for a workspace already holding
 // either connection, and for the gates' team pass. Counted and documented once OUTLOOK_CALENDAR_ENABLED is on in production.
 export const CALENDAR_DARK_TOOLS = Object.freeze(['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event', 'respond_to_calendar_event', 'calendar_free_busy', 'find_meeting_slots']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS, ...CALENDAR_DARK_TOOLS]);
+// THE OUTBRAIN AMPLIFY TOOLS SHIP DARK UNTIL A LIVE READ (2026-11-25). Outbrain granted Hermoso API access and the tools are
+// built and pinned against a stand-in (tools/outbrain-ads-check.mjs), but no real marketer has been read yet: the token page
+// asks for the Outbrain password, so OUTBRAIN_TEST_TOKEN is not stored. Until a live read flips their ads-matrix cells to
+// VERIFIED-LIVE they are not counted, documented or on a roster. Lit PER CALLER like Amazon Ads: server.js flagsOnNow names
+// them for a workspace already holding an Outbrain connection (the card is open: conversions), or everywhere with
+// OUTBRAIN_AMPLIFY_LIVE on. After the live read: delete this set and flip the cells, in one commit.
+export const OUTBRAIN_ADS_DARK_TOOLS = Object.freeze(['list_outbrain_ads_marketers', 'list_outbrain_ads_budgets', 'list_outbrain_ads_campaigns', 'list_outbrain_ads_promoted_links', 'outbrain_ads_report', 'create_outbrain_ads_campaign', 'add_outbrain_ads_promoted_links', 'update_outbrain_ads_budget', 'set_outbrain_ads_status', 'delete_outbrain_ads_object']);
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS, ...CALENDAR_DARK_TOOLS, ...OUTBRAIN_ADS_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
@@ -382,6 +413,28 @@ export function darkToolsUnder(flags) {
   const f = flags && typeof flags === 'object' ? flags : {};
   return new Set([...FLAGGED_OFF_TOOLS].filter((n) => !(DARK_TOOL_GATE_FLAG[n] && f[DARK_TOOL_GATE_FLAG[n]] === true)));
 }
+// THE ENV SWITCH THAT LIGHTS A DARK TOOL FOR EVERY CALLER (2026-11-25). The production gate flags above, plus the sets that
+// follow a plain switch of their own rather than a CONNECTOR_GATES flag (server.js flagsOnNow reads the same names). The
+// per-caller lights (a workspace already holding the connection, a team pass) are not here: this answers "is it dark for
+// everyone", which is what a count a customer reads must use.
+export const OUTBRAIN_ADS_LIVE_ENV = 'OUTBRAIN_AMPLIFY_LIVE';
+export const DARK_TOOL_ENV_SWITCH = Object.freeze({ ...DARK_TOOL_GATE_FLAG, reangle_video: 'REANGLE_VIDEO', ...Object.fromEntries(OUTBRAIN_ADS_DARK_TOOLS.map((n) => [n, OUTBRAIN_ADS_LIVE_ENV])) });
+// A switch is on when it reads 1/on/true/yes; a flag whose production value IS a key (WHOP_API_KEY) is on when present.
+const envSwitchOn = (name, v) => { const s = String(v ?? '').trim(); return /^(1|on|true|yes)$/i.test(s) || (/_KEY$/.test(name) && s !== ''); };
+export function darkToolsUnderEnv(env = {}) {
+  const e = env && typeof env === 'object' ? env : {};
+  return new Set([...FLAGGED_OFF_TOOLS].filter((n) => { const sw = DARK_TOOL_ENV_SWITCH[n]; return !(sw && envSwitchOn(sw, e[sw])); }));
+}
+// THE PROVIDERS WHOSE TOOLS ARE ALL DARK UNDER `env`, DERIVED FROM THE DARK LISTS (2026-11-25, owner: a dark platform does
+// not count). A provider is here when it owns dark-listed tools and every one of them is still dark. That equals "every tool
+// it has is dark" only because a platform that ships dark ships its whole family in one list (Amazon Ads, Outbrain);
+// tools/ads-platforms-dark-check.mjs proves the equality against the real registry, so a platform with a live tool and a
+// dark one fails there instead of disappearing from the counts. Read by lib/ads-readiness.mjs adsPlatformsOffered().
+export function darkProvidersUnderEnv(env = {}) {
+  const dark = darkToolsUnderEnv(env); const owns = new Map();
+  for (const n of FLAGGED_OFF_TOOLS) { const p = toolProvider(n); if (!p) continue; const r = owns.get(p) || { all: 0, dark: 0 }; r.all++; if (dark.has(n)) r.dark++; owns.set(p, r); }
+  return new Set([...owns].filter(([, r]) => r.all > 0 && r.dark === r.all).map(([p]) => p));
+}
 export function toolFlaggedOff(name, conn) { const n = String(name || ''); return FLAGGED_OFF_TOOLS.has(n) && !(conn && conn.flagsOn instanceof Set && conn.flagsOn.has(n)); }
 export function toolWithheldByServer(name, conn) { return toolFlaggedOff(name, conn) || !!(conn && ((conn.withheld instanceof Set && conn.withheld.has(String(name || ''))) || toolHeldForNoShopifyStore(name, conn))); }
 export function toolHeldBackByConnectors(name, conn) {
@@ -395,10 +448,14 @@ export function toolHeldBackByConnectors(name, conn) {
   if (p === 'tiktok_ads' && on.has('tiktok') && TIKTOK_ACCOUNT_GRANT_TOOLS.has(name)) return false;
   if (p === 'devto' && /blog_syndication/.test(name) && (on.has('hashnode') || on.has('linkedin'))) return false; // the settings serve every target: dev.to, Hashnode, the LinkedIn Page
   if (p === 'twilio' && PHONE_TOOL_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'twilio' && name === 'list_calls' && UNIFIED_CALLS_ALSO.some((x) => on.has(x))) return false;
   if (p === 'vapi' && VOICE_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'sendblue' && IMSG_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'outlook_calendar' && CALENDAR_TOOL_ALSO.some((x) => on.has(x))) return false;
   if (p === 'meta' && CONVERSION_HUB_TOOL_RE.test(name) && CONVERSION_HUB_ALSO.some((x) => on.has(x))) return false;
   if (p === 'meta' && CAMPAIGN_PROFIT_TOOL_RE.test(name) && CAMPAIGN_PROFIT_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'meta' && AD_CHANGE_TOOL_RE.test(name) && AD_CHANGE_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'meta' && AUTOMATION_TOOL_RE.test(name) && AD_CHANGE_ALSO.some((x) => on.has(x))) return false;
+  if (p === 'meta' && ADS_OPS_TOOL_RE.test(name) && AD_CHANGE_ALSO.some((x) => on.has(x))) return false;
   return !on.has(p);
 }

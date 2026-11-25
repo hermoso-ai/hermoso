@@ -58,9 +58,10 @@ export function phoneToolText(name, d = {}) {
       return [note, ...b.map((y) => `• brand ${y.name || y.id}: ${y.status}${y.identityStatus ? ` (${y.identityStatus})` : ''}`), ...k.map((y) => `• campaign ${y.id} (${y.useCase || '?'}): ${y.status}${y.messagingServiceName ? ` · service ${y.messagingServiceName}` : ''}`), ...tf.map((y) => `• toll-free ${y.phoneNumber || (y.phoneNumbers || []).join('/')}: ${y.status}${y.rejectionReason || y.reason ? ` (${y.rejectionReason || y.reason})` : ''}`)].filter(Boolean).join('\n');
     }
     case 'list_calls': {
+      if (x.call) { const y = x.call, r = Array.isArray(x.recordings) ? x.recordings : []; return [note, ...r.map((q) => `• recording ${q.id} · ${q.duration ?? '?'}s${q.transcript ? `\n  ${JSON.stringify(s(q.transcript).slice(0, 600))}` : ''}`)].filter(Boolean).join('\n') || `${s(y.from)} → ${s(y.to)} · ${s(y.status) || '?'}`; } // one call (callId)
       const c = Array.isArray(x.calls) ? x.calls : [];
       if (!c.length) return note || 'No calls on these numbers yet.';
-      return `${c.length} call(s):\n` + c.slice(0, 40).map((y) => `• ${s(y.startedAt || (y.at ? new Date(y.at).toISOString() : '')).slice(0, 16).replace('T', ' ')} ${y.from} → ${y.to} · ${y.status || '?'}${y.duration != null ? ` · ${y.duration}s` : ''}${y.missed ? ' · missed' : ''}${y.textedBack ? ' · texted back' : ''}${y.tracking?.campaign ? ` · ${y.tracking.campaign}` : ''} (${y.id})`).join('\n') + (note ? `\n${note}` : '');
+      return `${c.length} call(s):\n` + c.slice(0, 40).map((y) => `• ${s(y.startedAt || (y.at ? new Date(y.at).toISOString() : '')).slice(0, 16).replace('T', ' ')}${y.channel === 'whatsapp' ? ' [WhatsApp]' : ''} ${y.from} → ${y.to} · ${y.status || '?'}${(y.durationSeconds ?? y.duration) != null ? ` · ${y.durationSeconds ?? y.duration}s` : ''}${y.missed ? ' · missed' : ''}${y.textedBack ? ' · texted back' : ''}${y.tracking?.campaign ? ` · ${y.tracking.campaign}` : ''} (${y.id})`).join('\n') + (note ? `\n${note}` : '');
     }
     case 'list_call_recordings': {
       const r = Array.isArray(x.recordings) ? x.recordings : [];

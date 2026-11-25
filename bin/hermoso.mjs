@@ -19,7 +19,7 @@
 //   hermoso call post_to_x --json '{"text":"hello"}'     # run it
 // The curated subcommands above stay as ergonomics for the common path; `call` is the ceiling.
 //
-// Auth today: none locally (the server resolves the dev account). `hermoso auth login --token <t>` stores a Bearer
+// Auth today: none locally (the server resolves the dev account). `hermoso auth login --token -` (the key on stdin) stores a Bearer
 // for when real auth lands — the seam, not a requirement.
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import os from 'node:os';
@@ -114,7 +114,7 @@ async function main() {
   const cfg = await loadConfig();
 
   // ---- auth: `login` opens the browser to mint + store an agent key (nothing to paste — matches the app's OAuth
-  //      connectors); `--token <key>` is the manual fallback; a localhost base needs no auth (dev). ----
+  //      connectors); a key on stdin (`--token -`) or HERMOSO_TOKEN is the manual fallback; a localhost base needs no auth (dev). ----
   if (group === 'auth') {
     if (sub === 'logout') { await saveConfig({}); return console.log('✓ Logged out (cleared ~/.hermoso/config.json)'); }
     const apiBase = (flags.url || cfg.apiBase || 'https://app.hermoso.ai').replace(/\/$/, '');
@@ -122,7 +122,7 @@ async function main() {
     // OVERRIDES the brand a key was pinned to server-side (use_brand). An unpinned CLI must send nothing so the key wins.
     const profile = flags.profile || (cfg.profile && cfg.profile !== 'default' ? cfg.profile : '');
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(apiBase);
-    // A KEY NEVER HAS TO TOUCH ARGV (2026-11-25). `--token <key>` puts the key in shell history and in `ps`, so the key
+    // A KEY NEVER HAS TO TOUCH ARGV (2026-11-25). A key typed after `--token` lands in shell history and in `ps`, so the key
     // can come from stdin instead: `--token -` (or `--token-stdin`, or a bare `--token`) reads it from a pipe, or asks
     // for it on a terminal without echoing it. HERMOSO_TOKEN in the environment needs no sign-in at all. The argv form
     // still works for scripts that already use it, and says once on stderr how to keep the key out of history.

@@ -52,11 +52,14 @@ export const CHATGPT_ROSTER_LEFT_OUT = Object.freeze([
   'hashnode', // long tail
   'highlevel', // long tail
   'line', // long tail
+  'outbrain_ads', // long tail
   'outlook_calendar', // long tail
   'pinterest_ads', // long tail
   'salesforce', // long tail
   'sendblue', // long tail
   'shopify_blog', // long tail
+  'taboola_ads', // long tail
+  'trade_desk', // long tail
   'vercel', // long tail
   'webflow', // long tail
   'wechat', // long tail

@@ -19,7 +19,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups, widgetHostScope, withFirstRunLine, firstRunOffers } from './tools.mjs';
 import { chatgptExtRequested } from './openai-extensions.mjs';
 import { CURATED_SCOPES, isCuratedToken } from './directory-curated.mjs'; // a curated Claude directory connector's own scope on its 401 + PRM (2026-11-22)
-import { mcpCtx, connectedProviders } from './client.mjs';
+import { mcpCtx, connectedProviders, CLI_PKG } from './client.mjs';
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
@@ -237,7 +237,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       error_description: 'This Hermoso MCP server needs a signed-in account. Normally your client opens a browser consent page. IF NO BROWSER OR CONSENT CARD OPENED, your client cannot complete OAuth — retrying will keep failing the same way. Read the `how_to_connect` field of THIS response and use one of those two browser-free routes instead. Tell the user which one you are taking.',
       how_to_connect: {
         oauth: `Open ${BASE}/oauth/authorize through your client's own connector flow (a browser is required).`,
-        no_browser_stdio: `Add Hermoso as a STDIO command instead of a URL: run \`npx -y hermoso mcp\` with the environment variable HERMOSO_TOKEN set to a key from ${BASE}/#developers. THE TOKEN IS NOT OPTIONAL HERE: a sandbox that could not open a browser for OAuth cannot open one for \`hermoso auth login\` either, so plain stdio with no token connects and then has no account to act on. (On your own machine, where a browser exists, \`npx -y hermoso auth login\` once replaces the token.)`,
+        no_browser_stdio: `Add Hermoso as a STDIO command instead of a URL: run \`npx -y ${CLI_PKG} mcp\` with the environment variable HERMOSO_TOKEN set to a key from ${BASE}/#developers (never the key on a command line). THE TOKEN IS NOT OPTIONAL HERE: a sandbox that could not open a browser for OAuth cannot open one for \`hermoso auth login\` either, so plain stdio with no token connects and then has no account to act on. (On your own machine, where a browser exists, \`npx -y ${CLI_PKG} auth login\` once replaces the token.)`,
         no_browser_header: `Keep this URL and send an \`Authorization: Bearer <key>\` header. Create the key at ${BASE}/#developers (the MCP & CLI tab, under Terminal & API keys). A key in the URL query does NOT work and is not supported.`,
       },
       // Named so an agent can branch on it rather than parsing prose.
