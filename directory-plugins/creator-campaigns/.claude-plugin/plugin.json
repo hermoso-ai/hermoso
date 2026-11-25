@@ -22,15 +22,7 @@
     "marketing"
   ],
   "icon": "./logo.png",
-  "documentationUrl": "https://hermoso.ai/docs/mcp/",
-  "supportUrl": "https://hermoso.ai/contact",
   "privacyPolicyUrl": "https://hermoso.ai/privacy",
-  "termsOfServiceUrl": "https://hermoso.ai/terms",
-  "network": {
-    "hosts": [
-      "app.hermoso.ai"
-    ]
-  },
   "mcpServers": {
     "hermoso-creator-campaigns": {
       "type": "http",
