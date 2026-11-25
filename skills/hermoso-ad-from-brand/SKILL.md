@@ -6,7 +6,7 @@ description: >-
   launch ad for my brand", or gives a domain/brand and wants a complete ad, not just research. NOT for: just
   pulling competitor ads (use hermoso-research) or rendering from a prompt you already have (use hermoso-generate).
 argument-hint: "[brand or website + what to advertise, e.g. 'an ad for yourbrand.com, our best-selling olive oil']"
-allowed-tools: Bash
+allowed-tools: Bash(hermoso *) Bash(npx -y hermoso@0.1.681 *)
 ---
 
 # Hermoso: full ad from a brand
@@ -14,9 +14,30 @@ allowed-tools: Bash
 Drive the **Hermoso CLI** to go from a brand to an on-brand ad in three steps. Report the final media URL.
 
 ## Setup (once)
-- Install the CLI once: `npm install -g hermoso`, then run every command as `hermoso …`, as written below. If you cannot install packages, prefix the commands with `npx -y`, but know that npx asks the npm registry on every single call, so an agent making many calls can be rate-limited by npm (an HTTP 429 from npm, before Hermoso is ever reached). No MCP server is needed.
-- Sign in once: `npx -y hermoso auth login` (opens a browser; nothing to paste). On a machine with no browser (a server, chatted over Telegram, Discord or WhatsApp): run `npx -y hermoso auth login --device --no-wait`, send the user the link and short code it prints, and once they approve run `npx -y hermoso auth login --device --resume`. No key needed. Only if nobody can open a link: `npx -y hermoso auth login --token <your key>`, using a key from app.hermoso.ai under **MCP & CLI**. No account at all? An agent can sign itself up on a paid plan with `POST /v1/signup` at app.hermoso.ai; see the Hermoso README.
+- Install the CLI once: `npm install -g hermoso@0.1.681`, then run every command as `hermoso …`, as written below. If you cannot install packages, run each one as `npx -y hermoso@0.1.681 …` instead (always with the version), but know that npx asks the npm registry on every single call, so an agent making many calls can be rate-limited by npm (an HTTP 429 from npm, before Hermoso is ever reached). No MCP server is needed.
+- Sign in once: `npx -y hermoso@0.1.681 auth login` (opens a browser; nothing to paste). On a machine with no browser (a server, chatted over Telegram, Discord or WhatsApp): run `npx -y hermoso@0.1.681 auth login --device --no-wait`, send the user the link and short code it prints, and once they approve run `npx -y hermoso@0.1.681 auth login --device --resume`. No key needed. Only if nobody can open a link: the user creates a key at app.hermoso.ai under **MCP & CLI** and either sets it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipes it to `npx -y hermoso@0.1.681 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history. No account yet? The user signs up at app.hermoso.ai (free to start). Never create an account, choose a plan or pay on the user's behalf unless they explicitly ask you to and approve the plan and its price.
 - For anything these steps do not cover: `hermoso tools --search <what you want>` finds the tool, `hermoso tools <name>` prints its arguments, `hermoso call <name> --json '{...}'` runs it. The CLI reaches every tool and costs no context until it runs.
+
+## Ask first: purchases, payments, publishing and plan changes
+`hermoso call` reaches every Hermoso tool, including tools that spend real money or put something in public. Before
+any of these, show the user exactly what will happen (what, how much, which account) and wait for their explicit yes
+in this conversation to that specific action:
+- **Domains and purchases:** buying or renewing a domain (`buy_domain`), or anything else charged to a card.
+- **Payments and refunds:** charges, subscriptions, payment links and payouts through the user's own payment accounts
+  (`create_stripe_subscription`, `create_stripe_payment_link`, `pay_campaign_creators`, `creator_campaign_funds`),
+  and every refund (`refund_stripe_charge`).
+- **Publishing:** putting a page or site live (`publish_page`, `deploy_vercel_page`), and posting or scheduling
+  anything to the user's accounts.
+- **Credits and plans:** a paid render, generation or batch (quote it with `"get_cost": true` and run it with that
+  price as `expected_credits`, as in the hermoso-approval-checkpoints skill); buying credits, upgrading the plan or
+  turning on auto-reload (`buy_credits`, `upgrade_plan`, `set_auto_reload`). A search or lookup the user asked for is
+  approved by the request itself; say what it cost when you report it.
+- **Ad spend:** activating a campaign, ad set or ad, or raising a budget.
+
+A yes covers only the action it answered, so the next purchase, payment or publish asks again. A budget or a skipped
+checkpoint the user gave for a render never covers a purchase, a payment, a refund, a plan change or a publish. When
+nobody is there to answer (a scheduled run), do none of these beyond what the user set up in advance for that
+schedule: stop and report what is waiting for a yes.
 
 ## Procedure
 1. **Onboard the brand** (skip if the user already gave full brand details):

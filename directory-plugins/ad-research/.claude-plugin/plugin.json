@@ -1,7 +1,7 @@
 {
   "name": "hermoso-ad-research",
   "displayName": "Hermoso Ad Research",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Research the ads and posts already working in any market: find a brand's competitors, read their running ads in the Meta, Google and LinkedIn ad libraries, search organic TikTok, Instagram, YouTube, Reddit and Threads, break down a video ad, and check ad copy against Meta's advertising standards. Read-only. Competitor lists, teardowns, research summaries, video breakdowns and policy verdicts are written by an AI model run by Hermoso AI. Requires a Hermoso account (free to start).",
   "author": {
     "name": "Hermoso AI",

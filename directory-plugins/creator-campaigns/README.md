@@ -35,6 +35,19 @@ Creator searches and reading a submitted post's views use Hermoso credits; `herm
 
 **Who writes the answers.** Creator rankings, authenticity scores and campaign reports are computed by Hermoso from the public posts and the views each platform reports; no AI model writes them. Claude writes the summary you read.
 
+## Creator data
+
+Creator search returns public creator profiles and the contact details creators chose to publish.
+
+- **Sources.** The public profiles, bios and posts of creators on TikTok, Instagram and YouTube, including any
+  business email or link they chose to list on their profile.
+- **Legal basis.** Legitimate interests (GDPR Art. 6(1)(f)) in contacting creators about paid collaborations, using
+  contact details they published for business inquiries. Under PIPEDA, this is business contact information used for
+  its business purpose. We hold only what the creator made public, and we never sell lists.
+- **Opt out.** Email [hello@hermoso.ai](mailto:hello@hermoso.ai) with "remove me from creator search" and your handle
+  or email. We remove you from creator search results and add you to a suppression list, so you do not come back in
+  later searches.
+
 ## Privacy and support
 
 - Privacy Policy: [hermoso.ai/privacy](https://hermoso.ai/privacy)

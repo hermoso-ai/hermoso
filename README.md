@@ -77,8 +77,8 @@ and it carries on. No key needed.
 
 ```text
 Set up Hermoso for me so I can research ads, find creators, generate images and videos, and publish from here.
-1. Sign me in from your command line: run `npx -y hermoso auth login --device --no-wait`. It prints a link and a code. Send me both, wait until I say I approved, then run `npx -y hermoso auth login --device --resume`.
-2. Add an MCP server of type stdio (a command), not a URL. Command: `npx -y hermoso mcp`. It uses the sign-in from step 1, so it needs no key.
+1. Sign me in from your command line: run `npx -y hermoso@0.1.681 auth login --device --no-wait`. It prints a link and a code. Send me both, wait until I say I approved, then run `npx -y hermoso@0.1.681 auth login --device --resume`.
+2. Add an MCP server of type stdio (a command), not a URL. Command: `npx -y hermoso@0.1.681 mcp`. It uses the sign-in from step 1, so it needs no key.
 3. Then run one real tool call: list my brands.
 ```
 
@@ -89,8 +89,8 @@ line; each agent's own is in the app under MCP & CLI):
 Set up Hermoso for me. It is an AI marketing tool (hermoso.ai) that researches ads, makes image and video ads and posts to my social accounts.
 1. Install it by running: claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
    If the new skills only load after a restart, tell me, and use npx meanwhile.
-2. Sign me in by running: npx -y hermoso auth login
-   It opens my browser and I will approve the connection there. If this machine has no browser, run npx -y hermoso auth login --device --no-wait instead: send me the link and the code it prints, and once I say I approved, run npx -y hermoso auth login --device --resume.
+2. Sign me in by running: npx -y hermoso@0.1.681 auth login
+   It opens my browser and I will approve the connection there. If this machine has no browser, run npx -y hermoso@0.1.681 auth login --device --no-wait instead: send me the link and the code it prints, and once I say I approved, run npx -y hermoso@0.1.681 auth login --device --resume.
 3. Once I am signed in, do one small task to show it works: tell me my Hermoso credit balance and which profile is saved.
 4. Then set up my brand from my website and make my first ad.
 ```
@@ -115,13 +115,13 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
 **Cursor:**
 
 ```bash
-npx skills add hermoso-ai/hermoso -a cursor && npx -y hermoso auth login
+npx skills add hermoso-ai/hermoso -a cursor && npx -y hermoso@0.1.681 auth login
 ```
 
-Or add the MCP server to Cursor's `mcp.json` after `npx -y hermoso auth login`:
+Or add the MCP server to Cursor's `mcp.json` after `npx -y hermoso@0.1.681 auth login`:
 
 ```json
-{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso", "mcp"] } } }
+{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso@0.1.681", "mcp"] } } }
 ```
 
 </details>
@@ -183,7 +183,7 @@ Hermoso in one line. Every install brings the same eleven skills (`hermoso-resea
 `hermoso-setup-check`), and the skills drive the `hermoso`
 CLI through `npx`. No
 tool list is loaded into your session: a CLI command costs nothing until it runs, and it reaches every tool.
-The first time, your agent runs `npx -y hermoso auth login`, which opens a browser to sign in.
+The first time, your agent runs `npx -y hermoso@0.1.681 auth login`, which opens a browser to sign in.
 
 **Claude Code:**
 
@@ -207,16 +207,16 @@ gemini extensions install https://github.com/hermoso-ai/hermoso
 
 **Grok** (xAI) comes in three shapes, and each one connects differently:
 
-- **grok.com and the Grok apps** take the hosted connector: open **Plugins → Connectors → New Connector → Custom**
-  (or go straight to grok.com/connectors), paste `https://app.hermoso.ai/mcp` and sign in with your Hermoso account.
+- **grok.com and the Grok apps** take the hosted connector: open **grok.com/connectors** (Connect Apps) → **Custom** → **Add a custom connector**,
+  paste `https://app.hermoso.ai/mcp` as the Server URL and sign in with your Hermoso account.
 - **Grok Bot**: send it the one line above. It signs in from its own cloud computer with
-  `npx -y hermoso auth login --device` (a link and a short code you approve on your phone), then runs the stdio server
-  `npx -y hermoso mcp`. No key.
+  `npx -y hermoso@0.1.681 auth login --device` (a link and a short code you approve on your phone), then runs the stdio server
+  `npx -y hermoso@0.1.681 mcp`. No key.
 - **Grok Build**, xAI's terminal agent, runs a local MCP server. Sign in once, then add it:
 
   ```bash
-  npx -y hermoso auth login
-  grok mcp add hermoso -- npx -y hermoso mcp
+  npx -y hermoso@0.1.681 auth login
+  grok mcp add hermoso -- npx -y hermoso@0.1.681 mcp
   ```
 
 **Cursor, OpenCode, GitHub Copilot, Windsurf and about 75 more agents**, through the open skills installer:
@@ -233,14 +233,16 @@ It asks which agents to install into; `-a opencode` (or `cursor`, `github-copilo
 below). The ChatGPT desktop app and ChatGPT workspace admins can also read this repo's
 `.claude-plugin/marketplace.json`, which installs the skills.
 
-No browser on the machine (a server, an SSH session)? `npx -y hermoso auth login` notices and shows a link and a short
+No browser on the machine (a server, an SSH session)? `npx -y hermoso@0.1.681 auth login` notices and shows a link and a short
 code instead: open the link on your phone and approve. `--device` asks for it directly; an agent that relays the link
-over chat runs `npx -y hermoso auth login --device --no-wait` (prints the link and exits), then
-`npx -y hermoso auth login --device --resume` once you have approved. Only if nothing can open a link: create a key in
-the app under **MCP & CLI** and run `npx -y hermoso auth login --token <key>`.
+over chat runs `npx -y hermoso@0.1.681 auth login --device --no-wait` (prints the link and exits), then
+`npx -y hermoso@0.1.681 auth login --device --resume` once you have approved. Only if nothing can open a link: create a key in
+the app under **MCP & CLI** and either set it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipe it
+in with `npx -y hermoso@0.1.681 auth login --token -`, which reads the key from stdin (or asks for it without showing it),
+so it never lands in your shell history.
 
 On a server, a CI job or an agent gateway that calls Hermoso many times a day, install it once
-(`npm i -g hermoso`) and call `hermoso` directly. `npx` asks the npm registry about the package on every run,
+(`npm i -g hermoso@0.1.681`) and call `hermoso` directly. `npx` asks the npm registry about the package on every run,
 and a busy machine can be rate-limited by npm. If the CLI ever says an HTTP error "did not come from Hermoso",
 something on your side (a proxy, a firewall or the gateway) refused the request before it reached us.
 
@@ -251,14 +253,15 @@ Two shapes, and the right one is decided by **what your client can do**, not by 
 | Your client | Use | Why |
 | --- | --- | --- |
 | **Runs in a browser**: Claude.ai, ChatGPT, Claude Desktop | the hosted connector `https://app.hermoso.ai/mcp` | It cannot spawn a local process, so a URL is the only shape it has. Nothing to install, no key to paste, and the full toolset arrives with your saved brand context. This is the right answer for these clients, not a lesser one. |
-| **Can run a shell**: Claude Code, Codex, Gemini CLI, Cursor, Cline, OpenClaw, Hermes, your own scripts | the one-command install above, or the CLI itself (`npm install -g hermoso`) | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
+| **Can run a shell**: Claude Code, Codex, Gemini CLI, Cursor, Cline, OpenClaw, Hermes, your own scripts | the one-command install above, or the CLI itself (`npm install -g hermoso@0.1.681`) | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
 
 The CLI answers the questions a tool manifest would, on demand and only when asked:
 
 ```bash
-npx -y hermoso tools --search reddit   # every matching tool, name + one line
-npx -y hermoso tools plan_ad           # one tool's full argument schema
-npx -y hermoso call plan_ad --json '{"product":"…"}'   # run it
+npm install -g hermoso@0.1.681                  # once; or prefix each line with npx -y and that same hermoso@version
+hermoso tools --search reddit                   # every matching tool, name + one line
+hermoso tools plan_ad                           # one tool's full argument schema
+hermoso call plan_ad --json '{"product":"…"}'   # run it
 ```
 
 `tools` and `tools <name>` read a registry bundled in the package (no key, no network, no sign-in), so an agent
@@ -266,15 +269,16 @@ can browse the entire product before anyone signs in. Only `call` spends, and on
 `hermoso auth login` once.
 
 **Want the tools in your coding agent's own list as well?** That is the MCP server, and it is optional. One
-`hermoso auth login` covers the CLI *and* lets `claude mcp add hermoso -- npx -y hermoso mcp` pick the key up with
+`hermoso auth login` covers the CLI *and* lets `claude mcp add hermoso -- npx -y hermoso@0.1.681 mcp` pick the key up with
 no `env` block, so the agent can reach for a native tool when it wants structured results and shell out when it
 wants breadth. It costs context in every session, so add it when a session settles into one area and makes many
 calls there; `enable_tools({groups:['ads']})` then turns campaign management on in a single free call.
 
-## Your agent can sign itself up
+## Your agent can sign itself up, when you ask it to
 
-An agent with no Hermoso account can provision one, get its own key, and be rendering ads in the same session.
-No human at a browser, no ticket, no waiting.
+When you ask your agent to set Hermoso up and there is no account yet, it can provision one, get its own key, and be
+rendering ads in the same session, with no ticket and no waiting. It starts a signup only when you ask for one, and
+it pays only after you approve the plan and its price in the conversation.
 
 ```bash
 # 1. Start a signup. This call takes no credential, because the credential is what it creates.
@@ -297,16 +301,17 @@ curl -sX POST https://app.hermoso.ai/v1/signup/cs_.../claim \
 That `hmk_` key is the same credential everything else on this page takes: `/v1`, the MCP server, the CLI. Point
 your client at it and the full surface is open.
 
-**Paying is something a browser-capable agent can already do itself.** Checkout is Stripe's own hosted page, so
-Claude in Chrome and clients like it complete it unattended today. Everything else is a one-click handoff: send
-`checkout_url` to whoever holds the card. The same shape covers you later, once you are running: `buy_credits`
-and `upgrade_plan` mint a ready-to-pay link for more credits or a bigger plan, and `billing_status` reads the
-balance any time.
+**Paying always waits for your yes.** Checkout is Stripe's own hosted page. A browser-capable agent such as Claude in
+Chrome can complete it today, once you have approved the plan and the price; otherwise it hands `checkout_url` to
+you, or to whoever holds the card, to pay. The same shape covers you later, once you are running: `buy_credits` and
+`upgrade_plan` mint a ready-to-pay link for more credits or a bigger plan, which your agent shows you rather than
+pays unless you tell it to, and `billing_status` reads the balance any time.
 
-**An agent with its own payment credential can pay with no human at all.** `POST /api/billing/machine-payment`
+**An agent with its own payment credential can buy credits, when you tell it to.** `POST /api/billing/machine-payment`
 with `{"packId": "pack-1k"}` answers HTTP 402 carrying a `WWW-Authenticate: Payment` challenge (Stripe, through the
 Machine Payments Protocol); pay the challenge and retry, and the same credit pack lands on the same balance.
-`GET /api/billing/config` lists the packs under `machinePayments`. Same packs, same prices, no per-call billing.
+`GET /api/billing/config` lists the packs under `machinePayments`. Same packs, same prices, no per-call billing. Use it
+only after you have agreed the pack and its price with the person whose account it is.
 
 **The agentic path takes a paid plan.** Any of them. The free plan is there for a person signing up at
 [app.hermoso.ai](https://app.hermoso.ai), and asking for it here returns a refusal that says so. Nothing is
@@ -334,8 +339,8 @@ Connect, approve with your Hermoso account, and you are done: the full toolset w
 ## Quickstart for Claude Code (one command)
 
 1. **Get an account** at [app.hermoso.ai](https://app.hermoso.ai). The free tier is included; plans and credits
-   are the same ones the web Studio uses. Or skip the browser entirely and let your agent sign itself up on a paid
-   plan with `POST /v1/signup` (above).
+   are the same ones the web Studio uses. Or ask your agent to sign you up on a paid plan with `POST /v1/signup`
+   (above): it does so only when you ask, and pays only after you approve the plan and its price.
 2. **Install the plugin.** It adds the eleven Hermoso skills, which drive the `hermoso` CLI through `npx`:
 
 ```bash
@@ -344,14 +349,15 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
 
    Already inside a session? `/plugin marketplace add hermoso-ai/hermoso`, then `/plugin install hermoso@hermoso`.
    Codex, Gemini CLI and the rest are in [Install in one command](#install-in-one-command).
-3. **Sign in once.** `npx -y hermoso auth login` opens your browser; your agent also runs it by itself the first
+3. **Sign in once.** `npx -y hermoso@0.1.681 auth login` opens your browser; your agent also runs it by itself the first
    time it needs Hermoso. On a machine with no browser it shows a link and a short code to approve on your phone
-   (`npx -y hermoso auth login --device`). Only if nothing can open a link, use `npx -y hermoso auth login --token hmk_…`
-   with a key from the **MCP & CLI** tab, under **Terminal & API keys** (https://app.hermoso.ai/?tab=api-keys).
+   (`npx -y hermoso@0.1.681 auth login --device`). Only if nothing can open a link, take a key from the **MCP & CLI** tab, under
+   **Terminal & API keys** (https://app.hermoso.ai/?tab=api-keys), and pipe it to `npx -y hermoso@0.1.681 auth login --token -`
+   (or set it as `HERMOSO_TOKEN`), so the key never sits on a command line.
 4. **Ask for what you want**, in your normal prompts. Claude Code picks the Hermoso skill for the job and runs the
    commands. You type none of them.
 
-Rather install the CLI by hand? `npm install -g hermoso` puts the same `hermoso` command on your PATH, and the
+Rather install the CLI by hand? `npm install -g hermoso@0.1.681` puts the same `hermoso` command on your PATH, and the
 skills use it when it is there.
 
 The hosted URL works in Claude Code too, but the plugin is the lighter path there because it loads no tool list
@@ -366,24 +372,24 @@ learned memory you set up in the web app apply automatically (`get_brand` shows 
 ## 1. MCP server (stdio), optional in a coding agent
 
 `hermoso mcp` runs a stdio MCP server exposing the full toolset, for a client that wants Hermoso's tools in its own
-list. The published `hermoso` package means no clone: `npx -y hermoso mcp` fetches and runs it. Sign in once with
+list. The published `hermoso` package means no clone: `npx -y hermoso@0.1.681 mcp` fetches and runs it. Sign in once with
 the CLI and no key goes into any client config, because `hermoso mcp` reads the bearer `hermoso auth login` stored:
 
 ```bash
-npm install -g hermoso && hermoso auth login && claude mcp add hermoso -- npx -y hermoso mcp
+npm install -g hermoso@0.1.681 && hermoso auth login && claude mcp add hermoso -- npx -y hermoso@0.1.681 mcp
 ```
 
 On a machine with no browser, skip the sign-in and pass the key to the client instead:
 
 ```bash
-claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso mcp
+claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso@0.1.681 mcp
 ```
 
 Cursor / Codex: sign in the same way, then add to `mcp.json` (Codex uses the TOML equivalent). Drop the `env`
 block entirely if you signed in above; it is there for CI, where the process cannot read your home directory:
 
 ```json
-{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso", "mcp"],
+{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso@0.1.681", "mcp"],
   "env": { "HERMOSO_API_BASE": "https://app.hermoso.ai", "HERMOSO_TOKEN": "<your token>" } } } }
 ```
 
@@ -545,7 +551,7 @@ Render jobs queue server-side and poll to completion, returning a served URL.
 fat tool manifest.
 
 ```bash
-npm install -g hermoso                             # installs `hermoso`
+npm install -g hermoso@0.1.681                             # installs `hermoso`
 hermoso capabilities                               # valid model ids + costs (run first)
 hermoso create --brand "YourBrand" --product "your best-selling product" --format image
 hermoso generate image --prompt "…" --ref ./product.png --wait
@@ -620,6 +626,20 @@ The skills pick themselves. These are whole prompts, not commands:
 
 `mcp/http.mjs` is the hosted remote-connector transport (paste-a-URL into Claude.ai → Connectors). It ships in
 this repo for transparency and refuses to mount without authenticated identity — no anonymous spend, ever.
+
+## Creator data
+
+Creator search (`find_creators`, the creator board in the app and the Creator Campaigns plugin) returns public creator
+profiles and the contact details creators chose to publish.
+
+- **Sources.** The public profiles, bios and posts of creators on TikTok, Instagram and YouTube, including any
+  business email or link they chose to list on their profile.
+- **Legal basis.** Legitimate interests (GDPR Art. 6(1)(f)) in contacting creators about paid collaborations, using
+  contact details they published for business inquiries. Under PIPEDA, this is business contact information used for
+  its business purpose. We hold only what the creator made public, and we never sell lists.
+- **Opt out.** Email [hello@hermoso.ai](mailto:hello@hermoso.ai) with "remove me from creator search" and your handle
+  or email. We remove you from creator search results and add you to a suppression list, so you do not come back in
+  later searches.
 
 ## Privacy and support
 

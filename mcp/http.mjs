@@ -513,7 +513,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       res.setHeader('Retry-After', '5');
       return res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Hermoso is briefly unavailable. Please retry in a few seconds; your connection is fine.' }, id: null });
     }
-    if (!user && token) connectEvent(req, { step: 'mcp-auth', ok: false, reason: 'bearer token rejected', detail: `${token.slice(0, 4)}… (${token.length} chars) on ${req.method}` });
+    if (!user && token) connectEvent(req, { step: 'mcp-auth', ok: false, reason: 'bearer token rejected', detail: `${token.slice(0, 4)}… (${token.length} chars) on ${req.method}`, client: 'k:' + createHash('sha256').update(token).digest('hex').slice(0, 12) });
     if (!user) {
       // No valid bearer: allow ONLY the read-only discovery handshake (POST), fail CLOSED for everything else.
       if (req.method === 'POST' && isAllPreauth(req.body) && anonPreviewAllowed(req)) {

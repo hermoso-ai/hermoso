@@ -4,7 +4,8 @@
 // in skills/ wrap these commands. Same /api as the MCP server.
 //
 //   npm i -g  (from this repo)  OR  node bin/hermoso.mjs <cmd>
-//   hermoso auth login                                 # browser sign-in (loopback, like gh/heroku); --token <key> for CI
+//   hermoso auth login                                 # browser sign-in (loopback, like gh/heroku)
+//   hermoso auth login --token -                       # a key read from stdin (or a hidden prompt), never from argv; CI can set HERMOSO_TOKEN instead
 //   hermoso auth login --device                        # no browser here: a link + code to approve on any device
 //   hermoso capabilities                                 # learn valid model ids + costs (run first)
 //   hermoso create --brand Flourish --product "protein pancakes" --format image
@@ -71,6 +72,27 @@ function parse(argv) {
 
 const die = (msg) => { console.error('✗ ' + msg); process.exit(1); };
 
+/** A secret from stdin: the whole pipe when one is attached, otherwise one line typed at a prompt with no echo. */
+function readSecret(prompt) {
+  const stdin = process.stdin;
+  if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') {
+    return new Promise((res, rej) => { let b = ''; stdin.setEncoding('utf8'); stdin.on('data', (c) => { b += c; }); stdin.on('end', () => res(b)); stdin.on('error', rej); });
+  }
+  process.stderr.write(prompt);
+  return new Promise((res) => {
+    let b = '';
+    const done = (v) => { stdin.setRawMode(false); stdin.pause(); stdin.removeListener('data', on); process.stderr.write('\n'); res(v); };
+    const on = (chunk) => {
+      for (const ch of chunk) {
+        if (ch === '\r' || ch === '\n' || ch === '\u0004') return done(b);
+        if (ch === '\u0003') { done(''); process.exit(130); }
+        if (ch === '\u007f' || ch === '\b') b = b.slice(0, -1); else b += ch;
+      }
+    };
+    stdin.setRawMode(true); stdin.setEncoding('utf8'); stdin.resume(); stdin.on('data', on);
+  });
+}
+
 // RUN THROUGH npx, EVERY CALL ASKS THE NPM REGISTRY (2026-10-18). Measured: `npx -y hermoso …` revalidates the package
 // with registry.npmjs.org on every run, even with it cached, and an npm 429 kills the command before this file runs
 // (npm prints "E429 … Too Many Requests"). An agent on a server calling Hermoso hundreds of times an hour through npx
@@ -83,7 +105,7 @@ async function npxTip(group) {
   const mark = path.join(CONFIG_DIR, 'npx-tip');
   try { if (Date.now() - Number(await readFile(mark, 'utf8')) < 7 * 86400e3) return; } catch { /* first time */ }
   try { await mkdir(CONFIG_DIR, { recursive: true }); await writeFile(mark, String(Date.now())); } catch { /* best effort */ }
-  console.error('tip: this ran through npx, which asks the npm registry on every call. For an agent or a server making many calls, install once with `npm install -g hermoso` and run `hermoso` directly: npm rate-limits busy machines (an HTTP 429 from npm, before Hermoso is reached).');
+  console.error('tip: this ran through npx, which asks the npm registry on every call. For an agent or a server making many calls, install once with `npm install -g hermoso@' + CLI_VERSION + '` and run `hermoso` directly: npm rate-limits busy machines (an HTTP 429 from npm, before Hermoso is reached).');
 }
 
 async function main() {
@@ -100,7 +122,20 @@ async function main() {
     // OVERRIDES the brand a key was pinned to server-side (use_brand). An unpinned CLI must send nothing so the key wins.
     const profile = flags.profile || (cfg.profile && cfg.profile !== 'default' ? cfg.profile : '');
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(apiBase);
-    if (flags.token) { await saveConfig({ apiBase, token: String(flags.token), profile }); return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`); }
+    // A KEY NEVER HAS TO TOUCH ARGV (2026-11-25). `--token <key>` puts the key in shell history and in `ps`, so the key
+    // can come from stdin instead: `--token -` (or `--token-stdin`, or a bare `--token`) reads it from a pipe, or asks
+    // for it on a terminal without echoing it. HERMOSO_TOKEN in the environment needs no sign-in at all. The argv form
+    // still works for scripts that already use it, and says once on stderr how to keep the key out of history.
+    if (flags.token === '-' || flags.token === true || flags['token-stdin']) {
+      const key = String(await readSecret('Paste your Hermoso key (hmk_…), then press Enter: ') || '').trim();
+      if (!key) return die('No key was given on stdin. Pipe one in (for example: pbpaste | hermoso auth login --token -), or set HERMOSO_TOKEN instead.');
+      await saveConfig({ apiBase, token: key, profile });
+      return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`);
+    }
+    if (flags.token) {
+      console.error('tip: a key typed on the command line is kept in your shell history. Next time pipe it in with `hermoso auth login --token -`, or set HERMOSO_TOKEN.');
+      await saveConfig({ apiBase, token: String(flags.token), profile }); return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`);
+    }
     // NO BROWSER ON THIS MACHINE: THE DEVICE SIGN-IN (RFC 8628, 2026-11-18). An agent on a server, chatted through
     // Telegram or Discord, cannot finish the loopback sign-in: the browser that opens is the user's, on their phone, and
     // it cannot reach 127.0.0.1 on the server. So the CLI prints a link and a short code, the user approves on any
@@ -130,7 +165,7 @@ async function main() {
     if (isLocal) { await saveConfig({ apiBase, token: '', profile }); return console.log(`✓ Local dev — no auth required. API: ${apiBase}`); }
     if (sub === 'login') { // browser sign-in: spin a loopback server, open the app's /?cliauth page, receive a minted key
       const key = await browserLogin(apiBase);
-      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login". No browser on this machine? Run "hermoso auth login --device" to sign in with a link and a code on any device, or paste a key: hermoso auth login --token <key>  (create one at https://app.hermoso.ai/?tab=api-keys, the MCP & CLI tab under Terminal & API keys).`);
+      if (!key) return die(`Sign-in didn’t complete. Re-run "hermoso auth login". No browser on this machine? Run "hermoso auth login --device" to sign in with a link and a code on any device, or pipe a key in: hermoso auth login --token -  (create one at https://app.hermoso.ai/?tab=api-keys, the MCP & CLI tab under Terminal & API keys).`);
       await saveConfig({ apiBase, token: key, profile });
       return console.log(`✓ Signed in — key stored (~/.hermoso/config.json). API: ${apiBase}`);
     }
@@ -365,7 +400,7 @@ async function main() {
           if (reg.inventory().some((t) => t.name === group)) return await runTool(reg, group, flags, pos.slice(1));
         }
         console.log(`hermoso <command>
-  auth login [--url <base>] [--token <t>]   credits          capabilities
+  auth login [--url <base>] [--token -]     credits          capabilities   (--token - reads the key from stdin)
   limits   ·   limits set --limit <credits|none> [--brand] [--member]   monthly credit limits per brand / member
   auth login --device [--no-wait | --resume]   no browser here: sign in with a link + code on any device
   brand   ·   brand draft (--domain|--description|--social …)  create --brand --product [--format]
@@ -579,7 +614,7 @@ async function deviceStart(apiBase) {
     const reg = await fetch(`${apiBase}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ client_name: 'Hermoso CLI', redirect_uris: ['http://127.0.0.1/callback'], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', DEVICE_GRANT] }) })
       .then((x) => x.json()).catch(() => ({}));
-    if (!reg.client_id) throw new Error('Could not start the sign-in. Try again, or sign in with a key: hermoso auth login --token <key>');
+    if (!reg.client_id) throw new Error('Could not start the sign-in. Try again, or sign in with a key piped in: hermoso auth login --token -');
     clientId = reg.client_id; r = await ask(clientId);
   }
   if (!r.ok || !r.j.device_code) throw new Error(`Could not start the sign-in: ${r.j.error_description || r.j.error || 'HTTP ' + r.status}.`);

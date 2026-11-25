@@ -63,6 +63,19 @@ ad and analytics numbers, and creator stats come straight from the platforms.
 Searches use Hermoso credits from your account, and so do posts on X at X's per-post price; reports and other posts
 use none. Nothing is bought from inside Claude.
 
+## Creator data
+
+Creator search returns public creator profiles and the contact details creators chose to publish.
+
+- **Sources.** The public profiles, bios and posts of creators on TikTok, Instagram and YouTube, including any
+  business email or link they chose to list on their profile.
+- **Legal basis.** Legitimate interests (GDPR Art. 6(1)(f)) in contacting creators about paid collaborations, using
+  contact details they published for business inquiries. Under PIPEDA, this is business contact information used for
+  its business purpose. We hold only what the creator made public, and we never sell lists.
+- **Opt out.** Email [hello@hermoso.ai](mailto:hello@hermoso.ai) with "remove me from creator search" and your handle
+  or email. We remove you from creator search results and add you to a suppression list, so you do not come back in
+  later searches.
+
 ## Privacy and support
 
 - Privacy Policy: [hermoso.ai/privacy](https://hermoso.ai/privacy)
