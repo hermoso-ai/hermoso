@@ -391,14 +391,10 @@ export const WECHAT_DARK_TOOLS = Object.freeze(['read_wechat_inbox', 'send_wecha
 // CALLER like the email tools: server.js flagsOnNow names them when either gate is open, for a workspace already holding
 // either connection, and for the gates' team pass. Counted and documented once OUTLOOK_CALENDAR_ENABLED is on in production.
 export const CALENDAR_DARK_TOOLS = Object.freeze(['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event', 'respond_to_calendar_event', 'calendar_free_busy', 'find_meeting_slots']);
-// THE OUTBRAIN AMPLIFY TOOLS SHIP DARK UNTIL A LIVE READ (2026-11-25). Outbrain granted Hermoso API access and the tools are
-// built and pinned against a stand-in (tools/outbrain-ads-check.mjs), but no real marketer has been read yet: the token page
-// asks for the Outbrain password, so OUTBRAIN_TEST_TOKEN is not stored. Until a live read flips their ads-matrix cells to
-// VERIFIED-LIVE they are not counted, documented or on a roster. Lit PER CALLER like Amazon Ads: server.js flagsOnNow names
-// them for a workspace already holding an Outbrain connection (the card is open: conversions), or everywhere with
-// OUTBRAIN_AMPLIFY_LIVE on. After the live read: delete this set and flip the cells, in one commit.
-export const OUTBRAIN_ADS_DARK_TOOLS = Object.freeze(['list_outbrain_ads_marketers', 'list_outbrain_ads_budgets', 'list_outbrain_ads_campaigns', 'list_outbrain_ads_promoted_links', 'outbrain_ads_report', 'create_outbrain_ads_campaign', 'add_outbrain_ads_promoted_links', 'update_outbrain_ads_budget', 'set_outbrain_ads_status', 'delete_outbrain_ads_object']);
-export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS, ...CALENDAR_DARK_TOOLS, ...OUTBRAIN_ADS_DARK_TOOLS]);
+// OUTBRAIN AMPLIFY LEFT THE DARK SET ON 2026-11-25 after the live read on our own marketer (tools/outbrain-live-read.mjs:
+// marketers, budgets, campaigns and two reports, 0 refusals). Its ten tools are counted, documented and rostered like any
+// connected ad platform now; OUTBRAIN_AMPLIFY_LIVE, still set on the service, is read by nothing and can be removed.
+export const FLAGGED_OFF_TOOLS = new Set(['reangle_video', ...WHOP_DARK_TOOLS, ...CANVA_DARK_TOOLS, ...AMAZON_ADS_DARK_TOOLS, ...EMAIL_DARK_TOOLS, ...WECHAT_DARK_TOOLS, ...CALENDAR_DARK_TOOLS]);
 // THE PRODUCTION FLAG THAT LIFTS A DARK TOOL (2026-11-03, owner: count and document the Whop tools whenever their gate
 // is open in prod, keep the automatic gate). A tool named here is dark only while that CONNECTOR_GATES flag is off in
 // production, as recorded in docs-site/prod-gate-flags.json, the file the docs build already reads. The counts and the
@@ -417,8 +413,7 @@ export function darkToolsUnder(flags) {
 // follow a plain switch of their own rather than a CONNECTOR_GATES flag (server.js flagsOnNow reads the same names). The
 // per-caller lights (a workspace already holding the connection, a team pass) are not here: this answers "is it dark for
 // everyone", which is what a count a customer reads must use.
-export const OUTBRAIN_ADS_LIVE_ENV = 'OUTBRAIN_AMPLIFY_LIVE';
-export const DARK_TOOL_ENV_SWITCH = Object.freeze({ ...DARK_TOOL_GATE_FLAG, reangle_video: 'REANGLE_VIDEO', ...Object.fromEntries(OUTBRAIN_ADS_DARK_TOOLS.map((n) => [n, OUTBRAIN_ADS_LIVE_ENV])) });
+export const DARK_TOOL_ENV_SWITCH = Object.freeze({ ...DARK_TOOL_GATE_FLAG, reangle_video: 'REANGLE_VIDEO' });
 // A switch is on when it reads 1/on/true/yes; a flag whose production value IS a key (WHOP_API_KEY) is on when present.
 const envSwitchOn = (name, v) => { const s = String(v ?? '').trim(); return /^(1|on|true|yes)$/i.test(s) || (/_KEY$/.test(name) && s !== ''); };
 export function darkToolsUnderEnv(env = {}) {
