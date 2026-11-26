@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hermoso",
+  "version": "1.0.0",
+  "description": "Launch and market from your coding agent: put the site you built live with a domain, email and payments, then research the ads competitors run, make image and video ads, post and schedule to your own social channels, and run ad campaigns. Hosted Hermoso MCP connection plus skills that drive the hermoso CLI. Requires a Hermoso account (free to start).",
+  "author": { "name": "Hermoso AI", "email": "hello@hermoso.ai", "url": "https://hermoso.ai" },
+  "homepage": "https://hermoso.ai",
+  "repository": "https://github.com/hermoso-ai/hermoso",
+  "license": "MIT",
+  "keywords": ["marketing", "advertising", "ad-library", "ai-ad-generator", "social-media", "scheduling", "ads-management", "mcp"]
+}
