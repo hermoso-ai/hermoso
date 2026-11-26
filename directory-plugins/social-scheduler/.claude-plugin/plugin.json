@@ -1,8 +1,8 @@
 {
   "name": "hermoso-social-scheduler",
   "displayName": "Hermoso Social Scheduler",
-  "version": "1.0.1",
-  "description": "Publish and schedule your own posts to your own connected accounts (Facebook, Instagram, Threads, X, LinkedIn, Pinterest, Bluesky, Telegram, YouTube and TikTok), answer comments and messages, and see which posts performed. Every post is shown to you for a yes first. When you ask Hermoso to fit one caption to each channel, that version is written by an AI model run by Hermoso AI. Requires a Hermoso account (free to start).",
+  "version": "1.1.0",
+  "description": "Publish and schedule your own posts to your own connected accounts (Facebook, Instagram, Threads, X, LinkedIn, Pinterest, Bluesky, Telegram, YouTube and TikTok, plus Google Business Profile, WordPress, Webflow, Wix, a Shopify blog, Slack, Discord and Whop where connected), answer comments and messages from every connected inbox, and see which posts performed. Each post, change and reply is shown as a preview and runs only after you approve it. When you ask Hermoso to fit one caption to each channel, that version is written by an AI model run by Hermoso AI. Requires a Hermoso account (free to start).",
   "author": {
     "name": "Hermoso AI",
     "email": "hello@hermoso.ai",

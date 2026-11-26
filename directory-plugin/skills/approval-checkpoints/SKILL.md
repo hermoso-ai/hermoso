@@ -35,6 +35,18 @@ file, and the time in the user's own time zone.
   chose in `privacy`. Never pick it for them.
 - Read `list_scheduled` so a new post does not land on top of one already queued.
 
+## How the server holds every post for the user's yes
+Every publish, schedule, reschedule, cancel, retry and reply tool on this server runs in two steps, and the first
+call changes nothing:
+- The first call returns a preview: the exact text, the media, each destination account (the Page, board, chat or
+  handle as the connection resolves it right now) and the time, plus a single-use confirmation code. Show the user
+  that preview as it is.
+- After their yes to that preview, call the same tool again with the same arguments plus `confirmationCode`. Any
+  change (a word, a time, an account) needs a new preview: the server refuses a code for a changed post.
+- In a client that supports confirmation forms, the server shows the preview in a form instead and runs only if the
+  user accepts it; no code is involved, and a declined form publishes nothing.
+- A code works once and expires after 10 minutes.
+
 ## Then run it
 Only after an explicit yes to the exact post ("yes", "go", "schedule it", "post it"):
 - Later: `schedule_post` with `channels`, `message` (or `captions` per channel), the media, and `at` with

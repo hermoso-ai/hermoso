@@ -9,7 +9,7 @@ This plugin bundles four Hermoso connections, each limited to one job:
 | --- | --- |
 | Hermoso Ad Research | Reads the Meta, Google and LinkedIn ad libraries and organic TikTok, Instagram, YouTube, Reddit and Threads posts, breaks down video ads, and checks ad copy against Meta's advertising standards. Read-only. |
 | Hermoso Ads Reporting | Reads performance from your own ad accounts (Meta, Google Ads, LinkedIn, TikTok, Microsoft Advertising, Reddit, Pinterest, X and ChatGPT Ads) plus Google Analytics 4 and Search Console. Read-only. |
-| Hermoso Social Scheduler | Publishes and schedules your own posts to your own connected accounts, and answers comments and messages, each after your yes. |
+| Hermoso Social Scheduler | Publishes and schedules your own posts to your own connected accounts, and answers comments and messages; each post, change and reply is shown as a preview and runs only after you approve it. |
 | Hermoso Creator Campaigns | Finds creators in a niche, runs campaigns that pay creators for posts, and reviews what they submit. Payouts are made in the Hermoso app, never from here. |
 
 None of them generates images, video or audio. Want only one job? Each connection is also its own plugin: Hermoso Ad
@@ -47,7 +47,7 @@ Research, Hermoso Ads Reporting, Hermoso Social Scheduler and Hermoso Creator Ca
 - "Turn https://... into a LinkedIn post and an X Article for this week."
 - "Find TikTok creators in home espresso and set up a campaign paying per 1,000 views."
 
-Nothing is published, scheduled, sent or changed unless you say yes to it in the conversation.
+Nothing is published, scheduled, sent or changed unless you say yes to it: the Social Scheduler and Creator Campaigns servers answer every such call with a preview first, and run it only after you approve it (in a confirmation form, or with the preview's single-use code).
 
 ## What it sends and stores
 

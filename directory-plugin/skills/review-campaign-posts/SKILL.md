@@ -15,6 +15,13 @@ Approving a post makes it earn under the campaign's payout model (held, then pay
 cancels its unpaid earnings. The creator sees every decision and comment, and is emailed. So every decision is the
 user's, made on the evidence shown here; Hermoso never approves or rejects on its own.
 
+## How the server confirms a change
+Every tool here that approves, rejects, removes, invites, emails a creator or changes a campaign runs in two steps.
+The first call changes nothing and returns a preview of exactly what will change with a single-use confirmation code;
+show it to the user, and after their yes call the same tool again with the same arguments plus `confirmationCode`. In
+a client that supports confirmation forms the server asks the user in a form instead. Any change needs a new preview,
+and a code works once and expires after 10 minutes.
+
 ## Before you start
 - This plugin connects the Hermoso Creator Campaigns server
   (`https://app.hermoso.ai/mcp?tools=directory-creators`). The first time one of its tools runs, sign in with your

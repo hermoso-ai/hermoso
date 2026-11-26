@@ -1,10 +1,12 @@
 # Hermoso Social Scheduler for Claude
 
 Publish and schedule your own posts to your own accounts from Claude: Facebook, Instagram, Threads, X,
-LinkedIn, Pinterest, Bluesky, Telegram, YouTube and TikTok, plus a WordPress, Shopify, Webflow or Wix blog. Turn
-one article into a post for every channel, answer comments and messages, and see which posts performed. Claude
-shows you the exact words, media, account and time and waits for your yes before anything is posted. Requires a
-Hermoso account (free to start); channels are connected in the Hermoso app.
+LinkedIn, Pinterest, Bluesky, Telegram, YouTube and TikTok, plus Google Business Profile, a WordPress, Shopify,
+Webflow or Wix blog, Slack, Discord and Whop. Turn one article into a post for every channel, answer comments and
+messages, and see which posts performed. The server holds every post, change and reply for your approval: the first
+call returns a preview of the exact words, media, account and time, and nothing happens until you approve it, in a
+confirmation form where Claude shows one or with the preview's single-use code. Requires a Hermoso account (free to
+start); channels are connected in the Hermoso app.
 
 ## What is in this plugin
 
@@ -30,7 +32,7 @@ Hermoso account (free to start); channels are connected in the Hermoso app.
 ## What it sends and stores
 
 Each tool call sends its arguments to Hermoso at `app.hermoso.ai` over HTTPS, signed in with your Hermoso
-account. Posts, media links and replies you approve are published to the accounts you connected in the Hermoso app; reads return your queue, posts, comments and messages to Claude. Your Hermoso workspace keeps your sign-in, your brand profile, your connections, the posts you queue and the files you upload, and a log of the calls that
+account. Posts, media links and replies you approve are published to the accounts you connected in the Hermoso app; reads return your queue, your published posts, and the comments, reviews and messages from every inbox source you connected (including WhatsApp, SMS, iMessage, LINE, Intercom, Slack and Discord messages, email and voice-agent call records) to Claude, and can list each connection's accounts, including ad, analytics and webmaster accounts, with which ones this brand may use. Your Hermoso workspace keeps your sign-in, your brand profile, your connections, the posts you queue and the files you upload, and a log of the calls that
 used credits. The plugin reads nothing from your computer and no environment variable or local credential.
 Posting uses no credits, except on X, which is billed at X's per-post price and quoted before you post. Nothing is bought from inside Claude.
 

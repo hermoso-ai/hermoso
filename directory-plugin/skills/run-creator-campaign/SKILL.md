@@ -16,6 +16,13 @@ Creators join by link without a Hermoso account, post on their own channels and 
 approves each post, and approved posts earn under the campaign's payout model. Payouts are made in the Hermoso app
 and paid through Stripe; nothing on this connection charges a card or sends money.
 
+## How the server confirms a change
+Every tool here that approves, rejects, removes, invites, emails a creator or changes a campaign runs in two steps.
+The first call changes nothing and returns a preview of exactly what will change with a single-use confirmation code;
+show it to the user, and after their yes call the same tool again with the same arguments plus `confirmationCode`. In
+a client that supports confirmation forms the server asks the user in a form instead. Any change needs a new preview,
+and a code works once and expires after 10 minutes.
+
 ## Before you start
 - This plugin connects the Hermoso Creator Campaigns server
   (`https://app.hermoso.ai/mcp?tools=directory-creators`). The first time one of its tools runs, sign in with your
