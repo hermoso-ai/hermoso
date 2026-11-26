@@ -652,8 +652,8 @@ export const MCP_INSTRUCTIONS_WIDGET = [
 // The all-in-one ChatGPT app (the unscoped server) is "Hermoso: AI Marketing Agent"; these are the three focused apps
 // beside it, named by Keyword Planner volume (the owner, 2026-11-06; evidence in memory mcp-directory-listings.md).
 export const APP_TITLES = Object.freeze({ create: 'Hermoso: AI Ad Generator', ads: 'Hermoso: Ads Manager', social: 'Hermoso: Social Media Manager', creators: 'Hermoso: Creator Campaigns', sites: 'Hermoso: Launch Your Business', research: 'Hermoso: Ad Research', analytics: 'Hermoso: Marketing Analytics' });
-const APP_CONFIRM = 'CONFIRM with the user before posting or scheduling, messaging customers, turning on a campaign or changing a budget, deleting anything, or replacing a saved profile.';
-const APP_WORKSPACE = 'WORKSPACE: get_brand, list_brands, use_brand, create_brand, list_connectors (accounts are connected in the Hermoso app, Connectors), hermoso_credits, report_bug, request_feature.';
+const APP_CONFIRM = 'CONFIRM before posting or scheduling, messaging customers, turning on a campaign or changing a budget, deleting anything, or replacing a saved profile.';
+const APP_WORKSPACE = 'WORKSPACE: welcome, get_brand, list_brands, use_brand, create_brand, list_connectors (accounts are connected in the Hermoso app, Connectors), hermoso_credits, report_bug, request_feature.';
 const APP_ADS_LINES = [
   "Hermoso Ads Manager runs and reports on the user's own paid campaigns on Meta, Google, Microsoft, TikTok, LinkedIn, Pinterest, Reddit, Snapchat, X, Apple and ChatGPT Ads, and reads website and business analytics: Google Analytics, Search Console, Bing Webmaster, Tag Manager, PostHog, Mixpanel, Amplitude, Merchant Center, Stripe and HubSpot.",
   '• CAMPAIGNS: list_meta_ads, meta_insights, list_google_ads_campaigns, google_ads_report, tiktok_ads_report, linkedin_ads_report and the other list_*_campaigns / *_report tools read campaigns and results; analyze_campaigns compares them. create_* tools build campaigns, ad sets and ads PAUSED and read them back; set_*_status and set_*_budget control spend.',
@@ -674,9 +674,9 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
     '• RESEARCH: find_competitors, pull_competitor_ads, research_ads, competitor_teardown, mine_angles, search_meta_ads.',
     '• CREATE: get_brand / draft_brand, plan_ad, render_ad, generate_image, generate_video, make_template_ad, clone_static, plan_video_remake; variants: edit_image, headline_variants, hook_variants, multiply_ad. Renders run in the background: poll get_job until done.',
     '• FILES: upload_file turns a file into a URL; list_library lists past creations.',
-    'WORKSPACE: list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
+    'WORKSPACE: welcome, list_brands, use_brand, create_brand, hermoso_credits, report_bug, request_feature.',
     "CREDITS: AI and research tools use credits from the user's Hermoso account; the reply says how many. If too low, say so. Nothing is bought in this app.",
-    'CONFIRM with the user before deleting anything or replacing a saved profile (draft_brand with save:true).',
+    'CONFIRM before deleting anything or replacing a saved profile (draft_brand with save:true).',
     'SHOWING RESULTS: the widget already shows each finished image and video. Never repeat one as a markdown image or image link (it shows a broken tile); describe it and link only if asked.',
   ].join('\n'),
   ads: [...APP_ADS_LINES, APP_WORKSPACE, APP_CONFIRM].join('\n'),
@@ -691,7 +691,7 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
     '• RESULTS: hermoso_tag_report (visits, leads, revenue by source); schedule_post to announce it.',
     'EVERY PUBLISHED FILE IS PUBLIC: never put API keys or secrets in page files. Secrets, page passwords and new domains are set in the Hermoso app.',
     APP_WORKSPACE,
-    'CONFIRM with the user before publishing over a live page, taking one offline, restoring a database, changing DNS, sending an email, or switching payments to live.',
+    'CONFIRM before publishing over a live page, taking one offline, restoring a database, changing DNS, sending an email, or switching payments to live.',
   ].join('\n'),
   research: [
     "Hermoso Ad Research finds the ads and posts that work in the user's market: which brands compete with them, which ads those brands run and for how long, and which organic posts get attention. Each tool works on its own.",
@@ -718,7 +718,7 @@ export const MCP_INSTRUCTIONS_APP = Object.freeze({
     '• RESULTS: creator_campaign_report (CSV too).',
     'PAYMENTS: this app shows what creators are owed and never pays them; paying is done outside this app (OUTSIDE THIS APP below). Creators join through their own link and sign-in; their agreements are their own clicks.',
     APP_WORKSPACE,
-    'CONFIRM with the user before setting a campaign live or closing it, approving or rejecting a post, removing a creator, emailing a creator, building an ad, or deleting anything.',
+    'CONFIRM before setting a campaign live or closing it, approving or rejecting a post, removing a creator, emailing a creator, building an ad, or deleting anything.',
   ].join('\n'),
 });
 // The Claude directory pair: no generation tool is named, and Ads Manager also carries the research tools there.
@@ -3821,6 +3821,9 @@ export const WIDGET_WITHHELD_WHY = Object.freeze({
   get_credit_limits: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-18); a brand\'s monthly credit limit is read in the Hermoso app (Settings ▸ Monthly credit limit) or on any other MCP host, and hermoso_credits states it here',
   set_credit_limit: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-18); the account owner sets a brand\'s monthly credit limit in the Hermoso app (Settings ▸ Monthly credit limit) or on any other MCP host',
   // BILLING PER BRAND (2026-11-25): the same reason; an agency reads its per-brand statement and bills a brand separately in the Hermoso app (Settings ▸ Billing, Team ▸ Billing for this brand) or on any other MCP host.
+  // MANY BRANDS (2026-11-26): the same reason; reports and pausing across brands run from any other MCP host, the CLI or the API.
+  branded_report: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-26); branded reports are made from any other MCP host, the CLI or the REST API (POST /api/analytics/reports)',
+  pause_scheduled_posts: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-26); pausing posts across brands runs from any other MCP host, the CLI or the REST API (POST /api/schedule/pause)',
   brand_usage: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-25); the per-brand usage statement is read in the Hermoso app (Settings ▸ Billing) or on any other MCP host',
   brand_billing: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-25); billing a brand separately is set in the Hermoso app (Team ▸ Billing for this brand) or on any other MCP host',
   list_invoices: 'the published ChatGPT app has a reviewed tool list at its cap, and a new tool would push a whole ranked family off it (2026-11-25); invoices are read in the Hermoso app (Settings ▸ Billing) or on any other MCP host',
@@ -4190,6 +4193,7 @@ export const widgetHostHides = (name, widgetHost, app = null) => (widgetHost
 export const ON_DEMAND_TOOLS = new Set(['list_highlevel_social_accounts', 'post_to_highlevel', 'delete_highlevel_post', 'upload_to_highlevel_media', 'hermoso_other_capabilities', 'get_credit_limits', 'set_credit_limit', 'find_proven_formats', 'layerize_image', 'split_image', 'product_move', 'list_story_cards', 'get_story_card', 'start_story_film', 'advance_story_film', 'submit_to_gallery', 'list_gallery_submissions', 'withdraw_from_gallery', 'save_location', 'delete_location', 'edit_timeline', 'video_frames', 'recast_hook', 'face_check', 'list_templates', 'finish_draft', 'make_static_ads', 'make_listing_set', 'reangle_video', 'repurpose_transcript', 'tiktok_ideas', 'generate_sfx', 'repurpose_image', 'add_presenter', 'list_products', 'add_product', 'refresh_products', 'update_product', 'remove_product', 'make_short', 'finish_short', 'rewrite_ad_line', 'save_video_preset', 'list_video_presets', 'update_video_preset', 'delete_video_preset', 'make_from_preset', 'find_leads', 'find_company_contacts', 'search_companies', 'saved_lead_searches', 'list_winning_ads', 'view_images', 'face_swap_video', 'track_objects', 'face_match_cut', 'photo_to_model', 'upscale_image', 'split_vocals', 'video_filter', 'cut_out_background', 'cut_out_video_background', 'reangle_image', 'make_singing_ad', 'check_hook', 'write_video_ad_script', 'update_page', 'list_pages', 'get_page', 'unpublish_page', 'connect_domain', 'domain_status', 'disconnect_domain', 'set_site_secret', 'delete_site_secret', 'rollback_page', 'list_site_usage', 'set_site_spend_cap', 'find_domain', 'buy_domain', 'list_domains', 'get_domain', 'set_domain_autorenew', 'renew_domain', 'transfer_out', 'set_email_forwarding', 'list_dns_records', 'set_dns_record', 'delete_dns_record', 'connect_email_provider', 'set_page_access', 'create_review_link', 'audit_page', 'connect_page_to_search_console', 'create_domain_address', 'list_domain_mail', 'get_domain_mail', 'reply_domain_mail', 'send_domain_mail', 'start_payments_onboarding', 'payments_status', 'list_site_payments', 'get_site_payment', 'refund_site_payment', 'payouts_status', 'set_site_payments_mode']); // the four HighLevel tools (2026-11-24, owner: rarely used, so they take NO space from other tools): on demand only on every surface, reached by find_tools / call_tool, and the Studio loads them only by search on a brand that connected HighLevel // launch pages (2026-11-23): publish_page is listed and its description and every reply name these four // the thirteen mini tools (2026-11-23): held out of the default list on weight; find_tools finds each by what it does // search_companies / saved_lead_searches (2026-11-17): find_leads' description and every lead search reply name both // find_leads / find_company_contacts (2026-11-17): the research map and the instructions name both // rewrite_ad_line (2026-11-08): multiply_ad's description and its change note name it // list_winning_ads (2026-11-08): multiply_ad's description names it // the five video-preset tools (2026-11-08): clone_video's description names save_video_preset, whose reply names make_from_preset; list_video_presets names the rest // make_short / finish_short (2026-11-08): clone_video's description names make_short, and make_short's description and reply name finish_short // make_static_ads (2026-10-06): plan_variations' description names it, so a caller planning variants reaches it; // recast_hook and face_check (2026-09-24): hook_variants names recast_hook, and recast_hook's reply names face_check // finish_draft (2026-10-03): every 480p Seedance 2.5 video reply names it (draftLine) // generate_sfx (2026-11-03): find_sound's and generate_voice's descriptions name it // get_credit_limits / set_credit_limit (2026-11-18): hermoso_credits' limit line and each other's replies name them; find_tools finds both
 for (const t of LAUNCH_ADMIN_TOOLS) ON_DEMAND_TOOLS.add(t); // launch admin (2026-11-23): on demand, so no default roster grows
 for (const t of ['affiliate_status', 'join_affiliate_program', 'affiliate_payout_setup', 'withdraw_affiliate_earnings', 'claim_referral_code']) ON_DEMAND_TOOLS.add(t);
+for (const t of ['branded_report', 'pause_scheduled_posts']) ON_DEMAND_TOOLS.add(t); // many brands (2026-11-26): on demand, so no default roster grows; find_tools('report' / 'pause') finds them
 for (const t of ['brand_usage', 'brand_billing', 'list_invoices', 'preview_tax', 'creator_ledger']) ON_DEMAND_TOOLS.add(t); // billing per brand (2026-11-25): on demand, so no default roster grows; find_tools('usage' / 'invoice' / 'billing') finds them // Refer & earn (2026-11-24): on demand, so no default roster grows; find_tools('referral' / 'affiliate') finds them
 
 // ── A TOOL NAME A HOST STILL HOLDS MUST KEEP ANSWERING (2026-09-14) ─────────────────────────────────────────────
@@ -4430,6 +4434,8 @@ export const WITHHELD_FROM_DIRECTORY = new Set([
   'get_credit_limits', 'set_credit_limit',
   // 2026-11-25: billing per brand is on demand too (the same reason).
   'brand_usage', 'brand_billing', 'list_invoices', 'preview_tax', 'creator_ledger',
+  // 2026-11-26: the multi-brand tools are on demand too (the same reason).
+  'branded_report', 'pause_scheduled_posts',
   // 2026-11-23: Hermoso Launch's tools are on demand (listed by the Hermoso Launch app and every full connection), and the
   // directory listings were reviewed without them, so no cage reaches them through call_tool.
   ...LAUNCH_PAGE_TOOLS, ...LAUNCH_ADMIN_TOOLS,
@@ -4870,6 +4876,8 @@ export const APP_WIDGET_HINTS = Object.freeze({
   email_campaign_creator: { destructiveHint: true }, review_campaign_post: { openWorldHint: true }, review_campaign_creator: { openWorldHint: true },
 });
 const APP_WIDGET_DESC_EDITS = Object.freeze({
+  // A focused app's welcome answers that app's own ways to start (lib/launch-business.mjs APP_WELCOME), not the all-in-one menu.
+  welcome: [/, tailored to their brand and what is connected \([^)]*\)/, ', for what this app does, tailored to their brand and what is connected'],
   bing_webmaster_traffic: [/ Bing is a smaller share of search than Google, but its index is what Copilot and ChatGPT web search read from, so this is the answer-engine visibility read rather than a second traffic report\./, ''],
   bing_webmaster_query_stats: [[/The Bing twin of search_console_performance, split by what you want pinned\./, 'Use this when the user asks what people searched on Bing to reach their site, or which pages those searches landed on.'], [/, so it lags Search Console and will not move day to day/, ', so it does not move day to day'], [/ Worth reading BESIDE Search Console rather than instead of it[^.]*\./, '']],
   openai_ads_bulk: [/ — the only way to build a whole tree in one call\./, '.'],
@@ -7267,7 +7275,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {},
     outputSchema: { ok: z.boolean().optional(), brand: z.string().nullable().optional(), business: z.any().optional(), options: z.array(z.any()).optional(), links: z.array(z.any()).optional(), note: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, sessionBound((sctx) => wrap(async (a = {}) => { const d = bizForHost(await apiGet('/api/launch/welcome', a), sctx); return withHints(ok(d.note, d), (d.options || []).slice(0, 3).map((o) => ({ do: o.call, why: o.title }))); }), ctx));
+  }, sessionBound((sctx) => wrap(async (a = {}) => { const d = bizForHost(await apiGet('/api/launch/welcome', sctx?.app ? { ...a, app: sctx.app } : a), sctx); /* a focused app answers its own ways to start (lib/launch-business.mjs APP_WELCOME) */ return withHints(ok(d.note, d), (d.options || []).slice(0, 3).map((o) => ({ do: o.call, why: o.title }))); }), ctx));
 
   // ── THE INBOX ─────────────────────────────────────────────────────────────────────────────────────────────────
   // A FAN-OUT OVER THE EXISTING ROUTES, not a second implementation. Each source calls the endpoint that already
@@ -9210,13 +9218,20 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('list_brands', {
     title: 'List profiles',
-    description: "List every profile on this account (id + name; a profile is a brand, a creator or a personal workspace) and which one this connection acts on, PLUS any profile another account shared with you. Call this, then use_brand to switch; a SHARED profile switches the same way (pass its name or the profile id printed here). If a profile looks empty when the app shows it full, you are acting on a different one: call this first. Read-only, free.",
-    inputSchema: {}, outputSchema: {
+    description: "List every profile on this account (id + name; a profile is a brand, a creator or a personal workspace) and which one this connection acts on, PLUS any profile another account shared with you. Call this, then use_brand to switch; a SHARED profile switches the same way (pass its name or the profile id printed here). If a profile looks empty when the app shows it full, you are acting on a different one: call this first. overview:true instead reads ACROSS every brand you run (for clients or users): per brand, posts waiting for approval, failed and stuck posts, connections that need reconnecting (with the reconnect link), credits used and upcoming posts over the last `days` (default 7); includeAdSpend:true adds ad spend (reads each ad platform, slower); brands narrows it. Read-only, free.",
+    inputSchema: {
+      overview: z.boolean().optional().describe('read across every brand: what needs attention on each'),
+      days: z.number().optional().describe('overview window, 1-31 (default 7)'),
+      brands: z.union([z.array(z.string()), z.string()]).optional().describe('overview: only these brands (ids or names)'),
+      includeAdSpend: z.boolean().optional().describe('overview: also read ad spend per brand'),
+    }, outputSchema: {
+      totals: z.any().optional().describe('overview: the account-wide counts'),
       brands: z.array(z.any()).optional().describe('every profile on the account ({id, name, active, brandName?})'),
       sharedWorkspaces: z.array(z.any()).optional().describe('profiles another account shared with you ({name, ownerAccountId, profileUuid, role})'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, wrap(async () => {
+  }, wrap(async (a = {}) => {
+    if (a.overview === true) { const o = await apiGet('/api/brands/overview', { days: a.days, brands: Array.isArray(a.brands) ? a.brands.join(',') : a.brands, includeAdSpend: a.includeAdSpend ? '1' : undefined }); return ok(o.note || 'Done.', { brands: o.brands, totals: o.totals }); }
     const d = await apiGet('/api/brands');
     const lines = (d.brands || []).map(b => `• ${b.name}${b.brandName ? ` — brand: ${b.brandName}` : ''} (id: ${b.id})${b.active ? '  ← active' : ''}`).join('\n'); // a profile the user named shows that name, with its brand's own name beside it (lib/profile-label.mjs)
     // SHARED WORKSPACES WERE INVISIBLE HEADLESSLY. /api/brands is own-account-only, so a teammate driving Hermoso
@@ -10956,12 +10971,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       externalId: z.string().optional().describe('YOUR OWN id for this post (e.g. a CRM or sheet row id, up to 128 chars); list_scheduled externalId finds it, also after it publishes'),
       metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().describe('your own key/value notes stored with the post (up to 20 keys, 4 KB); never published'),
       platformCover: z.boolean().optional().describe('VIDEO COVER. Omit it (the default) and Hermoso sets the video\u2019s best frame \u2014 the same frame as its Library thumbnail \u2014 as the cover on every channel that allows one (Instagram, Facebook, TikTok direct posts, LinkedIn Pages, Pinterest, Telegram, YouTube) \u2014 and on X, Threads and Bluesky, which have none, a blank first frame is replaced on a copy sent there only. true = send no cover and let the platform pick (usually the first frame). A cover you pass yourself always wins.'),
+      brands: z.union([z.array(z.string()), z.string()]).optional().describe('SEVERAL BRANDS AT ONCE: "all" or a list of brand ids or names (list_brands). The same post goes to each brand\u2019s own connected channels, one result per brand (a refusal on one brand never stops the others). Past one brand the first call previews and schedules nothing; call again with confirm:true. Not with accounts / accountGroup.'),
+      confirm: z.boolean().optional().describe('with brands: true after the user agreed to the preview'),
     },
-    outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), label: z.string().optional(), posts: z.array(z.any()).optional(), approval: z.string().optional() },
+    outputSchema: { id: z.string().optional(), at: z.string().optional(), channels: z.array(z.string()).optional(), label: z.string().optional(), posts: z.array(z.any()).optional(), approval: z.string().optional(), brands: z.array(z.any()).optional(), needsConfirm: z.boolean().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const { channelOptions, ...rest } = a;
     const d = await apiPost('/api/schedule', { ...rest, ...(channelOptions || {}) });
+    if (a.brands != null && a.brands !== '' && !a.draft) return ok(d.note || 'Done.', d); // across brands: one result per brand (server.js schedCreateAcrossBrands)
     if (a.draft === true) return ok(`${d.note || `Saved as draft ${d.draft?.id}.`}`, { id: d.draft?.id, draft: d.draft, check: d.check });
     if (a.dryRun === true) return ok(`${d.ok ? 'PASSES' : 'WOULD BE REFUSED'}: ${d.note}`, d);
     return ok(`Scheduled for ${d.at} → ${(d.channels || []).join(', ')}. It is NOT posted yet; Hermoso publishes it at that time (id ${d.id}).${a.visibility && a.visibility !== 'public' ? ` Visibility: ${a.visibility} (as asked) — it will NOT be publicly live.` : (d.approval === 'pending' ? ' It WAITS FOR AN ADMIN’S APPROVAL, then goes LIVE publicly.' : ' It will go LIVE publicly.')}${d.note ? ` ${d.note}` : ''}`, d);
@@ -11390,6 +11408,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const d = await apiGet('/api/instagram/posting-hold');
     return ok(d.held ? `${d.note} Held: ${(d.holds || []).map((h) => `${h.who || h.account} since ${h.since}, ${h.postsWaiting} post${h.postsWaiting === 1 ? '' : 's'} waiting`).join('; ')}. Resume with action:"resume" once the user confirms the account holder checked Account Status.` : (d.note || 'Instagram posting is not held.'), d);
   })));
+  // PAUSE / RESUME across brands (2026-11-26, server.js schedPauseAction): beside the other scheduling tools, in `channels`.
+  server.registerTool('pause_scheduled_posts', {
+    title: 'Pause or resume scheduled posts',
+    description: "Stop a brand's scheduled posts from publishing, and start them again, on one brand or on many at once. action status (default): paused or not, how many posts are queued and how many are past their time. pause: nothing of the brand publishes until it is resumed (new posts can still be scheduled; they wait too). resume: held posts go out at their own time, or within minutes when that time passed while paused; skipOverdue:true cancels those instead. brands: \"all\" or a list of brand ids or names (list_brands); omit for the current brand. Pausing or resuming more than one brand, or resuming with overdue posts, answers with a per-brand preview first; call again with confirm:true once the user agrees. Each brand reports on its own, so a partial result says which brands failed. Brand admins only. Free.",
+    inputSchema: {
+      action: z.enum(['status', 'pause', 'resume']).optional(),
+      brands: z.union([z.array(z.string()), z.string()]).optional().describe('"all" or a list of brand ids or names; omit for the current brand'),
+      reason: z.string().optional().describe('pause: a note shown with the pause (e.g. "client review")'),
+      skipOverdue: z.boolean().optional().describe('resume: cancel posts whose time passed while paused instead of publishing them late'),
+      confirm: z.boolean().optional().describe('true after the user agreed to the preview'),
+    },
+    outputSchema: { action: z.string().optional(), brands: z.array(z.any()).optional(), needsConfirm: z.boolean().optional(), partial: z.boolean().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, wrap(async (a) => {
+    const act = a.action || 'status';
+    const d = act === 'status' ? await apiGet('/api/schedule/pause', { brands: Array.isArray(a.brands) ? a.brands.join(',') : a.brands }) : await apiPost(act === 'resume' ? '/api/schedule/resume' : '/api/schedule/pause', { ...a, action: act });
+    return ok(d.note || 'Done.', d);
+  }));
   server.registerTool('duplicate_scheduled', {
     title: 'Duplicate a scheduled post',
     description: 'Copy an existing scheduled or already-published post into a NEW queued post — the way to run a creative again, reuse a post that worked as the starting point for the next one, or re-send something after it went out. It copies the caption, media, per-channel captions, title, description, tags and the target board / Page / company Page / listing, and ANY of those can be overridden in the same call. Give a new time in `at`, or useQueue:true to drop it into the brand’s next free posting slot. The copy is INDEPENDENT — editing or cancelling it never touches the original — and it is a genuinely new post rather than a re-send, so it publishes even where the original already did. To re-fire only the channels that FAILED, use retry_scheduled instead.',
@@ -11558,14 +11594,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
   server.group('channel_admin');
   server.registerTool('list_pending_approvals', {
     title: 'Posts waiting for approval',
-    description: 'Scheduled posts waiting for an admin of the brand to approve them before they can go out (the brand’s approval setting holds them), or state "rejected" for the ones turned down. Also says whether approval is on. Read-only, free.',
+    description: 'Scheduled posts waiting for approval (an admin, or a no-login approver), or state "rejected" for those turned down or sent back with an approver’s note. Also says whether approval is on. Read-only, free.',
     inputSchema: { state: z.enum(['pending', 'rejected']).optional().describe('default pending') },
     outputSchema: { posts: z.array(z.any()).optional(), canApprove: z.boolean().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     const [d, s] = await Promise.all([apiGet('/api/schedule/approvals', { state: a.state || 'pending' }), apiGet('/api/schedule/approval', {})]);
     const posts = d.posts || [];
-    return ok([s.summary || '', posts.length ? `${posts.length} ${d.state}:\n${posts.slice(0, 30).map((r) => `- ${r.id} · ${r.at} → ${(r.channels || []).join(', ')} · ${String(r.message || '').replace(/\s+/g, ' ').slice(0, 160)}${r.approval?.reason ? ` · reason: ${r.approval.reason}` : ''}`).join('\n')}` : `No posts are ${d.state === 'rejected' ? 'rejected' : 'waiting for approval'}.`, d.canApprove ? '' : 'You are not an admin of this brand, so you cannot approve or reject.'].filter(Boolean).join('\n'), d);
+    const aps = Array.isArray(s.approvers) ? s.approvers : [];
+    return ok([s.summary || '', aps.length ? `Approvers with no login (emailed each waiting post): ${aps.map((x) => x.name ? `${x.name} <${x.email}>` : x.email).join(', ')}.` : '', posts.length ? `${posts.length} ${d.state}:\n${posts.slice(0, 30).map((r) => `- ${r.id} · ${r.at} → ${(r.channels || []).join(', ')} · ${String(r.message || '').replace(/\s+/g, ' ').slice(0, 160)}${r.approval?.changesRequested ? ` · CHANGES REQUESTED by ${r.approval.decidedBy || 'the approver'}` : ''}${r.approval?.reason ? ` · ${r.approval?.changesRequested ? 'their note' : 'reason'}: ${r.approval.reason}` : ''}${r.approval?.sentTo?.length && d.state === 'pending' ? ` · emailed to ${r.approval.sentTo.join(', ')}` : ''}`).join('\n')}` : `No posts are ${d.state === 'rejected' ? 'rejected' : 'waiting for approval'}.`, d.canApprove ? '' : 'You are not an admin of this brand, so you cannot approve or reject.'].filter(Boolean).join('\n'), d);
   }));
   server.registerTool('approve_post', {
     title: 'Approve a scheduled post',
@@ -11589,8 +11626,9 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('set_post_approval', {
     title: 'Approval before publishing',
-    description: 'Turn approval before publish on or off for this brand. mode "all" (every channel), "channels" (only those listed) or "off"; who "everyone" (default, admins’ posts wait too) or "members" (admins’ own posts skip it). Switching it on also holds posts already queued there unless applyToQueued is false. Switching it off never publishes what is already waiting. Admins only.',
+    description: 'Turn approval before publish on or off for this brand. mode "all" (every channel), "channels" (only those listed) or "off"; who "everyone" (default, admins’ posts wait too) or "members" (admins’ own posts skip it). Switching it on also holds posts already queued there unless applyToQueued is false. Switching it off never publishes what is already waiting. addApprover (email; approverName optional): someone outside the team, e.g. your client or your app’s user, gets each waiting post emailed in your name to approve or request changes (one-time links, no login); removeApprover. Admins only.',
     inputSchema: {
+      addApprover: z.string().optional(), approverName: z.string().optional(), removeApprover: z.string().optional(),
       mode: z.enum(['off', 'all', 'channels']).optional(),
       channels: z.array(z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'google_business', 'bluesky', 'telegram', 'wordpress', 'discord', 'slack', 'whop', 'shopify_blog', 'webflow', 'wix'])).optional(),
       who: z.enum(['everyone', 'members']).optional(),
@@ -11600,7 +11638,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => {
     const d = await apiPut('/api/schedule/approval', a);
-    return ok(`${d.summary || ''}${d.note ? ` ${d.note}` : ''}`, d);
+    return ok(`${d.summary || ''}${d.note ? ` ${d.note}` : ''}${d.approverNote ? ` ${d.approverNote}` : ''}`, d);
   }));
   server.registerTool('manage_post_queues', {
     title: 'Posting queues',
@@ -18139,20 +18177,22 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = ['list', 'get', 'platforms', undefined].includes(a.action) ? await apiGet('/api/connect/oauth-apps', { action: a.action, appId: a.appId }) : await apiPost('/api/connect/oauth-apps', a); return ok(d.note || 'Done.', d); }));
   server.registerTool('connect_welcome_screen', {
     title: 'The branded page on connect links',
-    description: "WHITE LABEL: the page your customer sees when they open a connect link you sent: your name, square logo, colours, headline and a short message instead of Hermoso's plain page. action get (default) reads it; save replaces it (a field left out is cleared): showByDefault (true = every link you make shows it; false = only links created with welcome:true), brandName, logoUrl (https), headline, message, theme {background, card, text, muted, accent, buttonText} as #hex colours (refused if the button or text would not be readable). The Terms line stays: the person still accepts Hermoso's Terms. Account owner or admin. Free.",
+    description: "WHITE LABEL: the page your customer sees when they open a connect link you sent: your name, square logo, colours, headline and a short message instead of Hermoso's plain page. The same name, logo and colours sign emails to your clients or users; replyTo gets their replies, emailFrom (a domain-inbox address) sends from your domain. action get (default) reads it; save replaces it (a field left out is cleared): showByDefault (true = every link you make shows it; false = only links created with welcome:true), brandName, logoUrl (https), headline, message, theme {background, card, text, muted, accent, buttonText} as #hex colours (refused if the button or text would not be readable). The Terms line stays: the person still accepts Hermoso's Terms. Account owner or admin. Free.",
     inputSchema: {
       action: z.enum(['get', 'save']).optional(),
       showByDefault: z.boolean().optional(), brandName: z.string().optional(), logoUrl: z.string().optional(), headline: z.string().optional(), message: z.string().optional(),
+      replyTo: z.string().optional(), emailFrom: z.string().optional(),
       theme: z.record(z.string()).optional().describe('{background, card, text, muted, accent, buttonText}: #rgb or #rrggbb'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, wrap(async (a) => { const d = (a.action || (a.showByDefault != null ? 'save' : 'get')) === 'save' ? await apiPut('/api/connect/welcome-screen', a) : await apiGet('/api/connect/welcome-screen'); return ok(d.note || 'Done.', d); }));
   server.registerTool('manage_connect_domains', {
     title: 'Connect pages on your own domain',
-    description: "WHITE LABEL: serve connect links on a subdomain you control (connect.yourbrand.com) instead of app.hermoso.ai. action list / get; add: hostname (a subdomain, never the bare domain), and the answer lists the DNS records to add (a CNAME, plus a TXT ownership record); it turns active by itself once they resolve and the certificate is issued. verify: check the DNS now. enable / disable (or update with connectEnabled): whether new connect links open on it. remove: confirm:true (links already sent on it stop opening). Up to 5 per account. Account owner or admin. Free.",
+    description: "WHITE LABEL: put your own web address (a subdomain you control, connect.yourbrand.com) on what the people you connect see, instead of app.hermoso.ai: an agency's clients, or the users of your app. Connect links open there; with appEnabled:true they can also sign in to the whole app there, under your name, logo and colours (from connect_welcome_screen) and with no Hermoso branding, and only people a brand of yours is shared with (plus your own team) get in. action list / get; add: hostname (never the bare domain) and appEnabled, and the answer lists the DNS records to add (a CNAME, plus a TXT ownership record); it turns active by itself once they resolve and the certificate is issued. verify: check the DNS now (and pay a paused, unpaid domain). update with appEnabled and/or connectEnabled; enable / disable: whether new connect links open on it. remove: confirm:true (links already sent on it stop opening). Up to 5 per account. Account owner or admin. Each domain costs its hosting in credits every 30 days while it is on the account (list shows monthCredits); a renewal the balance cannot cover pauses it until paid.",
     inputSchema: {
       action: z.enum(['list', 'get', 'add', 'verify', 'update', 'enable', 'disable', 'remove']).optional(),
       domainId: z.string().optional(), hostname: z.string().optional(), connectEnabled: z.boolean().optional(), confirm: z.boolean().optional(),
+      appEnabled: z.boolean().optional().describe('add / update: true = the people you connect can also sign in to the app at this address, under your brand'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, wrap(async (a) => { const d = ['list', 'get', undefined].includes(a.action) ? await apiGet('/api/connect/domains', { action: a.action, domainId: a.domainId, hostname: a.hostname }) : await apiPost('/api/connect/domains', a); return ok(d.note || 'Done.', d); }));
@@ -18168,15 +18208,18 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }, wrap(async (a) => { const d = ['set', 'remove'].includes(a.action) ? await apiPost('/api/connect/external-ids', a) : await apiGet('/api/connect/external-ids', { action: a.action, externalId: a.externalId, ...(a.brand ? { brandId: a.brand } : {}) }); return ok(d.note || 'Done.', d); }));
   server.registerTool('manage_connect_links', {
     title: 'Hosted connect links for your customers',
-    description: "A short-lived link your customer opens to connect THEIR OWN account (Facebook and Instagram, Instagram, TikTok, YouTube, LinkedIn, X, Pinterest, Threads, Google Business Profile, the ad platforms) to the current brand, with no Hermoso login. action create (default): provider, optional externalId (your customer id, mapped to this brand), welcome (true/false: show your saved welcome screen), redirectUrl (an address registered for the account; the person returns there with the outcome), state, expiresInMinutes (5 to 2880, default 60). It opens on your connect domain when one is active, and runs through your own app when you saved one for that platform. action get: status (pending, opened, connected, cancelled, failed, expired, revoked), the account that connected and whether its Pages or accounts still need choosing (list_connector_accounts, then set_connector_accounts). revoke: stop it opening. Free.",
+    description: "A short-lived link your customer opens to connect THEIR OWN account (Facebook and Instagram, Instagram, TikTok, YouTube, LinkedIn, X, Pinterest, Threads, Google Business Profile, the ad platforms) to the current brand, with no Hermoso login. action create (default): provider, optional externalId (your customer id, mapped to this brand), welcome (true/false: show your saved welcome screen), redirectUrl (an address registered for the account; the person returns there with the outcome), state, expiresInMinutes (5 to 2880, default 60). It opens on your connect domain when one is active, and runs through your own app when you saved one for that platform. email: send it to them in your name (optional message). action get: status (pending, opened, connected, cancelled, failed, expired, revoked), the account that connected and whether its Pages or accounts still need choosing (list_connector_accounts, then set_connector_accounts). revoke: stop it opening. Free.",
     inputSchema: {
-      action: z.enum(['create', 'get', 'revoke', 'providers']).optional().describe('providers: which platforms a link can connect here'),
+      action: z.enum(['create', 'get', 'revoke', 'providers', 'reconnect']).optional().describe('providers: which platforms a link can connect here; reconnect: a link for EVERY connection that needs reconnecting, on this brand or on `brands`'),
+      brands: z.union([z.array(z.string()), z.string()]).optional().describe('reconnect: "all" or a list of brand ids or names; omit for the current brand'),
+      hosted: z.boolean().optional().describe('reconnect: false gives sign-in links instead of hosted links (default hosted where the platform supports it)'),
+      email: z.string().optional(), message: z.string().optional(),
       provider: z.string().optional(), externalId: z.string().optional(), welcome: z.boolean().optional(),
       redirectUrl: z.string().optional(), state: z.string().optional(), expiresInMinutes: z.number().optional(),
       linkId: z.string().optional().describe('get / revoke: the link id (cl_…)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, wrap(async (a) => { const d = ['get', 'status', 'providers'].includes(a.action) ? await apiGet('/api/connect/links', { action: a.action === 'providers' ? 'providers' : 'get', linkId: a.linkId }) : await apiPost('/api/connect/links', a); return ok(d.note || 'Done.', d); }));
+  }, wrap(async (a) => { const d = a.action === 'reconnect' ? await apiPost('/api/connect/links/reconnect', a) : ['get', 'status', 'providers'].includes(a.action) ? await apiGet('/api/connect/links', { action: a.action === 'providers' ? 'providers' : 'get', linkId: a.linkId }) : await apiPost('/api/connect/links', a); return ok(d.note || 'Done.', d); }));
   server.registerTool('phone_handoff', {
     title: 'Finish connecting on a phone',
     description: "Start connecting an account here and finish on a phone: action start (default) with provider returns a short link and a QR code (qrSvg / qrDataUri) to scan with the phone camera; the phone opens the platform's own sign-in (useful when the account's app or two-factor code is on the phone). It works for 30 minutes. action get with handoffId says whether it finished and which account connected. Free.",
@@ -19272,7 +19315,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
   }));
   server.registerTool('search_console_performance', {
     title: 'What people searched for on Google, and what they clicked',
-    description: 'THE REAL SEARCH TERMS — Google Search Console\'s performance report, and the most useful research tool here for writing copy. `dimensions:["query"]` returns the literal words people typed to reach this brand, with impressions, clicks, CTR and average position; `dimensions:["page","query"]` answers "which landing page already wins this demand", i.e. where paid traffic should point. Every other dimension is available too: country, device, searchAppearance, date, hour. USE IT BEFORE mine_angles OR plan_ad — this is first-party MEASURED demand language, not a competitor\'s guess (an ad library) and not a model (a keyword planner), and it exists nowhere else: organic search terms left Google Analytics with "not provided" years ago. startDate and endDate are REQUIRED and are exact YYYY-MM-DD in Pacific time — Google Analytics\' relative forms like "28daysAgo" are NOT accepted anywhere in Search Console. THREE THINGS TO REPEAT WHENEVER YOU REPORT THESE NUMBERS: (1) rows are the TOP ones, not all of them, by Google\'s own statement; (2) anonymised queries are WITHHELD, so clicks summed per query will not equal the property total and that gap is not an error; (3) the default dataState "final" lags roughly 2-3 days, and "all" returns fresh partial data that will still change. Search Console keeps 16 months of history. Read-only, 0 credits.',
+    description: 'THE REAL SEARCH TERMS — Google Search Console\'s performance report, and the most useful research tool here for writing copy. `dimensions:["query"]` returns the literal words people typed to reach this brand, with impressions, clicks, CTR and average position; `dimensions:["page","query"]` answers "which landing page already wins this demand", i.e. where paid traffic should point. Every other dimension is available too: country, device, searchAppearance, date, hour. `preset:"questions"` (also ai_prompts, long_tail, how_to, comparisons, pricing, best_of, troubleshooting, definitions) lists the matching queries the site already shows up for, flags high-impression low-click ones and suggests adding each as a heading or FAQ with a direct answer. USE IT BEFORE mine_angles OR plan_ad — this is first-party MEASURED demand language, not a competitor\'s guess (an ad library) and not a model (a keyword planner), and it exists nowhere else: organic search terms left Google Analytics with "not provided" years ago. startDate and endDate are REQUIRED and are exact YYYY-MM-DD in Pacific time — Google Analytics\' relative forms like "28daysAgo" are NOT accepted anywhere in Search Console. THREE THINGS TO REPEAT WHENEVER YOU REPORT THESE NUMBERS: (1) rows are the TOP ones, not all of them, by Google\'s own statement; (2) anonymised queries are WITHHELD, so clicks summed per query will not equal the property total and that gap is not an error; (3) the default dataState "final" lags roughly 2-3 days, and "all" returns fresh partial data that will still change. Search Console keeps 16 months of history. Read-only, 0 credits.',
     inputSchema: {
       siteUrl: z.string().describe('the exact property string from list_search_console_sites — "sc-domain:example.com" or "https://example.com/", never a bare domain, and it must be one SHARED with this profile'),
       startDate: z.string().describe('YYYY-MM-DD, required, Pacific time, inclusive'),
@@ -19280,12 +19323,13 @@ function buildTools(rawServer, opts = {}, sink = null) {
       dimensions: z.array(z.string()).optional().describe('group by any of query, page, country, device, searchAppearance, brandedClassification (branded vs non-branded queries), date, hour. Omit for one total row. An unknown name is refused by name rather than dropped.'),
       type: z.string().optional().describe('web (default), image, video, news, discover, googleNews or webMultimodal'),
       dimensionFilterGroups: z.array(z.record(z.any())).optional().describe('narrow the report, e.g. [{"filters":[{"dimension":"query","operator":"contains","expression":"buy"}]}]. dimension is one of query/page/country/device/searchAppearance/brandedClassification (expression BRANDED or NON_BRANDED) — date and hour are NOT filterable, they are the date range. operator is equals/notEquals/contains/notContains/includingRegex/excludingRegex. An empty expression is refused: Google matches it literally, so it would silently return nothing.'),
+      preset: z.string().optional().describe('ready-made query filter: questions, ai_prompts, long_tail, how_to, comparisons, pricing, best_of, troubleshooting or definitions. Defaults dimensions to query+page, sorts by impressions and flags high-impression low-CTR rows with a suggested action.'),
       aggregationType: z.string().optional().describe('auto (default), byPage, byProperty or byNewsShowcasePanel'),
       dataState: z.string().optional().describe('final (default, lags 2-3 days), all (includes fresh partial data that WILL change), or hourlyAll'),
       rowLimit: z.number().optional().describe('1-25000, default 1000'),
       startRow: z.number().optional().describe('zero-based, for paging past rowLimit'),
     },
-    outputSchema: { siteUrl: z.string().optional(), rows: z.array(z.any()).optional(), rowCount: z.number().optional(), dimensions: z.array(z.string()).optional(), rowTotals: z.record(z.any()).optional(), filtered: z.boolean().optional(), dataState: z.string().optional(), caveats: z.string().optional(), firstIncompleteDate: z.string().optional() },
+    outputSchema: { siteUrl: z.string().optional(), rows: z.array(z.any()).optional(), presetInfo: z.record(z.any()).optional(), rowCount: z.number().optional(), dimensions: z.array(z.string()).optional(), rowTotals: z.record(z.any()).optional(), filtered: z.boolean().optional(), dataState: z.string().optional(), caveats: z.string().optional(), firstIncompleteDate: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   }, wrap(async (a) => {
     const d = await apiPost('/api/search-console/performance', a);
@@ -19294,7 +19338,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const head = `${d.rowCount || 0} row(s) for ${d.siteUrl}, ${d.startDate} to ${d.endDate}${d.filtered ? ' (FILTERED — this is a SUBSET of the property, not its total)' : ''}${d.dataState === 'ALL' ? ' (dataState ALL — fresh partial data that will still change)' : ''}.`;
     // The caveats ride the TEXT block, not only structuredContent: plenty of MCP clients print the text and
     // nothing else, and a summed-clicks total reported as the property total is documented to be wrong.
-    return ok(`${head}\n${rowLines(d.rows)}\n\n${d.caveats || ''}`, d);
+    return ok(`${head}\n${d.presetInfo ? d.presetInfo.note + '\n' : ''}${rowLines(d.rows)}\n\n${d.caveats || ''}`, d);
   }));
   server.registerTool('search_console_url_inspection', {
     title: 'Is this page actually in Google?',
@@ -35968,7 +36012,8 @@ function memoryNoteVerdict(text) {
   }, wrap(async () => {
     const d = await apiGet('/api/team/members');
     const lines = (d.members || []).map(m => `  • ${m.email} — ${m.roleLabel || m.role || 'member'}${m.status ? ` (${m.status})` : ''}${m.isYou ? ' (you)' : ''}${m.disabledAreas && m.disabledAreas.length ? `; turned off: ${m.disabledAreas.join(', ')}` : ''}`);
-    return ok(`${(d.members || []).length} member(s):\n${lines.join('\n') || '  (none)'}`, d);
+    const aps = (d.approvers || []).map(x => `  • ${x.name ? `${x.name} <${x.email}>` : x.email} — approver (no login; approves held posts from their email)`);
+    return ok(`${(d.members || []).length} member(s):\n${lines.join('\n') || '  (none)'}${aps.length ? `\n${aps.length} approver(s):\n${aps.join('\n')}` : ''}`, d);
   }));
   server.registerTool('invite_member', {
     title: 'Invite a teammate',
@@ -36163,6 +36208,40 @@ function memoryNoteVerdict(text) {
   }));
   // BILLING PER BRAND FOR AGENCIES (2026-11-25, Zernio parity: Usage, Treasury, Ledger, Workspaces billing). One account, one
   // balance stays the default; these read what each brand spent, and let an agency bill one brand separately.
+  // ── MANY BRANDS (2026-11-26): a performance report in your own name for a client or user, and pausing posts across
+  // brands. Agent-first on purpose (owner: the multi-brand gaps go to the customer's own agent, not new web UI), on
+  // demand so no default roster grows; the same workers answer the Studio and REST (lib/branded-report-server.mjs,
+  // server.js schedPauseAction). Pinned by tools/branded-report-check.mjs and tools/multi-brand-check.mjs.
+  const BRANDS_ARG = z.union([z.array(z.string()), z.string()]).optional();
+  server.registerTool('branded_report', {
+    title: 'Performance report in your name',
+    description: "A client-facing performance report for a brand over a date range, in YOUR name (the sender every email to your clients or users carries: your white-label business name and logo, else your brand; senderName picks another of your own brand names), never Hermoso's: for an agency's clients, or a platform's own users. It covers organic posts (per channel: posts, reach, engagement, followers, and the top posts with their pictures) and paid ads on every connected ad platform (spend, results, cost per result, top ads), with highlights. The numbers are read ONCE when it is made and frozen. action create (default): from / to (YYYY-MM-DD, inclusive), or month (YYYY-MM), or days; default the previous month. Returns a share link anyone with it can open (expires in expiresInDays, default 90; action revoke withdraws it) and a PDF link. summary:true adds a short written summary (billed at its exact model cost in credits, said in the answer; the highlights are free). action schedule: email it every month to recipients (dayOfMonth 1-28, hourUtc, period previous_month or last_30_days, message, summary), each email linking the page and its PDF; each recipient can stop it from the email. action list: this brand's reports and schedules; cancel_schedule: scheduleId. brands (\"all\" or a list) runs create / schedule / list on several brands at once (past one brand the first call previews; confirm:true after the user agrees). Reading the numbers and the PDF are free.",
+    inputSchema: {
+      action: z.enum(['create', 'list', 'revoke', 'schedule', 'cancel_schedule']).optional(),
+      from: z.string().optional().describe('first day, YYYY-MM-DD'), to: z.string().optional().describe('last day, YYYY-MM-DD (inclusive)'),
+      month: z.string().optional().describe('YYYY-MM instead of from/to'), days: z.number().optional().describe('the last N days instead'),
+      title: z.string().optional(), summary: z.boolean().optional().describe('add a written summary (uses credits)'), language: z.string().optional().describe('the summary language, e.g. Spanish'),
+      expiresInDays: z.number().optional().describe('1-365, default 90'),
+      senderName: z.string().optional().describe('the sender name: your white-label business name (the default) or one of your own brands\u2019 names'),
+      accentColor: z.string().optional().describe('#hex'),
+      reportId: z.string().optional().describe('revoke: the report id (rp_…)'),
+      scheduleId: z.string().optional().describe('schedule (to update one) / cancel_schedule'),
+      recipients: z.array(z.string()).optional().describe('schedule: email addresses (up to 20)'),
+      dayOfMonth: z.number().optional(), hourUtc: z.number().optional(),
+      period: z.enum(['previous_month', 'last_30_days']).optional(), message: z.string().optional().describe('schedule: a note at the top of each email'),
+      brands: BRANDS_ARG.describe('several brands at once: "all" or a list of ids or names (list_brands)'),
+      confirm: z.boolean().optional().describe('with brands: true after the user agreed'),
+    },
+    outputSchema: { report: z.any().optional(), url: z.string().optional(), pdfUrl: z.string().optional(), reports: z.array(z.any()).optional(), schedules: z.array(z.any()).optional(), schedule: z.any().optional(), brands: z.array(z.any()).optional(), needsConfirm: z.boolean().optional(), costCredits: z.number().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, wrap(async (a) => {
+    const act = a.action || 'create';
+    const d = act === 'list' && a.brands == null ? await apiGet('/api/analytics/reports')
+      : act === 'revoke' ? await apiPost(`/api/analytics/reports/${encodeURIComponent(a.reportId || '')}/revoke`, {})
+        : act === 'cancel_schedule' ? await apiDelete(`/api/analytics/reports/schedules/${encodeURIComponent(a.scheduleId || '')}`)
+          : await apiPost('/api/analytics/reports', a);
+    return ok(d.note || 'Done.', d);
+  }));
   server.registerTool('brand_usage', {
     title: 'Usage by brand',
     description: 'What each brand spent: credits and dollars per brand for a month (or any range up to a year), split by day or by person when asked, filtered to one brand, to your own client id (externalId, set with manage_external_ids), or to calls or SMS only. This is the statement an agency rebills clients from; csv:true adds a CSV of it. Inside a brand shared with you it covers that brand. Read-only, free.',
