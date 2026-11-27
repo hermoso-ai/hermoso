@@ -232,6 +232,10 @@ const APP_STYLE = String.raw`<style>
  --warn:var(--color-text-warning,light-dark(#b8450a,#ff8549));
  --danger:light-dark(#b42318,#ff7b72);
  --radius:var(--border-radius-lg,12px);
+ --cta:#FC734D;--cta-ink:#02070A;
+ --media:#0b0d10;
+ --shadow:0 1px 2px light-dark(rgba(10,12,16,.08),rgba(0,0,0,.4));
+ --lift:0 1px 2px light-dark(rgba(10,12,16,.04),rgba(0,0,0,.25));
  --cur:var(--cursor-interaction,pointer)}
 :root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box}
@@ -240,17 +244,31 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--font-san
 button,select,input,textarea{font:inherit;color:inherit}
 button,select{cursor:var(--cur)}
 button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,.tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.top{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.brand{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38%;min-width:0}
-.brand select{max-width:100%;background:transparent;border:1px solid var(--line);border-radius:8px;padding:3px 6px}
-.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
-@media (max-width:560px){.brand{max-width:62%}.tabs{order:3;width:100%;margin-left:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.top .push{margin-left:auto}.tab{flex:none}}
-.tab,.btn,.seg button,.chip{border:1px solid var(--ring);background:transparent;color:var(--fg);border-radius:999px;padding:4px 11px}
-.tab[aria-selected=true],.seg button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.top{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;position:sticky;top:0;z-index:4;background:var(--bg)}
+.brand{min-width:0;flex:none;max-width:34%;font-weight:600}
+.bsw{position:relative;display:inline-flex;align-items:center;gap:8px;max-width:100%;height:34px;padding:0 10px 0 5px;border-radius:10px;font-weight:600}
+.bsw.multi:hover{background:var(--card)}
+.bsw .bm{flex:none;width:24px;height:24px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;background:var(--card2);color:var(--accent)}
+.bsw .bm img{width:100%;height:100%;object-fit:contain;background:#fff}.bsw .bm svg{width:18px;height:18px}
+.bsw .bn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bsw .chev{flex:none;color:var(--muted);display:inline-flex}.bsw .chev svg{width:14px;height:14px}
+.bsw select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:var(--cur);font-size:16px}
+.bsw:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.tabs{display:flex;gap:2px;flex:1;min-width:0;justify-content:center;flex-wrap:wrap}
+.tright{display:flex;align-items:center;gap:2px;flex:none;margin-left:auto}
+.bal{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 10px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--fg);background:var(--card);border:1px solid var(--line);margin-right:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bal i{width:7px;height:7px;border-radius:2px;background:var(--cta);transform:rotate(45deg)}
+@media (max-width:560px){.brand{max-width:none;flex:1}.tabs{order:3;justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -12px;padding:0 12px;width:calc(100% + 24px);flex:none;-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}.tabs::-webkit-scrollbar{display:none}.tab{flex:none}.bal{margin-right:0}}
+.tab{border:0;background:transparent;color:var(--muted);border-radius:8px;height:32px;padding:0 11px;font-weight:500}
+.tab:hover{color:var(--fg);background:var(--card)}
+.tab[aria-selected=true]{color:var(--fg);background:var(--card2)}
+.btn,.seg button,.chip{border:1px solid var(--ring);background:transparent;color:var(--fg);border-radius:999px;padding:4px 11px}
+.seg button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .btn.primary{background:var(--btn-bg);border-color:var(--btn-bg);color:var(--btn-fg);font-weight:600}
 .btn.danger{color:var(--danger);border-color:color-mix(in oklab,var(--danger) 45%,transparent)}
 .btn:disabled{opacity:.5;cursor:default}
-.icon{border:0;background:transparent;padding:4px 7px;border-radius:8px;color:var(--muted)}
+.icon{border:0;background:transparent;width:32px;height:32px;padding:0;border-radius:8px;color:var(--muted);display:inline-flex;align-items:center;justify-content:center}
+.icon svg{width:18px;height:18px}.icon:hover{color:var(--fg)}
 .icon:hover{background:var(--card)}
 .cardhead{display:flex;align-items:baseline;gap:8px;padding:10px 12px 0}
 .cardhead b{font-size:15px}.cardhead span{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -304,8 +322,6 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute
 .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}@media (min-width:640px){.cards{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (max-width:639px){.cards>:last-child:nth-child(odd){grid-column:1/-1}}
 .ccard{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px}
 .ccard .row{margin-top:4px}
-.gcard{text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px;cursor:var(--cur)}
-.gcard b{display:block;margin-bottom:2px}.gcard span{color:var(--muted);font-size:12px}
 .field{margin:12px 0}
 .field>label,.flabel{display:block;font-weight:600;margin-bottom:6px}
 .field textarea,.field input[type=text],.field input[type=datetime-local],select.in{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:8px 10px}
@@ -359,11 +375,90 @@ dl.sum img{width:40px;height:40px;object-fit:cover;border-radius:8px;vertical-al
 .notice{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:var(--muted);text-align:left}
 .notice .ni{flex:none;width:15px;height:15px;border-radius:999px;border:1px solid currentColor;font-size:9px;line-height:13px;text-align:center;font-weight:700;font-style:normal;margin-top:1px}
 body.modal-open main{min-height:300px}
+main.home{max-width:1180px;margin:0 auto;padding:0 16px 28px}
+.hx{position:relative;max-width:760px;margin:0 auto;padding:34px 0 4px;text-align:center}
+.hx:before{content:"";position:absolute;left:50%;top:-30px;width:min(760px,100%);height:300px;transform:translateX(-50%);background:radial-gradient(closest-side at 40% 50%,color-mix(in oklab,var(--cta) 15%,transparent),transparent 72%),radial-gradient(closest-side at 68% 58%,color-mix(in oklab,#0297DE 9%,transparent),transparent 72%);pointer-events:none;z-index:0}
+.hx>*{position:relative;z-index:1}
+.hx .hm{display:inline-flex;color:var(--accent);margin-bottom:10px}.hx .hm svg{width:30px;height:30px}
+.hx h1{font-size:32px;line-height:1.12;letter-spacing:-.025em;font-weight:700;margin:0 0 8px;text-wrap:balance}
+.hx p.lead{margin:0 0 20px;color:var(--muted);font-size:14.5px}
+.cmp{position:relative;text-align:left;border:1px solid var(--line);border-radius:20px;background:light-dark(#fff,color-mix(in oklab,var(--fg) 6%,var(--bg)));box-shadow:0 14px 34px -14px light-dark(rgba(10,12,16,.16),rgba(0,0,0,.7));padding:12px 12px 10px;transition:border-color .15s,box-shadow .15s}
+.cmp:focus-within{border-color:color-mix(in oklab,var(--cta) 55%,var(--line));box-shadow:0 0 0 3px color-mix(in oklab,var(--cta) 16%,transparent),0 14px 34px -14px light-dark(rgba(10,12,16,.16),rgba(0,0,0,.7))}
+.cmp textarea{display:block;width:100%;border:0;background:transparent;resize:none;outline:none;min-height:56px;max-height:200px;padding:4px 6px;font-size:15px;line-height:1.5}
+.cmp textarea:focus-visible{outline:none}
+.cmp textarea::placeholder{color:var(--muted)}
+.cmp .mchips{padding:0 4px}
+.cmp .crow{display:flex;align-items:center;gap:10px;margin-top:6px}
+.plus{flex:none;width:36px;height:36px;border-radius:999px;border:1px solid var(--ring);background:transparent;color:var(--fg);display:inline-flex;align-items:center;justify-content:center;padding:0}
+.plus:hover{background:var(--card)}.plus svg{width:18px;height:18px}
+.hint{color:var(--muted);font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.go{margin-left:auto;flex:none;height:36px;border:0;border-radius:999px;background:var(--cta);color:var(--cta-ink);font-weight:650;padding:0 14px 0 16px;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 4px 12px -4px color-mix(in oklab,var(--cta) 80%,transparent)}
+.go svg{width:16px;height:16px}.go:hover{filter:brightness(1.05)}.go:active{transform:translateY(1px)}
+.sec{margin:34px 0 0}
+.sh{display:flex;align-items:baseline;gap:10px;margin:0 0 12px}
+.sh h2{font-size:16px;font-weight:650;letter-spacing:-.01em;margin:0}
+.sh .sub{color:var(--muted);font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sh .more{margin-left:auto;flex:none;border:0;background:transparent;color:var(--muted);font-size:13px;font-weight:500;padding:0;display:inline-flex;align-items:center;gap:3px}
+.sh .more:hover{color:var(--fg)}.sh .more svg{width:14px;height:14px}
+.starts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (min-width:640px){.starts{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}}
+.scard{position:relative;display:block;aspect-ratio:4/5;border:0;border-radius:16px;overflow:hidden;padding:0;background:var(--media);color:#fff;text-align:left;box-shadow:var(--shadow);isolation:isolate}
+.scard img,.scard video,.xt img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s cubic-bezier(.2,.7,.2,1)}
+.scard video{opacity:0;transition:opacity .25s,transform .5s cubic-bezier(.2,.7,.2,1)}.scard.playing video{opacity:1}
+.scard:hover img,.scard:hover video{transform:scale(1.035)}
+.scard:after,.xt:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.2) 0,rgba(0,0,0,0) 26%,rgba(0,0,0,0) 46%,rgba(0,0,0,.86));z-index:1;pointer-events:none}
+.scard .cap{position:absolute;left:14px;right:14px;bottom:13px;z-index:2;display:flex;flex-direction:column;gap:3px}
+.scard .cap b{font-size:16px;font-weight:650;letter-spacing:-.01em;line-height:1.2}
+.scard .cap span{font-size:12.5px;color:rgba(255,255,255,.84);line-height:1.3}
+.scard .tag{position:absolute;left:12px;top:12px;z-index:2;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-size:11.5px;font-weight:600}
+.scard .tag svg{width:12px;height:12px}
+.scard .art{position:absolute;inset:0;background:radial-gradient(120% 80% at 20% 10%,color-mix(in oklab,var(--cta) 70%,#000),transparent 60%),radial-gradient(90% 70% at 90% 90%,#0297DE,transparent 60%),#11151b}
+@media (max-width:420px){.scard{aspect-ratio:3/4}.scard .cap{left:11px;right:11px;bottom:10px}.scard .cap b{font-size:14.5px}.scard .cap span{display:none}}
+.recent,.xgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media (min-width:640px){.recent,.xgrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}}
+@media (min-width:900px){.recent,.xgrid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.rt{position:relative;aspect-ratio:1/1;border:0;border-radius:12px;overflow:hidden;padding:0;background:var(--card2);color:var(--fg);box-shadow:var(--shadow)}
+.rt img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s cubic-bezier(.2,.7,.2,1)}
+.rt:hover img{transform:scale(1.04)}
+.rt .ph{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:12px}
+.rt .vb{position:absolute;right:6px;bottom:6px;display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 7px 0 6px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+.rt .vb svg{width:9px;height:9px}
+.rt.live{background:var(--media);color:#fff;text-align:left}
+.rt.live .glow{position:absolute;inset:-40%;background:conic-gradient(from 0deg,transparent,color-mix(in oklab,var(--cta) 60%,transparent),transparent 40%,color-mix(in oklab,#0297DE 50%,transparent),transparent 75%);animation:spin 4s linear infinite;opacity:.6;filter:blur(18px)}
+.rt.live .in{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:10px;background:linear-gradient(180deg,rgba(11,13,16,.15),rgba(11,13,16,.78))}
+.rt.live .st{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600}
+.rt.live .st i{width:7px;height:7px;border-radius:99px;background:var(--cta);animation:pulse 1.6s ease-out infinite}
+.rt.live b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12.5px;line-height:1.3;font-weight:600}
+.rt.live .pc{display:block;font-size:11px;color:rgba(255,255,255,.8);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt.live .bar{background:rgba(255,255,255,.18);margin-top:7px}.rt.live .bar i{background:var(--cta)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--cta) 60%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
+@media (prefers-reduced-motion:reduce){.rt.live .glow,.rt.live .st i{animation:none}.scard img,.rt img,.xt img{transition:none}}
+.xt{position:relative;display:block;aspect-ratio:9/14;border:0;border-radius:12px;overflow:hidden;padding:0;background:var(--media);color:#fff;text-align:left;box-shadow:var(--shadow);isolation:isolate}
+.xt:hover img{transform:scale(1.04)}
+.xt .cap{position:absolute;left:9px;right:9px;bottom:8px;z-index:2;font-size:12px;font-weight:600;line-height:1.25}
+.mgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:640px){.mgrid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}}
+@media (min-width:900px){.mgrid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.gcard{display:flex;align-items:center;gap:10px;min-width:0;text-align:left;border:1px solid var(--line);border-radius:14px;background:var(--bg);padding:11px 12px;cursor:var(--cur);color:var(--fg);box-shadow:var(--lift);transition:border-color .15s,background .15s}
+.gcard:hover{border-color:var(--ring);background:var(--card)}
+.gcard .mi{flex:none;width:34px;height:34px;border-radius:10px;background:var(--card2);color:var(--fg);display:inline-flex;align-items:center;justify-content:center;overflow:hidden}
+.gcard .mi svg{width:18px;height:18px}.gcard .mi img{width:100%;height:100%;object-fit:contain;background:#fff}
+.gcard .mt{min-width:0;display:flex;flex-direction:column}
+.gcard b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gcard .mt span{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccard{flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px 14px;margin:18px 0 0;border-radius:16px;padding:14px 16px;background:color-mix(in oklab,var(--cta) 7%,var(--bg));border-color:color-mix(in oklab,var(--cta) 26%,var(--line))}
+.ccard .ct{flex:1;min-width:200px;display:flex;flex-direction:column;gap:2px}
+.ccard .row{margin-top:0}
+.skel{border-radius:14px;background:linear-gradient(90deg,var(--card) 0,var(--card2) 50%,var(--card) 100%);background-size:200% 100%;animation:sk 1.2s ease-in-out infinite}
+@keyframes sk{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+@media (max-width:560px){main.home{padding:0 12px 24px}.hx{padding-top:20px}.hx .hm{display:none}.hx h1{font-size:25px}.hx p.lead{font-size:13.5px;margin-bottom:14px}.hint{display:none}.sec{margin-top:26px}}
 </style>`;
 
 const APP_BODY = String.raw`<div class="top" id="top">
   <div class="brand" id="brand"></div>
-  <div class="tabs" role="tablist" id="tabs">
+  <div class="tabs" role="tablist" id="tabs" aria-label="Hermoso">
     <button class="tab" role="tab" data-act="tab" data-view="home">Home</button>
     <button class="tab" role="tab" data-act="tab" data-view="library">Library</button>
     <button class="tab" role="tab" data-act="tab" data-view="jobs">Renders</button>
@@ -371,9 +466,12 @@ const APP_BODY = String.raw`<div class="top" id="top">
     <button class="tab" role="tab" data-act="tab" data-view="ads">Ads</button>
     <button class="tab" role="tab" data-act="tab" data-view="create">Create</button>
   </div>
-  <button class="icon push" data-act="tab" data-view="setup" title="Set up Hermoso" aria-label="Set up Hermoso">&#9881;</button>
-  <button class="icon" id="refresh" data-act="refresh" title="Refresh" aria-label="Refresh">&#8635;</button>
-  <button class="icon" id="expand" data-act="expand" title="Expand" aria-label="Expand" hidden>&#10530;</button>
+  <div class="tright">
+    <span class="bal" id="bal" hidden></span>
+    <button class="icon" data-act="tab" data-view="setup" title="Set up Hermoso" aria-label="Set up Hermoso"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></svg></button>
+    <button class="icon" id="refresh" data-act="refresh" title="Refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
+    <button class="icon" id="expand" data-act="expand" title="Expand" aria-label="Expand" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></button>
+  </div>
 </div>
 <div class="cardhead" id="cardhead" hidden><b id="cardtitle"></b><span id="cardsub"></span></div>
 <main id="main"><div class="note">Loading Hermoso...</div></main>
@@ -396,13 +494,29 @@ const APP_SCRIPT = String.raw`<script>
     brief: { step: 'form', format: 'image', aspect: '1:1', length: 15, count: 4, product: null, productPhoto: null, creator: null, asset: null },
     setup: { step: 'brand', mode: 'website', editing: false, drafting: false, draft: null, watch: null, watchUntil: 0, watchTimer: null },
     concepts: { open: null, sent: {}, opts: {}, starting: null, err: null },
-    sched: null, started: [], noticesSaid: "[]",
+    sched: null, started: [], noticesSaid: "[]", badImg: [],
     cal: { offset: 0, open: null, full: {}, drag: null, draftAt: '' }
   };
   var pending = {}; var nextId = 1;
   var $ = function(id){ return document.getElementById(id); };
   var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
   var D = function(){ return state.data || {}; };
+  // Line icons, drawn here (no icon font, no external asset): generic shapes only, never a platform's logo.
+  var ICON = {
+    plus: '<path d="M12 5v14M5 12h14"/>', up: '<path d="M12 19V5M6 11l6-6 6 6"/>', chevd: '<path d="M6 9l6 6 6-6"/>', chevr: '<path d="M9 6l6 6-6 6"/>',
+    play: '<path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/>',
+    grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+    spark: '<path d="M12 4l1.8 5.2L19 11l-5.2 1.8L12 18l-1.8-5.2L5 11l5.2-1.8z"/>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+    chart: '<path d="M5 19v-8M11 19V5M17 19v-6M3 19h18"/>',
+    link: '<path d="M9 15l6-6"/><path d="M11 6l1.5-1.5a4 4 0 0 1 5.7 5.7L16.5 12M13 18l-1.5 1.5a4 4 0 0 1-5.7-5.7L7.5 12"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/>',
+    search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
+    video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+    send: '<path d="M4 12l16-8-6 16-2-7z"/>'
+  };
+  var svg = function(n){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICON[n] || '') + '</svg>'; };
 
   // ── the MCP Apps bridge: JSON-RPC over postMessage to the host frame ──
   function send(msg){ try { window.parent.postMessage(msg, '*'); } catch (e) {} }
@@ -600,10 +714,15 @@ const APP_SCRIPT = String.raw`<script>
       $('cardsub').textContent = state.view === 'concepts' && d.product ? 'for ' + d.product : (d.brand && d.brand.name ? d.brand.name : (d.brandName || ''));
       return;
     }
-    var el = $('brand');
-    if (brands.length > 1) {
-      el.innerHTML = '<select id="brandSel" aria-label="Profile">' + brands.map(function(x){ return '<option value="' + esc(x.id) + '"' + (x.active ? ' selected' : '') + '>' + esc(x.name || x.id) + '</option>'; }).join('') + '</select>';
-    } else el.textContent = b && b.name ? b.name : 'Hermoso';
+    var el = $('brand'); var pr = d.profile; var multi = brands.length > 1;
+    var nm = (b && b.name) || (pr && pr.name) || 'Hermoso';
+    var bh = '<span class="bsw' + (multi ? ' multi' : '') + '"><span class="bm" aria-hidden="true">' + (pr && pr.logo && state.badImg.indexOf(pr.logo) < 0 ? '<img alt="" src="' + esc(pr.logo) + '">' : BLOOM) + '</span><span class="bn">' + esc(nm) + '</span>'
+      + (multi ? '<span class="chev" aria-hidden="true">' + svg('chevd') + '</span><select id="brandSel" aria-label="Switch profile">' + brands.map(function(x){ return '<option value="' + esc(x.id) + '"' + (x.active ? ' selected' : '') + '>' + esc(x.name || x.id) + '</option>'; }).join('') + '</select>' : '') + '</span>';
+    // Only when it changed: the poll re-renders every few seconds and must not close a profile list that is open.
+    if (el.getAttribute('data-h') !== bh) { el.innerHTML = bh; el.setAttribute('data-h', bh); }
+    // The balance: Claude only. The payload carries the account balance only there (libraryPayload), with the word as its unit.
+    var bal = $('bal'); var ac = d.account;
+    if (ac && isFinite(ac.balance) && ac.unit) { var bt = fmtNum(ac.balance) + ' ' + ac.unit; bal.innerHTML = '<i aria-hidden="true"></i>' + esc(bt); bal.setAttribute('aria-label', bt); bal.hidden = false; } else bal.hidden = true;
     var tabs = document.querySelectorAll('.tab');
     for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute('aria-selected', String(tabs[i].getAttribute('data-view') === state.view));
   }
@@ -671,46 +790,122 @@ const APP_SCRIPT = String.raw`<script>
   }
   function focused(){ var list = state.view === 'results' ? (D().results || []) : (D().items || []); return state.focus != null ? list[state.focus] : null; }
 
-  // HOME: a composer that sends to the chat, quick starts and shortcuts. Nothing here spends: it hands requests over.
+  // HOME (redesigned 2026-11-26 on the reference product's shape: one floating composer with a small "+" attach and one accent
+  // action, image-led start cards, a dense grid of the user's own work with live renders first, then the workspace).
+  // Nothing here spends: every card and the composer hand a request to the chat, or open a view of this app.
   var BLOOM = '%%BLOOM%%';
+  var STARTERS = [
+    { act: 'create', format: 'video', tag: 'Create', icon: 'video', title: 'Video ad', sub: 'UGC, demos and product films', img: 'x-ugc', loop: true },
+    { act: 'create', format: 'image', tag: 'Create', icon: 'image', title: 'Image ad', sub: 'Statics for feed and stories', img: 'x-thumb-product' },
+    { act: 'msg', text: 'Show me the ads my top competitors are running right now, and what is working for them.', tag: 'Ad Spy', icon: 'search', title: 'Research competitors’ ads', sub: 'See what is working in your market', img: 'x-fooh', loop: true },
+    { act: 'msg', text: 'Help me schedule a post from my Hermoso Library.', tag: 'Publish', icon: 'calendar', title: 'Schedule a post', sub: 'Every channel, from this chat', img: 'x-dayinlife', loop: true }
+  ];
+  // Examples for an account that has made nothing yet: our own format posters. A click puts a ready request in the
+  // composer for the person to edit and send; nothing is sent for them.
+  var EXAMPLES = [['x-asmr', 'Product ASMR', 'a product ASMR video ad'], ['x-founder', 'Founder story', 'a founder story video ad'], ['x-unboxing', 'Unboxing', 'an unboxing video ad'], ['x-transformation', 'Before and after', 'a before and after video ad'], ['x-claymation', 'Claymation', 'a claymation video ad'], ['x-cinematic-story', 'Cinematic story', 'a cinematic story video ad']];
+  function reducedMotion(){ try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+  function fmtNum(n){ try { return new Intl.NumberFormat(state.host.locale || undefined, n >= 100000 ? { notation: 'compact', maximumFractionDigits: 1 } : { maximumFractionDigits: 0 }).format(n); } catch (e) { return String(Math.round(n)); } }
+  function mmss(sec){ sec = Math.max(0, Math.round(+sec || 0)); var m = Math.floor(sec / 60), r = sec % 60; return m + ':' + (r < 10 ? '0' : '') + r; }
+  // The grids' column counts, the same breakpoints as the CSS, so a row is never left with one lonely card.
+  function homeCols(){ var w = window.innerWidth || 1100; return w >= 900 ? 6 : w >= 640 ? 4 : 3; }
+  function fitRows(n, rows){ var c = homeCols(); var m = Math.min(n, c * (rows || 2)); return m > c ? m - (m % c) : m; }
+  function renderJobs(){ return activeJobs().filter(function(j){ return j.render !== false; }); }
+  function brandName(){ var d = D(); return (d.profile && d.profile.name) || (d.brand && d.brand.name) || ''; }
   function homeView(){
-    var d = D(); var p = d.profile; var live = activeJobs().length;
-    var c = state.composer;
-    var html = '<section class="hero"><span class="logo" aria-hidden="true">' + BLOOM + '</span><h1>What would you like to make?</h1>'
-      + '<div class="composer"><div class="mchips" id="mchips">' + c.mentions.map(function(m, i){ return '<span class="mchip">' + (m.thumb ? '<img alt="" src="' + esc(m.thumb) + '">' : '') + esc(m.name) + '<button data-act="mention-remove" data-i="' + i + '" aria-label="Remove ' + esc(m.name) + '">&#215;</button></span>'; }).join('') + '</div>'
-      + '<textarea id="composer" rows="2" placeholder="Describe an ad, a post or a question. Type @ to add a profile, creator, product or Library item." aria-label="Message to Hermoso"></textarea>'
+    var d = D(); var p = d.profile; var nm = brandName(); var c = state.composer;
+    var html = '<section class="hx"><span class="hm" aria-hidden="true">' + BLOOM + '</span>'
+      + '<h1>' + (nm ? 'What should we make for ' + esc(nm) + '?' : 'What would you like to make?') + '</h1>'
+      + '<p class="lead">Describe an ad or a post in your own words. Hermoso makes it right here in the chat.</p>'
+      + '<div class="cmp"><div class="mchips" id="mchips">' + c.mentions.map(function(m, i){ return '<span class="mchip">' + (m.thumb ? '<img alt="" src="' + esc(m.thumb) + '">' : '') + esc(m.name) + '<button data-act="mention-remove" data-i="' + i + '" aria-label="Remove ' + esc(m.name) + '">&#215;</button></span>'; }).join('') + '</div>'
+      + '<textarea id="composer" rows="2" placeholder="Describe your ad, post or question" aria-label="Message to Hermoso"></textarea>'
       + '<div class="menu" id="mmenu" role="listbox" hidden></div>'
-      + '<div class="crow"><span class="s">Sends to this chat</span><button class="send" data-act="send" id="sendBtn" aria-label="Send">&#8593;</button></div></div>'
-      + '<div class="quick">'
-      + '<button class="chip" data-act="msg" data-text="Show me the ads my top competitors are running right now.">Research competitors&#39; ads</button>'
-      + '<button class="chip" data-act="create" data-format="image">Make an image ad</button>'
-      + '<button class="chip" data-act="create" data-format="video">Make a video ad</button>'
-      + '<button class="chip" data-act="msg" data-text="Help me schedule a post from my Hermoso Library.">Schedule a post</button>'
-      + '</div></section>';
+      + '<div class="crow"><button class="plus" data-act="attach" aria-label="Add a product, creator or Library item" title="Add a product, creator or Library item">' + svg('plus') + '</button>'
+      + '<span class="hint">Sends to this chat. Type @ to add a product, creator or file.</span>'
+      + '<button class="go" data-act="send" id="sendBtn" aria-label="Send to the chat">Send' + svg('up') + '</button></div></div></section>';
     html += connectCardHtml(d);
-    html += '<h3>Get started</h3><div class="cards">'
-      + gcard('tab', 'library', 'Library', 'Your images and videos')
-      + gcard('tab', 'create', 'Create', 'Pick options, see concepts, then render')
-      + '<button class="gcard" data-act="msg" data-text="Show me the ads my top competitors are running right now, and what is working for them."><b>Ad Spy</b><span>What competitors are running</span></button>'
-      + gcard('tab', 'calendar', 'Calendar', 'Scheduled posts, move or cancel')
-      + gcard('tab', 'ads', 'Ads', 'Your campaigns, pause or turn on')
-      + gcard('setup', 'connections', 'Connections', 'Channels and ad accounts')
-      + gcard('setup', 'brand', p ? 'Profile' : 'Set up profile', p ? (p.name || 'Your profile') : 'Read your website or description')
-      + '</div>';
-    if (live) html += '<div class="note left"><button class="btn" data-act="tab" data-view="jobs">' + live + ' render' + (live === 1 ? '' : 's') + ' in progress</button></div>';
+    html += '<section class="sec"><div class="sh"><h2>Start something</h2></div><div class="starts">' + STARTERS.map(startCard).join('') + '</div></section>';
+    html += recentHtml(d);
+    var live = renderJobs().length;
+    var conn = d.connections ? d.connections.filter(function(x){ return x.connected; }).length : null;
+    html += '<section class="sec"><div class="sh"><h2>Your workspace</h2></div><div class="mgrid">'
+      + mcard('tab', 'library', 'grid', 'Library', 'Your creations')
+      + mcard('tab', 'jobs', 'spark', 'Renders', live ? live + ' in progress' : 'All renders')
+      + mcard('tab', 'calendar', 'calendar', 'Calendar', 'Scheduled posts')
+      + mcard('tab', 'ads', 'chart', 'Ads', 'Your campaigns')
+      + mcard('setup', 'connections', 'link', 'Connections', conn == null ? 'Your accounts' : conn ? conn + ' connected' : 'None yet')
+      + mcard('setup', 'brand', 'user', p ? 'Profile' : 'Set up profile', p ? (p.name || 'Your profile') : 'From your website', p && p.logo && state.badImg.indexOf(p.logo) < 0 ? p.logo : '')
+      + '</div></section>';
     if (d.notes && d.notes.brand) html += sectionNote('brand');
     return html;
+  }
+  function startCard(s){
+    var base = D().examples || '';
+    return '<button class="scard" data-act="' + s.act + '"' + (s.format ? ' data-format="' + s.format + '"' : '') + (s.text ? ' data-text="' + esc(s.text) + '"' : '') + '>'
+      + (base ? '<img alt="" src="' + esc(base + s.img + '.jpg') + '">' + (s.loop ? '<video muted loop playsinline preload="none" aria-hidden="true" data-src="' + esc(base + s.img + '.mp4') + '"></video>' : '') : '<span class="art"></span>')
+      + '<span class="tag">' + svg(s.icon) + esc(s.tag) + '</span><span class="cap"><b>' + esc(s.title) + '</b><span>' + esc(s.sub) + '</span></span></button>';
+  }
+  // RECENT: renders in progress as live cards, then the Library, newest first. A video shows its poster frame
+  // (/api/video/poster, the same thumbnail the web app paints), never a frame-0 seek.
+  function recentHtml(d){
+    if (d.notes && d.notes.library) return '<section class="sec"><div class="sh"><h2>Recent</h2></div>' + sectionNote('library') + '</section>';
+    var live = renderJobs(); var items = d.items || [];
+    var tiles = live.map(liveTile).concat(items.map(function(a, i){ return itemTile(a, i); }));
+    if (tiles.length) {
+      return '<section class="sec"><div class="sh"><h2>Recent</h2>' + (live.length ? '<span class="sub">' + live.length + ' rendering now</span>' : '')
+        + '<button class="more" data-act="tab" data-view="library">See all' + svg('chevr') + '</button></div>'
+        + '<div class="recent">' + tiles.slice(0, fitRows(tiles.length, 2)).join('') + '</div></section>';
+    }
+    if (!('items' in d) || !d.examples) return '';
+    var nm = brandName();
+    return '<section class="sec"><div class="sh"><h2>Start from an example</h2><span class="sub">What you make shows up here</span></div><div class="xgrid">'
+      + EXAMPLES.slice(0, fitRows(EXAMPLES.length, 1)).map(function(x){ return '<button class="xt" data-act="prefill" data-text="' + esc('Make ' + x[2] + ' for ' + (nm || 'my brand') + '.') + '" aria-label="' + esc('Start from ' + x[1]) + '"><img alt="" loading="lazy" src="' + esc(d.examples + x[0] + '.jpg') + '"><span class="cap">' + esc(x[1]) + '</span></button>'; }).join('')
+      + '</div></section>';
+  }
+  function liveTile(j){
+    var p = +j.progress || 0; if (p > 0 && p <= 1) p *= 100; p = Math.max(0, Math.min(100, Math.round(p)));
+    var st = j.status === 'queued' ? 'Queued' : 'Rendering';
+    return '<button class="rt live" data-act="tab" data-view="jobs" aria-label="' + esc((j.label || 'Render') + ', ' + st + (p ? ' ' + p + '%' : '')) + '"><span class="glow"></span><span class="in">'
+      + '<span class="st"><i aria-hidden="true"></i>' + st + '</span>'
+      + '<span><b>' + esc(j.label || 'Your render') + '</b><span class="pc">' + esc([j.stage, p ? p + '%' : ''].filter(Boolean).join(' · ') || (j.model || 'Working on it')) + '</span>'
+      + '<span class="bar">' + (p ? '<i style="width:' + p + '%"></i>' : '<i class="busy"></i>') + '</span></span></span></button>';
+  }
+  function itemTile(a, i){
+    var video = a.kind === 'video';
+    return '<button class="rt' + (state.selected.indexOf(a.url) >= 0 ? ' sel' : '') + '" data-act="open-item" data-i="' + i + '" aria-label="' + esc((video ? 'Video' : 'Image') + (a.model ? ', ' + a.model : '') + (a.age ? ', ' + a.age : '')) + '">'
+      + (a.thumb ? '<img loading="lazy" alt="" src="' + esc(a.thumb) + '">' : '<span class="ph">' + esc(a.kind || 'asset') + '</span>')
+      + (video ? '<span class="vb">' + svg('play') + (a.dur ? esc(mmss(a.dur)) : 'Video') + '</span>' : '') + '</button>';
+  }
+  function mcard(act, target, icon, title, sub, img){
+    return '<button class="gcard" data-act="' + act + '" ' + (act === 'setup' ? 'data-step' : 'data-view') + '="' + target + '"><span class="mi" aria-hidden="true">' + (img ? '<img alt="" src="' + esc(img) + '">' : svg(icon)) + '</span><span class="mt"><b>' + esc(title) + '</b><span>' + esc(sub) + '</span></span></button>';
+  }
+  function homeSkeleton(){
+    var four = '<div class="skel" style="aspect-ratio:4/5"></div>';
+    return '<section class="hx" aria-busy="true"><div class="skel" style="height:34px;width:62%;margin:12px auto 14px"></div><div class="skel" style="height:118px;border-radius:20px"></div></section>'
+      + '<section class="sec"><div class="starts">' + four + four + four + four + '</div></section>';
   }
   // NOTHING CONNECTED YET: posting from here starts with one browser sign-in. Absent while the read is pending or failed,
   // because an unread list is not an empty one. The links leave through openLink, like every other link in this app.
   function connectCardHtml(d){
     var c = d.connectCard; if (!c || !c.channels || !c.channels.length) return '';
-    return '<div class="ccard" data-connect-card="1"><b>Post what you make from this chat</b><span class="s">Nothing is connected yet. Sign in once on the platform, then ask here to post or schedule.</span><div class="row">'
+    return '<div class="ccard" data-connect-card="1"><div class="ct"><b>Post what you make from this chat</b><span class="s">No posting channel is connected yet. Sign in once on the platform, then ask here to post or schedule.</span></div><div class="row">'
       + c.channels.map(function(x){ return '<button class="btn primary" data-act="open-link" data-url="' + esc(x.url) + '">' + esc(x.name) + '</button>'; }).join('')
       + '<button class="btn" data-act="setup" data-step="connections">All channels</button></div></div>';
   }
-  function gcard(act, target, title, sub){
-    return '<button class="gcard" data-act="' + act + '" ' + (act === 'setup' ? 'data-step' : 'data-view') + '="' + target + '"><b>' + esc(title) + '</b><span>' + esc(sub) + '</span></button>';
+  // "+": the attach this host allows. The app has no network and no upload of its own, so it attaches what Hermoso
+  // already holds (a product photo, a saved creator, a Library item, a profile) through the same @ menu.
+  function attachMention(){
+    var ta = $('composer'); if (!ta) return;
+    var pos = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+    var pre = ta.value.slice(0, pos); var ins = pre && !/\s$/.test(pre) ? ' @' : '@';
+    ta.value = pre + ins + ta.value.slice(pos); ta.focus(); var np = pos + ins.length; try { ta.setSelectionRange(np, np); } catch (e) {}
+    updateMenu();
+  }
+  function prefill(text){
+    var ta = $('composer'); if (!ta || !text) return;
+    ta.value = text; ta.focus(); try { ta.setSelectionRange(text.length, text.length); } catch (e) {}
+    ta.style.height = 'auto'; ta.style.height = Math.min(200, ta.scrollHeight) + 'px';
+    try { window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) {}
+    reportSize();
   }
 
   // the composer's @-mentions, from what the app has already read (no extra network)
@@ -1121,7 +1316,8 @@ const APP_SCRIPT = String.raw`<script>
     var keepComposer = state.view === 'home' && $('composer') ? $('composer').value : null;
     var act = document.activeElement; var keepId = act && act.id && act !== document.body ? act.id : null; var caret = null;
     try { if (keepId && typeof act.selectionStart === 'number') caret = [act.selectionStart, act.selectionEnd]; } catch (e) {}
-    if (!state.data) { main.innerHTML = state.loadError ? '<div class="note err">' + esc(state.loadError) + '</div>' : '<div class="note">Loading Hermoso...</div>'; reportSize(); return; }
+    main.className = state.view === 'home' ? 'home' : '';
+    if (!state.data) { main.innerHTML = state.loadError ? '<div class="note err">' + esc(state.loadError) + '</div>' : state.view === 'home' ? homeSkeleton() : '<div class="note">Loading Hermoso...</div>'; reportSize(); return; }
     var html = state.loadError ? '<div class="note err">' + esc(state.loadError) + '</div>' : '';
     var v = state.view;
     html += v === 'home' ? homeView() : v === 'jobs' ? jobsView() : v === 'calendar' ? calendarView() : v === 'ads' ? adsView() : v === 'create' ? createView() : v === 'setup' ? setupView() : v === 'concepts' ? conceptsView() : v === 'results' ? resultsView() : libraryView();
@@ -1158,6 +1354,9 @@ const APP_SCRIPT = String.raw`<script>
     if (a === 'create') { state.brief.format = el.getAttribute('data-format') === 'video' ? 'video' : 'image'; state.brief.aspect = state.brief.format === 'video' ? '9:16' : '1:1'; state.brief.step = 'form'; return setView('create'); }
     if (a === 'setup') { state.setup.step = el.getAttribute('data-step') || 'brand'; setView('setup'); if (state.setup.step === 'connections' && !d.connections) load(['connectors']); return; }
     if (a === 'send') return sendComposer();
+    if (a === 'attach') return attachMention();
+    if (a === 'prefill') return prefill(el.getAttribute('data-text'));
+    if (a === 'open-item') { setView('library'); state.focus = i; return render(); }
     if (a === 'mention-pick') return pickMention(i);
     if (a === 'mention-remove') { state.composer.mentions.splice(i, 1); return render(); }
     // brief
@@ -1239,6 +1438,27 @@ const APP_SCRIPT = String.raw`<script>
     moveTo(p, t);
   });
   window.addEventListener('focus', function(){ if (state.setup.watch) load(['connectors']); });
+  // A profile logo that does not load falls back to the bloom (header) or the profile icon (workspace card), and is
+  // remembered so the next render does not draw the broken picture again. Capture phase: an image error does not bubble.
+  document.addEventListener('error', function(e){
+    var t = e.target; if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.bm,.mi')) return;
+    var src = t.getAttribute('src'); if (src && state.badImg.indexOf(src) < 0) state.badImg.push(src);
+    var box = t.parentNode; if (box) box.innerHTML = box.classList.contains('bm') ? BLOOM : svg('user');
+  }, true);
+  // A start card plays its loop while the pointer is on it (never on touch, never with reduced motion); the file is
+  // fetched on the first hover only.
+  document.addEventListener('pointerover', function(e){
+    var c = e.target.closest && e.target.closest('.scard'); if (!c || (e.relatedTarget && c.contains(e.relatedTarget)) || e.pointerType === 'touch') return;
+    var v = c.querySelector('video'); if (!v || reducedMotion()) return;
+    if (!v.getAttribute('src') && v.getAttribute('data-src')) v.setAttribute('src', v.getAttribute('data-src'));
+    try { var pl = v.play(); if (pl && pl.then) pl.then(function(){ c.classList.add('playing'); }).catch(function(){}); } catch (x) {}
+  });
+  document.addEventListener('pointerout', function(e){
+    var c = e.target.closest && e.target.closest('.scard'); if (!c || (e.relatedTarget && c.contains(e.relatedTarget))) return;
+    var v = c.querySelector('video'); if (v) { try { v.pause(); } catch (x) {} } c.classList.remove('playing');
+  });
+  var lastCols = homeCols();
+  window.addEventListener('resize', function(){ var n = homeCols(); if (n !== lastCols) { lastCols = n; if (state.view === 'home' && state.data) render(); } });
   if (window.ResizeObserver) new ResizeObserver(reportSize).observe(document.body);
 
   rpc('ui/initialize', { appInfo: { name: 'hermoso', version: '1.1.0' }, appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }, protocolVersion: PROTOCOL }, 15000)
@@ -1255,7 +1475,7 @@ const APP_SCRIPT = String.raw`<script>
         load(SECTIONS_FOR[state.view] || SECTIONS_FOR.home);
       }, 2500);
     })
-    .catch(function(e){ state.loadError = 'This view needs ChatGPT to open it. ' + String(e && e.message || e); state.data = state.data || null; render(); });
+    .catch(function(e){ state.loadError = 'Open Hermoso from your chat to load this. ' + String(e && e.message || e); state.data = state.data || null; render(); });
 })();
 </script>`;
 
@@ -1271,10 +1491,26 @@ export const LIBRARY_DISPLAY_MODES = Object.freeze({ availableDisplayModes: ['in
 // the display modes. `inline` is PREFERRED because a model-invoked card should not take the whole window over a chat;
 // the two entrypoints open fullscreen regardless (spec: "ChatGPT uses the fullscreen display mode for all
 // entrypoints"), and the app offers Expand when it is inline.
-export const libraryResourceMeta = (resourceMeta, origins) => ({
-  ...resourceMeta('Hermoso in ChatGPT: a home screen, this profile’s Library, renders in progress, the posting calendar, ad campaigns, a new-ad brief, ad concepts to pick from before rendering, and profile setup.', origins),
-  'openai/ui': { ...LIBRARY_DISPLAY_MODES },
-});
+// ── `ui.domain` IS PER HOST, AND CLAUDE REFUSES TO RENDER A VIEW WHOSE DOMAIN IS NOT ITS OWN (2026-11-26, measured) ──
+// The shared widget meta carries `ui.domain: https://app.hermoso.ai`, which is what OpenAI requires of a plugin. Claude
+// reads the same field and validates it against the connector URL: the value must be exactly
+// `{first 32 hex of sha256(connector URL)}.claudemcpcontent.com`, and on a mismatch the web app "shows an error instead
+// of rendering the app" (claude.com/docs/connectors/building/mcp-apps/troubleshooting.md#ui-domain-validation-fails,
+// read 2026-11-26). That is the "There was a problem displaying content from Hermoso Home" the first live test showed.
+// The field is optional in Claude ("opts your app into a stable sandbox origin, which you need if your app runs its own
+// OAuth flow"); this app runs none, and the hash would have to match the exact URL each user pasted (`?src=`, a trailing
+// slash), so on Claude it is left OUT rather than computed. ChatGPT keeps its domain byte for byte.
+export const libraryResourceMeta = (resourceMeta, origins, host = 'chatgpt') => {
+  const meta = {
+    ...resourceMeta(`Hermoso${host === 'claude' ? '' : ' in ChatGPT'}: a home screen, this profile’s Library, renders in progress, the posting calendar, ad campaigns, a new-ad brief, ad concepts to pick from before rendering, and profile setup.`, origins),
+    'openai/ui': { ...LIBRARY_DISPLAY_MODES },
+  };
+  if (host === 'claude') {
+    if (meta.ui && typeof meta.ui === 'object') { const { domain, ...ui } = meta.ui; meta.ui = ui; }
+    delete meta['openai/widgetDomain'];
+  }
+  return meta;
+};
 
 // ── A REFUSAL FOR LACK OF CREDITS IS ONE NEUTRAL SENTENCE INSIDE THE APP ─────────────────────────────────────────
 // Elsewhere an out-of-credits answer names buy_credits and a checkout link. OpenAI's guidelines allow a plugin to say a
@@ -1296,6 +1532,12 @@ export const neutralNote = (t) => {
 // name (the one /api/jobs returns, lib/job-types.mjs publicJobType), and the check fails if that list gains a type this
 // one lacks. A job queued for LATER is not in progress either.
 export const PANEL_HIDDEN_JOB_TYPES = Object.freeze(['convwatch', 'posttrack', 'blogsyndicate', 'postfailmail', 'branddraftrepair', 'cctrack', 'ccpayout', 'ccnotify', 'shopifykeepalive', 'shopredact', 'latelanding', 'storysweep', 'ttpublicurl', 'whatsappcoexsync', 'purge', 'agentidle', 'welcomewait', 'agentsetupmail', 'uploadretention', 'miniappretention', 'connectordrift', 'modelwatch', 'zerniowatch', 'faceassetsweep', 'searchvis', 'mcpcanary', 'welcomeads', 'lifecycleedu', 'connhealth', 'chargednothing', 'badoutcome', 'reviewask', 'emailfeedback', 'weeklyposts', 'winback', 'commentpoll', 'agentwatch', 'mcpidle', 'phonemeter']); // phonemeter (2026-11-21): the Hermoso phone usage meter, housekeeping like mcpidle
+// WHICH JOBS ARE A RENDER, for the home's live cards (2026-11-26). /api/jobs also lists the customer's own outbound work
+// (email sequences, queued social posts), which is real but is not "a render in progress": measured on a real account,
+// two queued `emailseq` runners would have shown as live render cards. This is lib/job-types.mjs's `paid` class
+// (JOB_DEPLOY_CLASS) by public name: a render, or anything that spends for the customer. Mirrored because this file
+// ships in the CLI, which cannot import lib/; tools/claude-home-check.mjs fails when the two lists differ.
+export const RENDER_JOB_TYPES = Object.freeze(['image', 'video', 'avatar', 'stitch', 'slideshow', 'videoedit', 'reframe', 'upscale', 'videobg', 'angles', 'dub', 'lineswap', 'voiceswap', 'motion', 'multiply', 'motionmoving', 'clipper', 'subtitles', 'explainer', 'thumbnail', 'clonestatic', 'singingad', 'templatead', 'videofinish', 'fixbeat', 'hypermotion', 'postedit', 'repurpose', 'repurposeimage', 'draftfinish', 'insertscene', 'reangle', 'reanglefinal', 'reanglestill', 'layerize', 'productmove', 'faceswapvideo', 'track', 'model3d', 'latelanding', 'watch', 'postrefill', 'weekplan']);
 const ageText = (h) => (h == null || !Number.isFinite(+h) ? '' : +h < 1 ? 'just now' : +h < 48 ? `${Math.round(+h)}h ago` : `${Math.round(+h / 24)}d ago`);
 const VIDEO_RE = /\.(mp4|webm|mov|m4v)([?#]|$)/i;
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -1354,7 +1596,8 @@ export function libraryPayload(reads = {}, { view = 'library', origins = [], pro
     if (reads.library.error) out.notes.library = errText(reads.library);
     else out.items = (reads.library.data?.assets || []).filter((a) => a && a.url).slice(0, 24).map((a) => {
       const url = abs(a.url); const video = a.kind === 'video' || VIDEO_RE.test(url);
-      return { url, kind: video ? 'video' : (a.kind || 'image'), model: a.model || '', age: ageText(a.ageHours), thumb: video ? poster(url) : picture(url), playable: video && own(url) };
+      const dur = Number(a.durationSeconds);
+      return { url, kind: video ? 'video' : (a.kind || 'image'), model: a.model || '', age: ageText(a.ageHours), thumb: video ? poster(url) : picture(url), playable: video && own(url), ...(video && Number.isFinite(dur) && dur > 0 ? { dur: Math.round(dur) } : {}) };
     });
   }
   if (reads.jobs) {
@@ -1369,7 +1612,7 @@ export function libraryPayload(reads = {}, { view = 'library', origins = [], pro
         const img = r.image || (Array.isArray(r.images) && r.images[0]) || (Array.isArray(r.thumbnails) && r.thumbnails[0]?.image) || '';
         const vid = r.video || (Array.isArray(r.clips) && r.clips[0]?.video) || '';
         const thumb = img ? picture(abs(img)) : vid ? poster(abs(vid)) : '';
-        return { id: j.id, type: j.type || '', label: j.label || '', status: j.status || '', statusText: STATUS[j.status] || j.status || '', progress: Number(j.progress) || 0, stage: j.status === 'running' ? (j.stage || '') : '', model: j.model || '', thumb };
+        return { id: j.id, type: j.type || '', label: j.label || '', status: j.status || '', statusText: STATUS[j.status] || j.status || '', progress: Number(j.progress) || 0, stage: j.status === 'running' ? (j.stage || '') : '', model: j.model || '', thumb, render: RENDER_JOB_TYPES.includes(j.type) };
       });
       out.running = out.jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
     }
@@ -1467,6 +1710,15 @@ export function libraryPayload(reads = {}, { view = 'library', origins = [], pro
   if (reads.results) {
     out.results = (reads.results.items || []).map((x) => resultItem(x, { abs, picture, poster, own }));
   }
+  // THE BALANCE, ON CLAUDE ONLY. `reads.account` exists only when registerLibraryApp was told the host is Claude (see
+  // readSections' `account`): ChatGPT's plugin rules forbid a balance inside the app, so its sessions never read it and
+  // the app's HTML never names it (the word itself arrives as `unit`). A failed read shows nothing, never a zero.
+  if (reads.account && !reads.account.error) {
+    const n = Number(reads.account.data?.accountBalance);
+    if (Number.isFinite(n)) out.account = { balance: Math.max(0, Math.floor(n)), unit: 'credits' };
+  }
+  // The home's example tiles: our own format posters (public/format-loops), on the same app origin the posters use.
+  if (out.view === 'home' && appOrigin) out.examples = `${appOrigin}/format-loops/`;
   if (!Object.keys(out.notes).length) delete out.notes;
   return out;
 }
@@ -1651,6 +1903,7 @@ async function readSections(sections, call, extra, deps = {}) {
       return;
     }
     if (s === 'ads') { reads.ads = await readAds(call, extra); return; }
+    if (s === 'account') { if (deps.host === 'claude') reads.account = await callRead(call, 'hermoso_credits', {}, extra); return; }
     const src = SECTION_SOURCE[s]; if (!src) return;
     reads[s] = await callRead(call, src[0], src[1], extra);
   }));
@@ -1876,7 +2129,8 @@ export function libraryToolDefs() {
 // for this session, and prefs {read, write} for the per-brand defaults this app adds.
 export function registerLibraryApp(server, deps) {
   const { resourceMeta, origins = [], proxyBase = '', abs = (u) => u, call = async () => null, prefs = null, markHomeConnectCard = null } = deps || {};
-  const meta = libraryResourceMeta(resourceMeta, origins);
+  const host = deps?.host === 'claude' ? 'claude' : 'chatgpt';
+  const meta = libraryResourceMeta(resourceMeta, origins, host);
   const description = meta['openai/widgetDescription'];
   server.registerResource('hermoso-library-app', LIBRARY_APP_URI, { description, mimeType: LIBRARY_APP_MIME, _meta: meta },
     async () => ({ contents: [{ uri: LIBRARY_APP_URI, mimeType: LIBRARY_APP_MIME, text: LIBRARY_APP_HTML, _meta: meta }] }));
@@ -1895,8 +2149,11 @@ export function registerLibraryApp(server, deps) {
   const payloadOpts = { origins, proxyBase, abs };
   const picture = (u) => { try { return origins.includes(new URL(u).origin) ? u : (proxyBase ? proxyBase + encodeURIComponent(u) : ''); } catch { return ''; } };
   const defs = libraryToolDefs();
+  // On Claude the header shows the credit balance, read wherever the header's brand list is (home, a refresh, a brand
+  // switch). `account` is not in EXT_SECTIONS, so no caller can ask for it and the data tool's schema is unchanged.
+  const withAccount = (sections) => (host === 'claude' && sections.includes('brands') ? [...sections, 'account'] : sections);
   const answer = async (args, extra, sections, view, more = {}) => {
-    const reads = await readSections(sections, call, extra, { prefs });
+    const reads = await readSections(withAccount(sections), call, extra, { prefs, host });
     const payload = { ...libraryPayload(reads, { view, ...payloadOpts }), surface: more.surface || 'panel', ...(more.payload || {}) };
     return { content: [{ type: 'text', text: libraryText(payload) }], structuredContent: payload };
   };
@@ -1916,7 +2173,7 @@ export function registerLibraryApp(server, deps) {
   reg(EXT_DATA_TOOL, async (args, extra) => {
     const asked = Array.isArray(args?.sections) ? [...new Set(args.sections)].filter((s) => EXT_SECTIONS.includes(s)) : [];
     const jobIds = (Array.isArray(args?.jobIds) ? args.jobIds : []).map(String).slice(0, 12);
-    const reads = await readSections(asked, call, extra, { prefs });
+    const reads = await readSections(withAccount(asked), call, extra, { prefs, host });
     if (jobIds.length) reads.results = await readResults(jobIds, [], call, extra);
     if (args?.postId) reads.post = await callRead(call, 'list_scheduled', { id: String(args.postId) }, extra);
     const v = EXT_VIEWS.includes(args?.view) ? args.view : 'library';

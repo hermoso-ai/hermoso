@@ -6183,9 +6183,13 @@ function replayTools(rawServer, opts, canon) {
 // open_hermoso_home as a tile because it already carries the global entrypoint and ui.resourceUri. The ChatGPT predicate
 // is evaluated first and alone decides every widget host, so ChatGPT's roster cannot move (claude-app-entrypoint-check).
 function registerChatGPTExtensions(rawServer, ctx, opts) {
-  if (!chatgptExtOn({ asked: opts.ext, widgetHost: opts.widgetHost })
-    && !claudeAppOn({ client: opts.client, ua: opts.ua, widgetHost: opts.widgetHost, scoped: !!(opts.app || opts.directory) })) return;
+  const onChatGPT = chatgptExtOn({ asked: opts.ext, widgetHost: opts.widgetHost });
+  if (!onChatGPT && !claudeAppOn({ client: opts.client, ua: opts.ua, widgetHost: opts.widgetHost, scoped: !!(opts.app || opts.directory) })) return;
   registerLibraryApp(rawServer, {
+    // `host` decides two things and nothing else: the resource's `ui.domain` (each host has its own format, and Claude
+    // refuses to render a view whose domain is not its own `{hash}.claudemcpcontent.com`; see libraryResourceMeta) and
+    // whether the home shows the credit balance (never on ChatGPT, whose plugin rules forbid it in the app).
+    host: onChatGPT ? 'chatgpt' : 'claude',
     resourceMeta: widgetResourceMeta, origins: widgetMediaOrigins(), proxyBase: widgetProxyBase(), abs,
     // `noWait` (Render it): run a render tool with waitMs 0 on THIS caller's own context, the same ask /v1's ?wait=0
     // makes, so it answers with its job handle as soon as the job is queued. Queueing, spend gate and billing are
