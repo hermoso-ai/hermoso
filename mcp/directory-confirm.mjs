@@ -104,6 +104,16 @@ export function redeemCode({ code, tool, owner, mac, destKey = '', now = Date.no
   if (String(destKey) !== String(e.destKey)) return { ok: false, reason: 'destination' };
   return { ok: true };
 }
+// Spend a code without running anything: the 2026-07-28 era (mcp/era-2026-serve.mjs) holds a preview's code server-side
+// while the user answers its MRTR form, and a no (or a dismissal) must leave nothing redeemable behind, exactly as the
+// legacy elicitation branch below issues no code at all.
+export function spendCode(code, now = Date.now()) {
+  const k = normalizeCode(code);
+  const e = PENDING.get(k);
+  if (!e) return false;
+  PENDING.delete(k); SPENT.set(k, Math.max(e.exp, now));
+  return true;
+}
 export const _confirmStateForTests = Object.freeze({ clear() { PENDING.clear(); SPENT.clear(); }, size: () => PENDING.size });
 const REFUSED = {
   unknown: 'is not a code this connection issued (or it was issued to another account)',

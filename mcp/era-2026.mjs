@@ -306,6 +306,33 @@ export function notConfirmedResult(name, answer) {
   return { content: [{ type: 'text', text: `The user said no, so ${name} did not run. Nothing was changed and nothing was charged.` }], structuredContent: { declined: true, ran: false } };
 }
 
+// ── the curated directory gate (mcp/directory-confirm.mjs) through MRTR ──
+// Its first call answers a preview: structuredContent.confirmation {status:'preview', code, action, destinations}. Only
+// that status becomes a form; 'refused_new_preview' (a bad code was presented) stays on the code path, as in legacy.
+export const isDirPreview = (result) => !!(result && !result.isError && result.structuredContent && result.structuredContent.confirmation
+  && result.structuredContent.confirmation.status === 'preview' && typeof result.structuredContent.confirmation.code === 'string' && result.structuredContent.confirmation.code);
+// The preview the user reads: everything the gate described, minus its "PREVIEW ONLY" head and its code tail (in a form
+// the Accept IS the approval), and the code itself scrubbed from anywhere else it might appear.
+export function dirPreviewText(result, code) {
+  const paras = resultText(result).split(/\n{2,}/).filter((p) => !/^\s*PREVIEW ONLY\b/.test(p) && !/^\s*Confirmation code:/.test(p) && !/^\s*The confirmation form could not be shown\b/.test(p));
+  const t = paras.join('\n\n').trim();
+  return code ? t.split(String(code)).join('(code withheld)') : t;
+}
+export const confirmStateNonce = (state) => { const s = verify('rs1', state); return s ? String(s.k || '') : ''; };
+export function withDirCode(name, args, arg, code) {
+  const a = args && typeof args === 'object' ? { ...args } : {};
+  if (name === 'call_tool') { a.args = { ...(a.args && typeof a.args === 'object' ? a.args : {}), [arg]: code }; return a; }
+  a[arg] = code; return a;
+}
+// The legacy branch's own words for a form that did not end in a yes (directory-confirm.mjs makeConfirmGate).
+export function dirNotDoneResult(dir, answer) {
+  const how = answer === 'dismissed' ? 'cancelled' : 'declined';
+  return {
+    content: [{ type: 'text', text: `Not done: the user ${how} on the confirmation form. Nothing was published, sent or changed.\n\n${dir.text}` }],
+    structuredContent: { confirmation: { status: 'declined', via: 'elicitation', action: dir.action, destinations: dir.destinations } },
+  };
+}
+
 // ── TASKS ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // A task IS one or more of our own durable render jobs (POST /api/jobs, the queue and its R2 mirror). The taskId carries
 // the job ids, signed and bound to the account; the job's own record is the task's state, read through the caller's

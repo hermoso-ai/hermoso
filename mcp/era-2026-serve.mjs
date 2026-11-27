@@ -19,6 +19,7 @@ import { registerTools, instructionsFor, widgetHostScope, withFirstRunLine, firs
 import { curatedTokenOf } from './directory-curated.mjs';
 import { mcpCtx, connectedProviders, getJob, apiPost } from './client.mjs';
 import * as E from './era-2026.mjs';
+import { CONFIRM_ARG as DIR_CODE_ARG, CONFIRM_TTL_MS as DIR_CODE_TTL_MS, spendCode as spendDirCode } from './directory-confirm.mjs';
 
 const Passthrough = z.object({}).passthrough();
 const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
@@ -34,6 +35,22 @@ export function serveModernFactory(deps) {
   const CTX_MAX_AGE_MS = Math.max(1000, Number(process.env.MCP_MODERN_CTX_MAX_AGE_MS || 5 * 60e3));
   const ctxs = new Map(); // key → { p: Promise<entry>, entry?, lastSeen }
   const nonces = E.makeNonceLedger();
+  // ── THE CURATED DIRECTORY GATE, ASKED AS AN MRTR FORM (2026-11-26) ──────────────────────────────────────────────────
+  // On a curated directory connector (mcp/directory-confirm.mjs) a gated tool's first call only previews, and a LEGACY
+  // client that declared elicitation is asked on a server→client form. The bridge below declares no
+  // client capabilities, so through it that gate always fell back to preview + confirmationCode: a form-capable modern
+  // client (Claude Code, measured on prod) lost the form the legacy era gives it. So a preview is turned into the same
+  // MRTR form every other confirm gets here. The CODE NEVER LEAVES THE SERVER: it is held under the form's requestState
+  // nonce, an accepted retry redeems it on the user's behalf, and a no or a dismissal spends it (the legacy branch issues
+  // none), so the model can never step around the user's answer.
+  const dirCodes = new Map(); // nonce → { code, text, action, destinations, exp }
+  const holdDirCode = (nonce, v) => {
+    const now = Date.now();
+    for (const [k, x] of dirCodes) { if (x.exp <= now) dirCodes.delete(k); else break; }
+    dirCodes.set(nonce, { ...v, exp: now + DIR_CODE_TTL_MS });
+    while (dirCodes.size > 10_000) { const k = dirCodes.keys().next().value; const x = dirCodes.get(k); dirCodes.delete(k); try { spendDirCode(x.code); } catch {} }
+  };
+  const takeDirCode = (nonce) => { const x = dirCodes.get(nonce); if (!x) return null; dirCodes.delete(nonce); return x.exp > Date.now() ? x : null; };
   if (ERA.on) console.error(`[mcp-era] MCP 2026-07-28 serving is ON (mode ${ERA.mode}${ERA.hosts ? `, hosts ${ERA.hosts}` : ''})`);
 
   // Retiring a context takes it out of the map at once (new requests build a fresh one) and CLOSES it only when no request
@@ -241,17 +258,24 @@ export function serveModernFactory(deps) {
     const canElicit = E.declaresFormElicitation(caps) && E.elicitableTool(name, args);
     // ── an MRTR retry: our own signed requestState + the answer to our own key ──
     let confirmed = false;
+    let dirCode = null; // a curated directory preview's code, redeemed for the user on their accepted form
     if (p.requestState !== undefined || p.inputResponses !== undefined) {
       const v = E.checkConfirmState(p.requestState, { user, name, args });
       const ans = E.confirmAnswer(p.inputResponses);
       if (v.ok && ans && nonces.consume(v.nonce)) {
-        if (ans !== 'accepted') return done(id, 'tools/call', E.notConfirmedResult(name, ans));
-        confirmed = true;
+        const dir = takeDirCode(v.nonce);
+        if (dir) {
+          if (ans !== 'accepted') { spendDirCode(dir.code); return done(id, 'tools/call', E.dirNotDoneResult(dir, ans)); }
+          dirCode = dir.code;
+        } else {
+          if (ans !== 'accepted') return done(id, 'tools/call', E.notConfirmedResult(name, ans));
+          confirmed = true;
+        }
       }
       // Anything else (tampered, expired, another account's, other arguments, or a replay of a yes already used) is
       // treated as a fresh call: it re-asks below, and never runs on the strength of the stale answer.
     }
-    const callArgs = confirmed ? E.withConfirm(name, args) : args;
+    const callArgs = dirCode ? E.withDirCode(name, args, DIR_CODE_ARG, dirCode) : confirmed ? E.withConfirm(name, args) : args;
     const fwdMeta = {}; for (const [k, v] of Object.entries(p._meta || {})) if (!k.startsWith('io.modelcontextprotocol/')) fwdMeta[k] = v;
     e.calls = (e.calls || 0) + 1;
     if (e.calls === 1 && typeof onFirstCall === 'function' && e.user?.accountId) { try { onFirstCall({ accountId: e.user.accountId, userId: e.user.userId || null, client: e.client || '', ua: e.ua || '', src: e.src || null }); } catch {} }
@@ -261,6 +285,17 @@ export function serveModernFactory(deps) {
     if (r.aborted) return;
     if (r.rpcError) return fail(id, r.rpcError, r.rpcError.code === E.ERR.METHOD_NOT_FOUND ? 404 : 200);
     const result = r.result;
+    // ── a curated directory preview: the same form, with its code held here (never shown to the model or the host) ──
+    // Not conditioned on `confirmed`: a yes whose code this process no longer holds (a restart) is asked again rather
+    // than handing the model a code the user never approved.
+    if (!dirCode && canElicit && E.isDirPreview(result)) {
+      const state = E.mintConfirmState({ user, name, args });
+      const nonce = E.confirmStateNonce(state);
+      const sc = result.structuredContent.confirmation;
+      const text = E.dirPreviewText(result, sc.code);
+      holdDirCode(nonce, { code: sc.code, text, action: sc.action, destinations: sc.destinations });
+      return done(id, 'tools/call', E.inputRequiredResult({ toolName: name, message: `Please confirm.\n\n${text}`, state }));
+    }
     // ── a confirm-gated tool asked for a yes: ask the USER, in a form, in the tool's own words ──
     if (!confirmed && canElicit && E.needsConfirmOf(result) && !E.needsMoreThanAYes(result)) {
       const def = (await toolIndex(e, req, token)).get(name);

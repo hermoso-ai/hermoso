@@ -301,7 +301,7 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute
 .menu .k{color:var(--muted);font-size:11px;margin-left:auto}
 .quick{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:12px 0 4px}
 .chip{font-size:13px;background:var(--card)}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}@media (min-width:640px){.cards{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (max-width:639px){.cards>:last-child:nth-child(odd){grid-column:1/-1}}
 .ccard{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px}
 .ccard .row{margin-top:4px}
 .gcard{text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px;cursor:var(--cur)}

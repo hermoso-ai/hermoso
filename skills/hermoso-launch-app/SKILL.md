@@ -19,11 +19,11 @@ and, only if the user asks, paid campaigns created paused.
   If its tools are not available, send the user to https://hermoso.ai/connect/ and pick their host
   (Lovable, Replit, Bolt, v0 and Base44 each have a page with the exact clicks).
 - In a terminal there is no MCP server to connect: the same tools run through the Hermoso CLI. Sign in once with
-  `npx -y hermoso@0.1.686 auth login` (opens a browser; nothing to paste). On a machine with no browser:
-  `npx -y hermoso@0.1.686 auth login --device --no-wait` prints a link and a short code; send both to the user, and once
-  they approve run `npx -y hermoso@0.1.686 auth login --device --resume`. No key needed. Only if nobody can open a link: the user creates a key at app.hermoso.ai under **MCP & CLI** and either sets it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipes it to `npx -y hermoso@0.1.686 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history. Then
+  `npx -y hermoso@0.1.687 auth login` (opens a browser; nothing to paste). On a machine with no browser:
+  `npx -y hermoso@0.1.687 auth login --device --no-wait` prints a link and a short code; send both to the user, and once
+  they approve run `npx -y hermoso@0.1.687 auth login --device --resume`. No key needed. Only if nobody can open a link: the user creates a key at app.hermoso.ai under **MCP & CLI** and either sets it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipes it to `npx -y hermoso@0.1.687 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history. Then
   `hermoso tools --search <what you want>` finds a tool, `hermoso tools <name>` prints its arguments and
-  `hermoso call <name> --json '{...}'` runs it (after `npm install -g hermoso@0.1.686`, or run each as `npx -y hermoso@0.1.686 …`).
+  `hermoso call <name> --json '{...}'` runs it (after `npm install -g hermoso@0.1.687`, or run each as `npx -y hermoso@0.1.687 …`).
   No account yet? The user signs up at app.hermoso.ai (free to start). Never create an account, choose a plan or pay on the user's behalf unless they explicitly ask you to and approve the plan and its price.
 - A tool you do not see in your list still exists: `find_tools` searches every Hermoso tool and `call_tool`
   runs any of them by name.
