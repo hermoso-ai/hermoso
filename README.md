@@ -77,8 +77,8 @@ and it carries on. No key needed.
 
 ```text
 Set up Hermoso for me so I can research ads, find creators, generate images and videos, and publish from here.
-1. Sign me in from your command line: run `npx -y hermoso@0.1.685 auth login --device --no-wait`. It prints a link and a code. Send me both, wait until I say I approved, then run `npx -y hermoso@0.1.685 auth login --device --resume`.
-2. Add an MCP server of type stdio (a command), not a URL. Command: `npx -y hermoso@0.1.685 mcp`. It uses the sign-in from step 1, so it needs no key.
+1. Sign me in from your command line: run `npx -y hermoso@0.1.686 auth login --device --no-wait`. It prints a link and a code. Send me both, wait until I say I approved, then run `npx -y hermoso@0.1.686 auth login --device --resume`.
+2. Add an MCP server of type stdio (a command), not a URL. Command: `npx -y hermoso@0.1.686 mcp`. It uses the sign-in from step 1, so it needs no key.
 3. Then run one real tool call: list my brands.
 ```
 
@@ -89,8 +89,8 @@ line; each agent's own is in the app under MCP & CLI):
 Set up Hermoso for me. It is an AI marketing tool (hermoso.ai) that researches ads, makes image and video ads and posts to my social accounts.
 1. Install it by running: claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermoso@hermoso
    If the new skills only load after a restart, tell me, and use npx meanwhile.
-2. Sign me in by running: npx -y hermoso@0.1.685 auth login
-   It opens my browser and I will approve the connection there. If this machine has no browser, run npx -y hermoso@0.1.685 auth login --device --no-wait instead: send me the link and the code it prints, and once I say I approved, run npx -y hermoso@0.1.685 auth login --device --resume.
+2. Sign me in by running: npx -y hermoso@0.1.686 auth login
+   It opens my browser and I will approve the connection there. If this machine has no browser, run npx -y hermoso@0.1.686 auth login --device --no-wait instead: send me the link and the code it prints, and once I say I approved, run npx -y hermoso@0.1.686 auth login --device --resume.
 3. Once I am signed in, do one small task to show it works: tell me my Hermoso credit balance and which profile is saved.
 4. Then set up my brand from my website and make my first ad.
 ```
@@ -115,18 +115,45 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
 **Cursor:**
 
 ```bash
-npx skills add hermoso-ai/hermoso -a cursor && npx -y hermoso@0.1.685 auth login
+npx skills add hermoso-ai/hermoso -a cursor && npx -y hermoso@0.1.686 auth login
 ```
 
-Or add the MCP server to Cursor's `mcp.json` after `npx -y hermoso@0.1.685 auth login`:
+Or add the MCP server to Cursor's `mcp.json` after `npx -y hermoso@0.1.686 auth login`:
 
 ```json
-{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso@0.1.685", "mcp"] } } }
+{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso@0.1.686", "mcp"] } } }
 ```
 
 </details>
 
 Codex, Gemini CLI, Grok and the rest are in [Install in one command](#install-in-one-command).
+
+## Focused connectors
+
+The main URL serves everything. Each URL below is the same server with a smaller tool list, so it uses less of the
+AI's context. Add one as its own connector; sign-in is the same Hermoso account.
+
+| URL | What it serves |
+|---|---|
+| `https://app.hermoso.ai/mcp` | Everything. Most AI apps list a short set and reach every other tool with `find_tools` and `call_tool`. |
+| `https://app.hermoso.ai/mcp/full` | Every tool, listed. In ChatGPT, the full connection, ranked to fit ChatGPT's tool limit. |
+| `https://app.hermoso.ai/mcp/all` | Every tool group, listed. |
+| `https://app.hermoso.ai/mcp/lean` | The short list on any AI app: the core tools, with `find_tools` and `call_tool` for the rest. |
+| `https://app.hermoso.ai/mcp/core` | Only the core tools: account, credits, jobs and support. |
+| `https://app.hermoso.ai/mcp/create` | AI Ad Generator: finished image and video ads with the brand's real products, plus competitor ad research. |
+| `https://app.hermoso.ai/mcp/ads` | Ads Manager: your own paid campaigns on every ad platform, plus website and business analytics. |
+| `https://app.hermoso.ai/mcp/social` | Social Media Manager: publish and schedule posts, answer comments, DMs and reviews, read post results. |
+| `https://app.hermoso.ai/mcp/sites` | Launch Your Business: host the site your AI wrote, on your own domain, with email and payments. |
+| `https://app.hermoso.ai/mcp/analytics` | Marketing Analytics: read-only results for paid campaigns, social posts, the website and search. |
+| `https://app.hermoso.ai/mcp/research` | Ad Research (Claude connector): read-only ad-library and organic social research. |
+| `https://app.hermoso.ai/mcp/reports` | Ads Reporting (Claude connector): read-only performance from your connected ad accounts and GA4 / Search Console. |
+| `https://app.hermoso.ai/mcp/scheduler` | Social Scheduler (Claude connector): publish and schedule your own posts, each confirmed before it runs. No generation. |
+| `https://app.hermoso.ai/mcp/creators` | Creator Campaigns (Claude connector): find creators, run campaigns, review posts. No payouts from the connector. |
+| `https://app.hermoso.ai/mcp/gemini` | The tool set for Gemini (Connected Apps and Gemini Enterprise, which allows up to 100 actions). |
+| `https://app.hermoso.ai/mcp/copilot` | The tool set for Microsoft Copilot Studio. Long calls return a job id that `get_job` reads. |
+| `https://app.hermoso.ai/mcp/s/<groups>` | Your own mix: comma-separated groups from `core`, `research`, `create`, `channels`, `channel_admin`, `analytics`, `ads`, `files`, `workspace`. Example: `/mcp/s/research,create`. |
+
+The older `?tools=` form (`https://app.hermoso.ai/mcp?tools=research,create`) keeps working.
 
 ## Examples
 
@@ -183,7 +210,7 @@ Hermoso in one line. Every install brings the same eleven skills (`hermoso-resea
 `hermoso-setup-check`), and the skills drive the `hermoso`
 CLI through `npx`. No
 tool list is loaded into your session: a CLI command costs nothing until it runs, and it reaches every tool.
-The first time, your agent runs `npx -y hermoso@0.1.685 auth login`, which opens a browser to sign in.
+The first time, your agent runs `npx -y hermoso@0.1.686 auth login`, which opens a browser to sign in.
 
 **Claude Code:**
 
@@ -210,13 +237,13 @@ gemini extensions install https://github.com/hermoso-ai/hermoso
 - **grok.com and the Grok apps** take the hosted connector: open **grok.com/connectors** (Connect Apps) → **Custom** → **Add a custom connector**,
   paste `https://app.hermoso.ai/mcp` as the Server URL and sign in with your Hermoso account.
 - **Grok Bot**: send it the one line above. It signs in from its own cloud computer with
-  `npx -y hermoso@0.1.685 auth login --device` (a link and a short code you approve on your phone), then runs the stdio server
-  `npx -y hermoso@0.1.685 mcp`. No key.
+  `npx -y hermoso@0.1.686 auth login --device` (a link and a short code you approve on your phone), then runs the stdio server
+  `npx -y hermoso@0.1.686 mcp`. No key.
 - **Grok Build**, xAI's terminal agent, runs a local MCP server. Sign in once, then add it:
 
   ```bash
-  npx -y hermoso@0.1.685 auth login
-  grok mcp add hermoso -- npx -y hermoso@0.1.685 mcp
+  npx -y hermoso@0.1.686 auth login
+  grok mcp add hermoso -- npx -y hermoso@0.1.686 mcp
   ```
 
 **Cursor, OpenCode, GitHub Copilot, Windsurf and about 75 more agents**, through the open skills installer:
@@ -233,16 +260,16 @@ It asks which agents to install into; `-a opencode` (or `cursor`, `github-copilo
 below). The ChatGPT desktop app and ChatGPT workspace admins can also read this repo's
 `.claude-plugin/marketplace.json`, which installs the skills.
 
-No browser on the machine (a server, an SSH session)? `npx -y hermoso@0.1.685 auth login` notices and shows a link and a short
+No browser on the machine (a server, an SSH session)? `npx -y hermoso@0.1.686 auth login` notices and shows a link and a short
 code instead: open the link on your phone and approve. `--device` asks for it directly; an agent that relays the link
-over chat runs `npx -y hermoso@0.1.685 auth login --device --no-wait` (prints the link and exits), then
-`npx -y hermoso@0.1.685 auth login --device --resume` once you have approved. Only if nothing can open a link: create a key in
+over chat runs `npx -y hermoso@0.1.686 auth login --device --no-wait` (prints the link and exits), then
+`npx -y hermoso@0.1.686 auth login --device --resume` once you have approved. Only if nothing can open a link: create a key in
 the app under **MCP & CLI** and either set it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipe it
-in with `npx -y hermoso@0.1.685 auth login --token -`, which reads the key from stdin (or asks for it without showing it),
+in with `npx -y hermoso@0.1.686 auth login --token -`, which reads the key from stdin (or asks for it without showing it),
 so it never lands in your shell history.
 
 On a server, a CI job or an agent gateway that calls Hermoso many times a day, install it once
-(`npm i -g hermoso@0.1.685`) and call `hermoso` directly. `npx` asks the npm registry about the package on every run,
+(`npm i -g hermoso@0.1.686`) and call `hermoso` directly. `npx` asks the npm registry about the package on every run,
 and a busy machine can be rate-limited by npm. If the CLI ever says an HTTP error "did not come from Hermoso",
 something on your side (a proxy, a firewall or the gateway) refused the request before it reached us.
 
@@ -253,12 +280,12 @@ Two shapes, and the right one is decided by **what your client can do**, not by 
 | Your client | Use | Why |
 | --- | --- | --- |
 | **Runs in a browser**: Claude.ai, ChatGPT, Claude Desktop | the hosted connector `https://app.hermoso.ai/mcp` | It cannot spawn a local process, so a URL is the only shape it has. Nothing to install, no key to paste, and the full toolset arrives with your saved brand context. This is the right answer for these clients, not a lesser one. |
-| **Can run a shell**: Claude Code, Codex, Gemini CLI, Cursor, Cline, OpenClaw, Hermes, your own scripts | the one-command install above, or the CLI itself (`npm install -g hermoso@0.1.685`) | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
+| **Can run a shell**: Claude Code, Codex, Gemini CLI, Cursor, Cline, OpenClaw, Hermes, your own scripts | the one-command install above, or the CLI itself (`npm install -g hermoso@0.1.686`) | A tool manifest is loaded into every session whether or not a tool is called. A shell command costs nothing until it runs, and it reaches **every** tool rather than the default roster. |
 
 The CLI answers the questions a tool manifest would, on demand and only when asked:
 
 ```bash
-npm install -g hermoso@0.1.685                  # once; or prefix each line with npx -y and that same hermoso@version
+npm install -g hermoso@0.1.686                  # once; or prefix each line with npx -y and that same hermoso@version
 hermoso tools --search reddit                   # every matching tool, name + one line
 hermoso tools plan_ad                           # one tool's full argument schema
 hermoso call plan_ad --json '{"product":"…"}'   # run it
@@ -269,7 +296,7 @@ can browse the entire product before anyone signs in. Only `call` spends, and on
 `hermoso auth login` once.
 
 **Want the tools in your coding agent's own list as well?** That is the MCP server, and it is optional. One
-`hermoso auth login` covers the CLI *and* lets `claude mcp add hermoso -- npx -y hermoso@0.1.685 mcp` pick the key up with
+`hermoso auth login` covers the CLI *and* lets `claude mcp add hermoso -- npx -y hermoso@0.1.686 mcp` pick the key up with
 no `env` block, so the agent can reach for a native tool when it wants structured results and shell out when it
 wants breadth. It costs context in every session, so add it when a session settles into one area and makes many
 calls there; `enable_tools({groups:['ads']})` then turns campaign management on in a single free call.
@@ -349,15 +376,15 @@ claude plugin marketplace add hermoso-ai/hermoso && claude plugin install hermos
 
    Already inside a session? `/plugin marketplace add hermoso-ai/hermoso`, then `/plugin install hermoso@hermoso`.
    Codex, Gemini CLI and the rest are in [Install in one command](#install-in-one-command).
-3. **Sign in once.** `npx -y hermoso@0.1.685 auth login` opens your browser; your agent also runs it by itself the first
+3. **Sign in once.** `npx -y hermoso@0.1.686 auth login` opens your browser; your agent also runs it by itself the first
    time it needs Hermoso. On a machine with no browser it shows a link and a short code to approve on your phone
-   (`npx -y hermoso@0.1.685 auth login --device`). Only if nothing can open a link, take a key from the **MCP & CLI** tab, under
-   **Terminal & API keys** (https://app.hermoso.ai/?tab=api-keys), and pipe it to `npx -y hermoso@0.1.685 auth login --token -`
+   (`npx -y hermoso@0.1.686 auth login --device`). Only if nothing can open a link, take a key from the **MCP & CLI** tab, under
+   **Terminal & API keys** (https://app.hermoso.ai/?tab=api-keys), and pipe it to `npx -y hermoso@0.1.686 auth login --token -`
    (or set it as `HERMOSO_TOKEN`), so the key never sits on a command line.
 4. **Ask for what you want**, in your normal prompts. Claude Code picks the Hermoso skill for the job and runs the
    commands. You type none of them.
 
-Rather install the CLI by hand? `npm install -g hermoso@0.1.685` puts the same `hermoso` command on your PATH, and the
+Rather install the CLI by hand? `npm install -g hermoso@0.1.686` puts the same `hermoso` command on your PATH, and the
 skills use it when it is there.
 
 The hosted URL works in Claude Code too, but the plugin is the lighter path there because it loads no tool list
@@ -372,24 +399,24 @@ learned memory you set up in the web app apply automatically (`get_brand` shows 
 ## 1. MCP server (stdio), optional in a coding agent
 
 `hermoso mcp` runs a stdio MCP server exposing the full toolset, for a client that wants Hermoso's tools in its own
-list. The published `hermoso` package means no clone: `npx -y hermoso@0.1.685 mcp` fetches and runs it. Sign in once with
+list. The published `hermoso` package means no clone: `npx -y hermoso@0.1.686 mcp` fetches and runs it. Sign in once with
 the CLI and no key goes into any client config, because `hermoso mcp` reads the bearer `hermoso auth login` stored:
 
 ```bash
-npm install -g hermoso@0.1.685 && hermoso auth login && claude mcp add hermoso -- npx -y hermoso@0.1.685 mcp
+npm install -g hermoso@0.1.686 && hermoso auth login && claude mcp add hermoso -- npx -y hermoso@0.1.686 mcp
 ```
 
 On a machine with no browser, skip the sign-in and pass the key to the client instead:
 
 ```bash
-claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso@0.1.685 mcp
+claude mcp add hermoso -e HERMOSO_TOKEN=hmk_… -- npx -y hermoso@0.1.686 mcp
 ```
 
 Cursor / Codex: sign in the same way, then add to `mcp.json` (Codex uses the TOML equivalent). Drop the `env`
 block entirely if you signed in above; it is there for CI, where the process cannot read your home directory:
 
 ```json
-{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso@0.1.685", "mcp"],
+{ "mcpServers": { "hermoso": { "command": "npx", "args": ["-y", "hermoso@0.1.686", "mcp"],
   "env": { "HERMOSO_API_BASE": "https://app.hermoso.ai", "HERMOSO_TOKEN": "<your token>" } } } }
 ```
 
@@ -552,7 +579,7 @@ Render jobs queue server-side and poll to completion, returning a served URL.
 fat tool manifest.
 
 ```bash
-npm install -g hermoso@0.1.685                             # installs `hermoso`
+npm install -g hermoso@0.1.686                             # installs `hermoso`
 hermoso capabilities                               # valid model ids + costs (run first)
 hermoso create --brand "YourBrand" --product "your best-selling product" --format image
 hermoso generate image --prompt "…" --ref ./product.png --wait

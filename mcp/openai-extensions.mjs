@@ -176,6 +176,22 @@ export const chatgptExtOn = ({ env = process.env, asked, widgetHost } = {}) =>
 export const CHATGPT_EXT_PUBLISHED_ENV = 'HERMOSO_CHATGPT_EXT_PUBLISHED';
 export const chatgptExtRequested = ({ env = process.env, asked, app } = {}) =>
   chatgptExtAsked(asked) || (!app && String(env?.[CHATGPT_EXT_PUBLISHED_ENV] ?? '').trim() === '1');
+// THE SAME HOME IN CLAUDE'S ARTIFACTS PAGE (2026-11-26, OFF until HERMOSO_CLAUDE_APP=1). Claude lists an MCP App on
+// claude.ai/artifacts, as a tile people open without asking, when one tool carries `_meta["openai/ui"].entrypoints`
+// with `{type:"global"}` AND `_meta.ui.resourceUri` pointing at a `ui://` resource, the model can see it, and the
+// connector is a custom or Verified one (claude.com/docs/connectors/building/mcp-apps/entry-points.md, read
+// 2026-11-26). open_hermoso_home already carries exactly that `_meta` (libraryToolDefs), and the app speaks only the
+// MCP Apps bridge, so what Claude lacked was the tool itself: the app was registered for ChatGPT only. This predicate
+// registers the SAME app, unchanged, on a Claude chat connection. Its keys: the env, a Claude chat client (the names
+// production logged on 2026-11-26 were `claude-ai` and `Anthropic/ClaudeAI`; `claude-code` renders no app and is left
+// out), not a widget host (ChatGPT keeps its own predicate above, untouched), and an UNSCOPED connection (no `?tools=`
+// focused app or Claude directory cage, whose rosters were reviewed as they are). Any key missing and the Claude
+// roster is byte-identical. Pinned by tools/claude-app-entrypoint-check.mjs.
+export const CLAUDE_APP_ENV = 'HERMOSO_CLAUDE_APP';
+export const CLAUDE_APP_HOST_RE = /claude-?ai\b/i;
+export const claudeAppOn = ({ env = process.env, client, ua, widgetHost, scoped } = {}) =>
+  !widgetHost && !scoped && String(env?.[CLAUDE_APP_ENV] ?? '').trim() === '1'
+  && (CLAUDE_APP_HOST_RE.test(String(client ?? '')) || CLAUDE_APP_HOST_RE.test(String(ua ?? '')));
 
 // THE SIDEBAR ICON. The spec asks for a 20x20 monochrome SVG in currentColor. This is the bloom (four petals and a
 // centre, public/brand/bloom-mono-black.svg) redrawn in currentColor at the spec's stroke weight. A data: URI, so it

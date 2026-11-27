@@ -3,7 +3,7 @@
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
   "description": "Launch and market what your AI built. 1830 tools, usable alone. Start free: 160+ credits. No markup.",
-  "version": "0.1.685",
+  "version": "0.1.686",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -13,6 +13,78 @@
     {
       "type": "streamable-http",
       "url": "https://app.hermoso.ai/mcp?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/full?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/all?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/lean?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/core?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/create?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/ads?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/social?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/sites?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/analytics?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/research?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/reports?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/scheduler?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/creators?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/gemini?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/copilot?src=registry"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://app.hermoso.ai/mcp/s/{groups}?src=registry",
+      "variables": {
+        "groups": {
+          "description": "Comma-separated tool groups: core, research, create, channels, channel_admin, analytics, ads, files, workspace.",
+          "isRequired": true,
+          "default": "core,research,create",
+          "placeholder": "research,create"
+        }
+      }
     }
   ],
   "packages": [
@@ -20,7 +92,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.685",
+      "version": "0.1.686",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

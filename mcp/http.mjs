@@ -18,8 +18,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups, widgetHostScope, withFirstRunLine, firstRunOffers } from './tools.mjs';
 import { chatgptExtRequested } from './openai-extensions.mjs';
-import { CURATED_SCOPES, isCuratedToken } from './directory-curated.mjs'; // a curated Claude directory connector's own scope on its 401 + PRM (2026-11-22)
+import { CURATED_SCOPES, isCuratedToken, mcpPathScope } from './directory-curated.mjs'; // a curated Claude directory connector's own scope on its 401 + PRM (2026-11-22)
 import { mcpCtx, connectedProviders, CLI_PKG } from './client.mjs';
+import { serveModernFactory } from './era-2026-serve.mjs'; // MCP 2026-07-28, OFF unless MCP_ERA_2026 is set (see that file)
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
@@ -70,9 +71,17 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   // bare: measured on production, see CURATED_SCOPES in ./directory-curated.mjs). So a 401 on `?tools=<curated>` names
   // that connector's one scope, and points at this document with the same `?tools=`, which then lists only that scope:
   // the challenge and the PRM agree whichever one a client reads. `resource` is UNCHANGED on every form.
-  const curatedOfReq = (req) => { const t = String(req?.query?.tools ?? req?.headers?.['x-hermoso-tools'] ?? '').trim().toLowerCase(); return isCuratedToken(t) ? t : null; };
+  // ── THE PATH FORM OF A SCOPE (2026-11-26) ── `/mcp/reports` == `/mcp?tools=directory-reports`, `/mcp/s/<tools>` ==
+  // `/mcp?tools=<tools>` (mcpPathScope in ./directory-curated.mjs; Anthropic's directory ignores the query when it checks
+  // that a URL is unique). The path-form routes below set PATH_SCOPE on the request and hand it to the SAME handler the
+  // query form uses; everything that reads the scope reads it through toolsParamOf, so the two forms cannot diverge.
+  // Only the resource identifier differs, because RFC 9728 §3.3 says it must be the URL the client used.
+  const PATH_SCOPE = Symbol('hermoso.mcpPathScope');
+  const toolsParamOf = (req) => (req && req[PATH_SCOPE] ? req[PATH_SCOPE].tools : (req?.query?.tools ?? req?.headers?.['x-hermoso-tools']));
+  const resourceOf = (req) => (req && req[PATH_SCOPE] ? `${BASE}${req[PATH_SCOPE].path}` : `${BASE}${MCP_PATH}`);
+  const curatedOfReq = (req) => { const t = String(toolsParamOf(req) ?? '').trim().toLowerCase(); return isCuratedToken(t) ? t : null; };
   const protectedResourceMetadata = (req, res) => { const cur = curatedOfReq(req); return res.json({
-    resource: `${BASE}${MCP_PATH}`,
+    resource: resourceOf(req),
     authorization_servers: [process.env.HERMOSO_OAUTH_ISSUER || process.env.HEIST_OAUTH_ISSUER].filter(Boolean),
     scopes_supported: cur ? [CURATED_SCOPES[cur]] : ['hermoso.research', 'hermoso.generate'],
     bearer_methods_supported: ['header'],
@@ -88,6 +97,14 @@ export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStar
   // is the property the AS metadata lacks (see the asymmetry note above), so this alias is for the PRM only. Same one
   // handler, never a copy. Pinned by the canary (`prm-appended`) and tools/mcp-connect-canary-check.mjs.
   app.get(`${MCP_PATH}/.well-known/oauth-protected-resource`, protectedResourceMetadata);
+  // The path forms' own documents, at the RFC 9728 inserted URL (/.well-known/oauth-protected-resource/mcp/reports) and the
+  // appended one Perplexity probes (/mcp/reports/.well-known/oauth-protected-resource). `resource` is the path URL, and the
+  // scopes are what its query form lists. A path that is not a path form falls through (404). Read off req.path, which is
+  // still percent-encoded, so the identifier is the URL exactly as sent.
+  const PRM_SUFFIX = '/.well-known/oauth-protected-resource';
+  const pathFormPrm = (pathOf) => (req, res, next) => { const ps = mcpPathScope(pathOf(String(req.path || ''))); if (!ps) return next(); req[PATH_SCOPE] = ps; return protectedResourceMetadata(req, res); };
+  app.get(/^\/\.well-known\/oauth-protected-resource\/mcp\/.+$/i, pathFormPrm((p) => p.slice(PRM_SUFFIX.length)));
+  app.get(/^\/mcp\/.+\/\.well-known\/oauth-protected-resource\/?$/i, pathFormPrm((p) => p.replace(/\/\.well-known\/oauth-protected-resource\/?$/i, '')));
 
   // ── THE STATIC SERVER CARD A DIRECTORY READS INSTEAD OF SCANNING (2026-09-25) ─────────────────────────────────────
   // Smithery's re-scan stopped at "Authentication required": its first probe (UA `SmitheryBot/1.0 (+https://…)`) gets
@@ -204,6 +221,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
         if (!res.writableEnded && !res.destroyed) {
           // An open 200 on a GET here IS the SDK's SSE stream (its headers go through writeHead, so getHeader cannot see them;
           // any refusal it answers is JSON and already ended). Events are written whole, so a field between them is valid SSE.
+          if (typeof res.__eraFinal === 'function') { try { res.__eraFinal(); } catch {} } // a 2026-07-28 subscriptions/listen stream ends with its graceful result (only those carry the hook)
           if (res.headersSent && res.statusCode === 200) res.write(`retry: ${RECONNECT_HINT_MS}\n\n`);
           res.end(); ended++;
         }
@@ -229,7 +247,10 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     // `scope` rides the challenge (MCP authorization spec, "Protected Resource Metadata Discovery Requirements":
     // servers SHOULD include it; ChatGPT's own auth doc shows the same shape). The same ONE list the PRM and the AS
     // metadata publish, so a client that scopes its authorize request from the challenge asks for exactly that.
-    .set('WWW-Authenticate', curatedOfReq(req)
+    // A path form points at its OWN document (the RFC 9728 inserted URL for that path); the query forms are unchanged.
+    .set('WWW-Authenticate', req?.[PATH_SCOPE]
+      ? `Bearer resource_metadata="${BASE}${PRM_SUFFIX}${req[PATH_SCOPE].path}", scope="${curatedOfReq(req) ? CURATED_SCOPES[curatedOfReq(req)] : 'hermoso.research hermoso.generate'}"`
+      : curatedOfReq(req)
       ? `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource?tools=${curatedOfReq(req)}", scope="${CURATED_SCOPES[curatedOfReq(req)]}"`
       : `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource", scope="hermoso.research hermoso.generate"`)
     .json({
@@ -424,7 +445,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // was the right instinct for a scope the SERVER changes silently, and the wrong one for a change the CLIENT
   // asked for and is told about.
   function scopeFor(req, res) {
-    const { groups, error, directory, app, lean, full } = parseToolScope(req.query?.tools ?? req.headers['x-hermoso-tools']);
+    const { groups, error, directory, app, lean, full } = parseToolScope(toolsParamOf(req));
     if (error) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: error }, id: null }); return false; }
     // `app` = one of the focused Hermoso apps (APP_SCOPE_TOKENS in tools.mjs); set ONLY by those tokens, so it is absent
     // on every other connection and nothing below changes for them.
@@ -443,6 +464,13 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   const extAsked = (req, scope) => chatgptExtRequested({ asked: req.query?.ext, app: scope?.app || null });
   const srcOf = (req) => { const v = String(req.query?.src || '').trim().toLowerCase(); return /^[a-z0-9][a-z0-9_.-]{0,39}$/.test(v) ? v : null; };
   const methodsOf = (body) => (Array.isArray(body) ? body : [body]).map((m) => m && m.method).filter(Boolean);
+  // The modern-era server, built from THIS mount's own pieces (the same scope parser, host decision, registerTools options,
+  // first-run read and session hooks as the legacy session below), so the two eras cannot disagree about a caller.
+  const modern = serveModernFactory({
+    PKG_VERSION, scopeFor, isWidgetHost, WIDGET_HOST_RE, extAsked, srcOf, connectEvent, firstRunFor, onSessionStart, onSessionEnd, onFirstCall,
+    streams: { canOpen: () => !draining && openGetStreams < GET_STREAM_MAX, open: () => { openGetStreams++; }, close: () => { openGetStreams = Math.max(0, openGetStreams - 1); }, track: (r) => openGetResponses.add(r), untrack: (r) => openGetResponses.delete(r), lifeMs: GET_STREAM_MS, draining: () => draining },
+    wallMs: MCP_CALL_WALL_MS,
+  });
 
   async function serveAnonDiscovery(req, res, scope) {
     // A widget host (ChatGPT, whose plugin scanner reads this anonymous roster) gets its own instructions — see
@@ -488,7 +516,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     await transport.handleRequest(req, res, req.body);
   }
 
-  app.all(MCP_PATH, async (req, res) => {
+  const handleMcp = async (req, res) => {
     const auth = req.headers.authorization || '';
     // The auth-scheme name is case-insensitive (RFC 9110 §11.1, RFC 6750 §2.1): `bearer <key>` is the same
     // credential, and reading only `Bearer ` made a client that lower-cases it look tokenless, challenged for ever.
@@ -528,6 +556,12 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       }
       return challenge(res, req);
     }
+
+    // ── MCP 2026-07-28 (stateless) for an AUTHENTICATED modern request, and only while MCP_ERA_2026 allows it ──────────
+    // Everything legacy falls straight through: `modern.handles` is false unless the flag is on, the request opted in (or
+    // the mode admits every host), and the request itself is modern (2026-07-28 in MCP-Protocol-Version / `_meta`, never
+    // an initialize). Off, this line is the only thing that runs, and it reads two headers. See mcp/era-2026-serve.mjs.
+    if (modern.handles(req)) return modern.serve(req, res, token, user);
 
     // The stream cap, BEFORE any session work: a burst of reconnects must be refused at the door, not after allocating.
     if (req.method === 'GET') {
@@ -574,6 +608,9 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // host would stall at connect. Serving the modern revision for real is a transport rewrite (no protocol-level
       // sessions, per-request _meta, subscriptions/listen) that SDK 1.29 does not implement; this is the answer
       // until then. Pinned by tools/mcp-connect-canary-check.mjs and replayed daily by the connect canary.
+      // (2026-11-26) The modern revision now EXISTS behind MCP_ERA_2026 (mcp/era-2026-serve.mjs, answered above this
+      // point for an allowed request). Everything that reaches this line is a request the flag did not admit, so this
+      // legacy 400 is still the answer for it — tools/mcp-era-2026-check.mjs pins that it never changes.
       if (!init && req.method === 'POST' && methodsOf(req.body).includes('server/discover')) {
         return res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: this server speaks the initialize-based MCP revisions (2025-11-25 and earlier). Send initialize to open a session.' }, id: null });
       }
@@ -736,6 +773,18 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       const r = inflight.get(k);
       if (r && !r.res.writableEnded) { console.error(`[mcp] request ${k} cancelled by the client (${entry.client || '?'}) — ending its stream`); try { r.res.end(); } catch {} }
     }
+  };
+  app.all(MCP_PATH, handleMcp);
+  // The path forms (see PATH_SCOPE above): every method, into the same handler. Only paths mcpPathScope recognises are
+  // taken; anything else under /mcp/ (the server card, the appended PRM) falls through to its own route. A `?tools=` that
+  // names a DIFFERENT scope is refused rather than silently losing to the path; the same value is accepted.
+  app.all(/^\/mcp\/[^/]+(?:\/[^/]+)?\/?$/i, (req, res, next) => {
+    const ps = mcpPathScope(String(req.path || ''));
+    if (!ps) return next();
+    const q = req.query?.tools;
+    if (q !== undefined && String(q).trim() !== '' && String(q).trim().toLowerCase() !== ps.tools) return res.status(400).json({ jsonrpc: '2.0', error: { code: -32602, message: `This URL names its tool scope (${ps.tools}) in its path, and ?tools=${String(q).slice(0, 80)} names another. Drop ?tools=, or use ${BASE}${MCP_PATH}?tools=${String(q).slice(0, 80)}.` }, id: null });
+    req[PATH_SCOPE] = ps;
+    return handleMcp(req, res);
   });
 
   console.error(`[mcp-remote] mounted at ${BASE || '(set HERMOSO_PUBLIC_URL)'}/mcp`);

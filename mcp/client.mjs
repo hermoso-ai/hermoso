@@ -8,6 +8,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { jobQuoteLegs } from './spend-guard.mjs'; // a quoted job as named legs (get_cost)
+import { youtubeFileJobInput, youtubeRefusalText, YOUTUBE_TRANSCRIPT_HELPS_JOBS } from './youtube-file-source.mjs'; // a YouTube source file is refused before anything is sent (2026-11-26)
 
 // Remote-connector identity: mcp/http.mjs wraps each request in mcpCtx.run({ token }) so every /api call a tool
 // makes carries THAT caller's bearer (bills their account). stdio keeps using the env token — ctx is simply unset.
@@ -162,7 +163,7 @@ function headers(extra = {}) {
 // THE PIN (2026-11-25): every command this package prints names the exact release, never a bare `npx -y` of the package,
 // which runs whatever npm serves that day (plugin-directory review). cli/package.json's version; a release rewrites it
 // (tools/cli-version-pin-write.mjs), and the check fails on a stale one. tools.mjs and http.mjs read it here.
-export const CLI_PKG = 'hermoso@0.1.685';
+export const CLI_PKG = 'hermoso@0.1.686';
 export const SIGN_IN_HINT = `Not signed in. Run \`npx -y ${CLI_PKG} auth login\` (it opens a browser; on a machine with none, add --device for a link and a code), or set HERMOSO_TOKEN to an agent key (hmk_…) created at app.hermoso.ai on the MCP & CLI tab, under Terminal & API keys.`;
 export const signedOut = () => !mcpCtx.getStore() && !TOKEN && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(API_BASE);
 /** The 401 sentence a caller with no credential reads. PURE (the signed-out verdict is an argument) so a check runs it. */
@@ -601,6 +602,9 @@ export async function apiSSE(p, body = {}) {
 // (the {image|video, model} object) on success — the job's `result` is itself a {data} envelope, so we peel it.
 export async function submitJob(type, input, { label = '' } = {}) {
   const st = toolCtx.getStore();
+  // A YOUTUBE LINK AS THE SOURCE FILE never leaves this process: YouTube does not let us download it, and every job tool
+  // submits through here, so the refusal (with the captions offer where the words help) comes before any quote, hold or queue.
+  if (youtubeFileJobInput(type, input)) throw Object.assign(new Error(youtubeRefusalText({ transcript: YOUTUBE_TRANSCRIPT_HELPS_JOBS.has(String(type || '')), forAgent: true })), { status: 400, _userInput: true, code: 'youtube_no_download' });
   // A PRICE QUOTE (get_cost / expected_credits): the same submit as a dry run, priced by the job's own hold, then the call
   // stops: nothing is queued. The server forces the dry run in quote mode too; this keeps the tally exact.
   if (st?.quoteOnly) {
