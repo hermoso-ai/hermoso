@@ -965,18 +965,22 @@ const APP_SCRIPT = String.raw`<script>
   function jobsView(){
     var d = D(); var jobs = d.jobs || [];
     if (d.notes && d.notes.jobs) return sectionNote('jobs');
-    var live = jobs.filter(function(j){ return j.status === 'queued' || j.status === 'running'; });
-    var done = jobs.filter(function(j){ return live.indexOf(j) < 0; }).slice(0, 8);
+    // A RENDER IS A RENDER (2026-11-26): the account's own queued email sequences and social posts are real work, but
+    // "2 renders in progress" over two emailseq runners was wrong. They stay visible, under their own heading.
+    var live = renderJobs();
+    var other = activeJobs().filter(function(j){ return j.render === false; });
+    var done = jobs.filter(function(j){ return j.render !== false && live.indexOf(j) < 0 && other.indexOf(j) < 0; }).slice(0, 8);
     var row = function(j){
       var pct = Math.max(0, Math.min(100, Math.round(+j.progress || 0)));
       return '<div class="item">' + (j.thumb ? '<img alt="" src="' + esc(j.thumb) + '">' : '')
         + '<div class="grow"><div class="t">' + esc(j.label || j.type || 'Render') + '</div>'
         + '<div class="s">' + esc([j.statusText, j.model, j.stage].filter(Boolean).join(' · ')) + '</div>'
-        + ((j.status === 'queued' || j.status === 'running') ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : '')
+        + ((j.status === 'queued' || j.status === 'running') && j.render !== false ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : '')
         + '</div></div>';
     };
     var html = '<h3>In progress</h3>' + (live.length ? '<div class="list">' + live.map(row).join('') + '</div>' : '<div class="note">No renders in progress.</div>');
     if (done.length) html += '<h3>Recent</h3><div class="list">' + done.map(row).join('') + '</div>';
+    if (other.length) html += '<h3>Also queued</h3><div class="note">Posts and emails waiting to go out. They are not renders.</div><div class="list">' + other.map(row).join('') + '</div>';
     return html;
   }
 
@@ -1538,6 +1542,10 @@ export const PANEL_HIDDEN_JOB_TYPES = Object.freeze(['convwatch', 'posttrack', '
 // (JOB_DEPLOY_CLASS) by public name: a render, or anything that spends for the customer. Mirrored because this file
 // ships in the CLI, which cannot import lib/; tools/claude-home-check.mjs fails when the two lists differ.
 export const RENDER_JOB_TYPES = Object.freeze(['image', 'video', 'avatar', 'stitch', 'slideshow', 'videoedit', 'reframe', 'upscale', 'videobg', 'angles', 'dub', 'lineswap', 'voiceswap', 'motion', 'multiply', 'motionmoving', 'clipper', 'subtitles', 'explainer', 'thumbnail', 'clonestatic', 'singingad', 'templatead', 'videofinish', 'fixbeat', 'hypermotion', 'postedit', 'repurpose', 'repurposeimage', 'draftfinish', 'insertscene', 'reangle', 'reanglefinal', 'reanglestill', 'layerize', 'productmove', 'faceswapvideo', 'track', 'model3d', 'latelanding', 'watch', 'postrefill', 'weekplan']);
+// THE ONE classification every render count uses: the home's live cards, the Renders tab, the payload's `running` and
+// the model's text. A payload row carries it as `render`; a raw /api/jobs row is classified by its public type.
+export const isRenderJob = (j) => !!j && (typeof j.render === 'boolean' ? j.render : RENDER_JOB_TYPES.includes(j.type));
+export const liveRenderCount = (jobs) => (Array.isArray(jobs) ? jobs.filter((j) => isRenderJob(j) && (j.status === 'queued' || j.status === 'running')).length : 0);
 const ageText = (h) => (h == null || !Number.isFinite(+h) ? '' : +h < 1 ? 'just now' : +h < 48 ? `${Math.round(+h)}h ago` : `${Math.round(+h / 24)}d ago`);
 const VIDEO_RE = /\.(mp4|webm|mov|m4v)([?#]|$)/i;
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -1604,17 +1612,22 @@ export function libraryPayload(reads = {}, { view = 'library', origins = [], pro
     if (reads.jobs.error) out.notes.jobs = errText(reads.jobs);
     else {
       const STATUS = { queued: 'Queued', running: 'Rendering', done: 'Done', error: 'Failed', cancelled: 'Cancelled' };
+      const OTHER_STATUS = { ...STATUS, running: 'Running' }; // an email sequence or a queued post is never "Rendering"
       // NOT /api/jobs' own `running`: that is the PROCESS-wide count (every account's renders), not this user's.
       const now = Date.now();
       const isWork = (j) => j && !PANEL_HIDDEN_JOB_TYPES.includes(j.type) && !(j.status === 'queued' && Number(j.runAt) > now + 60e3);
-      out.jobs = (reads.jobs.data?.jobs || []).filter(isWork).slice(0, 12).map((j) => {
+      // Renders get the list's budget first, so a burst of queued posts can never push a live render out of it.
+      const work = (reads.jobs.data?.jobs || []).filter(isWork);
+      const kept = new Set([...work.filter((j) => isRenderJob(j)).slice(0, 12), ...work.filter((j) => !isRenderJob(j)).slice(0, 6)]);
+      out.jobs = work.filter((j) => kept.has(j)).map((j) => {
         const r = j?.result || {};
         const img = r.image || (Array.isArray(r.images) && r.images[0]) || (Array.isArray(r.thumbnails) && r.thumbnails[0]?.image) || '';
         const vid = r.video || (Array.isArray(r.clips) && r.clips[0]?.video) || '';
         const thumb = img ? picture(abs(img)) : vid ? poster(abs(vid)) : '';
-        return { id: j.id, type: j.type || '', label: j.label || '', status: j.status || '', statusText: STATUS[j.status] || j.status || '', progress: Number(j.progress) || 0, stage: j.status === 'running' ? (j.stage || '') : '', model: j.model || '', thumb, render: RENDER_JOB_TYPES.includes(j.type) };
+        const render = isRenderJob(j);
+        return { id: j.id, type: j.type || '', label: j.label || '', status: j.status || '', statusText: (render ? STATUS : OTHER_STATUS)[j.status] || j.status || '', progress: Number(j.progress) || 0, stage: j.status === 'running' ? (j.stage || '') : '', model: j.model || '', thumb, render };
       });
-      out.running = out.jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
+      out.running = liveRenderCount(out.jobs);
     }
   }
   if (reads.brands) {
@@ -1788,7 +1801,11 @@ export const libraryText = (p) => {
   const bits = [];
   if (p.brand?.name) bits.push(`Profile: ${p.brand.name}.`);
   if (Array.isArray(p.items)) bits.push(p.items.length ? `${p.items.length} Library asset${p.items.length === 1 ? '' : 's'}, newest first.` : 'The Library is empty.');
-  if (Array.isArray(p.jobs)) { const live = p.jobs.filter((j) => j.status === 'queued' || j.status === 'running').length; bits.push(`${live} render${live === 1 ? '' : 's'} in progress.`); }
+  if (Array.isArray(p.jobs)) {
+    const live = liveRenderCount(p.jobs); bits.push(`${live} render${live === 1 ? '' : 's'} in progress.`);
+    const other = p.jobs.filter((j) => !isRenderJob(j) && (j.status === 'queued' || j.status === 'running')).length;
+    if (other) bits.push(`${other} other job${other === 1 ? '' : 's'} (scheduled posts or emails) queued; ${other === 1 ? 'it is' : 'they are'} not a render.`);
+  }
   if (Array.isArray(p.scheduled)) bits.push(`${p.scheduled.length} post${p.scheduled.length === 1 ? '' : 's'} scheduled.`);
   if (Array.isArray(p.connections)) bits.push(`${p.connections.filter((c) => c.connected).length} of ${p.connections.length} accounts connected.`);
   if (Array.isArray(p.ads)) bits.push(p.ads.length ? `${p.ads.reduce((n, g) => n + g.campaigns.length, 0)} ad campaigns across ${[...new Set(p.ads.map((g) => g.label))].join(', ')}.` : 'No ad platform is connected.');

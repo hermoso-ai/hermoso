@@ -17,6 +17,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { registerTools, instructionsFor, widgetHostScope, withFirstRunLine, firstRunOffers, canonToolGroups } from './tools.mjs';
 import { curatedTokenOf } from './directory-curated.mjs';
+import { installAnswerStates } from './answer-states.mjs'; // a state that is an answer (not connected, credits, plan, confirm, platform rule) is not a failed tool
 import { mcpCtx, connectedProviders, getJob, apiPost } from './client.mjs';
 import * as E from './era-2026.mjs';
 import { CONFIRM_ARG as DIR_CODE_ARG, CONFIRM_TTL_MS as DIR_CODE_TTL_MS, spendCode as spendDirCode } from './directory-confirm.mjs';
@@ -103,6 +104,7 @@ export function serveModernFactory(deps) {
       const instructions = withFirstRunLine(baseInstructions, firstRun);
       const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions });
       registerTools(server, { only: scope.groups, lean: !!scope.lean, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, chatgptFull, hosted: true, ext, client, ua });
+      if (!widgetHost) installAnswerStates(server); // not on ChatGPT, whose widgets render a non-error result as a finished card (see mcp/answer-states.mjs)
       const [a, b] = InMemoryTransport.createLinkedPair();
       // The bridge declares NO client capabilities: a modern client is never sent a server→client request, so no tool
       // can reach one through this bridge either (elicitation is MRTR here, below).
@@ -158,6 +160,11 @@ export function serveModernFactory(deps) {
     if (!ERA.on || req.method !== 'POST') return false;
     const c = E.classifyModern(req);
     if (!c) return false;
+    // ADMIT ONLY WITH THE HEADER (2026-11-27). A body that says 2026-07-28 in `_meta` but sends no MCP-Protocol-Version
+    // header is not a request this path can serve: validateModernHeaders would answer 400 -32020, a MODERN error, and a
+    // dual-era host that reads it stops falling back to initialize, so it stalls at connect (the connect canary caught
+    // exactly this on claude-code the morning after the flip). Leave it to the legacy path, whose 400 is the fallback cue.
+    if (!c.batch && !E.isModernVersion(c.headerVersion)) return false;
     return E.eraAllowed(ERA, req, c.batch ? '' : E.clientInfoOfMeta(c.meta).name);
   };
 

@@ -180,8 +180,12 @@ async function main() {
   // resolve API base + token from config (env overrides), then load the shared client
   await npxTip(group);
   process.env.HERMOSO_API_BASE = process.env.HERMOSO_API_BASE || cfg.apiBase || 'https://app.hermoso.ai';
+  // THE SAVED PROFILE BELONGS TO THE SAVED KEY (2026-11-27). A HERMOSO_TOKEN for ANOTHER account (an agent, CI, a second account)
+  // used to apply the config's profile, find it "not on this account" and DELETE it from the config file the user's own key
+  // relies on. A different key in the environment now leaves the saved profile, and the file, alone.
+  const _envKeyIsAnother = !!(process.env.HERMOSO_TOKEN && cfg.token && process.env.HERMOSO_TOKEN !== cfg.token);
   if (cfg.token && !process.env.HERMOSO_TOKEN) process.env.HERMOSO_TOKEN = cfg.token;
-  if (cfg.profile && cfg.profile !== 'default' && !process.env.HERMOSO_PROFILE) {
+  if (cfg.profile && cfg.profile !== 'default' && !process.env.HERMOSO_PROFILE && !_envKeyIsAnother) {
     // a saved profile the account no longer has failed EVERY call; it falls back to the default with one line (saved-profile.mjs)
     const { resolveSavedProfile } = await import('./saved-profile.mjs');
     const r = await resolveSavedProfile(cfg, { apiBase: process.env.HERMOSO_API_BASE, token: process.env.HERMOSO_TOKEN });
@@ -243,8 +247,14 @@ async function main() {
         if (sub !== 'draft') return die('usage: hermoso brand            the saved profile (a brand, creator or personal workspace)\n       hermoso brand draft (--domain <d> | --description <t> | --social <h> --platform <p>)');
         const body = flags.domain ? { domain: flags.domain } : flags.description ? { description: flags.description } : flags.social ? { socialHandle: flags.social, platform: flags.platform || 'instagram' } : null;
         if (!body) return die('give --domain, --description, or --social');
-        const d = await api.apiPost('/api/brand/draft', body); const p = d.profile || d;
-        return out(`✓ ${p.name || '—'}${p.category ? ' · ' + p.category : ''}${p.domain ? ' · ' + p.domain : ''}`, p);
+        // THROUGH draft_brand, SO IT SAVES (2026-11-27). This posted the raw route, which drafts and never saves: measured with two real
+        // agents the same day, `brand draft` printed "✓ Cal.com", `brand` then said no brand was saved, and the first ad came out
+        // off-brand. The MCP tool carries the save rule (save when none is saved yet) and the product-photo read.
+        // The flags become the tool's own arguments (--social is the tool's socialHandle), so no preset is needed.
+        const { social: _s, ...rest } = flags;
+        const reg = await import('../mcp/registry.mjs');
+        const args = { ...rest, ...(body.socialHandle ? { socialHandle: body.socialHandle, platform: body.platform } : {}) };
+        return await runTool(reg, 'draft_brand', args);
       }
       case 'create': {
         if (!flags.product) return die('usage: hermoso create --brand <b> --product <p> [--format auto|image|video] [--recipe <id>]');

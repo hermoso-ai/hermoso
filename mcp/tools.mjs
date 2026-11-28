@@ -79,6 +79,10 @@ const moneyText = (amount, currency) => {
 };
 const budgetTextOf = (o, currency) => o?.budgetText || (Number(o?.lifetimeBudget ?? o?.lifetimeBudgetUsd) > 0 ? `${moneyText(o.lifetimeBudget ?? o.lifetimeBudgetUsd, o.currency || currency)} lifetime` : Number(o?.dailyBudget ?? o?.dailyBudgetUsd) > 0 ? `${moneyText(o.dailyBudget ?? o.dailyBudgetUsd, o.currency || currency)}/day` : '');
 const JOB_TIMEOUT = +(process.env.HERMOSO_JOB_TIMEOUT_MS || process.env.HEIST_JOB_TIMEOUT_MS || 10 * 60 * 1000);
+// How long a render tool holds a HOSTED caller (/mcp, /v1) before it answers with the job handle, counted from the start of the
+// tool call (awaitRenderJob). 45s sits under the shortest client timeout measured (Claude Code, under 75s) with room for the
+// reply. The env override exists for checks (tools/render-wait-budget-check.mjs); production leaves it unset.
+export const HOSTED_RENDER_WAIT_MS = Math.max(0, +(process.env.HERMOSO_HOSTED_RENDER_WAIT_MS || 45_000));
 // /generated/x.mp4 → a URL THE CALLER can open. `API_BASE` is the base this layer CALLS the app on, and on the hosted
 // transport and the `/v1` passthrough that is a loopback self-call — so prefixing it handed a remote caller
 // `http://127.0.0.1:8080/generated/…` (live on /v1 2026-09-20). The rule lives in public-url.mjs, the ONE absolutiser:
@@ -198,8 +202,14 @@ const channelOutcomeLine = (res) => {
 // card the user is looking at: it should say one line and stop. Everywhere else there is no card, so polling is
 // exactly what it should do — it just may not claim a result it has not received.
 const stillMsg = (r, widget = hostRendersWidgets()) => widget
-  ? `NOT FINISHED. Job ${r.jobId} is still rendering and there is no video yet. The Hermoso card above is already polling and will show the finished video in place the moment it lands, so do NOT call get_job and do NOT re-render. Reply with ONE short line saying it is rendering and will appear in the card above. Do NOT say it is done, ready, rendered or finished, and do NOT describe the video — you have not seen it.`
-  : `Still rendering — job ${r.jobId}. This is NORMAL: video renders take 1–3 minutes and each get_job call waits up to ~45s, so it can take several calls. Keep calling get_job with this id until status is done or error — do NOT ask the user whether to keep waiting, and do NOT re-fire the render on another model (that double-charges). Only surface a problem after ~6 minutes of polling. Until get_job reports done you have NO video: do NOT say it is finished and do NOT describe it.`;
+  ? `NOT FINISHED. Job ${r.jobId} is still rendering and there is no video yet. The Hermoso card above is already polling and shows the finished video in place the moment it lands, so get_job is not needed here, and a second render would be charged a second time. Status for the user, in one short line: it is rendering and will appear in the card above. It is not done, ready, rendered or finished yet, and there is no video to describe.`
+  : `Still rendering — job ${r.jobId}. This is NORMAL: video renders take 1–3 minutes and each get_job call waits up to ~45s, so it can take several calls. get_job with this id returns the video when status is done, or the reason when it is error; polling is free and is the expected next step, with nothing for the user to decide. Running the render again on another model is charged a second time. A problem is only likely after ~6 minutes of polling. Until get_job reports done there is NO video: it is not finished and there is nothing to describe.`;
+// AN IMAGE THAT OUTLIVED THE WAIT (2026-11-27). generate_image answers with its job once the shared wait budget is spent
+// (awaitRenderJob). The sentence names the one next step (get_job with this id), says the render goes on and is charged
+// once, and forbids the re-send that would charge a second image. On a widget host the card is already polling the job.
+const stillImageMsg = (jobId, widget = hostRendersWidgets()) => widget
+  ? `NOT FINISHED YET. Image job ${jobId} is still rendering and there is no image yet. The Hermoso card above is polling it and shows the image in place the moment it lands; get_job with id "${jobId}" returns it too. It is charged once however it is read, and calling generate_image again would make and charge a second image. Status for the user, in one short line: the image is still rendering and will appear in the card above.`
+  : `Still rendering: image job ${jobId} took longer than this call waits. Call get_job with id "${jobId}": it returns the finished image URL when status is done (usually within a minute; polling is free and is the expected next step). The render keeps going and is charged once. Do not call generate_image again for it: that makes and charges a second image. The finished image also lands in the Library (list_library). Until get_job reports done there is no image to describe.`;
 // A TIMELINE EDIT'S SEAM REVIEW, one sentence for both places it can arrive: edit_timeline's own reply when the render
 // finished inside the wait, and get_job's when it did not (a prod timeline takes ~3 minutes, past the hosted 45 s wait,
 // so on a hosted MCP the review ONLY ever arrives through get_job). Empty for every other job. ON REQUEST ONLY
@@ -532,10 +542,13 @@ export const MCP_INSTRUCTIONS = [
   'CONFIRM the exact target before a delete or real spend, then confirm:true; to stop delivery, PAUSE.',
   'CREDITS: only AI generation, ad research and X posts cost credits; publishing, campaigns, analytics are free. Report the final media URL.',
   // The one-line setup (the full list of hosts and links is the 'setup' topic).
-  'SETUP ELSEWHERE: shell agents: https://hermoso.ai/SKILL.md; Claude: add https://app.hermoso.ai/mcp.',
+  'SETUP: shell agents: https://hermoso.ai/SKILL.md; Claude: https://app.hermoso.ai/mcp.',
   // The pointer to everything that moved. Topic names are asserted against MCP_INSTRUCTION_TOPIC_NAMES.
   // ONBOARDING LIVES IN THE USER'S AI (owner 2026-11-23): a first connection or "what can you do?" is answered by welcome.
-  'FIRST USE / "what can you do?": welcome; idea to business: start_business.',
+  // THE FIRST AD, AS A RECIPE (2026-11-27, docs/research/agent-docs-2026-11-27.md): agents that connected and surveyed (get_brand,
+  // list_connectors, list_brands) and stopped made up most of the abandoned first sessions; one that rendered lost the image when
+  // the call outlived Claude Code's tool timeout. The image path is the one the free credits cover.
+  'FIRST AD: draft_brand, generate_image. "what can you do?": welcome; idea: start_business.',
   'MORE: get_instructions({topic}): \'launch\', \'capabilities\', \'roster\', \'safety\', \'credits\', \'instagram\', \'areas\', \'setup\', \'all\', or a tool name.',
 ].join('\n');
 // Everything an agent can READ from this server's guidance: the head it is sent, plus every topic it can ask for.
@@ -1122,6 +1135,30 @@ function launchNextOnce(tool, r, brand = '') {
 const SINCE_ARG = z.string().optional().describe('only what is NEW since your last call: pass the sinceCursor the previous answer gave. Polling? whats_new covers every channel in one call and reads no platform');
 const sinceQuery = (a) => (typeof a?.since === 'string' && a.since.trim() ? { sinceCursor: a.since.trim() } : {});
 const sinceTail = (d, n, a) => (d && typeof d.sinceCursor === 'string' ? `\n${sinceLine({ cursor: d.sinceCursor, fresh: n, total: d.sinceRead ?? n, valid: !d.sinceNote }, !!sinceQuery(a).sinceCursor)}` : '');
+// A FAILED CALL SAYS WHY IN THE LOG (2026-11-27, daily review). list_scheduled failed 62 of 227 times from ChatGPT in a day
+// and nothing said why: a refusal a tool ANSWERS (isError, no throw) never reaches the error ledger, a signed-out 401 is a
+// signal since 2026-11-24, and the usage table keeps only ok/not-ok. Every failed hosted call now writes one line with the
+// tool, the AI app, the status and the first words of the answer, so the next review reads the cause instead of guessing.
+// Hosted only (on stdio, stderr is the user's terminal). Pure formatter, so tools/mcp-tool-fail-log-check.mjs runs it.
+export function toolFailLogLine(tool, { host = '', status = '', signedOut = false, viaApi = false, text = '' } = {}) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  return `[mcp-tool-failed] tool=${String(tool || '?').slice(0, 64)} host=${String(host || '?').slice(0, 40)}${status ? ` status=${status}` : ''}${signedOut ? ' signedOut=1' : ''}${viaApi ? ' viaApi=1' : ''} text="${t.replace(/"/g, "'")}"`;
+}
+function logToolFailure(tool, info = {}) {
+  try { if (!isRemote()) return; const c = mcpCtx.getStore() || {}; console.error(toolFailLogLine(tool, { host: c.client || c.ua || '', ...info })); } catch {}
+}
+// …AND A PAID CREATION TOOL'S ANSWERED REFUSAL REACHES THE ERROR LEDGER, ON EVERY SURFACE (2026-11-27, the ChatGPT render
+// review: "some failures left no reason on record"). A failure that THREW is already on the ledger (the route records its
+// refusal; a local throw goes through reportToolError), but a refusal the tool ANSWERED (isError, no throw), a repeated
+// refusal and a refused spend preflight never reach the server, and the log line above is hosted-only and is not the board.
+// For every spend tool (generate_image, generate_video, render_ad, make_template_ad, plan_ad and the rest of the paid
+// creation roster) those three now file one `render_refused` dead end (lib/error-ledger.mjs, the user's side) with the
+// tool's own sentence, so every failed render call has its reason on record. So does a free refusal answered as plain text
+// ("NOTHING WAS RENDERED and nothing was charged…"), which the usage table counts as ok. Never blocks or changes the answer.
+function recordAnsweredRenderRefusal(tool, text) {
+  try { if (!isSpendToolName(tool)) return; const t = String(text || '').replace(/\s+/g, ' ').trim(); if (t) reportDeadEnd('render_refused', tool, t.slice(0, 300)); } catch {}
+}
+const _failText = (r) => (Array.isArray(r?.content) ? r.content.find((b) => b && b.type === 'text')?.text : '') || '';
 const wrap = (fn) => {
   // A NAMED closure, so registerTools' proxy can stamp the tool name onto the very function it registers and this
   // body can read it back. Reading a name off `fn` instead would be wrong: `fn` is the inner handler and the thing
@@ -1158,7 +1195,7 @@ const wrap = (fn) => {
       // A HOSTED PAGE'S files[].path IS A PATH INSIDE THE SITE ("/about/index.html"), not a file on the caller's machine, and
       // files[].content is the file itself; its files[].url is held to http(s) by the server (lib/launch-sites.mjs normalizeFiles).
       if (_tool !== 'upload_file' && _tool !== 'publish_page' && _tool !== 'update_page') { const _lm = findClientLocalMedia(args, isRemote() ? { served: null } : { served: null, exists: (p) => { try { return localFileExists(p); } catch { return false; } } }); if (_lm) throw clientLocalMediaError(_lm); }
-      const _st = { tool: _tool, callId: `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}` }; _stU = _st; // callId: one tool call counts once however many requests it makes (x-hermoso-call)
+      const _st = { tool: _tool, callId: `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`, startedAt: _t0 }; _stU = _st; // startedAt: a render's wait budget counts from here (awaitRenderJob) // callId: one tool call counts once however many requests it makes (x-hermoso-call)
       if (typeof args?.account === 'string' && args.account.trim() && accountScopedTool(_tool)) _st.account = args.account.trim(); // see MULTI_ACCOUNT_CHANNELS
       // PRICE FIRST, BUY ONCE (spend-guard.mjs): the call controls never reach the handler; with none of them sent this
       // is exactly the call it always was. `context` is lifted off every tool's arguments and rides as a header.
@@ -1166,12 +1203,12 @@ const wrap = (fn) => {
       // THE SAME "NOT FOUND" TWICE IS NOT ASKED A THIRD TIME (2026-11-16, mcp/repeat-refusal.mjs): same caller, brand, tool and
       // arguments within ten minutes is answered here, said as such, and costs the user's platform rate limits nothing.
       { const _mc = mcpCtx.getStore(); _rk = repeatRefusalKey({ who: _mc?.token || 'local', brand: brandScope.getStore()?.brand || _mc?.profile || '', tool: _tool, args }); }
-      { const _rp = REPEAT_REFUSALS.check(_rk); if (_rp) { try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {} _usage(false); return { content: [{ type: 'text', text: repeatRefusalText(_tool, _rp) }], isError: true, _meta: { 'hermoso.ai/error': { status: 404, repeated: _rp.n - 1 } } }; } }
+      { const _rp = REPEAT_REFUSALS.check(_rk); if (_rp) { try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {} _usage(false); logToolFailure(_tool, { text: `repeated refusal: ${repeatRefusalText(_tool, _rp)}` }); recordAnsweredRenderRefusal(_tool, `repeated refusal: ${repeatRefusalText(_tool, _rp)}`); return { content: [{ type: 'text', text: repeatRefusalText(_tool, _rp) }], isError: true, _meta: { 'hermoso.ai/error': { status: 404, repeated: _rp.n - 1 } } }; } }
       const _sm = isSpendToolName(_tool) ? takeSpendMeta(args) : null;
       if (_sm) {
         args = withoutArgKeys(args, ['get_cost', 'expected_credits', 'idempotency_key']);
         const _early = await spendPreflight(_tool, _sm, args, extra, _st, fn);
-        if (_early) { try { recordToolOutcome(_tool, { ok: !_early.isError, ms: Date.now() - _t0 }); } catch {} _usage(!_early.isError); return noPitchOnWidget(_early); }
+        if (_early) { try { recordToolOutcome(_tool, { ok: !_early.isError, ms: Date.now() - _t0 }); } catch {} _usage(!_early.isError); if (_early.isError) { logToolFailure(_tool, { text: _failText(_early) }); recordAnsweredRenderRefusal(_tool, _failText(_early)); } return noPitchOnWidget(_early); }
       }
       const _claim = _sm?.key ? await claimToolKey(_tool, _sm.key, args, _st) : null;
       if (_claim?.answer) return noPitchOnWidget(_claim.answer);
@@ -1182,6 +1219,8 @@ const wrap = (fn) => {
       if (!r?.isError) REPEAT_REFUSALS.clear(_rk);
       try { recordToolOutcome(_tool, { ok: !r?.isError, ms: Date.now() - _t0 }); } catch {}
       _usage(!r?.isError);
+      if (r?.isError) { logToolFailure(_tool, { text: _failText(r) }); recordAnsweredRenderRefusal(_tool, _failText(r)); }
+      else if (/^NOTHING WAS RENDERED/.test(_failText(r))) recordAnsweredRenderRefusal(_tool, _failText(r)); // a free refusal answered as text (generate_video's "say what the clip should show"): nothing was made, so its reason is recorded too
       // the charge, once, on every paid reply that did not already say it (chargeNote above)
       try {
         const _c = chargeTenth((_st.apiCharged || 0) + (_st.jobCharged || 0));
@@ -1216,6 +1255,7 @@ const wrap = (fn) => {
     catch (e) {
       try { recordToolOutcome(_tool, { ok: false, ms: Date.now() - _t0 }); } catch {}
       _usage(false);
+      logToolFailure(_tool, { status: e?.status || '', signedOut: !!e?._signedOut, viaApi: !!e?._viaApi, text: e?.message || String(e || '') });
       if (isMemoRefusal(e)) { try { REPEAT_REFUSALS.record(_rk, e?.message); } catch {} }
       if (!e?._viaApi && !e?._signedOut) { try { reportToolError(_tool, e); } catch {} } // a caller with no key is not a defect, and its report would be anonymous noise
       // A RUNTIME ERROR NAMES ITS FRAMES IN THE LOG (2026-11-06, er:c5826cfae730): the ledger keeps only the message, so an
@@ -1321,7 +1361,7 @@ const wrap = (fn) => {
         const _wt = withInfoTier(msg, _hints, _tier); msg = _wt.text; _hints.splice(0, _hints.length, ..._wt.hints);
       }
       if (_widget) msg = stripPlanPromo(msg, PLAN_PITCH_RE);
-      return noPitchOnWidget(withHints({ content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, ...(_param ? { param: _param } : {}), ...(Number(e?.status) === 429 && e?.retryAfter > 0 ? { retryAfterSeconds: Number(e.retryAfter) } : {}), connector: e?.connector ? String(e.connector) : '', ...(_vcOpts ? { options: _vcOpts } : {}), ...(e?.remedy && typeof e.remedy === 'object' && typeof e.remedy.code === 'string' ? { code: e.remedy.code, remedy: e.remedy } : {}) } } }, _hints)); // `options` = the video choice's three ways forward, structured, so /v1 answers its 402 with them
+      return noPitchOnWidget(withHints({ content: [{ type: 'text', text: msg }], isError: true, _meta: { 'hermoso.ai/error': { status: Number(e?.status) || 0, ...(_param ? { param: _param } : {}), ...(Number(e?.status) === 429 && e?.retryAfter > 0 ? { retryAfterSeconds: Number(e.retryAfter) } : {}), connector: e?.connector ? String(e.connector) : '', ...(typeof e?.apiCode === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(e.apiCode) ? { apiCode: e.apiCode } : {}), ...(_vcOpts ? { options: _vcOpts } : {}), ...(e?.remedy && typeof e.remedy === 'object' && typeof e.remedy.code === 'string' ? { code: e.remedy.code, remedy: e.remedy } : {}) } } }, _hints)); // `options` = the video choice's three ways forward, structured, so /v1 answers its 402 with them
     }
   };
   return outer;
@@ -1350,7 +1390,7 @@ const publishWrap = (fn) => {
     if (typeof _rc === 'string' && _rc.startsWith('publish_')) return r;
     const text = r.content?.[0]?.text || '';
     if (!PUBLISH_AMBIGUOUS_RE.test(text)) return r;
-    return { ...r, content: [{ type: 'text', text: `${text}\n\nDO NOT ASSUME THIS FAILED, AND DO NOT RETRY BLINDLY. Publishing routinely outlives a transport, so the post may well be LIVE. Hermoso protects you: call this tool AGAIN with the identical arguments${args?.idempotencyKey ? ` and the same idempotencyKey ("${args.idempotencyKey}")` : ''} — an identical publish is recognised and returns the ORIGINAL post instead of posting twice. Tell the user it is being confirmed, not that it failed. For video, prefer async:true (post_to_meta), which returns a job id you poll with get_job and cannot time out at all.` }] };
+    return { ...r, content: [{ type: 'text', text: `${text}\n\nTHIS MAY NOT HAVE FAILED. Publishing routinely outlives a transport, so the post may well be LIVE, and a retry with different arguments could post it twice. Hermoso protects against that: this tool called AGAIN with the identical arguments${args?.idempotencyKey ? ` and the same idempotencyKey ("${args.idempotencyKey}")` : ''} is recognised as the same publish and returns the ORIGINAL post instead of posting twice. The accurate status for the user is that the post is being confirmed, not that it failed. For video, async:true (post_to_meta) returns a job id that get_job reads, and that path cannot time out at all.` }] };
   };
   // The registry tags the function it REGISTERS, which here is this outer one — forward the name down to the wrap()
   // that actually reads it, or every publish tool would report its errors with an empty op. (Without this the whole
@@ -1415,7 +1455,14 @@ async function awaitRenderJob(job) {
   // AFTER submitJob on purpose: the job is queued through the identical POST /api/jobs — same spend gate, same
   // pre-queue credit check, same reserve and settle in the worker — whether or not anybody waits for it. Waiting was
   // never part of what a render costs, so not waiting cannot change it, and there is no second submit path to drift.
-  const waitMs = jobWaitMs(ctx?.waitMs, remote ? 45_000 : JOB_TIMEOUT);
+  // THE WAIT IS A BUDGET FOR THE WHOLE TOOL CALL, NOT FOR THE POLL ALONE (2026-11-27). A client gives a tool call one
+  // timeout from the moment it sends it, so the work done before the job was queued (render_ad's assembly, generate_image's
+  // brand-photo hydration) comes out of the same budget. Measured: Claude Code reported "The operation timed out" on a hosted
+  // generate_image that answered at 75s (2026-11-27 20:29Z); ChatGPT's hosted images answered in 23 to 41s. So the hosted
+  // budget is 45s from the call's start, and past it the reply is the job handle that get_job finishes.
+  const _t0 = Number(toolCtx.getStore()?.startedAt);
+  const _spent = Number.isFinite(_t0) && _t0 > 0 ? Math.max(0, Date.now() - _t0) : 0;
+  const waitMs = Math.max(0, jobWaitMs(ctx?.waitMs, remote ? HOSTED_RENDER_WAIT_MS : JOB_TIMEOUT) - _spent);
   // wait=0: answer the moment the job is queued. Not even one poll — pollJob sleeps between reads, and a caller with a
   // 30s step budget (an automation platform) asked for the handle, not for a status.
   // THE @NAMES BOUND AT SUBMIT (2026-11-08, POST /api/jobs elementsNote): which saved person, place or product rode in.
@@ -4263,7 +4310,9 @@ export function registerLegacyToolName(name, spec) {
 // publish does that), so the one useful thing to say is "carry on, nothing to tell the user".
 // Widget hosts only (withStaleNote), and those are not offered the generic executor (EXECUTOR_TOOLS), so the note
 // names no tool: it says only what is true and what to do.
-export const STALE_ROSTER_NOTE = 'Note for the assistant, not for the user: your Hermoso tool list is an older published snapshot. Keep working with the tools you have and do not ask the user to reconnect; the list refreshes on its own when this host publishes the newer version.';
+export const STALE_ROSTER_NOTE = 'About this Hermoso connection: its tool list is an older published snapshot. Every tool in it still works, and reconnecting does not change the list; it refreshes on its own when this host publishes the newer version.';
+// What a brand setup that did not run leaves behind, in plain words (draft_brand's refusal; tools/agent-result-plain-check.mjs).
+export const BRAND_SETUP_SKIPPED = 'Brand setup did not finish, so no brand profile, logo, colours or product photos were saved. Nothing else is blocked: generate_image, plan_ad and render_ad work from a product page link or a description, and brand setup can be run again at any time.';
 export const withStaleNote = (out, ctx) => {
   if (!ctx?.widgetHost || !out || !Array.isArray(out.content)) return out;
   const last = [...out.content].reverse().find((c) => c && c.type === 'text' && typeof c.text === 'string');
@@ -4304,7 +4353,9 @@ const FIRST_RUN_ALL = Object.freeze({ brand: true, ad: true, connectors: true })
 export const firstRunOffers = (instructions) => {
   const s = String(instructions || '');
   const has = (n) => new RegExp(`(^|[^a-z0-9_])${n}([^a-z0-9_]|$)`).test(s);
-  return { brand: has('draft_brand'), ad: has('plan_ad') && has('render_ad'), connectors: has('list_connectors') };
+  // `ad` is the IMAGE ad since 2026-11-27: the free credits cover an image and not a video (a fresh account offered "a 10-second
+  // video ad" was refused at plan_ad, 234 credits against 90, measured with a real agent the same day).
+  return { brand: has('draft_brand'), ad: has('generate_image'), connectors: has('list_connectors') };
 };
 // The line itself: agent-facing, one sentence, a first step the agent can take before the user has asked for anything.
 export function firstRunLine(fr, offer = FIRST_RUN_ALL) {
@@ -4314,12 +4365,12 @@ export function firstRunLine(fr, offer = FIRST_RUN_ALL) {
   if (fr.unclaimed === true) return `NEW ACCOUNT, no credits: start by sending the user to ${FIRST_RUN_APP_URL} to claim free starter credits${!name && o.brand ? ', then set up their brand (draft_brand)' : ''}.`;
   if (name && o.ad) {
     // UTF-8 bytes, not characters: ChatGPT's budget is bytes, and a name in another script costs two or three per letter.
-    const say = (n) => `NEW ACCOUNT, nothing made yet: start by offering a 10-second video ad for ${n}, their saved brand (plan_ad, render_ad).`;
+    const say = (n) => `NEW ACCOUNT, nothing made yet: start by offering an image ad for ${n}, their saved brand (generate_image); free credits cover it.`;
     let n = name; while (n && new TextEncoder().encode(say(n)).length > FIRST_RUN_LINE_MAX) n = n.slice(0, -1).trim();
     if (n !== name && n.includes(' ')) n = n.slice(0, n.lastIndexOf(' ')).trim(); // a cut name ends on a whole word
-    return n ? say(n) : `NEW ACCOUNT, nothing made yet: start by offering a 10-second video ad for their saved brand (plan_ad, render_ad).`;
+    return n ? say(n) : `NEW ACCOUNT, nothing made yet: start by offering an image ad for their saved brand (generate_image); free credits cover it.`;
   }
-  if (!name && o.brand) return `NEW ACCOUNT, nothing made yet: start by asking for the user's website (draft_brand)${o.ad ? ', then offer a 10-second video ad (plan_ad, render_ad)' : ' so every post is made for their brand'}.`;
+  if (!name && o.brand) return `NEW ACCOUNT, nothing made yet: start by asking for the user's website (draft_brand)${o.ad ? ', then make an image ad from it (generate_image)' : ' so every post is made for their brand'}.`;
   if (o.connectors) return 'NEW ACCOUNT, nothing made yet: start by asking what the user wants done first; list_connectors shows what is connected.';
   return null;
 }
@@ -4333,13 +4384,13 @@ export function firstRunNote(tool, fr, r) {
   const o = fr.offer || FIRST_RUN_ALL;
   const name = firstRunBrandName(fr, 60);
   let ask, how, hint;
-  if (name && o.ad) { ask = `Make a 10-second video ad for ${name}`; how = 'plan_ad with durationSeconds 10, then render_ad'; hint = { do: 'plan_ad({ durationSeconds: 10 }), then render_ad', why: `nothing has been made on this account yet; a short video ad for ${name} is the first thing to offer` }; }
-  else if (!name && o.brand) { ask = 'Set up my brand from my website'; how = 'draft_brand with their website, or a one-line description when they have none'; hint = { do: "draft_brand({ domain: '<their website>' })", why: 'nothing has been made and no brand is saved; with the brand drafted, every ad is made for it' }; }
+  if (name && o.ad) { ask = `Make an image ad for ${name}`; how = 'generate_image: the saved brand and its product photo ride along, and the free credits cover it'; hint = { do: "generate_image({ prompt: '<the ad: product, scene, headline, call to action>' })", why: `nothing has been made on this account yet; an image ad for ${name} is the first thing to offer, and the free credits cover it (a video costs far more)` }; }
+  else if (!name && o.brand) { ask = o.ad ? 'Make an ad from my website' : 'Set up my brand from my website'; how = o.ad ? 'draft_brand with their website or a product page link, then generate_image' : 'draft_brand with their website, or a one-line description when they have none'; hint = { do: o.ad ? "draft_brand({ domain: '<their website>' }), then generate_image" : "draft_brand({ domain: '<their website>' })", why: 'nothing has been made and no brand is saved; with the brand drafted, every ad is made for it' }; }
   else if (o.connectors) { ask = 'Show me which of my accounts are connected'; how = 'list_connectors'; hint = { do: 'list_connectors()', why: 'nothing has been made on this account yet; what is connected decides what can be done first' }; }
   else if (fr.unclaimed !== true) return null;
-  const claim = fr.unclaimed === true ? ` It has no credits yet: the free starter credits are claimed once in the Hermoso app at ${FIRST_RUN_APP_URL} (a quick check that they are a person), so offer that link first.` : '';
+  const claim = fr.unclaimed === true ? ` It has no credits yet: the free starter credits are claimed once in the Hermoso app at ${FIRST_RUN_APP_URL} (a quick check that they are a person), so that link is the first step.` : '';
   return {
-    text: `Note for the assistant, not for the user: this account has not made anything with Hermoso yet.${claim}${ask ? ` After you answer, offer the user one concrete next step they can say yes to, for example "${ask}" (${how}).` : ''}`,
+    text: `About this account: it has not made anything with Hermoso yet.${claim}${ask ? ` One next step the user can say yes to: "${ask}" (${how}).` : ''}`,
     hint: fr.unclaimed === true ? { do: `send the user to ${FIRST_RUN_APP_URL} to claim the free starter credits`, why: 'the balance is zero until they do, so every paid first step would be refused' } : hint,
   };
 }
@@ -5247,8 +5298,13 @@ export function stripOutputSchema(def) {
 // OpenAI's daily scan held these on wording alone: comparative or self-preferring phrasing ("the most useful research
 // tool here", "the one channel where"), a description that read as claiming more than the tool does, or one it found
 // unclear. Every other host keeps the longer text, which carries real operating detail; ChatGPT gets the same behaviour
-// described plainly. Each override is a complete description: what the tool does, its inputs, its cost.
+// described plainly. Each override is a complete description: what the tool does, its inputs, its cost. Where one clause
+// is all that differs, the entry is a FUNCTION of the text this host would otherwise read, so there is no second copy to drift.
 export const WIDGET_HOST_DESCRIPTIONS = Object.freeze({
+  // 2026-11-27 scan (all-in-one app): the definition was held, no reason stated, and its only change was the clause this
+  // replaces. The behaviour is the same: brand or presenter voice unless the user asks for a customer voice, and then that.
+  // tools/chatgpt-review-findings-check.mjs §15 fails if the clause is ever reworded so that this stops applying.
+  make_template_ad: (d) => d.replace('by default the brand or a presenter speaks, not a made-up customer reporting use, results or ratings, unless the user asks for testimonials or a customer voice.', "by default write in the brand's or a presenter's voice; use a customer voice or testimonial style when the user asks for it."),
   // 2026-11-20 scans (focused apps): youtube_bulk_report "claims capabilities that do not match its behavior" (it read
   // the old all-caps lead as a claim); update_creator_campaign "description appears missing, blank, or unclear" (one dense
   // paragraph); create_openai_ads_feed "claims capabilities that do not match" (it named a follow-up tool and a beta);
@@ -5327,7 +5383,7 @@ export async function ingestFileParam(tool, args, upload = apiUploadUrl) {
 // list is exactly the wording OpenAI's scan holds (chatgpt-tool-scan-holds), so ChatGPT keeps every full description.
 export const SLIM_TOOL_DESCRIPTIONS = Object.freeze({
   make_thumbnail: 'Render a click-driving YOUTUBE / Shorts / Instagram THUMBNAIL or video cover through the full production pipeline (concept, casting, scene, render, tweaks, text), not a bare image prompt. Use it for any "thumbnail", "video cover" or MrBeast-style packaging ask INSTEAD of generate_image. Default: 4 variants at 1K (YouTube shows 1280x720 at most), each billed; 2K or 4K only when the user asks. dryRun:true prices it free. The headline overlay is free. WHO IS IN FRAME — never assume or silently substitute a stranger. A framework with a person and no face photo is refused (nothing charged): ask the user once — themselves (a face photo, identity-locked), a generated person (`castGenericPerson:true`), or a people-free framework. TEXT — default is a CLEAN render with the headline TYPESET over it (free, legible, correctly spelled): pass `headline`. `bakeText:true` only on an explicit ask for words painted INTO the image. ALWAYS check the returned postRenderCheck against the image before presenting it.',
-  schedule_post: 'Schedule a social media post for later, on one channel or several. Costs no credits (X alone bills per call: hermoso_credits). FREE PLAN: up to 10 posts on 3 channels (a post counts once); paid plans are unlimited. Over it the post is refused and nothing is queued: relay the refusal as written, never retry or split it. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order, never just slide 1. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT. Hermoso never guesses the account: Pinterest needs `boardId` (list_pinterest_boards), else refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages), else it goes to the person’s own profile. Several Facebook Pages need `pageId` (list_meta_pages), for Facebook and for an Instagram that posts through a Page: none named is refused at scheduling with the Pages listed, so ask the user which. Resolve these FIRST with the user. Posts GO LIVE PUBLICLY by default.',
+  schedule_post: 'Use this to schedule a social media post for later, on one channel or several. Costs no credits (X alone bills per call: hermoso_credits). FREE PLAN: up to 10 posts on 3 channels (a post counts once); paid plans are unlimited. Over it the post is refused and nothing is queued: relay the refusal as written. A MULTI-SLIDE creative goes in imageUrls[] as a CAROUSEL, in order, never just slide 1. Name the time in `at`, or pass `useQueue:true` for the brand’s next free POSTING SLOT. Hermoso never guesses the account: Pinterest needs `boardId` (list_pinterest_boards), else refused; a LinkedIn COMPANY PAGE post needs `linkedinOrganizationId` (list_linkedin_pages), else it goes to the person’s own profile. Several Facebook Pages need `pageId` (list_meta_pages), for Facebook and for an Instagram that posts through a Page: none named is refused at scheduling with the Pages listed, so ask the user which. Resolve these FIRST. Posts GO LIVE PUBLICLY by default.',
   post_to_x: 'Use this when the user wants to post to X (Twitter) now. Publish to the user’s connected X (Twitter) account — a single post, a post with an image or video render attached, a reply to an existing post, or a whole THREAD (pass `thread` as an array and each part is posted as a reply to the one before). This PUBLISHES immediately and PUBLICLY — ALWAYS show the user the exact text and get an explicit yes BEFORE calling. Text is NEVER truncated. Write altText whenever you attach a render. COSTS CREDITS at X’s per-post price, every post in a thread billed: a post that contains a link (any web address, and every quote post) is X’s link rate, far higher than one without (hermoso_credits gives both figures). When the user asks what a post will cost, call this with dryRun:true: it posts NOTHING and returns that exact post’s costCredits. THIS TOOL POSTS ORGANICALLY — it does not create an ad campaign. Needs X connected (Connectors > X).',
   clip_video: 'Cut ONE long video into several RANKED, ready-to-post short clips (podcast, webinar, interview, talk, long ad cut -> Reels/Shorts/TikTok). Transcribes with timestamps, picks the strongest SELF-CONTAINED moments, then cuts + reframes each with ffmpeg — no video model renders anything, so it is fast and cheap. NOT supported: TikTok / Instagram / Facebook links, and anything age-restricted, private, members-only, geo-blocked or still LIVE — those fail fast with the real reason and are fully refunded, so ask for a direct file or an upload rather than retrying. SUBTITLES ARE BURNED IN BY DEFAULT (white sentence case timed by the spoken words, thin black outline, bottom safe band, no box) because short-form is watched on mute; captions:false for clean footage. TIMING IS APPROXIMATE (per-sentence, not word-level); never promise frame-accurate sync.',
   post_to_bluesky: 'Use this when the user wants to post to Bluesky. Publishing costs no credits. Publish a post to Bluesky as the connected account. Text up to 300 characters — Bluesky ALSO caps a post at 3000 UTF-8 bytes, so an emoji-heavy post can be under 300 characters and still be refused; Hermoso checks both and says which limit. Bluesky requires a CONFIRMED EMAIL on the account before it will process any video — if it is unconfirmed you get a refusal saying so, and reconnecting will not help. Returns the post\'s public bsky.app URL. Connect at Connectors > Bluesky.',
@@ -5397,7 +5453,7 @@ export function defForHost(name, def, widgetHost) {
   explicitHints(def);
   let out = widgetHost ? leftOutNeutralDef(name, renamedForWidgetHost(stripOutputSchema(def), name)) : slimDef(name, stripOutputSchema(def));
   if (widgetHost && out && Object.prototype.hasOwnProperty.call(WIDGET_HOST_DESCRIPTIONS, name)) {
-    let o = _widgetDescribed.get(out); if (!o) { o = { ...out, description: WIDGET_HOST_DESCRIPTIONS[name] }; _widgetDescribed.set(out, o); } out = o;
+    let o = _widgetDescribed.get(out); if (!o) { const w = WIDGET_HOST_DESCRIPTIONS[name]; o = { ...out, description: typeof w === 'function' ? w(String(out.description || '')) : w }; _widgetDescribed.set(out, o); } out = o;
   }
   if (!widgetHost || !out || !WIDGET_WITHHELD_TOOLS.has(name)) return out;
   const meta = out._meta;
@@ -6531,15 +6587,15 @@ export const INLINE_RESULT_NOTE = 'Finished in this call: the file above is the 
 export function jobMissReply(id) {
   const s = String(id ?? '').trim();
   if (JOB_ID_RE.test(s)) {
-    return { text: `No job with id "${s}". Nothing is rendering under that id: it does not exist on this workspace (it may have been mistyped, or it may belong to another account or brand). STOP POLLING IT. Do NOT re-run the render on the strength of this: call list_jobs to see this workspace's recent jobs and their real ids.`,
+    return { text: `No job with id "${s}". Nothing is rendering under that id: it does not exist on this workspace (it may have been mistyped, or it may belong to another account or brand), so asking again gives the same answer. It does not mean a render failed, and no render needs to be run again because of it: list_jobs shows this workspace's recent jobs and their real ids.`,
       error: `No job with id "${s}" on this workspace.` };
   }
   const fileLike = /^(https?:)?\/\//i.test(s) || /^\/(generated|api|uploads?)\//i.test(s) || /\.(mp3|wav|m4a|aac|ogg|flac|mp4|mov|webm|png|jpe?g|webp|gif|avif|pdf)(\?.*)?$/i.test(s);
-  return { text: `"${s}" is not a job id, and nothing on this workspace is rendering under it. STOP POLLING IT.`
+  return { text: `"${s}" is not a job id, and nothing on this workspace is rendering under it, so asking again gives the same answer.`
       + (fileLike ? ' It is a file link: that file is already finished, so use it as it is.' : '')
       + ' Real job ids start with job_ and come back as jobId from a render that runs in the background (generate_video, render_ad, edit_video, plan_week and the like), or from list_jobs.'
       + ' generate_voice and generate_sfx never make a job: they return their MP3 directly in the same reply, so there is nothing to poll for them.'
-      + ' Do NOT re-run anything on the strength of this.',
+      + ' It does not mean a render failed, so nothing needs to be run again because of it.',
     error: `"${s}" is not a job id.` };
 }
 export function registerTools(rawServer, opts = {}) {
@@ -7382,7 +7438,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       return { ...st, next: { ...st.next, here: false, heldHere: out } };
     });
     if (!held.length) return d;
-    return { ...d, steps, note: `${d.note}\nIN THIS CHATGPT APP: ${held.join('; ')} ${held.length === 1 ? 'is' : 'are'} not listed here yet; Hermoso runs ${held.length === 1 ? 'it' : 'them'} in the Hermoso app (https://app.hermoso.ai; its Launch page, https://app.hermoso.ai/#launch, for the site, domain, email and payment steps) or on its full connection, which the user adds in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. Never say Hermoso cannot do ${held.length === 1 ? 'it' : 'them'}.` };
+    return { ...d, steps, note: `${d.note}\nIN THIS CHATGPT APP: ${held.join('; ')} ${held.length === 1 ? 'is' : 'are'} not listed here yet; Hermoso runs ${held.length === 1 ? 'it' : 'them'} in the Hermoso app (https://app.hermoso.ai; its Launch page, https://app.hermoso.ai/#launch, for the site, domain, email and payment steps) or on its full connection, which the user adds in ChatGPT: ${CHATGPT_ADD_FULL_STEPS}. Hermoso does ${held.length === 1 ? 'it' : 'them'}; only this app's list leaves ${held.length === 1 ? 'it' : 'them'} out.` };
   };
   server.registerTool('start_business', {
     title: 'Start a business from an idea',
@@ -8967,7 +9023,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const offered = c.providers || [];
       connLine = `\nConnected channels (usable NOW): ${on.join(', ') || 'none — the user links these in Connectors'}`
         + `\nOffered but not linked: ${offered.filter(p => !on.includes(p)).join(', ') || 'none'}`
-        + `\nAny channel absent from BOTH lists is not available on this build — do not tell the user to connect it.`
+        + `\nAny channel absent from BOTH lists is not available on this build, so there is nothing for the user to connect for it.`
         + `\nOnly the accounts a user TICKED under a connector's "Manage accounts" are usable; list_connector_accounts shows them and set_connector_accounts changes them.`;
     } catch { /* capabilities must still answer when connectors are unreadable */ }
     // THE THREE VIDEO RULES AN AGENT GETS WRONG, and the length one is DERIVED so it can never go stale. This line
@@ -8977,12 +9033,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
     const _vm = d.options?.video?.models || [];
     const _longest = _vm.reduce((b, m) => { const mx = Math.max(0, ...(m.durations || [0])); return mx > b.max ? { max: mx, id: m.id, label: m.label } : b; }, { max: 0, id: '', label: '' });
     const _lenLine = _longest.max
-      ? `IMPORTANT: the durations above are SINGLE-PASS — ONE continuous generation with a full multi-beat arc, not a stitch. The longest single clip on this account is ${_longest.max}s (${_longest.id}${_longest.label ? ` · ${_longest.label}` : ''}), so do NOT assume a generic 8–10s cap and do NOT stitch anything that fits inside one clip. durationSeconds must be one of the chosen model's own listed values.`
-      : 'IMPORTANT: the durations above are SINGLE-PASS — durationSeconds must be one of the chosen model\'s own listed values.';
+      ? `The durations above are SINGLE-PASS: ONE continuous generation with a full multi-beat arc, not a stitch. The longest single clip on this account is ${_longest.max}s (${_longest.id}${_longest.label ? ` · ${_longest.label}` : ''}), so there is no generic 8–10s cap, and anything that fits inside one clip needs no stitching. durationSeconds must be one of the chosen model's own listed values.`
+      : 'The durations above are SINGLE-PASS: durationSeconds must be one of the chosen model\'s own listed values.';
     // NAMING THE MODEL IS HOW YOU GET IT. The catalog is what this account COULD render; the auto-router is narrower
     // than the catalog by design, and neither `best` nor the longest-clip row decides where an unnamed ask lands.
     // Stated as a rule rather than as today's allowlist, so it stays true when the allowlist changes.
-    const _pickLine = 'NAMING A MODEL IS HOW YOU GET ONE: a render that passes no `model` is routed by the server\'s own auto-pool, which is deliberately NARROWER than this catalog — the `best` flag and the longest-clip row do NOT decide it. If you need a particular model\'s length, resolution, audio or reference-count capability, pass its id in `model`; that is a deliberate pick and the server will not swap it without telling you.';
+    const _pickLine = 'NAMING A MODEL IS HOW YOU GET ONE: a render that passes no `model` is routed by the server\'s own auto-pool, which is deliberately NARROWER than this catalog — the `best` flag and the longest-clip row do not decide it. If you need a particular model\'s length, resolution, audio or reference-count capability, pass its id in `model`; that is a deliberate pick and the server will not swap it without telling you.';
     // RESOLUTION IS PER MODEL, and asking outside the list is not an error — it is a quiet downgrade.
     // THE PRICE AND THE TIER ARE ONE FACT (2026-11-03): a 30s Seedance 2.5 clip was quoted ~350 off the per-duration prices
     // below and rendered at 1080p for 853, because the tier those prices assume was never said here.
@@ -11272,7 +11328,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const hitQ = (d.scheduled || []).filter(r => r && r.id === wantId), hitH = (d.history || []).filter(r => r && r.id === wantId);
       const hitD = (d.drafts || []).filter(r => r && r.id === wantId);
       if (hitD.length) return ok(`${wantId}: draft (no time) to ${(hitD[0].channels || []).join(', ') || 'no channel yet'}. The full draft is in the structured result.`, { drafts: hitD });
-      if (!hitQ.length && !hitH.length) return { content: [{ type: 'text', text: `No queued or fired post with id ${wantId} on this profile. Call list_scheduled without an id to see the ids.` }], isError: true };
+      // WHAT WAS SEARCHED RIDES THE REFUSAL (2026-11-27, fi:3422731d2076): 62 of 227 ChatGPT list_scheduled calls failed here
+      // and the failure log (44c869dbf) could show only the id. A fired post whose job record has aged out is rebuilt from
+      // its post records under a rec_ id, so the job_ id schedule_post returned stops matching; the counts and the oldest
+      // fired date say which window was read, and the rec_ sentence tells the agent how to find the post instead.
+      if (!hitQ.length && !hitH.length) {
+        const _from = Number(d.historyFrom), _back = Number.isFinite(_from) && _from > 0 ? ` back to ${new Date(_from).toISOString().slice(0, 10)}` : '';
+        const _rec = /^job_/.test(wantId) && (d.history || []).some((r) => /^rec_/.test(String(r?.id || '')));
+        return { content: [{ type: 'text', text: `No queued or fired post with id ${wantId} on this profile (searched ${(d.scheduled || []).length} queued, ${(d.history || []).length} fired${_back} and ${(d.drafts || []).length} drafts).${_rec ? ' A post that already went out is listed under a rec_ id once its job record has aged out, so a job_ id from schedule_post may no longer match it: find it with `search` (its caption) or list without an id.' : ''} Call list_scheduled without an id to see the ids.` }], isError: true };
+      }
       const r0 = hitQ[0] || hitH[0];
       return ok(`${wantId}: ${r0.status || 'unknown'} at ${r0.at || 'no time'} to ${(r0.channels || []).join(', ') || 'no channel'}${hitH.length > 1 ? ` (${hitH.length} fired rows, one per channel)` : ''}. The full post is in the structured result.`, { scheduled: hitQ, history: hitH });
     }
@@ -33260,22 +33324,24 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // product photo and it differs (or is missing), the reply LEADS with that — the note below it says what differs and
     // how to fix it. Nothing was re-rendered; the image is still delivered so the caller can judge it.
     const _imgHead = (pc) => (pc && (pc.verdict === 'mismatch' || pc.verdict === 'absent')) ? '⚠ Image delivered, but the product in it is NOT your product — do not use it as is (details below): ' : 'Image ready: ';
-    const _wctx = mcpCtx.getStore();
-    // THE LOCAL (stdio / CLI) TRANSPORT QUEUES TOO (2026-10-15). Its one long HTTPS request to /api/generate/image went
-    // through the public edge, which answers 524 at 100s while the render finishes server-side: a slow provider turned a
-    // delivered image into an error. No request context = the local transport; it now queues the same job and polls it
-    // (awaitRenderJob: up to 10 minutes locally), so no single request outlives the edge.
-    if (!_wctx || (_wctx.waitMs !== undefined && _wctx.waitMs !== null)) {
+    // EVERY SURFACE QUEUES THE IMAGE AND WAITS A BOUNDED TIME (2026-11-27, owner-approved). The hosted transport (claude.ai,
+    // ChatGPT, Claude Code over /mcp, /v1 without ?wait=) used to render inside the tool call with no job behind it, so a
+    // client whose timeout was shorter than the render lost the image: Claude Code's "The operation timed out" at 75s, four
+    // empty list_library checks, and the finished ad landed after the session ended (docs/research/agent-docs-2026-11-27.md).
+    // Now the image is always the ordinary image JOB (the same route, brand-photo hydration, spend gate, reserve and one
+    // settle in the worker), and awaitRenderJob holds the caller for the shared budget (45s hosted, from the start of the
+    // call; 10 minutes on stdio; a /v1 ?wait= can only shorten it). A fast render still comes back as the image itself. A
+    // slow one comes back as a job id the reply tells the agent to read with get_job, which returns the finished URL; the
+    // ChatGPT card polls the same job on its own. The render is never re-sent, so it is charged once.
+    // The stdio/CLI transport and /v1 ?wait= already took this path (2026-10-15, R321); it is now the only path.
+    {
       const q = await apiPost('/api/generate/image', { ..._imgBody, queue: true });
       const r = await awaitRenderJob({ id: q.jobId });
-      if (r.stillRendering) return { content: [{ type: 'text', text: `Image queued as job ${r.jobId}. It is rendering; read it with get_job.${adForText(q.product, q.products, q.noProduct)}${q.productNote ? `\n${q.productNote}` : ''}` }], structuredContent: { jobId: r.jobId, stillRendering: true, ...(q.productNote ? { productNote: q.productNote } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}), ...(q.noProduct ? { noProduct: true } : {}), ...(q.products ? { products: q.products } : {}), ...(q.product ? { product: q.product } : {}) } };
+      if (r.stillRendering) return { content: [{ type: 'text', text: `${stillImageMsg(r.jobId)}${adForText(q.product, q.products, q.noProduct)}${q.productNote ? `\n${q.productNote}` : ''}` }], structuredContent: { jobId: r.jobId, stillRendering: true, status: 'running', ...(q.productNote ? { productNote: q.productNote } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}), ...(q.noProduct ? { noProduct: true } : {}), ...(q.products ? { products: q.products } : {}), ...(q.product ? { product: q.product } : {}) } };
       const img = await imageBlock(r.raw?.preview ? abs(r.raw.preview) : r.url); // an SVG shows its PNG preview inline
       const _qNote = joinQueuedImageNote(q.productNote, r.raw); // the route's note (logo, lineup) + the worker's (crop, the product check); a logo the worker moved is said once, where it landed
-      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${adForText(q.product, q.products, q.noProduct)}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...(q.noProduct ? { noProduct: true } : {}), ...(q.products ? { products: q.products } : {}), ...(q.product ? { product: q.product } : {}), image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(r.raw?.format ? { format: r.raw.format } : {}), ...(r.raw?.preview ? { preview: abs(r.raw.preview) } : {}), ...(r.raw?.frames ? { frames: r.raw.frames, frameMs: r.raw.frameMs } : {}), ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
+      return { content: [{ type: 'text', text: `${_imgHead(r.raw?.productCheck)}${r.url}${r.model ? `  (${r.model})` : ''}${switchNote({ raw: r.raw || {}, chargedCredits: r.chargedCredits ?? null })}${adForText(q.product, q.products, q.noProduct)}${_qNote ? `\n${_qNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...(q.noProduct ? { noProduct: true } : {}), ...(q.products ? { products: q.products } : {}), ...(q.product ? { product: q.product } : {}), image: r.url, model: r.model, jobId: r.jobId, creditsUsed: r.creditsUsed, ...(r.deliveredWidth ? { deliveredWidth: r.deliveredWidth, deliveredHeight: r.deliveredHeight } : {}), ...(r.raw?.format ? { format: r.raw.format } : {}), ...(r.raw?.preview ? { preview: abs(r.raw.preview) } : {}), ...(r.raw?.frames ? { frames: r.raw.frames, frameMs: r.raw.frameMs } : {}), ...(r.raw?.background ? { background: r.raw.background } : {}), ...(_qNote ? { productNote: _qNote } : {}), ...(r.raw?.productCheck ? { productCheck: r.raw.productCheck } : {}), ...(r.raw?.labelPass ? { labelPass: r.raw.labelPass } : {}), ...(r.raw?.logoCheck ? { logoCheck: r.raw.logoCheck } : {}), ...(r.raw?.logoPlaced ? { logoPlaced: r.raw.logoPlaced } : {}), ...(q.brandPhoto ? { brandPhoto: q.brandPhoto } : {}) } };
     }
-    const d = await apiPost('/api/generate/image', _imgBody); // explicit boolean so the server's saved-brand hydration default is unambiguous
-    const img = await imageBlock(abs(d.preview || d.image)); // show the actual creative inline in Claude, not just a URL (an SVG shows its PNG preview: an agent's image block takes no vector)
-    return { content: [{ type: 'text', text: `${_imgHead(d.productCheck)}${abs(d.image)}${d.model ? `  (${d.model})` : ''}${switchNote({ raw: d })}${adForText(d.product, d.products, d.noProduct)}${d.productNote ? `\n${d.productNote}` : ''}` }, ...(img ? [img] : [])], structuredContent: { ...d, image: abs(d.image) } };
   }));
 
   // ---------- Static-ad edits + variants (2026-09-18) ----------
@@ -33460,7 +33526,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     inputSchema: {
       text: z.string().optional().describe('ONE VOICE: the script to speak (≤900 characters)'),
       engine: z.string().optional().describe("voice-engine id: one voice defaults to 'seed-audio'; a dialogue defaults to the dialogue model ('eleven-dialogue'); or 'eleven-v4', 'minimax-speech', 'kokoro'… (hermoso_capabilities)"),
-      voice: z.string().optional().describe("ONE VOICE: a preset from the chosen engine (e.g. 'Aria'/'George' on eleven-v4, 'stokie_en' on seed-audio); omit for the engine default"),
+      voice: z.string().optional().describe("ONE VOICE: a preset from the chosen engine (e.g. 'Aria'/'George' on eleven-v4, 'stokie_en' on seed-audio); omit for the engine default. A name the engine does not have is not refused: the nearest preset on that engine speaks it (else its default) and voiceNote says which"),
       lines: z.array(z.object({
         speaker: z.string().optional().describe('who speaks; the same name keeps the same voice'),
         voice: z.string().optional().describe("that speaker's voice from the engine's list (or a voice id); omit to be given one"),
@@ -33489,12 +33555,12 @@ function buildTools(rawServer, opts = {}, sink = null) {
       const d = await apiPost('/api/generate/voice', { lines, ...(engine ? { engine } : {}), ...(dryRun ? { dryRun: true } : {}) });
       const cast = (d.cast || []).map((c) => `${c.speaker}: ${c.voice}`).join(', ');
       if (d.dryRun) return ok(`DIALOGUE QUOTE (nothing made, nothing charged): ${d.lines} lines, ${d.characters} characters, ${cast}, on ${d.model}. Price: ${d.credits} credits, exactly what it charges. Call again without dryRun to make it.`, d);
-      return ok(`Dialogue ready (${d.durationSeconds ?? '?'}s, ${d.model}; ${cast}, ${d.creditsUsed} credits): ${abs(d.audio)}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
+      return ok(`Dialogue ready (${d.durationSeconds ?? '?'}s, ${d.model}; ${cast}, ${d.creditsUsed} credits): ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
     }
     const d = await apiPost('/api/generate/voice', { text, ...(engine ? { engine } : {}), ...(voice ? { voice } : {}), ...(dryRun ? { dryRun: true } : {}) });
     if (d.dryRun) return ok(`VOICE QUOTE (nothing made, nothing charged): ${d.characters} characters on ${d.model}. Price: ${d.credits} credits, exactly what it charges.`, d);
-    // REPORT WHAT SPOKE (GEN-2). `d.voice` is the DISPATCHED voice and is null on a fixed-voice engine — the server
-    // refuses an unknown voice for free rather than rendering in a different one and echoing the ask back.
+    // REPORT WHAT SPOKE (GEN-2). `d.voice` is the DISPATCHED voice and is null on a fixed-voice engine. An unknown voice
+    // name is resolved to the nearest preset on that engine (else its default) and `voiceNote` says so (2026-11-27).
     // NO JOB TO POLL (fi:c9eb3a08e010): the clip is finished in this reply, said in words and in structuredContent.
     return ok(`Voice clip ready — ${d.voice || 'the engine’s own voice'}${d.model ? ` · ${d.model}` : ''}: ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
   }));
@@ -33652,7 +33718,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // photo, or the caller re-calls with allowGenericProduct:true once they have actually said they are fine with a
     // stand-in. (dryRun already returns before this — it charges nothing either way.)
     if (needsProductPhoto && !a.allowGenericProduct) {
-      return ok(`NOTHING WAS RENDERED and nothing was charged.${notes || ''}\n\nDo this now: tell the user in ONE short line that you have no photo of their product and the packaging would be invented, then either (a) lock a real photo with set_product_image and call render_ad again, or (b) if they say a generic stand-in is fine, call render_ad again with allowGenericProduct:true. Do NOT describe or claim any render — none happened.`, { needsProductPhoto: true, jobType: jobType || 'video', ...(adProduct ? { product: adProduct } : {}), ...(adProducts ? { products: adProducts } : {}), ...(noProduct ? { noProduct: true } : {}) });
+      return ok(`NOTHING WAS RENDERED and nothing was charged.${notes || ''}\n\nWhy: there is no photo of the product on file, so the packaging would have been invented. The user decides between two ways forward: (a) a real photo, locked with set_product_image, then render_ad again, or (b) a generic stand-in, which is render_ad again with allowGenericProduct:true once they say that is fine. No render happened, so there is nothing to describe.`, { needsProductPhoto: true, jobType: jobType || 'video', ...(adProduct ? { product: adProduct } : {}), ...(adProducts ? { products: adProducts } : {}), ...(noProduct ? { noProduct: true } : {}) });
     }
     const r = await renderJob(jobType === 'stitch' ? 'stitch' : 'video', a.faceRoute === 'face_lane' ? { ...input, faceRoute: 'face_lane' } : input, 'MCP ad render');
     // THE NOTES RIDE A STILL-RENDERING REPLY TOO (2026-10-04). okVideo answers a job that outlived the wait with the
@@ -33671,7 +33737,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
 
   server.registerTool('make_template_ad', {
     title: 'Make template ad',
-    description: "Use this when the user asks for a quick, low-cost ad or post built from their words and pictures: a slideshow, carousel, iMessage or ChatGPT chat, Notes, kinetic type, myth vs fact, an app tour, or their own HTML design. Rendered from HTML, no AI model, ~30s, billed for its compute only, ready to post. Presets are SHORTCUTS; 'custom' is YOUR OWN design as config.html (+ css), so no layout, type, colour or motion is unsupported. custom: { html, css?, size? ('9:16' default | '4:5' | '1:1' | '16:9' | any 'W:H' | {w,h} px), durationSeconds? (1-60 = VIDEO; CSS/SVG animation and <video> are frame-stepped, scripts stripped), slides?:[{html, css?}] (2-35 = carousel) }; {{logo}} {{brandName}} {{domain}} {{accent}} fill from the brand; images and fonts load by public https URL; notes[] lists what failed to load. YOU write preset copy: short, casual, believable, finished phrases within budget; by default the brand or a presenter speaks, not a made-up customer reporting use, results or ratings, unless the user asks for testimonials or a customer voice. Preset ids and their fields are listed on `config`. config.music on a VIDEO: omit for a free library bed matched to its mood when the library is stocked (hermoso_capabilities hasMusic; else only its own sound effects), 'off' for silence, or words (a mood or description) to compose one for a flat fee.",
+    description: "Use this when the user asks for a quick, low-cost ad or post built from their words and pictures: a slideshow, carousel, iMessage or ChatGPT chat, Notes, kinetic type, myth vs fact, an app tour, or their own HTML design. Rendered from HTML, no AI model, ~30s, billed for its compute only, ready to post. Presets are SHORTCUTS; 'custom' is YOUR OWN design as config.html (+ css), so no layout, type, colour or motion is unsupported. custom: { html, css?, size? ('9:16' default | '4:5' | '1:1' | '16:9' | any 'W:H' | {w,h} px), durationSeconds? (1-60 = VIDEO; CSS/SVG animation and <video> are frame-stepped, scripts stripped), slides?:[{html, css?}] (2-35 = carousel) }; {{logo}} {{brandName}} {{domain}} {{accent}} {{fontDisplay}} {{fontBody}} fill from the brand; images and fonts load by public https URL; notes[] lists what failed to load. YOU write preset copy: short, casual, believable, finished phrases within budget; by default the brand or a presenter speaks, not a made-up customer reporting use, results or ratings, unless the user asks for testimonials or a customer voice. Preset ids and their fields are listed on `config`. config.music on a VIDEO: omit for a free library bed matched to its mood when the library is stocked (hermoso_capabilities hasMusic; else only its own sound effects), 'off' for silence, or words (a mood or description) to compose one for a flat fee.",
     inputSchema: {
       config: z.object({}).passthrough().describe("MUST include config.template: 'custom' or a preset id, plus its fields; language ('Portuguese') for its own words. PRESETS: 'slideshow' (IMAGES, TikTok photo mode / Reels 1080x1920, or size:'4:5' feed carousels; no branding): { slides:[{text, sub?, image?, blur?, background?, position?}] (2-35; words never rewritten), style? ('tiktok-classic'|'clean-minimal'|'note-style' or a look in words), textStyle?, video?:true (+ an MP4, which takes config.music like any video) }; 2 credits, +1 per slide past 5, +2 for the MP4. 'imessage-chat' (VIDEO ~15s): { thread:{contactName, messages:[{from:'them'|'me', text?, product?:{image,title,domain}}]}, theme?, endCard }. 'chatgpt-chat' (VIDEO): { question, answer (may **bold** the brand), productImage?, endCard }. 'apple-notes' (VIDEO): { title, lines[], theme?, endCard }. 'value-prop' (VIDEO ~17s): { hook ≤40ch, claims[3-5 ≤34ch], productImages[2-3], palette[], endCard }. 'static-mockup' (IMAGE): { style:'imessage'|'notes'|'card', size?:{w,h}, ...fields }. 'airdrop-carousel' (VIDEO): { brandName, products:[{image, title?}] (3-16), endCard }. 'app-ui-tour' (VIDEO): { hook?, appName, iconImage?, beats:[{screenImage, caption}] (2-6), endCard }. 'imessage-cascade' (VIDEO): { notifications:[{sender, text}] (4-8), backgroundImage?, endCard }. 'photo-grid' (VIDEO): { title?, photos:[{image, label?}] (4-9), endCard }. 'vignette' (VIDEO): { hook, lines[2-4 ≤40ch], heroImage, endCard }. 'kinetic-type' (VIDEO, own SFX): { phrases[3-6 ≤34ch], productImages?[≤4], endCard }. 'myth-vs-fact' (VIDEO with a real VOICEOVER, small extra charge): { pairs:[{myth ≤50ch, fact ≤60ch}] (2-4; [brackets] accent), endCard }, real truths only. 'carousel' (IMAGES, 5-10 branded 1080x1080): { cover:{hook?, title}, slides:[{headline, support?, stat?:{value, label}}] (3-8), cta:{headline, cta?, domain?}, productImage?, logo? }. endCard = { headline, cta, domain?, logo?, color? } is OPTIONAL on every video preset: include it ONLY when the user asked for an end card (a closing card with their logo); without it the video ends on its own last frame. palette and fontStack optional."),
     },
@@ -33682,7 +33748,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // A custom design fills {{logo}} {{brandName}} {{domain}} {{accent}} from the workspace brand, the same record the web
     // client sends; presets keep their explicit config fields (endCard etc.) exactly as before.
     let _brand;
-    if (String(a.config?.template || '') === 'custom') { let b = await readStore('heist.brand.v1').catch(() => null); if (!b || typeof b !== 'object') b = {}; const pal = (Array.isArray(b.palette) ? b.palette : []).filter((c) => /^#[0-9a-f]{6}$/i.test(String(c || ''))); _brand = { name: b.name || '', domain: b.domain || '', logo: b.logo || '', accent: pal[0] || '' }; }
+    if (String(a.config?.template || '') === 'custom') { let b = await readStore('heist.brand.v1').catch(() => null); if (!b || typeof b !== 'object') b = {}; const pal = (Array.isArray(b.palette) ? b.palette : []).filter((c) => /^#[0-9a-f]{6}$/i.test(String(c || ''))); _brand = { name: b.name || '', domain: b.domain || '', logo: b.logo || '', ...(b.logoLight ? { logoLight: b.logoLight } : {}), ...(b.logoDark ? { logoDark: b.logoDark } : {}), ...(b.logoKind && typeof b.logoKind === 'object' ? { logoKind: b.logoKind } : {}), accent: pal[0] || '', ...(!b.setAside && Array.isArray(b.fonts) && b.fonts.some((f) => typeof f === 'string' && f.trim()) ? { fonts: b.fonts.filter((f) => typeof f === 'string' && f.trim()) } : {}) }; } // the brand's fonts too (2026-11-27): a custom design was the one lane never handed them, so every agent guessed the type
     // A PRESET'S END CARD CARRIES THE SAVED BRAND'S REAL LOGO (2026-09-25, found by the customer-journey QA). Presets
     // used to get ONLY what the caller wrote into config, and almost no agent writes endCard.logo — so a value-prop ad
     // for a brand with a logo on file ended on a card with its name and no mark, while the web client (which fills it)
@@ -33702,7 +33768,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       let b = await readStore('heist.brand.v1').catch(() => null); if (!b || typeof b !== 'object' || Array.isArray(b)) b = {};
       if (!b.setAside) {
         const fonts = (Array.isArray(b.fonts) ? b.fonts : []).filter((f) => typeof f === 'string' && f.trim());
-        if (fonts.length) _brand = { ...(_brand || {}), fonts };
+        if (fonts.length) _brand = { ...(_brand || {}), fonts, ...(b.domain ? { domain: b.domain } : {}) }; // domain: a face Google lacks is embedded from the brand's own site (lib/brand-type.mjs)
         const pal = (Array.isArray(b.palette) ? b.palette : []).filter((c) => /^#[0-9a-f]{6}$/i.test(String(c || '')));
         if (!Array.isArray(_cfg.palette) && pal.length) _cfg = { ..._cfg, palette: pal };
       }
@@ -34769,7 +34835,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     // A JOB THAT DELIVERS MORE THAN ITS PICTURE SAYS SO (2026-11-23): photo_to_model's .glb and cut_out_video_background's
     // green-screen MP4 ride beside the video, and a resumed render must name them as the inline reply does.
     const extraFiles = [['glb', '3D model (.glb)'], ['greenVideo', 'Green-screen MP4']].filter(([k]) => typeof res?.[k] === 'string' && res[k]).map(([k, l]) => `\n${l}: ${abs(res[k])}`).join('');
-    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${(j.status === 'queued' || j.status === 'running') && j.queue?.line ? ` — ${j.queue.line}` : ''}${url ? ` → ${url}` : ''}${extraFiles}${channelOutcomeLine(res)}${j.error ? ` — ${j.error}` : ''}${j.status === 'error' ? (() => { const _b = buyDoorsOf(j.errorMeta || {}, hostHidesCommerce()); return _b ? `\n${buyDoorsText(_b, '')}` : ''; })() : ''}${j.status === 'done' ? switchNote(j) : ''}${resumeLine(j)}`; // a render the balance refused carries its checkout links here too (2026-11-23)
+    const text = `Job ${id}: ${j.status}${j.progress ? ` (${Math.round(j.progress * 100)}%)` : ''}${(j.status === 'queued' || j.status === 'running') && j.queue?.line ? ` — ${j.queue.line}` : ''}${url ? ` → ${url}` : ''}${extraFiles}${channelOutcomeLine(res)}${j.error ? ` — ${j.error}` : ''}${j.status === 'error' ? (() => { const _b = buyDoorsOf(j.errorMeta || {}, hostHidesCommerce()); return _b ? `\n${buyDoorsText(_b, '')}` : ''; })() : ''}${j.status === 'done' ? switchNote(j) : ''}${resumeLine(j)}${j.agedOut === true && typeof j.note === 'string' ? `\n${j.note}` : ''}`; // a render the balance refused carries its checkout links here too (2026-11-23)
     // THE TEXT BLOCK MUST CARRY THE JOB, NOT JUST structuredContent (2026-08-24). ChatGPT hands a widget the
     // content array WITHOUT structuredContent, so the render card — which polls this tool over the host bridge —
     // received prose it could not read: 219 polls over 9 minutes, every one HTTP 200, against a job that finished
@@ -36662,7 +36728,7 @@ function memoryNoteVerdict(text) {
       showing: rows.length,
       platforms: [...new Set(rows.map((r) => r.platform))],
       sample_copy: angles,
-      note: 'The Hermoso card above is already displaying all ' + rows.length + ' ads with their creative. Do NOT list them one by one. Reply in two or three sentences about the PATTERN you see, then offer a next step.' + resolvedNote,
+      note: 'The Hermoso card above is already displaying all ' + rows.length + ' ads with their creative, so listing them one by one would repeat the card. What the card does not show is the PATTERN across them: two or three sentences on that, and a next step, are what is left to say.' + resolvedNote,
     };
     const text = widget
       ? JSON.stringify(digest)
@@ -37199,7 +37265,7 @@ function memoryNoteVerdict(text) {
   // (free) with the claims the ad may make. Nothing renders here.
   server.registerTool('tiktok_ideas', {
     title: 'TikTok post ideas from what is working now',
-    description: "What to post on TikTok, from posts that are working THIS MONTH in the brand's niche: up to 6 content ideas (hook, format, caption, why, an act-within window of 7d or 30d, a quality tier), EACH backed by linked TikTok posts with their views, likes and engagement. One bounded pull of the last 30 days: up to 4 keyword searches + up to 5 hashtag pulls, then up to 8 reads of what the strongest posts SAY in their first seconds; only posts past 50,000 views back an idea, and an idea the catalog cannot back is dropped. Works with nothing connected. PAID and priced first: dryRun:true returns the exact credits (lookups + writing) with nothing run; the run charges exactly that (the writing part is not charged if no post clears the bar). THE PICK: call again with pick (one idea object from `ideas`) and to ('render_ad' or 'make_series'), free: it returns the next call's arguments (plan_ad then render_ad, or make_series) with the CLAIMS the ad may make, taken only from the brand's own facts. Nothing renders until you make that call. Omit keywords/hashtags to derive them from product/category or the saved brand.",
+    description: "What to post on TikTok, from posts that are working THIS MONTH in the brand's niche: up to 6 content ideas (hook, format, caption, why, an act-within window of 7d or 30d, a quality tier), EACH backed by linked TikTok posts with their views, likes and engagement. One bounded pull of the last 30 days: up to 4 keyword searches + up to 5 hashtag pulls, then up to 8 reads of what the strongest posts SAY in their first seconds; only posts past 50,000 views back an idea, and an idea the catalog cannot back is dropped. Works with nothing connected. PAID and priced first: dryRun:true returns the credits it holds (lookups + writing) with nothing run; the run charges what it really uses, usually less (the writing part is not charged if no post clears the bar). THE PICK: call again with pick (one idea object from `ideas`) and to ('render_ad' or 'make_series'), free: it returns the next call's arguments (plan_ad then render_ad, or make_series) with the CLAIMS the ad may make, taken only from the brand's own facts. Nothing renders until you make that call. Omit keywords/hashtags to derive them from product/category or the saved brand.",
     inputSchema: {
       product: z.string().optional().describe('the product (a name from list_products, or words); omit to use the saved brand'),
       category: z.string().optional().describe('the niche in words, e.g. "matcha", "running shoes"'),
@@ -37538,7 +37604,7 @@ function memoryNoteVerdict(text) {
       const lines = [];
       if (all.length) {
         const ordered = [hero, ...all.filter((u) => u !== hero)].filter(Boolean);
-        lines.push(`Product photos: ${ordered.length} saved (never ask the user to upload them again; plan_ad / render_ad / generate_image ground on the primary one automatically). Primary (hero): ${abs(ordered[0])}${titles.get(ordered[0]) ? ' (' + titles.get(ordered[0]) + ')' : ''}.` + (ordered.length > 1 ? ' Others: ' + ordered.slice(1, 8).map((u) => abs(u) + (titles.get(u) ? ' (' + titles.get(u) + ')' : '')).join('; ') + (ordered.length > 8 ? ` (+${ordered.length - 8} more, list_product_photos)` : '') + '.' : ''));
+        lines.push(`Product photos: ${ordered.length} saved, so no upload is needed (plan_ad / render_ad / generate_image ground on the primary one automatically). Primary (hero): ${abs(ordered[0])}${titles.get(ordered[0]) ? ' (' + titles.get(ordered[0]) + ')' : ''}.` + (ordered.length > 1 ? ' Others: ' + ordered.slice(1, 8).map((u) => abs(u) + (titles.get(u) ? ' (' + titles.get(u) + ')' : '')).join('; ') + (ordered.length > 8 ? ` (+${ordered.length - 8} more, list_product_photos)` : '') + '.' : ''));
       } else lines.push('Product photos: none saved (set_product_image or draft_brand with confirmed:true adds them).');
       if (_s(b.logo)) lines.push(`Logo: ${abs(_s(b.logo))}`);
       const pal = (Array.isArray(b.palette) ? b.palette : []).map((c) => _s(typeof c === 'string' ? c : c?.hex || c?.color)).filter(Boolean);
@@ -37560,7 +37626,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('draft_brand', {
     title: 'Draft profile',
-    description: 'Use this when the user gives a website, a description or a social handle to set up their brand or creator profile. It fills in the profile: its name, products, logo and summary, saved as the brand profile when none is saved yet. On an account with NO saved brand one call does it all: it saves the brand and reads its product photos (no second call with confirmed:true). Check the business it returns against what you know about the user and go straight on to the ad unless you have a real reason to think it is a different business. Next, for an image ad call generate_image directly (plan_ad is for a video or for concepts to choose from). A domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com): if the returned `name` or `summary` is clearly not the business the user named, re-draft with the correct domain or a description.',
+    description: 'Use this when the user gives a website, a description or a social handle to set up their brand or creator profile. It fills in the profile: its name, products, logo and summary, saved as the brand profile when none is saved yet. On an account with NO saved brand one call does it all: it saves the brand and reads its product photos. The result names the business it found (name, site, summary). Once a brand is saved, generate_image makes an image ad from it, and plan_ad plans a video or concepts to choose from. Brand setup is optional: both also work from a product page link or a description. A domain can resolve to a DIFFERENT company than intended (e.g. bala.com is an engineering firm, not the Bala fitness brand at shopbala.com): if the returned `name` or `summary` is clearly not the business the user named, re-draft with the correct domain or a description.',
     inputSchema: {
       domain: z.string().optional().describe('a website to scrape, or a social link (profile, YouTube channel or one post) to draft from the account it names'),
       description: z.string().optional().describe('a free-text brand description (no website)'),
@@ -37600,7 +37666,11 @@ function memoryNoteVerdict(text) {
     const _firstBrand = !!(_cur0 && _cur0.hasBrand === false);
     const _photosConfirmed = confirmed === true || _firstBrand;
     const _earlyPhotos = _firstBrand && a.domain && !a.socialHandle ? apiGet('/api/site/images', { url: a.domain }).catch(() => null) : null; // read beside the draft; used only if the draft keeps it (a product brand, same site)
-    const d = await apiPost('/api/brand/draft', confirmed === true && a.domain ? { ...a, resume: true } : a);
+    // A SETUP THAT DID NOT FINISH IS NOT A DEAD END (2026-11-27, production walk E3): after a brand setup that was denied or
+    // failed, ChatGPT told the person to "reconnect or authorize". The refusal now says what was skipped and what still works.
+    let d;
+    try { d = await apiPost('/api/brand/draft', confirmed === true && a.domain ? { ...a, resume: true } : a); }
+    catch (e) { if (e && typeof e.message === 'string' && !e.message.includes(BRAND_SETUP_SKIPPED)) e.message = `${e.message} ${BRAND_SETUP_SKIPPED}`; throw e; }
     const p = d.profile || d;
     // ALWAYS TRY THE WEBSITE (2026-07-28). /api/brand/draft returns the PROFILE only — it never fetched a single
     // product photo, so an MCP-onboarded brand was structurally photo-less even with a perfectly good domain, and every
@@ -37685,12 +37755,12 @@ function memoryNoteVerdict(text) {
     // THE AGENT CONFIRMS THE BUSINESS ITSELF (owner, 2026-11-13: "Can't the agent confirm if its the right business, they already
     // likely know about their user."): the reply names what was found, and the agent checks it against what it knows.
     const _found = `${p.name || 'unnamed'}${p.domain ? ` (${p.domain})` : ''}${p.summary ? `: ${String(p.summary).replace(/\s+/g, ' ').trim().slice(0, 160)}` : ''}`;
-    const _firstSaved = saved && _firstBrand ? ` Found ${_found}. Saved as this account's first brand${_nPhotos ? ` with ${_nPhotos} product photo${_nPhotos === 1 ? '' : 's'}` : ''}. Check it against what you already know about the user: if it fits, or nothing suggests otherwise, go straight on to the ad. Only if you have a real reason to think it is a different business, tell the user and draft the right one with save:true.` : '';
+    const _firstSaved = saved && _firstBrand ? ` Found ${_found}. Saved as this account's first brand${_nPhotos ? ` with ${_nPhotos} product photo${_nPhotos === 1 ? '' : 's'}` : ''}. If this is not the business the user meant, draft_brand with the right site and save:true replaces it; nothing else of theirs is stored here yet.` : '';
     // A PROVISIONAL PROFILE IS STILL A PROFILE (2026-11-21): when the model could not run (no credits yet, an outage, a bad answer)
     // the route builds the profile from the input and a server job drafts it properly in the background. The agent is told, so
     // it neither retries nor reports a failure; get_brand a minute later shows the finished fields.
     const _provNote = d && d.fallback ? (d.repair ? ' This is a provisional profile built from the input; Hermoso finishes drafting it in the background (get_brand shows the full profile once it is done). Nothing failed and there is nothing to retry; fields the user edits meanwhile are kept.' : ' This is a provisional profile built from the input: the full AI draft could not run just now (for an existing brand it needs credits). Use it as is, edit fields with update_brand, or call draft_brand again later.') : '';
-    const _next = saved ? ' Next: for an image ad call generate_image directly (the saved brand and its photos ride automatically; no plan_ad needed); for a video ad, plan_ad then render_ad.' : '';
+    const _next = saved ? ' Next steps: generate_image makes an image ad from the saved brand and its photos in one call (no plan_ad needed); a video ad is plan_ad, then render_ad.' : '';
     return ok(`Drafted brand: ${p.name || 'unnamed'}${p.category ? ' · ' + p.category : ''}.${saved ? (keptNewer ? ` Saved as the workspace brand, EXCEPT ${keptNewer.join(', ')}: a newer edit to those is already stored and was kept.` : ' Saved as the workspace brand: plan_ad/create now use it automatically.') : ' Pass this object to plan_ad.'}${_firstSaved}${_photoNote}${_provNote}${_next}`, { ...p, ...(_photosHeld ? { photosHeld: true } : {}), ...(saved && _firstBrand ? { firstBrand: true } : {}), ...(d && d.fallback ? { provisional: true } : {}) });
   }));
 
@@ -37913,7 +37983,7 @@ function memoryNoteVerdict(text) {
   // Studio's tool. Priced by the video's length before anything is spent; without confirm it only quotes, free.
   server.registerTool('repurpose_transcript', {
     title: 'Repurpose a video transcript',
-    description: "Turn a VIDEO into WRITTEN pieces: a summary, YouTube chapters (first at 0:00, at least 3, each 10s+), chapter summaries, an X thread (every post under 280 characters), a blog post, timestamped verbatim quotes, or any piece in your own words (pass the words as a format). The video: a YouTube link (read from its captions), a video file URL, a Library id, an upload_file URL or a social post link (read by watching it); or the text itself, when you already have it from analyze_video (which is the tool that just reads a video back). Several formats share ONE read. Priced by the video's length before anything is spent: without confirm it returns the exact credits and spends nothing; confirm:true writes and charges exactly that. Only the paid minutes are read. Every piece is written only from what the video says. Built-in skills youtube_script and retention_skeleton (get_skill) write long-form scripts.",
+    description: "Turn a VIDEO into WRITTEN pieces: a summary, YouTube chapters (first at 0:00, at least 3, each 10s+), chapter summaries, an X thread (every post under 280 characters), a blog post, timestamped verbatim quotes, or any piece in your own words (pass the words as a format). The video: a YouTube link (read from its captions), a video file URL, a Library id, an upload_file URL or a social post link (read by watching it); or the text itself, when you already have it from analyze_video (which is the tool that just reads a video back). Several formats share ONE read. Priced by the video's length before anything is spent: without confirm it returns the credits it holds and spends nothing; confirm:true writes and charges what it really uses, usually less. Only the paid minutes are read. Every piece is written only from what the video says. Built-in skills youtube_script and retention_skeleton (get_skill) write long-form scripts.",
     inputSchema: {
       video: z.string().optional().describe('a YouTube link, a video file URL, a Library id (L0…), an upload_file URL or a social post link'),
       transcript: z.string().optional().describe('the transcript text, when you already have it; then nothing is read'),
@@ -37942,10 +38012,10 @@ function memoryNoteVerdict(text) {
     const notes = Array.isArray(d?.notes) ? d.notes : [];
     if (d?.needsConfirm) {
       const q = d.quote || {};
-      return ok(`PRICE (nothing spent): ${q.credits} credits for ${(q.formats || []).map((f) => `${f.label} (${f.credits})`).join(', ')} from ${q.minutes} minute${q.minutes === 1 ? '' : 's'} of video, ${q.read === 'captions' ? `read from its captions (${q.readCredits})` : q.read === 'watch' ? `read by watching it (${q.readCredits})` : 'from the transcript given'}, written by ${q.model}.${notes.length ? '\n' + notes.join('\n') : ''}\nAsk the user; call again with confirm:true to write it for exactly ${q.credits} credits.`, d);
+      return ok(`PRICE (nothing spent): ${q.credits} credits for ${(q.formats || []).map((f) => `${f.label} (${f.credits})`).join(', ')} from ${q.minutes} minute${q.minutes === 1 ? '' : 's'} of video, ${q.read === 'captions' ? `read from its captions (${q.readCredits})` : q.read === 'watch' ? `read by watching it (${q.readCredits})` : 'from the transcript given'}, written by ${q.model}.${notes.length ? '\n' + notes.join('\n') : ''}\nAsk the user; call again with confirm:true to write it; it holds ${q.credits} credits and charges what it really uses.`, d);
     }
     const out = (d?.formats || []).map((f) => `=== ${f.label} ===\n${f.text || `(not written: ${f.error})`}${f.warning ? `\n[check: ${f.warning}]` : ''}`).join('\n\n');
-    return ok(`${out}\n\n— ${d.creditsUsed} credits (the quote), ${d.minutes} min read${notes.length ? '\n' + notes.join('\n') : ''}`, d);
+    return ok(`${out}\n\n— ${d.creditsUsed} credits, ${d.minutes} min read${notes.length ? '\n' + notes.join('\n') : ''}`, d);
   }));
 
   // A SOUND FOR AN EDIT + THE INSERT CLIP THAT CARRIES IT (2026-09-24): found per edit, never a library.
@@ -39183,7 +39253,7 @@ function memoryNoteVerdict(text) {
 
   server.registerTool('check_ad_policy', {
     title: 'Check ad policy',
-    description: "Pre-flight ad copy against Meta's REAL, live Advertising Standards before you run it — a flat 1-credit check. Pulls Meta's actual policy pages and returns a verdict (pass / fix / block) where every flagged issue QUOTES Meta's own policy text verbatim plus a compliant rewrite that keeps the sell. It's a check, not an edit — it never changes the creative. Especially worth running for regulated-adjacent categories (health/supplements, weight-loss or beauty results claims, finance/crypto/insurance, alcohol, dating, gambling) or ANY strong/absolute/guaranteed claim.",
+    description: "Pre-flight ad copy against Meta's REAL, live Advertising Standards before you run it — a flat 4-credit check. Pulls Meta's actual policy pages and returns a verdict (pass / fix / block) where every flagged issue QUOTES Meta's own policy text verbatim plus a compliant rewrite that keeps the sell. It's a check, not an edit — it never changes the creative. Especially worth running for regulated-adjacent categories (health/supplements, weight-loss or beauty results claims, finance/crypto/insurance, alcohol, dating, gambling) or ANY strong/absolute/guaranteed claim.",
     inputSchema: {
       copy: z.string().describe('the ad copy / script / on-screen text to check'),
       claims: z.string().optional().describe('the claims / proof points the ad makes'),

@@ -56,7 +56,7 @@ export function eraAllowed(cfg, req, clientName = '') {
 
 // ── CLASSIFYING A REQUEST ────────────────────────────────────────────────────────────────────────────────────────────
 const metaOf = (msg) => (msg && msg.params && typeof msg.params === 'object' && msg.params._meta && typeof msg.params._meta === 'object' ? msg.params._meta : null);
-const isModernVersion = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && v >= MODERN_VERSION;
+export const isModernVersion = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && v >= MODERN_VERSION;
 // A request is MODERN when it says so — a modern version in MCP-Protocol-Version or in `_meta` — and is not an
 // initialize (which selects legacy semantics by definition, versioning § Backward Compatibility). A legacy client sends
 // MCP-Protocol-Version 2025-11-25 after its initialize, so it can never match. A batch is a legacy-only shape.

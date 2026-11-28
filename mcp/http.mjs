@@ -12,15 +12,17 @@
 //
 // When the cloud step happens, the remaining work is small and explicit (see ENABLE CHECKLIST at the bottom).
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SUPPORTED_PROTOCOL_VERSIONS, LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 import { registerTools, MCP_INSTRUCTIONS, instructionsFor, parseToolScope, DEFAULT_TOOL_GROUPS, anonDiscoveryGroups, widgetHostScope, withFirstRunLine, firstRunOffers } from './tools.mjs';
 import { chatgptExtRequested } from './openai-extensions.mjs';
 import { CURATED_SCOPES, isCuratedToken, mcpPathScope } from './directory-curated.mjs'; // a curated Claude directory connector's own scope on its 401 + PRM (2026-11-22)
 import { mcpCtx, connectedProviders, CLI_PKG } from './client.mjs';
-import { serveModernFactory } from './era-2026-serve.mjs'; // MCP 2026-07-28, OFF unless MCP_ERA_2026 is set (see that file)
+import { serveModernFactory } from './era-2026-serve.mjs';
+import { installAnswerStates } from './answer-states.mjs'; // a state that is an answer (not connected, credits, plan, confirm, platform rule) is not a failed tool // MCP 2026-07-28, OFF unless MCP_ERA_2026 is set (see that file)
 
 // Mount the remote connector onto the Express app. No-op unless explicitly enabled + auth-backed.
 // `verifyBearer(token) -> {userId, accountId, email} | null` MUST be supplied by the caller (the real auth seam).
@@ -28,7 +30,7 @@ import { serveModernFactory } from './era-2026-serve.mjs'; // MCP 2026-07-28, OF
 // beside cli/, whose package.json carries the release; inside the npm package there is no ../cli/ and ../package.json
 // IS the CLI package. One resolver, so the byte-identical twins agree.
 const PKG_VERSION = (() => { const r = createRequire(import.meta.url); for (const p of ['../cli/package.json', '../package.json']) { try { const v = r(p).version; if (v) return v; } catch {} } return '0.0.0'; })();
-export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null, onConnectEvent = null, firstRunFor = null } = {}) {
+export function mountRemoteMcp(app, { verifyBearer, publicBaseUrl, onSessionStart = null, onSessionEnd = null, onAnonDiscovery = null, onFirstCall = null, onConnectEvent = null, firstRunFor = null, sessionSecret = null } = {}) {
   // Outcomes of a real connect, for the host's connect watch (lib/mcp-connect-watch.mjs): a bearer we reject, and the
   // first tools/list of a signed-in session (keyed by the token's hash, so a FRESH token's first listing marks a
   // completed connect). Never throws into the request.
@@ -231,7 +233,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     return { ended, sessions: sessions.size };
   }
   function undrain() { if (draining) console.error(`[mcp-remote] no longer draining (was: ${draining})`); draining = ''; }
-  const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS, draining: draining || null });
+  const streamStats = () => ({ open: openGetStreams, max: GET_STREAM_MAX, lifeMs: GET_STREAM_MS, draining: draining || null, sessions: sessions.size, sessionMax: SESSION_MAX });
   // THE 401 IS THE ONLY THING A STUCK AGENT EVER READS, so it carries the way out (2026-09-04). It used to be the
   // three words `Authentication required`, and that is exactly how far a real user got: a Cursor-based client
   // (Grok Bot) registered fine, listed all 160 tools, and then every call 401'd while its own consent card never
@@ -296,6 +298,50 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
   // hosted connection. -32001 "Session not found" is the SDK's own code for this case; we mint it ourselves because
   // the SDK's branch is unreachable when there is no initialized transport left to compare the id against.
   const sessionGone = (res) => res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found' }, id: null });
+  // ── A SESSION THIS SERVER MINTED SURVIVES A RESTART, A DEPLOY AND AN EVICTION (2026-11-27, "D1c") ───────────────────
+  // The 404 above is correct and recoverable, but every one of them is a FAILED CALL to the host: Anthropic's directory
+  // dashboard counted them ("Endpoint or session not found", McpSessionTerminated) and showed the connector as Degraded,
+  // because the sessions map is in-process and we deploy several times a day on one instance. A session holds nothing
+  // that has to live here: authorization is re-derived from the bearer on EVERY request, the roster from the URL's scope
+  // plus the bearer's workspace, and the only things that ride the initialize alone are the client's name (presentation)
+  // and its capabilities (elicitation, for the directory confirm card). So the id CARRIES those two, signed: a request
+  // naming an id we minted, with a bearer that verifies AND belongs to the same principal, rebuilds the session in place
+  // and is served, so the client never sees the restart. Nothing new is trusted: an id we did not mint (bad signature,
+  // the old unsigned `sess_<hex>` shape, another account's id) is still the 404 above, and the bearer is still checked
+  // first. The key is derived from HEIST_SESSION_SECRET (or MCP_SESSION_SECRET, or the `sessionSecret` option); with
+  // none set it is random per process, which still makes an eviction invisible but not a restart.
+  const SID_KEY = createHmac('sha256', String(sessionSecret || process.env.MCP_SESSION_SECRET || process.env.HEIST_SESSION_SECRET || randomBytes(32).toString('hex'))).update('hermoso-mcp-session-id-v1').digest();
+  const b64u = (s) => Buffer.from(s).toString('base64url');
+  const principalOf = (user) => createHash('sha256').update(`${user?.accountId || ''}:${user?.userId || ''}`).digest('base64url').slice(0, 16);
+  const sidSig = (body) => createHmac('sha256', SID_KEY).update(body).digest('base64url').slice(0, 32);
+  // Client capabilities as they arrived, bounded: whole when small (they always are), else their top-level keys.
+  const capsOf = (body) => {
+    const m = (Array.isArray(body) ? body : [body]).find((x) => x && x.method === 'initialize');
+    const caps = m?.params?.capabilities && typeof m.params.capabilities === 'object' ? m.params.capabilities : {};
+    try { const j = JSON.stringify(caps); if (j.length <= 400) return caps; } catch {}
+    return Object.fromEntries(Object.keys(caps).slice(0, 12).map((k) => [k, {}]));
+  };
+  const protoOf = (body) => { const m = (Array.isArray(body) ? body : [body]).find((x) => x && x.method === 'initialize'); return String(m?.params?.protocolVersion || '').slice(0, 16); };
+  const mintSid = (req, user) => {
+    const meta = b64u(JSON.stringify({ p: principalOf(user), c: rememberedClient(req), k: capsOf(req.body), v: protoOf(req.body) }));
+    const body = `${randomUUID().replace(/-/g, '')}.${meta}`;
+    return `sess_${body}.${sidSig(body)}`;
+  };
+  // The meta of an id we minted for THIS principal, or null. Constant-time on the signature.
+  const readSid = (sid, user) => {
+    const m = /^sess_([0-9a-f]{32}\.[A-Za-z0-9_-]{1,1600})\.([A-Za-z0-9_-]{32})$/.exec(String(sid || ''));
+    if (!m) return null;
+    const want = Buffer.from(sidSig(m[1])), got = Buffer.from(m[2]);
+    if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
+    let meta; try { meta = JSON.parse(Buffer.from(m[1].split('.')[1], 'base64url').toString('utf8')); } catch { return null; }
+    if (!meta || typeof meta !== 'object' || meta.p !== principalOf(user)) return null;
+    return { client: String(meta.c || '').slice(0, 64), caps: meta.k && typeof meta.k === 'object' ? meta.k : {}, proto: String(meta.v || '').slice(0, 16) };
+  };
+  const restoring = new Map(); // sid -> Promise<entry|null>: concurrent requests on one stale id share ONE rebuild
+  // A session the CLIENT ended (DELETE) stays ended: its id is never rebuilt by this process (spec: after a DELETE the id is
+  // answered 404). Bounded; a restart forgets it, which costs nothing, since a client that ended a session does not reuse it.
+  const endedSids = new Map();
+  const endSid = (id) => { endedSids.set(id, Date.now()); while (endedSids.size > 5000) endedSids.delete(endedSids.keys().next().value); };
   // The SDK's own answer for a non-initialize request that names no session at all. We reply BEFORE constructing
   // anything: building a 36 MB McpServer purely to have it reject the request turns a burst of retries into
   // memory pressure. Status and message are byte-identical to the SDK's, so no client sees a behaviour change.
@@ -516,6 +562,117 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
     await transport.handleRequest(req, res, req.body);
   }
 
+  // ONE builder for a session, new or rebuilt, so the two can never disagree about a caller (scope, host, roster).
+  // `restore` = { sid, client, caps, proto } from readSid: rebuild under that id instead of minting one. Returns the entry,
+  // or null when the request was already answered (an unknown `?tools=` group).
+  async function openSession(req, res, { token, user, restore = null }) {
+    const hostName = restore ? restore.client : clientInfoOf(req.body);
+    const remembered = restore ? (restore.client || String(req.headers['user-agent'] || '').slice(0, 64)) : rememberedClient(req);
+    let entry = null;
+    const scope0 = scopeFor(req, res);
+    if (scope0 === false) return null; // unknown group — already answered 400, and nothing was allocated
+    // On ChatGPT the URL our own app handed out (seven named groups, no ads or analytics) is read as the plain URL:
+    // a widget host has no executor, so a group it does not list is a feature it does not have. See
+    // LEGACY_WIDGET_CONNECT_GROUPS in tools.mjs. The same host decision as `widgetHost` below.
+    // `?tools=full` from ChatGPT is the full connection (FULL_SCOPE_TOKENS): ChatGPT presentation, none of the published
+    // apps' holds. So the POLICY host decision below is "a widget host that did not ask for full".
+    const chatgptFull = !!scope0?.full && isWidgetHost(hostName, req);
+    const scope = widgetHostScope(scope0, isWidgetHost(hostName, req) && !chatgptFull);
+    sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
+    // ── WHAT THIS CALLER CAN ACTUALLY USE (2026-08-26) ────────────────────────────────────────────────────────
+    // One free store read, on the ONE request per session that mints the roster, so the tools we advertise are
+    // the tools their workspace can call. A connector-bound tool for an unconnected provider can only answer
+    // `401 {connector:'<p>'}`; carrying it costs the caller context every turn and pushes the roster further
+    // past the 30-50 tool accuracy cliff. The MCP spec permits exactly this and nothing looser — the tool set
+    // "MAY vary by the authorization presented on the request … since credentials are per-request input, not
+    // connection state" (rev 2026-07-28, Tools ▸ Capabilities) — which is why it is keyed to the BEARER and not
+    // to the connection or to a query parameter.
+    //
+    // INSIDE `mcpCtx.run`, because that store is what puts this caller's token on the outbound /api call. Read
+    // it outside and it would go out unauthenticated, answer 401, and — correctly, by its own contract — fail
+    // OPEN with the full roster, so the whole change would be silently inert. Never throws; see
+    // connectedProviders() ([[failed-read-is-not-empty]]).
+    const connectors = await mcpCtx.run({ token, remote: true, client: remembered }, () => connectedProviders());
+    // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
+    const widgetHost = isWidgetHost(hostName, req) && !chatgptFull;
+    // AN ACCOUNT THAT HAS MADE NOTHING YET, ON EVERY HOST (2026-10-19 for ChatGPT; every host since 2026-11-12). Read once
+    // per session, bounded so a slow read can never hold the connect: null (no guidance) is the answer to every failure.
+    // Read BEFORE the server is built, because it changes what initialize says: a fresh account's `instructions` open with
+    // one line saying how to start (withFirstRunLine in tools.mjs), which a host reads before the user types anything. The
+    // first successful tool reply of the session then carries the same next ask (firstRunNote), for hosts that ignore
+    // instructions. `offer` is what this session's own instructions can name, so a focused app or the directory cage is
+    // never told to offer a tool it does not list.
+    const baseInstructions = instructionsFor(scope, { widgetHost });
+    let firstRun = null;
+    if (!restore && typeof firstRunFor === 'function' && user.accountId) { // a rebuilt session is not a new one: its first-run line was already given
+      try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId, brandKey: user.brandKey === true })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
+    }
+    firstRun = firstRun && typeof firstRun === 'object' && firstRun.fresh === true ? { ...firstRun, offer: firstRunOffers(baseInstructions) } : null;
+    const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: withFirstRunLine(baseInstructions, firstRun) });
+    registerTools(server, { only: scope.groups, lean: !!scope.lean, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, chatgptFull, hosted: true, ext: extAsked(req, scope), client: entry?.client || remembered, ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
+    if (!widgetHost) installAnswerStates(server); // not on ChatGPT, whose widgets render a non-error result as a finished card (see mcp/answer-states.mjs)
+    const transport = new StreamableHTTPServerTransport({
+      // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
+      // A REBUILT session keeps the id the client holds; a new one gets a signed id that can be rebuilt (mintSid above).
+      sessionIdGenerator: restore ? () => restore.sid : () => mintSid(req, user),
+      onsessioninitialized: (id) => { entry.lastSeen = Date.now(); sessions.set(id, entry); sweepSessions(); },
+    });
+    transport.onclose = () => { if (transport.sessionId) dropSession(transport.sessionId, 'transport closed'); };
+    // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
+    // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
+    // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
+    // The fresh-account read (firstRun) happened above, before the server was built; the session keeps it so the first
+    // successful tool reply can carry the same next ask.
+    entry = { restored: !!restore, transport, server, user, lastSeen: Date.now(), client: remembered, ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun, chatgptFull };
+    if (!restore && typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
+    // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
+    // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
+    // the predicate can be corrected from evidence instead of from a hunch.
+    if (entry.client && !restore) console.error(`[mcp-remote] client: ${entry.client}`);
+    await server.connect(transport);
+    // THE REBUILD (D1c): replay the client's own handshake inside the process, under the id it already holds, so the SDK
+    // transport and server are in exactly the state a real initialize leaves them in. Through the SDK's own request path
+    // (its web-standard transport), never by setting its private flags: if that shape ever changes, this throws, and the
+    // caller answers the plain 404 the client already knows how to recover from.
+    if (restore) await replayHandshake(transport, req, restore);
+    // A ONE-SHOT NUDGE FOR A HOST THAT SNAPSHOTS THE ROSTER (2026-09-14). ChatGPT serves its users the tool list
+    // OpenAI scanned at review time; whether it honours a tools/list_changed notification is UNVERIFIED (the
+    // published app cannot be observed from here). It costs one frame after the handshake, it is only sent to
+    // widget hosts, and if the host does honour it the stale-snapshot problem heals itself. The real belt is
+    // LEGACY_TOOL_NAMES in tools.mjs, which keeps every name a snapshot could hold answering.
+    //
+    // ── MEASURED NOT GUILTY OF "No app tools available yet" (2026-09-25) ─────────────────────────────────────────
+    // A fresh ChatGPT developer-mode app shows "No app tools available yet" right after Allow. This nudge was the
+    // first suspect (it lands on the notification stream ChatGPT opens at connect), so it was switched off and the
+    // connect repeated: same panel. What IS true: our tools/list answered 200 with the whole roster inside the
+    // connect every time, and a plain page reload — with ZERO further requests from ChatGPT to us — lists every
+    // tool. The panel is rendered before ChatGPT's own background sync finishes and never re-reads it. So the
+    // nudge is back on, as it had been since 2026-09-14; MCP_LIST_CHANGED_NUDGE=0 turns it off.
+    // NOT ON A FOCUSED APP (2026-11-19): OpenAI's review of the AI Ad Generator read a changing roster as "dynamic tools";
+    // a focused app's list is fixed for every session (no connector gate, no snapshot to heal), so it never announces a change.
+    if (!restore && process.env.MCP_LIST_CHANGED_NUDGE !== '0' && !scope?.app && !chatgptFull && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
+    // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
+    // objects are otherwise reachable only from this request's still-open response — close them explicitly
+    // rather than leaving a session pinned by a dead socket.
+    res.on('close', () => { if (!transport.sessionId || !sessions.has(transport.sessionId)) { try { transport.close(); } catch {} try { server.close(); } catch {} } });
+    return entry;
+  }
+  // The client's handshake, replayed for a rebuilt session: initialize (its own capabilities and name, the protocol version
+  // it is speaking now) then notifications/initialized, both through the SDK's request handling.
+  async function replayHandshake(transport, req, restore) {
+    const wt = transport && transport._webStandardTransport;
+    if (!wt || typeof wt.handleRequest !== 'function') throw new Error('SDK transport has no web-standard handler');
+    const hv = String(req.headers['mcp-protocol-version'] || '');
+    const proto = SUPPORTED_PROTOCOL_VERSIONS.includes(hv) ? hv : (SUPPORTED_PROTOCOL_VERSIONS.includes(restore.proto) ? restore.proto : LATEST_PROTOCOL_VERSION);
+    const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+    const init = { jsonrpc: '2.0', id: 'hermoso-session-rebuild', method: 'initialize', params: { protocolVersion: proto, capabilities: restore.caps || {}, clientInfo: { name: restore.client || 'rebuilt-session', version: '0' } } };
+    const r1 = await wt.handleRequest(new Request('http://session-rebuild.invalid/mcp', { method: 'POST', headers, body: JSON.stringify(init) }), { parsedBody: init });
+    try { await r1.text(); } catch {}
+    if (r1.status !== 200 || transport.sessionId !== restore.sid) throw new Error(`session rebuild: initialize answered ${r1.status}`);
+    const done = { jsonrpc: '2.0', method: 'notifications/initialized' };
+    const r2 = await wt.handleRequest(new Request('http://session-rebuild.invalid/mcp', { method: 'POST', headers: { ...headers, 'mcp-session-id': restore.sid, 'mcp-protocol-version': proto }, body: JSON.stringify(done) }), { parsedBody: done });
+    if (r2.status !== 202) throw new Error(`session rebuild: initialized answered ${r2.status}`);
+  }
   const handleMcp = async (req, res) => {
     const auth = req.headers.authorization || '';
     // The auth-scheme name is case-insensitive (RFC 9110 §11.1, RFC 6750 §2.1): `bearer <key>` is the same
@@ -581,6 +738,7 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
     const sid = req.headers['mcp-session-id'];
     let entry = sid ? sessions.get(sid) : null;
+    if (sid && req.method === 'DELETE') endSid(sid);
     // A CONNECT IS COMPLETE WHEN THE NEW TOKEN IS FIRST USED, WHATEVER THE METHOD (2026-09-29). This used to be reported on
     // a session's first tools/list, and ChatGPT never lists on a reconnect — it opens each turn as initialize →
     // initialized → GET → tools/call against the roster it already holds — so every ChatGPT sign-in since 09-25 read as
@@ -590,12 +748,34 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
 
     if (!entry) {
       const init = req.method === 'POST' && hasInitialize(req.body);
-      // A session id we do not have → 404, and WITHOUT allocating. This is the whole of D1b: 404 is the only status
+      // A session id we do not have and did not mint → 404, and WITHOUT allocating (D1c below rebuilds one we DID mint).
+      // This is the whole of D1b: 404 is the only status
       // that obliges a client to re-initialize, so a restart, a deploy or an LRU eviction becomes a reconnect
       // instead of a permanently bricked connector. It applies to every method — a stale id is stale for GET and
       // DELETE too. The one exception is an `initialize`, which IS a client starting over: strict in what we send,
       // liberal in what we accept, because the entire point of this fix is that nothing here bricks a client.
-      if (sid && !init) return sessionGone(res);
+      // ── D1c: AN ID WE MINTED IS REBUILT, NOT REFUSED (see mintSid / readSid). Only an id that is not ours, or not this
+      // principal's, still gets the 404. A DELETE of a session we no longer hold has nothing left to end: it succeeds.
+      if (sid && !init) {
+        const meta = readSid(sid, user);
+        if (!meta) return sessionGone(res);
+        if (req.method === 'DELETE') return res.status(200).end();
+        if (endedSids.has(sid)) return sessionGone(res);
+        let p = restoring.get(sid);
+        if (!p) {
+          p = openSession(req, res, { token, user, restore: { sid, ...meta } })
+            .then((e) => { if (e) console.error(`[mcp-remote] session ${sid.slice(0, 12)}… rebuilt (${e.client || '?'}); ${sessions.size} live`); return e; })
+            .catch((err) => { dropSession(sid, 'rebuild failed'); console.error(`[mcp-remote] session rebuild failed, answering 404: ${String(err?.message || err).slice(0, 160)}`); return null; })
+            .finally(() => restoring.delete(sid));
+          restoring.set(sid, p);
+        }
+        const rebuilt = await p;
+        if (!rebuilt) return res.headersSent ? undefined : sessionGone(res);
+        entry = rebuilt;
+      }
+    }
+    if (!entry) {
+      const init = req.method === 'POST' && hasInitialize(req.body);
       // ── `server/discover` IS A HOST ASKING WHICH ERA WE SPEAK, AND THE 400 IS THE ANSWER (2026-09-25) ────────────
       // ChatGPT (openai-mcp/1.0.0) and Claude Code (2.1.282) open EVERY connection with the MCP 2026-07-28 probe
       // `server/discover` (headers MCP-Protocol-Version: 2026-07-28 + Mcp-Method, the version in params._meta) and
@@ -617,85 +797,8 @@ const inflightNameOf = (body) => { const msgs = Array.isArray(body) ? body : [bo
       // Only an `initialize` may mint a session. Anything else naming no session at all is the SDK's own 400 —
       // answered here so we never build a server whose only job would be to reject the request.
       if (!init) return needSession(res);
-      const scope0 = scopeFor(req, res);
-      if (scope0 === false) return; // unknown group — already answered 400, and nothing was allocated
-      // On ChatGPT the URL our own app handed out (seven named groups, no ads or analytics) is read as the plain URL:
-      // a widget host has no executor, so a group it does not list is a feature it does not have. See
-      // LEGACY_WIDGET_CONNECT_GROUPS in tools.mjs. The same host decision as `widgetHost` below.
-      // `?tools=full` from ChatGPT is the full connection (FULL_SCOPE_TOKENS): ChatGPT presentation, none of the published
-      // apps' holds. So the POLICY host decision below is "a widget host that did not ask for full".
-      const chatgptFull = !!scope0?.full && isWidgetHost(entry?.client || clientInfoOf(req.body), req);
-      const scope = widgetHostScope(scope0, isWidgetHost(entry?.client || clientInfoOf(req.body), req) && !chatgptFull);
-      sweepSessions(); // make room before allocating, so the cap is a ceiling and not a suggestion
-      // ── WHAT THIS CALLER CAN ACTUALLY USE (2026-08-26) ────────────────────────────────────────────────────────
-      // One free store read, on the ONE request per session that mints the roster, so the tools we advertise are
-      // the tools their workspace can call. A connector-bound tool for an unconnected provider can only answer
-      // `401 {connector:'<p>'}`; carrying it costs the caller context every turn and pushes the roster further
-      // past the 30-50 tool accuracy cliff. The MCP spec permits exactly this and nothing looser — the tool set
-      // "MAY vary by the authorization presented on the request … since credentials are per-request input, not
-      // connection state" (rev 2026-07-28, Tools ▸ Capabilities) — which is why it is keyed to the BEARER and not
-      // to the connection or to a query parameter.
-      //
-      // INSIDE `mcpCtx.run`, because that store is what puts this caller's token on the outbound /api call. Read
-      // it outside and it would go out unauthenticated, answer 401, and — correctly, by its own contract — fail
-      // OPEN with the full roster, so the whole change would be silently inert. Never throws; see
-      // connectedProviders() ([[failed-read-is-not-empty]]).
-      const connectors = await mcpCtx.run({ token, remote: true, client: rememberedClient(req) }, () => connectedProviders());
-      // ONE host decision for the instructions and the roster (see MCP_INSTRUCTIONS_WIDGET), so the two cannot disagree.
-      const widgetHost = isWidgetHost(entry?.client || clientInfoOf(req.body), req) && !chatgptFull;
-      // AN ACCOUNT THAT HAS MADE NOTHING YET, ON EVERY HOST (2026-10-19 for ChatGPT; every host since 2026-11-12). Read once
-      // per session, bounded so a slow read can never hold the connect: null (no guidance) is the answer to every failure.
-      // Read BEFORE the server is built, because it changes what initialize says: a fresh account's `instructions` open with
-      // one line saying how to start (withFirstRunLine in tools.mjs), which a host reads before the user types anything. The
-      // first successful tool reply of the session then carries the same next ask (firstRunNote), for hosts that ignore
-      // instructions. `offer` is what this session's own instructions can name, so a focused app or the directory cage is
-      // never told to offer a tool it does not list.
-      const baseInstructions = instructionsFor(scope, { widgetHost });
-      let firstRun = null;
-      if (typeof firstRunFor === 'function' && user.accountId) {
-        try { firstRun = await Promise.race([Promise.resolve(firstRunFor({ accountId: user.accountId, brandKey: user.brandKey === true })).catch(() => null), new Promise((r) => { const t = setTimeout(() => r(null), 1500); if (t && typeof t.unref === 'function') t.unref(); })]); } catch { firstRun = null; }
-      }
-      firstRun = firstRun && typeof firstRun === 'object' && firstRun.fresh === true ? { ...firstRun, offer: firstRunOffers(baseInstructions) } : null;
-      const server = new McpServer({ name: 'hermoso', version: PKG_VERSION }, { instructions: withFirstRunLine(baseInstructions, firstRun) });
-      registerTools(server, { only: scope.groups, lean: !!scope.lean, directory: scope.directory || false, app: scope.app || null, connectors, widgetHost, chatgptFull, hosted: true, ext: extAsked(req, scope), client: entry?.client || rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }); // the SAME tools as stdio (minus any the caller scoped out) — and every /api call they make carries this user's token
-      const transport = new StreamableHTTPServerTransport({
-        // CSPRNG, per the spec's SHOULD for session ids (Math.random() is not one).
-        sessionIdGenerator: () => 'sess_' + randomUUID().replace(/-/g, ''),
-        onsessioninitialized: (id) => { entry.lastSeen = Date.now(); sessions.set(id, entry); sweepSessions(); },
-      });
-      transport.onclose = () => { if (transport.sessionId) dropSession(transport.sessionId, 'transport closed'); };
-      // WHO IS CALLING, captured at the ONE moment it is on the wire. `clientInfo` rides the `initialize`
-      // request and nothing afterwards, so it has to be remembered on the session or it is gone by the first
-      // tools/call. It is advisory only: it may not change auth, scope or spend — it decides PRESENTATION.
-      // The fresh-account read (firstRun) happened above, before the server was built; the session keeps it so the first
-      // successful tool reply can carry the same next ask.
-      entry = { transport, server, user, lastSeen: Date.now(), client: rememberedClient(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), src: srcOf(req), startedAt: Date.now(), listed: false, calls: 0, connectSeen: true, firstRun, chatgptFull };
-      if (typeof onSessionStart === 'function') { try { onSessionStart({ accountId: user.accountId || null, userId: user.userId || null, client: entry.client, ua: entry.ua, src: entry.src }); } catch {} }
-      // LOG THE NAME. `hostRendersWidgets()` matches it with a regex, and a regex over a string no one has
-      // ever read is a guess. One line per session (not per call) so a new host identifies itself once and
-      // the predicate can be corrected from evidence instead of from a hunch.
-      if (entry.client) console.error(`[mcp-remote] client: ${entry.client}`);
-      await server.connect(transport);
-      // A ONE-SHOT NUDGE FOR A HOST THAT SNAPSHOTS THE ROSTER (2026-09-14). ChatGPT serves its users the tool list
-      // OpenAI scanned at review time; whether it honours a tools/list_changed notification is UNVERIFIED (the
-      // published app cannot be observed from here). It costs one frame after the handshake, it is only sent to
-      // widget hosts, and if the host does honour it the stale-snapshot problem heals itself. The real belt is
-      // LEGACY_TOOL_NAMES in tools.mjs, which keeps every name a snapshot could hold answering.
-      //
-      // ── MEASURED NOT GUILTY OF "No app tools available yet" (2026-09-25) ─────────────────────────────────────────
-      // A fresh ChatGPT developer-mode app shows "No app tools available yet" right after Allow. This nudge was the
-      // first suspect (it lands on the notification stream ChatGPT opens at connect), so it was switched off and the
-      // connect repeated: same panel. What IS true: our tools/list answered 200 with the whole roster inside the
-      // connect every time, and a plain page reload — with ZERO further requests from ChatGPT to us — lists every
-      // tool. The panel is rendered before ChatGPT's own background sync finishes and never re-reads it. So the
-      // nudge is back on, as it had been since 2026-09-14; MCP_LIST_CHANGED_NUDGE=0 turns it off.
-      // NOT ON A FOCUSED APP (2026-11-19): OpenAI's review of the AI Ad Generator read a changing roster as "dynamic tools";
-      // a focused app's list is fixed for every session (no connector gate, no snapshot to heal), so it never announces a change.
-      if (process.env.MCP_LIST_CHANGED_NUDGE !== '0' && !scope?.app && !chatgptFull && isWidgetHost(entry.client, req)) { const t = setTimeout(() => { try { server.sendToolListChanged(); } catch {} }, 2500); if (t && typeof t.unref === 'function') t.unref(); }
-      // If the handshake never completes (client drops, initialize rejected), nothing is in the map and both
-      // objects are otherwise reachable only from this request's still-open response — close them explicitly
-      // rather than leaving a session pinned by a dead socket.
-      res.on('close', () => { if (!transport.sessionId || !sessions.has(transport.sessionId)) { try { transport.close(); } catch {} try { server.close(); } catch {} } });
+      entry = await openSession(req, res, { token, user });
+      if (!entry) return; // unknown group — already answered 400, and nothing was allocated
     } else {
       // Touch = LRU. Re-inserting moves the key to the end of the Map's insertion order, so the cap evicts the
       // genuinely coldest session rather than the oldest-established one (which is often the most active).

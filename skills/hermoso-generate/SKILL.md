@@ -7,7 +7,7 @@ description: >-
   turn a concept into finished creative with Hermoso. NOT for: pure research/competitor lookups (use
   hermoso-research), or editing an existing local image with a non-Hermoso tool.
 argument-hint: "[what to generate, e.g. 'a 9:16 video ad for our protein pancakes']"
-allowed-tools: Bash(hermoso *) Bash(npx -y hermoso@0.1.688 *)
+allowed-tools: Bash(hermoso *) Bash(npx -y hermoso@0.1.689 *)
 ---
 
 # Hermoso: generate ad creative
@@ -15,8 +15,8 @@ allowed-tools: Bash(hermoso *) Bash(npx -y hermoso@0.1.688 *)
 You drive the **Hermoso CLI** (`hermoso`) to render images and videos. Always report the final **media URL**.
 
 ## Setup (once)
-- Install the CLI once: `npm install -g hermoso@0.1.688`, then run every command as `hermoso …`, as written below. If you cannot install packages, run each one as `npx -y hermoso@0.1.688 …` instead (always with the version), but know that npx asks the npm registry on every single call, so an agent making many calls can be rate-limited by npm (an HTTP 429 from npm, before Hermoso is ever reached). No MCP server is needed.
-- Sign in once: `npx -y hermoso@0.1.688 auth login` (opens a browser; nothing to paste). On a machine with no browser (a server, chatted over Telegram, Discord or WhatsApp): run `npx -y hermoso@0.1.688 auth login --device --no-wait`, send the user the link and short code it prints, and once they approve run `npx -y hermoso@0.1.688 auth login --device --resume`. No key needed. Only if nobody can open a link: the user creates a key at app.hermoso.ai under **MCP & CLI** and either sets it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipes it to `npx -y hermoso@0.1.688 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history. No account yet? The user signs up at app.hermoso.ai (free to start). Never create an account, choose a plan or pay on the user's behalf unless they explicitly ask you to and approve the plan and its price.
+- Install the CLI once: `npm install -g hermoso@0.1.689`, then run every command as `hermoso …`, as written below. If you cannot install packages, run each one as `npx -y hermoso@0.1.689 …` instead (always with the version), but know that npx asks the npm registry on every single call, so an agent making many calls can be rate-limited by npm (an HTTP 429 from npm, before Hermoso is ever reached). No MCP server is needed.
+- Sign in once: `npx -y hermoso@0.1.689 auth login` (opens a browser; nothing to paste). On a machine with no browser (a server, chatted over Telegram, Discord or WhatsApp): run `npx -y hermoso@0.1.689 auth login --device --no-wait`, send the user the link and short code it prints, and once they approve run `npx -y hermoso@0.1.689 auth login --device --resume`. No key needed. Only if nobody can open a link: the user creates a key at app.hermoso.ai under **MCP & CLI** and either sets it as the `HERMOSO_TOKEN` environment variable (nothing is stored) or pipes it to `npx -y hermoso@0.1.689 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history. No account yet? The user signs up at app.hermoso.ai (free to start). Never create an account, choose a plan or pay on the user's behalf unless they explicitly ask you to and approve the plan and its price.
 - For anything these steps do not cover: `hermoso tools --search <what you want>` finds the tool, `hermoso tools <name>` prints its arguments, `hermoso call <name> --json '{...}'` runs it. The CLI reaches every tool and costs no context until it runs.
 
 ## Ask first: purchases, payments, publishing and plan changes
