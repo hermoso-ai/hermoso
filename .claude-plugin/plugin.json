@@ -1,6 +1,6 @@
 {
   "name": "hermoso",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "description": "Launch and market from your coding agent: put the site you built live with a domain, email and payments, then research ads, make image and video ads, post and schedule, and run campaigns. Requires a Hermoso account (free to start). Eleven skills that drive the hermoso CLI, so no tool list is loaded until a command runs.",
   "author": { "name": "Hermoso AI", "email": "hello@hermoso.ai", "url": "https://hermoso.ai" },
   "homepage": "https://hermoso.ai",

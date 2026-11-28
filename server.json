@@ -3,7 +3,7 @@
   "name": "io.github.hermoso-ai/hermoso",
   "title": "Hermoso",
   "description": "Launch and market what your AI built. 1831 tools, usable alone. Start free: 160+ credits. No markup.",
-  "version": "0.1.689",
+  "version": "0.1.690",
   "websiteUrl": "https://hermoso.ai/mcp/",
   "repository": {
     "url": "https://github.com/hermoso-ai/hermoso",
@@ -92,7 +92,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "hermoso",
-      "version": "0.1.689",
+      "version": "0.1.690",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

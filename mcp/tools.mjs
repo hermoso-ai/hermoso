@@ -33300,7 +33300,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       product: PRODUCT_OUT,
       products: PRODUCTS_OUT,
       noProduct: z.boolean().optional(),
-      labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. Tell the user the note.'),
+      labelPass: z.any().optional().describe('present when the product\'s label lines were known: {status: checked (read and already right, left as rendered) | fixed (read wrong and re-printed from the photo) | left (not re-printed: label faces away, product not found, or the pass could not run) | off (fixLabel:false), read, expected[], note}. `note` is present ONLY when the user should act on it (the label came out wrong and was not re-printed, or carries a script that cannot print): tell them that one line. Otherwise say nothing about the label check.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     _meta: openaiMeta(AD_RESULT_URI, 'Rendering your ad image…', 'Ad image ready'),
@@ -33539,6 +33539,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
       voice: z.string().nullable().optional().describe('ONE VOICE: the voice that ACTUALLY spoke — null on an engine that takes no voice preset (see voiceNote), never an echo of what was asked for'),
       voiceSelectable: z.boolean().optional().describe('false when this engine generates its own voice and takes no preset'),
       voiceNote: z.string().optional().describe('why the voice differs from what was asked, when it does — report it verbatim'),
+      note: z.string().optional().describe('the engine asked for was retired by its provider, so this ran on the current default: report it verbatim'),
       cast: z.array(z.any()).optional().describe('DIALOGUE: [{speaker, voice}], the voice each speaker spoke in'),
       lines: z.number().optional().describe('DIALOGUE: the number of turns'),
       characters: z.number().optional(),
@@ -33554,15 +33555,15 @@ function buildTools(rawServer, opts = {}, sink = null) {
     if (Array.isArray(lines) && lines.length) {
       const d = await apiPost('/api/generate/voice', { lines, ...(engine ? { engine } : {}), ...(dryRun ? { dryRun: true } : {}) });
       const cast = (d.cast || []).map((c) => `${c.speaker}: ${c.voice}`).join(', ');
-      if (d.dryRun) return ok(`DIALOGUE QUOTE (nothing made, nothing charged): ${d.lines} lines, ${d.characters} characters, ${cast}, on ${d.model}. Price: ${d.credits} credits, exactly what it charges. Call again without dryRun to make it.`, d);
-      return ok(`Dialogue ready (${d.durationSeconds ?? '?'}s, ${d.model}; ${cast}, ${d.creditsUsed} credits): ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
+      if (d.dryRun) return ok(`DIALOGUE QUOTE (nothing made, nothing charged): ${d.lines} lines, ${d.characters} characters, ${cast}, on ${d.model}. Price: ${d.credits} credits, exactly what it charges. Call again without dryRun to make it.${d.note ? `\n⚠ ${d.note}` : ''}`, d);
+      return ok(`Dialogue ready (${d.durationSeconds ?? '?'}s, ${d.model}; ${cast}, ${d.creditsUsed} credits): ${abs(d.audio)}${d.note ? `\n⚠ ${d.note}` : ''}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
     }
     const d = await apiPost('/api/generate/voice', { text, ...(engine ? { engine } : {}), ...(voice ? { voice } : {}), ...(dryRun ? { dryRun: true } : {}) });
-    if (d.dryRun) return ok(`VOICE QUOTE (nothing made, nothing charged): ${d.characters} characters on ${d.model}. Price: ${d.credits} credits, exactly what it charges.`, d);
+    if (d.dryRun) return ok(`VOICE QUOTE (nothing made, nothing charged): ${d.characters} characters on ${d.model}. Price: ${d.credits} credits, exactly what it charges.${d.note ? `\n⚠ ${d.note}` : ''}`, d);
     // REPORT WHAT SPOKE (GEN-2). `d.voice` is the DISPATCHED voice and is null on a fixed-voice engine. An unknown voice
     // name is resolved to the nearest preset on that engine (else its default) and `voiceNote` says so (2026-11-27).
     // NO JOB TO POLL (fi:c9eb3a08e010): the clip is finished in this reply, said in words and in structuredContent.
-    return ok(`Voice clip ready — ${d.voice || 'the engine’s own voice'}${d.model ? ` · ${d.model}` : ''}: ${abs(d.audio)}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
+    return ok(`Voice clip ready — ${d.voice || 'the engine’s own voice'}${d.model ? ` · ${d.model}` : ''}: ${abs(d.audio)}${d.note ? `\n⚠ ${d.note}` : ''}${d.voiceNote ? `\n⚠ ${d.voiceNote}` : ''}\n${INLINE_RESULT_NOTE}`, { ...d, audio: abs(d.audio), nothingToPoll: true });
   }));
 
   // A SOUND EFFECT OR AMBIENCE MADE FROM WORDS (2026-11-03): POST /api/generate/sfx, the same engine as the Studio's generate_sfx.

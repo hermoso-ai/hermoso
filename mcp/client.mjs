@@ -163,7 +163,7 @@ function headers(extra = {}) {
 // THE PIN (2026-11-25): every command this package prints names the exact release, never a bare `npx -y` of the package,
 // which runs whatever npm serves that day (plugin-directory review). cli/package.json's version; a release rewrites it
 // (tools/cli-version-pin-write.mjs), and the check fails on a stale one. tools.mjs and http.mjs read it here.
-export const CLI_PKG = 'hermoso@0.1.689';
+export const CLI_PKG = 'hermoso@0.1.690';
 export const SIGN_IN_HINT = `Not signed in. Run \`npx -y ${CLI_PKG} auth login\` (it opens a browser; on a machine with none, add --device for a link and a code), or set HERMOSO_TOKEN to an agent key (hmk_…) created at app.hermoso.ai on the MCP & CLI tab, under Terminal & API keys.`;
 export const signedOut = () => !mcpCtx.getStore() && !TOKEN && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(API_BASE);
 /** The 401 sentence a caller with no credential reads. PURE (the signed-out verdict is an argument) so a check runs it. */
