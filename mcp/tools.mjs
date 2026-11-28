@@ -11300,7 +11300,7 @@ function buildTools(rawServer, opts = {}, sink = null) {
     description: 'Use this when the user asks what is scheduled, what already posted, or whether a post went out. Show what is queued to post and what already went out. Each fired item reports PER-CHANNEL outcomes, so you can see that (say) Instagram published and TikTok failed on the same item rather than a single misleading verdict. Past items are rebuilt from published-post records, one row per channel; they are not job runs (use list_jobs for those). THE LIST IS COMPACT so it fits in one reply: the next 25 queued and the last 15 fired, captions shortened. Pass `id` for ONE post in full (every caption and setting, which you need before reschedule_post replaces a caption map), `channel` to filter, or `upcoming` / `fired` for more rows. Read-only, 0 credits.',
     inputSchema: {
       brand: z.string().optional().describe('WHICH PROFILE to list — the id or exact name from list_brands. Needed when the post lives in a profile this connection is not pinned to: a post you can CREATE in a profile must be manageable there too, without switching the whole connection. A name that matches no profile, or two, is REFUSED.'),
-      id: z.string().optional().describe('one post id from this list: returns that post in full, every caption and setting included'),
+      id: z.string().optional().describe('a post id from this list, or the job_ id schedule_post gave: that post in full'),
       channel: z.string().optional().describe('only posts that include this channel, e.g. "pinterest" or "x"'),
       upcoming: z.number().optional().describe('how many queued posts to list, soonest first (default 25, max 200)'),
       fired: z.number().optional().describe('how many already-fired posts to list, most recent last (default 15, max 200)'),
@@ -11332,6 +11332,29 @@ function buildTools(rawServer, opts = {}, sink = null) {
       // and the failure log (44c869dbf) could show only the id. A fired post whose job record has aged out is rebuilt from
       // its post records under a rec_ id, so the job_ id schedule_post returned stops matching; the counts and the oldest
       // fired date say which window was read, and the rec_ sentence tells the agent how to find the post instead.
+      // A JOB ID IS RESOLVED, NOT REFUSED (2026-11-28, account 824f030e polled job_mwrf7eg1y8zzl here). schedule_post answers
+      // with a job_ id; once the post fires and its job record ages out, the calendar lists it under a rec_ id. The server
+      // maps the job id to its post's rows with the same postGroup match get_job uses (GET /api/schedule/job/:id), reading
+      // the post records from the job's own mint time, so a post older than the calendar's default window is found too.
+      if (!hitQ.length && !hitH.length && /^job_[a-z0-9]{9,40}$/i.test(wantId)) {
+        const rz = await apiGet(`/api/schedule/job/${encodeURIComponent(wantId)}`, brand ? { brandId: brand } : {});
+        const rows = Array.isArray(rz?.rows) ? rz.rows : [];
+        if (rows.length) {
+          const q2 = rows.filter((r) => r && r.status === 'queued'), h2 = rows.filter((r) => r && r.status !== 'queued');
+          const r0 = rows[0], chans = [...new Set(rows.flatMap((r) => r.channels || []))];
+          const ok2 = rows.flatMap((r) => (Array.isArray(r.results) ? r.results : [])).filter((x) => x && x.ok === true).map((x) => x.channel);
+          const bad2 = rows.flatMap((r) => (Array.isArray(r.results) ? r.results : [])).filter((x) => x && x.ok === false).map((x) => `${x.channel}: ${x.error || 'failed'}`);
+          const where = rz.resolved === 'queue' ? `${r0.status || 'queued'} at ${r0.at || 'no time'} to ${chans.join(', ') || 'no channel'}`
+            : rz.resolved === 'outcome' ? `${r0.status === 'error' ? 'ended in an error' : 'went out'}${r0.at ? ` on ${String(r0.at).slice(0, 10)}` : ''} (from the outcome recorded when it ended)${ok2.length ? `; published to ${ok2.join(', ')}` : ''}${bad2.length ? `; failed: ${bad2.join('; ')}` : ''}${r0.error && !bad2.length ? `: ${r0.error}` : ''}`
+            : `went out${r0.at ? ` on ${String(r0.at).slice(0, 10)}` : ''} to ${chans.join(', ') || 'no channel'}, listed as ${h2.map((r) => r.id).join(', ')} (rebuilt from the published-post records, which exist only for channels that published: a channel that failed is not listed)`;
+          return ok(`${wantId} is the job this scheduled post was created under: it ${where}. The full post is in the structured result.`, { scheduled: q2, history: h2, resolvedFrom: wantId, resolved: rz.resolved });
+        }
+        const why = rz?.jobType && rz.jobType !== 'socialpost'
+          ? `${wantId} is a ${rz.jobType} job, not a scheduled post, so it is never on the calendar: read it with get_job.`
+          : rz?.otherProfile ? `${wantId} is a scheduled post in another brand of this account (profile ${rz.otherProfile}): call list_scheduled with brand set to it.`
+          : `${wantId} is a job id, and no scheduled post on this brand was created under it: not in the queue, not in the published-post records${rz?.mintedAt ? ` since it was minted on ${String(rz.mintedAt).slice(0, 10)}` : ''}, not in the outcome log. If it is a render, get_job reads it; if the post is in another brand, pass brand; a post whose every channel failed before 2026-11-28 left no record at all.`;
+        return { content: [{ type: 'text', text: why }], structuredContent: { scheduled: [], history: [], resolvedFrom: wantId, resolved: rz?.resolved || null, ...(rz?.jobType ? { jobType: rz.jobType } : {}) }, ...(rz?.jobType && rz.jobType !== 'socialpost' ? {} : { isError: true }) };
+      }
       if (!hitQ.length && !hitH.length) {
         const _from = Number(d.historyFrom), _back = Number.isFinite(_from) && _from > 0 ? ` back to ${new Date(_from).toISOString().slice(0, 10)}` : '';
         const _rec = /^job_/.test(wantId) && (d.history || []).some((r) => /^rec_/.test(String(r?.id || '')));
