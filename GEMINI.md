@@ -13,12 +13,12 @@ Hermoso is an AI marketing agent and AI ad generator, run from your own AI agent
 
 Everything runs through the `hermoso` CLI in the shell, so no tool list is loaded into the session and nothing costs context until it runs.
 
-1. Sign in once: `npx -y hermoso@0.1.691 auth login` opens a browser. On a machine with no browser, `npx -y hermoso@0.1.691 auth login --device` shows a link and a short code to approve on your phone instead. Only if nothing can open a link, create a key in the app under MCP & CLI and pipe it to `npx -y hermoso@0.1.691 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history.
+1. Sign in once: `npx -y hermoso@0.1.692 auth login` opens a browser. On a machine with no browser, `npx -y hermoso@0.1.692 auth login --device` shows a link and a short code to approve on your phone instead. Only if nothing can open a link, create a key in the app under MCP & CLI and pipe it to `npx -y hermoso@0.1.692 auth login --token -` (it reads the key from stdin, or asks for it without showing it). Never put the key itself on the command line, where it stays in shell history.
 2. No account yet? Sign up at https://app.hermoso.ai and set up a profile (a website, a social handle or a short description is enough).
 
 ## How to work
 
-- Run commands as `npx -y hermoso@0.1.691 <command>`, or `hermoso <command>` after `npm install -g hermoso@0.1.691`.
+- Run commands as `npx -y hermoso@0.1.692 <command>`, or `hermoso <command>` after `npm install -g hermoso@0.1.692`.
 - `hermoso capabilities` lists model ids, exact credit costs and live durations.
 - Every tool is reachable: `hermoso tools --search <what you want>` finds one, `hermoso tools <name>` prints its arguments, `hermoso call <name> --json '{...}'` runs it.
 - `hermoso call` reaches tools that spend real money or publish. Never buy or renew a domain, take a payment, issue a refund, pay creators, publish a page or a post, buy credits, change the plan or turn on ad spend without the user's explicit yes to that exact action in this conversation.

@@ -34,6 +34,10 @@ const A = (t, d) => Object.freeze({ t, d, ro: false, de: false, add: true });
 // A read shared by several connectors whose wording differs per connector: `s` maps a curated token to its description;
 // `d` (the first one) is the fallback.
 const S = (t, s) => Object.freeze({ t, d: Object.values(s)[0], s: Object.freeze({ ...s }), ro: true, de: false });
+// A read whose PARAMETER wording differs per connector: `p` maps a curated token to {param: description}, replacing that
+// parameter's canonical description on that connector only (Anthropic's resubmission review of Ads Reporting, 2026-11-28:
+// a connection with no posting tools must not mention posting anywhere a client is shown, parameters included).
+const RP = (t, d, p) => Object.freeze({ t, d, p: Object.freeze({ ...p }), ro: true, de: false });
 
 export const DIRECTORY_CURATED_DEFS = Object.freeze({
   // ── research (Hermoso Ad Research) ──
@@ -66,7 +70,7 @@ export const DIRECTORY_CURATED_DEFS = Object.freeze({
   }),
   list_meta_pages: S('List Facebook Pages and ad accounts', {
     'directory-scheduler': 'Lists the Facebook Pages (with any linked Instagram business account) and the Meta ad accounts on the connected Meta account, with their ids. The Page ids choose which Page a post goes to. Read-only; no credits.',
-    'directory-reports': 'Lists the Facebook Pages (with any linked Instagram business account) and the Meta ad accounts on the connected Meta account, with their ids. The ids choose which Page or ad account is read. Read-only; no credits.',
+    'directory-reports': 'Lists the Facebook Pages (with any linked Instagram business account) and the Meta ad accounts on the connected Meta account, with their ids, used to choose which Page or ad account is read. Read-only; no credits.',
   }),
 
   // ── scheduler (Hermoso Social Scheduler) ──
@@ -96,7 +100,9 @@ export const DIRECTORY_CURATED_DEFS = Object.freeze({
   list_meta_ads: R('List Meta campaigns, ad sets and ads', 'Reads the existing campaigns, ad sets or ads on a connected Meta ad account: id, name, status, budget, objective, and for ads Meta\'s review feedback. Takes adAccountId and level (campaign, adset or ad); campaignId or adsetId narrow it and status filters it. Read-only; no credits.'),
   meta_insights: R('Meta ad performance', 'Reads performance for a Meta ad account, or one campaign, ad set or ad (objectId, level): spend, impressions, reach, clicks, CTR, CPC, CPM, frequency, conversions such as purchases, ROAS and cost per purchase, and video plays. Dates: datePreset (Meta\'s values, e.g. last_7d, last_30d, maximum) or since and until. breakdowns splits by age, gender, placement, country or device; timeIncrement gives daily, weekly or monthly rows. A null metric was not reported by Meta, never zero. Read-only; no credits.'),
   meta_page_insights: R('Facebook Page insights', 'Reads organic performance for a connected Facebook Page: views and reach, post engagements, video views, follows and follower count, with the linked Instagram account\'s headline numbers alongside. A metric Meta returns no value for is named as missing, never reported as zero. Read-only; no credits.'),
-  instagram_insights: R('Instagram account insights', 'Reads account-level performance for a connected Instagram business account: views, reach, accounts engaged, interactions, likes, comments, shares, saves and follows, plus follower and engaged-audience demographics by age, city, country or gender. Instagram returns no demographics for an account under 100 followers. Read-only; no credits.'),
+  instagram_insights: RP('Instagram account insights', 'Reads account-level performance for a connected Instagram business account: views, reach, accounts engaged, interactions, likes, comments, shares, saves and follows, plus follower and engaged-audience demographics by age, city, country or gender. Instagram returns no demographics for an account under 100 followers. Read-only; no credits.', {
+    'directory-reports': { metrics: 'account metrics (default: views, reach, accounts_engaged, total_interactions, likes, comments, shares, saves, profile_links_taps). Add follower_demographics or engaged_audience_demographics for the audience, which also needs a breakdown. Add online_followers for how many followers are online in each hour of the day (accounts with 100+ followers, last 30 days).' },
+  }),
   list_google_ads_campaigns: R('List Google Ads accounts and campaigns', 'Without customerId, lists the Google Ads accounts the connection can reach (id, name, currency). With customerId, lists that account\'s campaigns (id, name, status, daily budget, channel) with impressions, clicks, CTR, average CPC, cost and conversions for a datePreset (e.g. LAST_30_DAYS) or since and until. Read-only; no credits.'),
   google_ads_report: R('Google Ads query report', 'Runs a read-only Google Ads Query Language (GAQL) report for a customerId: performance by ad group, ad, keyword, search term, age, gender, location or another documented report resource. Takes a SELECT query, e.g. SELECT campaign.name, metrics.clicks FROM campaign WHERE segments.date DURING LAST_30_DAYS. cost_micros is in millionths of the account currency. Read-only; no credits.'),
   google_ads_keyword_ideas: R('Google keyword ideas and volumes', 'Returns keyword ideas from Google\'s Keyword Planner with average monthly search volume, competition and top-of-page bid estimates, sorted by volume. Seeds are keywords, a page url or a whole site; locations (place names) and language narrow it. It only reads: nothing is created and nothing is spent. No credits.'),
@@ -361,8 +367,24 @@ export function curatedDef(def, name, tok = null) {
   if (per.has(mk)) return per.get(mk);
   const annotations = { ...(def.annotations && typeof def.annotations === 'object' ? def.annotations : {}), title: row.t, readOnlyHint: row.ro, destructiveHint: row.de };
   const o = { ...def, title: row.t, description: curatedDescription(name, tok), annotations };
+  const pover = row.p && tok && row.p[tok];
+  if (pover && def.inputSchema && typeof def.inputSchema === 'object') o.inputSchema = curatedParamsDescribed(def.inputSchema, pover);
   per.set(mk, o);
   return o;
+}
+// A parameter's description replaced on one connector. zod's describe() returns a NEW schema, so the canonical one (shared
+// by every other session) is never touched; a raw shape is copied, a zod object is extended (which keeps loose loose).
+// A named parameter the schema does not have is an error, so an override cannot silently outlive a renamed parameter.
+function curatedParamsDescribed(schema, pover) {
+  const raw = !schema._zod;
+  const shape = raw ? schema : schema.shape;
+  const over = {};
+  for (const [k, desc] of Object.entries(pover)) {
+    const v = shape && shape[k];
+    if (!v || typeof v.describe !== 'function') throw new Error(`curated parameter override names "${k}", which the schema does not have`);
+    over[k] = v.describe(desc);
+  }
+  return raw ? { ...schema, ...over } : schema.extend(over);
 }
 
 // ── A CURATED CONNECTOR'S REPLIES NEVER NAME A TOOL IT DOES NOT CARRY (2026-11-22) ────────────────────────────────────
